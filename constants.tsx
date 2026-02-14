@@ -1,0 +1,30 @@
+
+import { Status, Prioridade } from './types';
+
+export const STATUS_COLORS: Record<string, string> = {
+  'pendente': 'bg-slate-200 text-slate-900 border-slate-400',
+  'aguardando resposta': 'bg-amber-400 text-amber-950 border-amber-600',
+  'em andamento': 'bg-amber-300 text-amber-950 border-amber-600',
+  'concluído': 'bg-emerald-500 text-white border-emerald-700',
+  'concluido': 'bg-emerald-500 text-white border-emerald-700',
+  'bloqueado': 'bg-rose-500 text-white border-rose-700',
+  'default': 'bg-slate-100 text-slate-600 border-slate-300'
+};
+
+export const PRIORITY_COLORS: Record<Prioridade, string> = {
+  'alta': 'bg-rose-600 text-white shadow-sm',
+  'média': 'bg-amber-600 text-white shadow-sm',
+  'baixa': 'bg-emerald-600 text-white shadow-sm',
+};
+
+export const PROJECT_COLORS: Record<string, string> = {
+  'MAGO': 'text-purple-700 font-black',
+  'SIGEX': 'text-indigo-700 font-black',
+  'PROEN': 'text-cyan-700 font-black',
+  'PLS-MEC': 'text-orange-700 font-black',
+  'CLC (Licitações e Compras)': 'text-rose-700 font-black',
+  'Assistência Estudantil': 'text-emerald-700 font-black',
+};
+
+export const DEFAULT_JSON_URL = '/tarefas_andre.json';
+export const ATIVIDADES_FEVEREIRO_URL = '/atividades_fevereiro.json';

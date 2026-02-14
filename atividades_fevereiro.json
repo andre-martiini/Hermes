@@ -1,0 +1,50 @@
+[
+  {
+    "id": "entrega-audio-video",
+    "entrega": "Contratação de empresa fornecedora de materiais e equipamentos de áudio e vídeo",
+    "status_planejamento": "planejada",
+    "atividades_realizadas": []
+  },
+  {
+    "id": "entrega-almoxarifado-virtual",
+    "entrega": "Assistência Estudantil Contratação de empresa prestadora do serviço de almoxarifado virtual",
+    "status_planejamento": "planejada",
+    "atividades_realizadas": []
+  },
+  {
+    "id": "entrega-materiais-consumo",
+    "entrega": "Contratação de empresa fornecedora de materiais de consumo para atendimento das demandas da Coordenadoria de Serviços Auxiliares e Transportes",
+    "status_planejamento": "planejada",
+    "atividades_realizadas": [
+      {
+        "descricao_atividade": "Trabalhou no processo de Extintores (Demanda do Hildo), fez nova contratação para 2025, criou novo Termo de Referência (TR), e iniciou a instrução do processo com análises via Gemini. Conversas fixadas: processo extintores e tr extintores.",
+        "data_atividade": "2026-02-11",
+        "status_atividade": "concluida"
+      }
+    ]
+  },
+  {
+    "id": "entrega-saude-mental",
+    "entrega": "Contratação de empresa prestadora de serviços de apoio às ações de promoção da saúde mental de servidores, estagiários e prestadores de serviços",
+    "status_planejamento": "planejada",
+    "atividades_realizadas": [
+      {
+        "descricao_atividade": "Fez a revisão das planilhas e das fórmulas para propostas de fornecedores (Demandas do Ezequiel - Grupo de Contratação de Serviços Terceirizados). (CONCLUÍDO)",
+        "data_atividade": "2026-02-11",
+        "status_atividade": "concluida"
+      }
+    ]
+  },
+  {
+    "id": "entrega-desenv-interno",
+    "entrega": "Desenvolvimento de Ferramentas Internas",
+    "status_planejamento": "em andamento",
+    "atividades_realizadas": [
+      {
+        "descricao_atividade": "Trabalhou no sisteminha de busca de CATSER e CATMAT.",
+        "data_atividade": "2026-02-11",
+        "status_atividade": "concluida"
+      }
+    ]
+  }
+]
