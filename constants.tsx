@@ -2,12 +2,9 @@
 import { Status, Prioridade } from './types';
 
 export const STATUS_COLORS: Record<string, string> = {
-  'pendente': 'bg-slate-200 text-slate-900 border-slate-400',
-  'aguardando resposta': 'bg-amber-400 text-amber-950 border-amber-600',
   'em andamento': 'bg-amber-300 text-amber-950 border-amber-600',
   'concluído': 'bg-emerald-500 text-white border-emerald-700',
   'concluido': 'bg-emerald-500 text-white border-emerald-700',
-  'bloqueado': 'bg-rose-500 text-white border-rose-700',
   'default': 'bg-slate-100 text-slate-600 border-slate-300'
 };
 
