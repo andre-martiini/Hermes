@@ -3,71 +3,71 @@
     {
       "id": "1",
       "responsavel": "André",
-      "status": "pendente",
-      "titulo": "Criar questionamentos AGIFES/Pro",
-      "entregas_relacionadas": [],
-      "hora_limite": "",
-      "projeto": "MAGO",
       "data_atualizacao": "2026-02-13",
-      "link_referencia": "",
+      "data_criacao": "2026-02-13",
+      "data_limite": "2026-02-20",
+      "status": "pendente",
+      "hora_limite": "",
+      "titulo": "Criar questionamentos AGIFES/Pro",
       "acompanhamento": [
         {
-          "data": "2026-02-13",
-          "nota": "Elaborar lista de possíveis questionamentos da AGIFES/Pro sobre o projeto MAGO.\n\nObservações: Baseado nos próximos passos (Backlog Atlas) do plano de expansão do MAGO."
+          "nota": "Elaborar lista de possíveis questionamentos da AGIFES/Pro sobre o projeto MAGO.\n\nObservações: Baseado nos próximos passos (Backlog Atlas) do plano de expansão do MAGO.",
+          "data": "2026-02-13"
         }
       ],
-      "data_criacao": "2026-02-13",
-      "data_limite": "2026-02-20"
+      "link_referencia": "",
+      "projeto": "MAGO",
+      "entregas_relacionadas": []
     },
     {
       "id": "2",
-      "link_referencia": "",
-      "entregas_relacionadas": [],
+      "data_criacao": "2026-02-13",
+      "titulo": "Implementar feedback Anny Tocantins - MAGO",
+      "data_atualizacao": "2026-02-14T00:20:15.544Z",
+      "hora_limite": "",
       "data_limite": "2026-02-15",
       "status": "pendente",
       "responsavel": "André",
-      "hora_limite": "",
-      "data_criacao": "2026-02-13",
       "acompanhamento": [
         {
           "nota": "Ajustar exportação PDF para incluir todos os itens, corrigir assistente MAGO em 'Análise crítica' e 'Redigir justificativa', verificar 'Sugerir Plano IA', e manter priorização por menor nível de adoção.\n\nObservações: Feedback detalhado de Anny Tocantins (IFRO).",
           "data": "2026-02-13"
         }
       ],
+      "link_referencia": "",
       "projeto": "SISTEMAS",
-      "titulo": "Implementar feedback Anny Tocantins - MAGO",
-      "data_atualizacao": "2026-02-14T00:20:15.544Z"
+      "entregas_relacionadas": []
     },
     {
       "id": "3",
-      "data_limite": "2026-02-20",
-      "status": "em andamento",
       "titulo": "Acompanhar Consultoria PROEN",
-      "responsavel": "André",
-      "projeto": "PROEN",
-      "data_atualizacao": "2026-02-13",
-      "data_criacao": "2026-02-13",
+      "data_limite": "2026-02-20",
       "entregas_relacionadas": [],
+      "status": "em andamento",
+      "projeto": "PROEN",
+      "hora_limite": "",
       "acompanhamento": [
         {
           "nota": "Continuar com o projeto de Transferência de Tecnologia e Inovação Aberta.\n\nObservações: Consultoria PROEN (Transferência de Tecnologia e Inovação Aberta).",
           "data": "2026-02-13"
         }
       ],
+      "data_atualizacao": "2026-02-13",
       "link_referencia": "",
-      "hora_limite": ""
+      "data_criacao": "2026-02-13",
+      "responsavel": "André"
     },
     {
       "id": "4",
       "link_referencia": "",
+      "hora_limite": "",
+      "projeto": "PLS-MEC",
       "status": "em andamento",
+      "responsavel": "André",
       "entregas_relacionadas": [],
       "titulo": "Redesign Painel PLS-MEC",
-      "projeto": "PLS-MEC",
-      "hora_limite": "",
-      "data_criacao": "2026-02-13",
       "data_limite": "2026-02-15",
-      "responsavel": "André",
+      "data_criacao": "2026-02-13",
       "acompanhamento": [
         {
           "nota": "Trabalhar no redesign e re-layout do Painel de Logística Sustentável do MEC, adequando aos pedidos.\n\nObservações: Projeto bastante adiantado. Trabalhou no redesign e re-layout do sistema, adequando-o aos pedidos do MEC. Salvo no desktop do escritório. Retomará o trabalho no domingo (15/02).",
@@ -78,141 +78,141 @@
     },
     {
       "id": "5",
+      "hora_limite": "",
+      "data_limite": "",
+      "entregas_relacionadas": [],
+      "link_referencia": "",
+      "data_criacao": "2026-02-13",
+      "data_atualizacao": "2026-02-13",
+      "status": "concluído (aguardando resposta)",
+      "projeto": "Clínica Reforço Positivo",
       "acompanhamento": [
         {
           "nota": "Trabalhar no recurso de folha de pagamento para o sistema da clínica Reforço Positivo.\n\nObservações: Cumprido, aguardando feedback.",
           "data": "2026-02-13"
         }
       ],
-      "projeto": "Clínica Reforço Positivo",
-      "data_criacao": "2026-02-13",
-      "status": "concluído (aguardando resposta)",
-      "hora_limite": "",
-      "entregas_relacionadas": [],
-      "responsavel": "André",
-      "data_limite": "",
-      "data_atualizacao": "2026-02-13",
       "titulo": "Desenvolver folha de pagamento clínica Reforço Positivo",
-      "link_referencia": ""
+      "responsavel": "André"
     },
     {
       "id": "6",
-      "data_criacao": "2026-02-13",
-      "acompanhamento": [
-        {
-          "data": "2026-02-13",
-          "nota": "Trabalhar no processo de extintores e elaborar o novo Termo de Referência (TR) para o processo nº 23543.001476/2025-92, incluindo teste hidrostático de mangueiras e recarga de extintores. Basear no processo de 2024 e propostas (Neto, VF, Extinsan) para pesquisa de preços."
-        }
-      ],
+      "hora_limite": "",
+      "status": "em andamento",
+      "titulo": "Processo de extintores e Elaboração de TR (23543.001476/2025-92)",
       "link_referencia": "",
-      "data_atualizacao": "2026-02-13T23:53:29.088Z",
+      "responsavel": "André",
       "entregas_relacionadas": [
         "vQLBWFV2TtPAA9fnwJma"
       ],
-      "responsavel": "André",
       "data_limite": "2026-02-19",
-      "titulo": "Processo de extintores e Elaboração de TR (23543.001476/2025-92)",
-      "projeto": "CLC",
-      "hora_limite": "",
-      "status": "em andamento"
-    },
-    {
-      "id": "7",
-      "data_limite": "2026-02-13",
-      "responsavel": "André",
-      "link_referencia": "",
-      "hora_limite": "",
-      "data_atualizacao": "2026-02-13",
-      "projeto": "Administrativo IFES",
       "acompanhamento": [
         {
-          "nota": "Enviar agradecimento pela participação do campus na IRP de computadores.\n\nObservações: Demanda vinda do Sival.",
+          "nota": "Trabalhar no processo de extintores e elaborar o novo Termo de Referência (TR) para o processo nº 23543.001476/2025-92, incluindo teste hidrostático de mangueiras e recarga de extintores. Basear no processo de 2024 e propostas (Neto, VF, Extinsan) para pesquisa de preços.",
           "data": "2026-02-13"
         }
       ],
+      "projeto": "CLC",
+      "data_atualizacao": "2026-02-13T23:53:29.088Z",
+      "data_criacao": "2026-02-13"
+    },
+    {
+      "id": "7",
       "status": "concluído",
-      "data_criacao": "2026-02-13",
+      "hora_limite": "",
+      "titulo": "Agradecer participação IRP computadores",
+      "link_referencia": "",
+      "responsavel": "André",
       "entregas_relacionadas": [],
-      "titulo": "Agradecer participação IRP computadores"
+      "data_limite": "2026-02-13",
+      "acompanhamento": [
+        {
+          "data": "2026-02-13",
+          "nota": "Enviar agradecimento pela participação do campus na IRP de computadores.\n\nObservações: Demanda vinda do Sival."
+        }
+      ],
+      "data_atualizacao": "2026-02-13",
+      "projeto": "Administrativo IFES",
+      "data_criacao": "2026-02-13"
     },
     {
       "id": "8",
+      "data_criacao": "2026-02-13",
+      "projeto": "ATIVIDADES ADM",
       "acompanhamento": [
         {
           "nota": "Revisar e atualizar o plano de trabalho referente ao mês de janeiro.",
           "data": "2026-02-13"
         }
       ],
+      "hora_limite": "",
+      "link_referencia": "",
+      "responsavel": "André",
+      "data_limite": "2026-02-13",
       "entregas_relacionadas": [
         "entrega-materiais-consumo"
       ],
-      "hora_limite": "",
-      "responsavel": "André",
       "data_atualizacao": "2026-02-14T00:32:51.078Z",
-      "link_referencia": "",
       "status": "concluído",
-      "projeto": "ATIVIDADES ADM",
-      "titulo": "Atualizar plano de trabalho de janeiro",
-      "data_criacao": "2026-02-13",
-      "data_limite": "2026-02-13"
+      "titulo": "Atualizar plano de trabalho de janeiro"
     }
   ],
   "atividades": [
     {
       "id": "4DkCocR6b4craIEWrc2N",
-      "ano": 2026,
-      "entrega": "Contratação de empresa prestadora de serviços de apoio às ações de promoção da saúde mental de servidores, estagiários e prestadores de serviços, encaminhada.",
-      "area": "CLC",
       "mes": 1,
-      "descricao_trabalho": "Realizar o acompanhamento da Intenção de Registro de Preços (IRP) e das etapas preliminares para abertura do processo."
+      "descricao_trabalho": "Realizar o acompanhamento da Intenção de Registro de Preços (IRP) e das etapas preliminares para abertura do processo.",
+      "area": "CLC",
+      "ano": 2026,
+      "entrega": "Contratação de empresa prestadora de serviços de apoio às ações de promoção da saúde mental de servidores, estagiários e prestadores de serviços, encaminhada."
     },
     {
       "id": "LZsIFrg7TqRMWptALZlS",
-      "ano": 2026,
       "area": "CLC",
       "descricao_trabalho": "Realizar o acompanhamento sistemático da Intenção de Registro de Preços (IRP) e monitorar o fluxo processual até a conclusão da entrega.",
+      "ano": 2026,
       "entrega": "Contratação de empresa fornecedora de materiais e equipamentos de áudio e vídeo, concluída.",
       "mes": 1
     },
     {
       "id": "MQ7nT82DaMe7LZSUTr1t",
-      "descricao_trabalho": "Realizar o acompanhamento sistemático da Intenção de Registro de Preços (IRP) e monitorar a fase de instalação e recebimento.",
-      "mes": 1,
       "entrega": "Contratação de empresa fornecedora de conjunto de controle de acesso e catracas, realizada.",
+      "area": "CLC",
+      "mes": 1,
       "ano": 2026,
-      "area": "CLC"
+      "descricao_trabalho": "Realizar o acompanhamento sistemático da Intenção de Registro de Preços (IRP) e monitorar a fase de instalação e recebimento."
     },
     {
       "id": "bUtKmYe7wAOjV9GBSxq3",
       "mes": 1,
-      "ano": 2026,
       "entrega": "Acompanhamento de estudantes da assistência estudantil realizados",
-      "descricao_trabalho": "Realizar o acompanhamento dos alunos contemplados nos editais de assistência estudantil referentes ao ano de 2026.",
-      "area": "Assistência Estudantil"
+      "ano": 2026,
+      "area": "Assistência Estudantil",
+      "descricao_trabalho": "Realizar o acompanhamento dos alunos contemplados nos editais de assistência estudantil referentes ao ano de 2026."
     },
     {
       "id": "entrega-almoxarifado-virtual",
+      "status_planejamento": "planejada",
       "entrega": "Assistência Estudantil Contratação de empresa prestadora do serviço de almoxarifado virtual",
-      "atividades_realizadas": [],
-      "status_planejamento": "planejada"
+      "atividades_realizadas": []
     },
     {
       "id": "entrega-audio-video",
-      "atividades_realizadas": [],
+      "status_planejamento": "planejada",
       "entrega": "Contratação de empresa fornecedora de materiais e equipamentos de áudio e vídeo",
-      "status_planejamento": "planejada"
+      "atividades_realizadas": []
     },
     {
       "id": "entrega-desenv-interno",
-      "status_planejamento": "em andamento",
+      "entrega": "Desenvolvimento de Ferramentas Internas",
       "atividades_realizadas": [
         {
-          "status_atividade": "concluida",
+          "descricao_atividade": "Trabalhou no sisteminha de busca de CATSER e CATMAT.",
           "data_atividade": "2026-02-11",
-          "descricao_atividade": "Trabalhou no sisteminha de busca de CATSER e CATMAT."
+          "status_atividade": "concluida"
         }
       ],
-      "entrega": "Desenvolvimento de Ferramentas Internas"
+      "status_planejamento": "em andamento"
     },
     {
       "id": "entrega-materiais-consumo",
@@ -220,15 +220,14 @@
       "entrega": "Contratação de empresa fornecedora de materiais de consumo para atendimento das demandas da Coordenadoria de Serviços Auxiliares e Transportes",
       "atividades_realizadas": [
         {
+          "descricao_atividade": "Trabalhou no processo de Extintores (Demanda do Hildo), fez nova contratação para 2025, criou novo Termo de Referência (TR), e iniciou a instrução do processo com análises via Gemini. Conversas fixadas: processo extintores e tr extintores.",
           "status_atividade": "concluida",
-          "data_atividade": "2026-02-11",
-          "descricao_atividade": "Trabalhou no processo de Extintores (Demanda do Hildo), fez nova contratação para 2025, criou novo Termo de Referência (TR), e iniciou a instrução do processo com análises via Gemini. Conversas fixadas: processo extintores e tr extintores."
+          "data_atividade": "2026-02-11"
         }
       ]
     },
     {
       "id": "entrega-saude-mental",
-      "entrega": "Contratação de empresa prestadora de serviços de apoio às ações de promoção da saúde mental de servidores, estagiários e prestadores de serviços",
       "status_planejamento": "planejada",
       "atividades_realizadas": [
         {
@@ -236,23 +235,24 @@
           "data_atividade": "2026-02-11",
           "descricao_atividade": "Fez a revisão das planilhas e das fórmulas para propostas de fornecedores (Demandas do Ezequiel - Grupo de Contratação de Serviços Terceirizados). (CONCLUÍDO)"
         }
-      ]
+      ],
+      "entrega": "Contratação de empresa prestadora de serviços de apoio às ações de promoção da saúde mental de servidores, estagiários e prestadores de serviços"
     },
     {
       "id": "iHZLSui0hd5TIWi2pvL5",
-      "entrega": "Contratação de empresa prestadora do serviço de almoxarifado virtual, encaminhada.",
-      "descricao_trabalho": "Realizar o acompanhamento sistemático da Intenção de Registro de Preços (IRP) e monitorar o fluxo processual até a contratação.",
-      "mes": 1,
       "ano": 2026,
-      "area": "CLC"
+      "entrega": "Contratação de empresa prestadora do serviço de almoxarifado virtual, encaminhada.",
+      "mes": 1,
+      "area": "CLC",
+      "descricao_trabalho": "Realizar o acompanhamento sistemático da Intenção de Registro de Preços (IRP) e monitorar o fluxo processual até a contratação."
     },
     {
       "id": "vQLBWFV2TtPAA9fnwJma",
-      "mes": 1,
-      "area": "CLC",
       "ano": 2026,
+      "mes": 1,
       "entrega": "Tarefas Operacionais Rotineiras",
-      "descricao_trabalho": "Executar tarefas administrativas rotineiras, como triagem de e-mails, gestão de documentos e suporte operacional à unidade."
+      "descricao_trabalho": "Executar tarefas administrativas rotineiras, como triagem de e-mails, gestão de documentos e suporte operacional à unidade.",
+      "area": "CLC"
     }
   ],
   "atividades_pgc": [],
