@@ -460,7 +460,7 @@ const App: React.FC = () => {
       
       // Identificadores das unidades PGD/PGC - APENAS PELO CAMPO UNIDADE (projeto)
       const isCLC = proj.includes('CLC');
-      const isASSIST = proj.includes('ASSIST') || proj.includes('ESTUDANTIL') || proj.includes('ANTIU');
+      const isASSIST = proj.includes('ASSIST') || proj.includes('ESTUDANTIL');
       const isPgcUnit = isCLC || isASSIST;
       
       // Verifica se está vinculada a qualquer entrega institucional
@@ -502,7 +502,7 @@ const App: React.FC = () => {
     
     return pgcTasks.filter(t => {
       const proj = norm(t.projeto);
-      const isPgcUnit = proj.includes('CLC') || proj.includes('ASSIST') || proj.includes('ESTUDANTIL') || proj.includes('ANTIU');
+      const isPgcUnit = proj.includes('CLC') || proj.includes('ASSIST') || proj.includes('ESTUDANTIL');
       const linkedIds = Array.isArray(t.entregas_relacionadas) ? t.entregas_relacionadas : [];
       const isLinkedToCurrentDeliveries = linkedIds.some(id => currentDeliveryIds.includes(id));
       
