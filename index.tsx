@@ -279,19 +279,49 @@ const CalendarView = ({
               </div>
 
               <div className="flex-1 flex flex-col gap-1 mt-1 overflow-y-auto max-h-[100px] scrollbar-hide">
-                {dayTasks.map(t => (
-                  <div
-                    key={t.id}
-                    onClick={() => onTaskClick(t)}
-                    className={`px-2 py-1.5 rounded-md border text-[9px] font-bold cursor-pointer transition-all active:scale-95 group
-                      ${t.categoria === 'CLC' ? 'bg-blue-50 border-blue-100 text-blue-700 hover:border-blue-300' :
-                        t.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-100 text-emerald-700 hover:border-emerald-300' :
-                          'bg-slate-50 border-slate-100 text-slate-600 hover:border-slate-300'}
-                    `}
-                  >
-                    <div className="line-clamp-2 leading-tight">{t.titulo}</div>
-                  </div>
-                ))}
+                {dayTasks.map(t => {
+                  // Show full card ONLY on start date and end date
+                  // Show slim bar on all intermediate days
+                  const startStr = t.data_criacao ? t.data_criacao.split('T')[0] : (t.data_limite || '');
+                  const endStr = t.data_limite || '';
+
+                  const isStart = startStr === dayStr;
+                  const isEnd = endStr === dayStr;
+
+                  const showTitle = isStart || isEnd;
+
+                  if (showTitle) {
+                    return (
+                      <div
+                        key={`${t.id}-${dayStr}`}
+                        onClick={() => onTaskClick(t)}
+                        className={`px-2 py-1.5 rounded-md border text-[9px] font-bold cursor-pointer transition-all active:scale-95 group relative z-10
+                          ${t.categoria === 'CLC' ? 'bg-blue-50 border-blue-100 text-blue-700 hover:border-blue-300' :
+                            t.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-100 text-emerald-700 hover:border-emerald-300' :
+                              'bg-slate-50 border-slate-100 text-slate-600 hover:border-slate-300'}
+                        `}
+                      >
+                        <div className="line-clamp-2 leading-tight">{t.titulo}</div>
+                        {isStart && endStr && startStr !== endStr && (
+                          <div className="text-[7px] text-slate-400 mt-0.5">→ {formatDate(endStr).split(' ')[0]}</div>
+                        )}
+                      </div>
+                    );
+                  } else {
+                    return (
+                      <div
+                        key={`${t.id}-${dayStr}`}
+                        onClick={() => onTaskClick(t)}
+                        title={t.titulo}
+                        className={`h-1.5 rounded-full cursor-pointer transition-all hover:h-3 w-full my-0.5 relative z-0
+                          ${t.categoria === 'CLC' ? 'bg-blue-300/60 hover:bg-blue-400' :
+                            t.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-300/60 hover:bg-emerald-400' :
+                              'bg-slate-300/60 hover:bg-slate-400'}
+                        `}
+                      />
+                    );
+                  }
+                })}
               </div>
             </div>
           );
@@ -878,6 +908,7 @@ const App: React.FC = () => {
   const [sortOption, setSortOption] = useState<SortOption>('date-asc');
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Sync Logic
   const handleSync = async () => {
@@ -1131,7 +1162,7 @@ const App: React.FC = () => {
     clc: tarefas.filter(t => t.categoria === 'CLC' && normalizeStatus(t.status) !== 'concluido').length,
     assistencia: tarefas.filter(t => t.categoria === 'ASSISTÊNCIA' && normalizeStatus(t.status) !== 'concluido').length,
     geral: tarefas.filter(t => t.categoria === 'GERAL' && normalizeStatus(t.status) !== 'concluido').length,
-    semTag: tarefas.filter(t => (t.categoria === 'NÃO CLASSIFICADA' || !t.categoria) && normalizeStatus(t.status) !== 'concluido').length,
+    semTag: tarefas.filter(t => (t.categoria === 'NÃO CLASSIFICADA' || !t.categoria) && normalizeStatus(t.status) !== 'concluido' && t.status !== 'excluído' as any).length,
   }), [tarefas]);
 
   const prioridadesHoje = useMemo(() => {
@@ -1152,7 +1183,7 @@ const App: React.FC = () => {
     if (searchTerm) {
       const s = searchTerm.toLowerCase();
       if (s === 'filter:unclassified') {
-        result = result.filter(t => !t.categoria || t.categoria === 'NÃO CLASSIFICADA');
+        result = result.filter(t => (!t.categoria || t.categoria === 'NÃO CLASSIFICADA') && normalizeStatus(t.status) !== 'concluido');
       } else if (s === 'categoria:geral') {
         result = result.filter(t => t.categoria === 'GERAL');
       } else {
@@ -1170,7 +1201,7 @@ const App: React.FC = () => {
     // Se viewMode for gallery (Dashboard), ele mostra tudo filtrado por status.
     // Se criarmos uma visão específica para sem classificação, podemos filtrar aqui.
     if (viewMode === 'gallery' && searchTerm === 'filter:unclassified') {
-      result = result.filter(t => !t.categoria || t.categoria === 'NÃO CLASSIFICADA');
+      result = result.filter(t => (!t.categoria || t.categoria === 'NÃO CLASSIFICADA') && normalizeStatus(t.status) !== 'concluido');
     }
 
     result.sort((a, b) => {
@@ -1181,6 +1212,15 @@ const App: React.FC = () => {
     });
     return result;
   }, [tarefas, searchTerm, statusFilter, sortOption]);
+
+  // Calcula tarefas não classificadas usando EXATAMENTE o mesmo filtro da exibição
+  const unclassifiedTasksCount = useMemo(() => {
+    return tarefas.filter(t =>
+      (!t.categoria || t.categoria === 'NÃO CLASSIFICADA') &&
+      normalizeStatus(t.status) !== 'concluido' &&
+      t.status !== 'excluído' as any
+    ).length;
+  }, [tarefas]);
 
   const tarefasAgrupadas = useMemo<Record<string, Tarefa[]>>(() => {
     const groups: Record<string, Tarefa[]> = {};
@@ -1343,64 +1383,174 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col relative">
 
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-40 px-4 md:px-8 py-4 shadow-sm">
-        <div className="max-w-[1400px] mx-auto flex items-center justify-between gap-4">
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-slate-900 rounded-xl flex items-center justify-center shadow-lg">
-                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-              </div>
-              <h1 className="text-xl font-black tracking-tighter text-slate-900 hidden sm:block">HERMES</h1>
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
+        <div className="max-w-[1400px] mx-auto px-4 md:px-8 py-3 md:py-4">
+          {/* Mobile Header */}
+          <div className="flex md:hidden items-center justify-between">
+            <div className="flex items-center gap-2">
+              <img src="/logo.png" alt="Hermes" className="w-10 h-10 object-contain" />
+              <h1 className="text-lg font-black tracking-tighter text-slate-900">HERMES</h1>
             </div>
-            <nav className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => {
-                  setViewMode('gallery');
-                  setSearchTerm(''); // Limpa TUDO para garantir volta ao Dashboard
-                }}
-                className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'gallery' && !searchTerm ? 'bg-white text-slate-900 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}
+                onClick={() => setIsCreateModalOpen(true)}
+                className="bg-slate-900 text-white p-2.5 rounded-xl shadow-lg hover:bg-slate-800 transition-all active:scale-95"
+                aria-label="Criar Ação"
               >
-                Dashboard
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
               </button>
               <button
-                onClick={() => {
-                  setViewMode('gallery');
-                  setSearchTerm(searchTerm === 'filter:unclassified' ? '' : 'filter:unclassified');
-                }}
-                className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${searchTerm === 'filter:unclassified' ? 'bg-rose-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="p-2.5 rounded-xl hover:bg-slate-100 transition-colors"
+                aria-label="Menu"
               >
-                Não Classificadas
+                <svg className="w-6 h-6 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {isMobileMenuOpen ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" />
+                  )}
+                </svg>
               </button>
-              <button onClick={() => setViewMode('licitacoes')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'licitacoes' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>CLC</button>
-              <button onClick={() => setViewMode('assistencia')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'assistencia' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>Assistência</button>
-
-              <button onClick={() => setViewMode('pgc')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pgc' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>Audit PGC</button>
-              <button onClick={() => setViewMode('plano-trabalho')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'plano-trabalho' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>Plano</button>
-            </nav>
+            </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="hidden lg:flex items-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 w-64 group focus-within:ring-2 focus-within:ring-blue-500 focus-within:bg-white transition-all">
-              <svg className="w-4 h-4 text-slate-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-              <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none outline-none text-xs font-bold text-slate-900 w-full" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+          {/* Desktop Header */}
+          <div className="hidden md:flex items-center justify-between gap-4">
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-3">
+                <img src="/logo.png" alt="Hermes" className="w-9 h-9 object-contain" />
+                <h1 className="text-xl font-black tracking-tighter text-slate-900">HERMES</h1>
+              </div>
+              <nav className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+                <button
+                  onClick={() => {
+                    setViewMode('gallery');
+                    setSearchTerm('');
+                  }}
+                  className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'gallery' && !searchTerm ? 'bg-white text-slate-900 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}
+                >
+                  Dashboard
+                </button>
+                {unclassifiedTasksCount > 0 && (
+                  <button
+                    onClick={() => {
+                      setViewMode('gallery');
+                      setSearchTerm(searchTerm === 'filter:unclassified' ? '' : 'filter:unclassified');
+                    }}
+                    className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${searchTerm === 'filter:unclassified' ? 'bg-rose-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}
+                  >
+                    Não Classificadas
+                  </button>
+                )}
+                <button onClick={() => setViewMode('licitacoes')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'licitacoes' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>CLC</button>
+                <button onClick={() => setViewMode('assistencia')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'assistencia' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>AE</button>
+                <button onClick={() => setViewMode('pgc')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pgc' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>Audit PGC</button>
+                <button onClick={() => setViewMode('plano-trabalho')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'plano-trabalho' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>Plano</button>
+              </nav>
             </div>
-            <button
-              onClick={handleSync}
-              disabled={isSyncing}
-              className={`bg-white border border-slate-200 text-slate-700 px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-3 shadow-sm hover:bg-slate-50 transition-all active:scale-95 ${isSyncing ? 'opacity-50 cursor-wait' : ''}`}
-            >
-              <svg className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-              {isSyncing ? 'Sincronizar' : 'Sync Google'}
-            </button>
-            <button
-              onClick={() => setIsCreateModalOpen(true)}
-              className="bg-slate-900 text-white px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg hover:bg-slate-800 transition-all active:scale-95"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
-              Criar Ação
-            </button>
+
+            <div className="flex items-center gap-4">
+              <div className="hidden lg:flex items-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 w-64 group focus-within:ring-2 focus-within:ring-blue-500 focus-within:bg-white transition-all">
+                <svg className="w-4 h-4 text-slate-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none outline-none text-xs font-bold text-slate-900 w-full" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+              </div>
+              <button
+                onClick={handleSync}
+                disabled={isSyncing}
+                className={`bg-white border border-slate-200 text-slate-700 px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-3 shadow-sm hover:bg-slate-50 transition-all active:scale-95 ${isSyncing ? 'opacity-50 cursor-wait' : ''}`}
+              >
+                <svg className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                {isSyncing ? 'Sincronizar' : 'Sync Google'}
+              </button>
+              <button
+                onClick={() => setIsCreateModalOpen(true)}
+                className="bg-slate-900 text-white px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg hover:bg-slate-800 transition-all active:scale-95"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+                Criar Ação
+              </button>
+            </div>
           </div>
         </div>
+
+        {/* Mobile Menu Drawer */}
+        {isMobileMenuOpen && (
+          <div className="md:hidden border-t border-slate-200 bg-white">
+            <nav className="flex flex-col p-4 space-y-2">
+              <button
+                onClick={() => {
+                  setViewMode('gallery');
+                  setSearchTerm('');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`px-4 py-3 rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'gallery' && !searchTerm ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
+              >
+                📊 Dashboard
+              </button>
+              {unclassifiedTasksCount > 0 && (
+                <button
+                  onClick={() => {
+                    setViewMode('gallery');
+                    setSearchTerm('filter:unclassified');
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`px-4 py-3 rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${searchTerm === 'filter:unclassified' ? 'bg-rose-600 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
+                >
+                  ⚠️ Não Classificadas
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setViewMode('licitacoes');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`px-4 py-3 rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'licitacoes' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
+              >
+                📋 CLC
+              </button>
+              <button
+                onClick={() => {
+                  setViewMode('assistencia');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`px-4 py-3 rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'assistencia' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
+              >
+                🎓 Assistência Estudantil
+              </button>
+              <button
+                onClick={() => {
+                  setViewMode('pgc');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`px-4 py-3 rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'pgc' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
+              >
+                📈 Audit PGC
+              </button>
+              <button
+                onClick={() => {
+                  setViewMode('plano-trabalho');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`px-4 py-3 rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'plano-trabalho' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
+              >
+                📅 Plano de Trabalho
+              </button>
+              <div className="pt-4 border-t border-slate-200 mt-2">
+                <button
+                  onClick={() => {
+                    handleSync();
+                    setIsMobileMenuOpen(false);
+                  }}
+                  disabled={isSyncing}
+                  className={`w-full px-4 py-3 rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left bg-blue-50 text-blue-700 hover:bg-blue-100 ${isSyncing ? 'opacity-50' : ''}`}
+                >
+                  🔄 {isSyncing ? 'Sincronizando...' : 'Sync Google'}
+                </button>
+              </div>
+            </nav>
+          </div>
+        )}
       </header>
 
       <div className="max-w-[1400px] mx-auto w-full px-0 md:px-8 py-6">
@@ -1411,33 +1561,35 @@ const App: React.FC = () => {
               <div className="flex flex-col md:flex-row items-center justify-between mb-8 gap-4 px-4 md:px-0">
                 {/* Layout & Sort Controls */}
                 <div className="flex items-center gap-4">
-                  <div className="bg-white p-1 rounded-xl border border-slate-200 inline-flex shadow-sm">
-                    <button
-                      onClick={() => setDashboardViewMode('list')}
-                      className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${dashboardViewMode === 'list' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
-                      Lista
-                    </button>
-                    <button
-                      onClick={() => setDashboardViewMode('calendar')}
-                      className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${dashboardViewMode === 'calendar' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                      Calendário
-                    </button>
-                  </div>
+                  {searchTerm !== 'filter:unclassified' && (
+                    <div className="bg-white p-0.5 md:p-1 rounded-xl border border-slate-200 inline-flex shadow-sm">
+                      <button
+                        onClick={() => setDashboardViewMode('list')}
+                        className={`px-3 md:px-4 py-2 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-wide md:tracking-widest transition-all flex items-center gap-1.5 md:gap-2 ${dashboardViewMode === 'list' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
+                      >
+                        <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
+                        <span className="hidden sm:inline">Lista</span>
+                      </button>
+                      <button
+                        onClick={() => setDashboardViewMode('calendar')}
+                        className={`px-3 md:px-4 py-2 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-wide md:tracking-widest transition-all flex items-center gap-1.5 md:gap-2 ${dashboardViewMode === 'calendar' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
+                      >
+                        <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                        <span className="hidden sm:inline">Calendário</span>
+                      </button>
+                    </div>
+                  )}
 
-                  <div className="bg-white p-1 rounded-xl border border-slate-200 inline-flex shadow-sm">
+                  <div className="bg-white p-0.5 md:p-1 rounded-xl border border-slate-200 inline-flex shadow-sm">
                     <button
                       onClick={() => setSortOption('date-asc')}
-                      className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${sortOption === 'date-asc' ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+                      className={`px-3 md:px-4 py-2 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-wide md:tracking-widest transition-all ${sortOption === 'date-asc' ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
                     >
                       Antigas
                     </button>
                     <button
                       onClick={() => setSortOption('date-desc')}
-                      className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${sortOption === 'date-desc' ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+                      className={`px-3 md:px-4 py-2 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-wide md:tracking-widest transition-all ${sortOption === 'date-desc' ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
                     >
                       Recentes
                     </button>
