@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Tarefa, Status, EntregaInstitucional, Prioridade, AtividadeRealizada, Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento, BrainstormIdea, FinanceTransaction, FinanceGoal, FinanceSettings, FixedBill } from './types';
+import { Tarefa, Status, EntregaInstitucional, Prioridade, AtividadeRealizada, Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento, BrainstormIdea, FinanceTransaction, FinanceGoal, FinanceSettings, FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight, DailyHabits, HealthSettings, Notification, AppSettings, formatDate } from './types';
+import HealthView from './HealthView';
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
 import { db } from './firebase';
 import { collection, onSnapshot, query, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
@@ -48,6 +49,31 @@ const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[], removeToast:
 };
 
 // --- Utilitários ---
+const DEFAULT_APP_SETTINGS: AppSettings = {
+  notifications: {
+    habitsReminder: {
+      enabled: true,
+      time: "20:00"
+    },
+    weighInReminder: {
+      enabled: true,
+      frequency: 'weekly',
+      time: "07:00",
+      dayOfWeek: 1 // Segunda-feira
+    },
+    budgetRisk: {
+      enabled: true
+    },
+    overdueTasks: {
+      enabled: true
+    },
+    pgcAudit: {
+      enabled: true,
+      daysBeforeEnd: 5
+    }
+  }
+};
+
 const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
 
 const isWorkDay = (date: Date) => {
@@ -74,17 +100,8 @@ const normalizeStatus = (status: string): string => {
     .replace(/[\u0300-\u036f]/g, "");
 };
 
-const formatDate = (dateStr: string) => {
-  if (!dateStr || dateStr === "-" || dateStr === "0000-00-00" || dateStr.trim() === "") return 'Sem Data';
-  const parts = dateStr.split('-');
-  if (parts.length !== 3) return dateStr;
-  const [year, month, day] = parts.map(Number);
-  const date = new Date(year, month - 1, day);
-  if (isNaN(date.getTime())) return dateStr;
-  const dayOfWeek = new Intl.DateTimeFormat('pt-BR', { weekday: 'long' }).format(date);
-  const capitalizedDay = dayOfWeek.charAt(0).toUpperCase() + dayOfWeek.slice(1);
-  return `${parts[2]}/${parts[1]}/${parts[0]} (${capitalizedDay})`;
-};
+// Moved formatDate to types.ts to break circular dependency
+
 
 // --- Subcomponentes Atômicos ---
 const FilterChip = React.memo(({ label, isActive, onClick, colorClass }: { label: string, isActive: boolean, onClick: () => void, colorClass?: string }) => (
@@ -537,6 +554,440 @@ const CategoryView = ({ tasks, viewMode, onSelectTask }: { tasks: Tarefa[], view
               <p className="text-slate-300 font-black text-[10px] uppercase">Sem histórico</p>
             </div>
           )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const NotificationCenter = ({
+  notifications,
+  onMarkAsRead,
+  onDismiss,
+  isOpen,
+  onClose,
+  onUpdateOverdue
+}: {
+  notifications: Notification[],
+  onMarkAsRead: (id: string) => void,
+  onDismiss: (id: string) => void,
+  isOpen: boolean,
+  onClose: () => void,
+  onUpdateOverdue?: () => void
+}) => {
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        onClose();
+      }
+    };
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen, onClose]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div ref={dropdownRef} className="fixed sm:absolute top-16 sm:top-full mt-2 sm:mt-4 inset-x-4 sm:inset-auto sm:right-0 w-auto sm:w-96 bg-white rounded-[2.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.2)] border border-slate-100 overflow-hidden z-[100] animate-in fade-in slide-in-from-top-4 sm:slide-in-from-right-4 duration-300">
+      <div className="p-8 border-b border-slate-50 bg-slate-50/50 flex items-center justify-between">
+        <div>
+          <h3 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em]">Notificações</h3>
+          <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">Hermes Intelligent Alerts</p>
+        </div>
+        <span className="bg-blue-600 text-white text-[10px] font-black px-2.5 py-1 rounded-full shadow-lg shadow-blue-200">
+          {notifications.filter(n => !n.isRead).length}
+        </span>
+      </div>
+      <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
+        {notifications.length > 0 ? (
+          notifications.map(n => (
+            <div
+              key={n.id}
+              className={`p-6 border-b border-slate-50 hover:bg-slate-50 transition-all cursor-pointer relative group ${!n.isRead ? 'bg-blue-50/30' : ''}`}
+              onClick={() => onMarkAsRead(n.id)}
+            >
+              <div className="flex gap-4">
+                <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${n.type === 'success' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]' :
+                  n.type === 'warning' ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]' :
+                    n.type === 'error' ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]' :
+                      'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.4)]'
+                  }`} />
+                <div className="flex-1">
+                  <h4 className={`text-xs font-bold leading-tight mb-1 ${!n.isRead ? 'text-slate-900' : 'text-slate-600'}`}>{n.title}</h4>
+                  <p className="text-[11px] text-slate-500 leading-relaxed font-medium">{n.message}</p>
+                  <div className="flex items-center justify-between mt-3">
+                    <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">{formatDate(n.timestamp.split('T')[0])}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDismiss(n.id);
+                      }}
+                      className="text-[8px] font-black text-slate-300 uppercase tracking-widest hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"
+                    >
+                      Remover
+                    </button>
+                  </div>
+                  {n.title === "Ações Vencidas" && onUpdateOverdue && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onUpdateOverdue();
+                        onMarkAsRead(n.id);
+                      }}
+                      className="mt-4 w-full py-2.5 bg-slate-900 text-white text-[9px] font-black uppercase tracking-widest rounded-xl shadow-lg hover:bg-blue-600 transition-all active:scale-95"
+                    >
+                      Atualizar tudo para hoje
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="p-16 text-center">
+            <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-6 h-6 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+            </div>
+            <p className="text-slate-300 font-black text-[10px] uppercase tracking-widest italic">Tudo limpo por aqui</p>
+          </div>
+        )}
+      </div>
+      {notifications.length > 0 && (
+        <button
+          onClick={() => notifications.forEach(n => onDismiss(n.id))}
+          className="w-full py-5 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] hover:bg-slate-50 transition-colors border-t border-slate-50 group"
+        >
+          Limpar todas as notificações <span className="group-hover:text-blue-600 transition-colors ml-1">→</span>
+        </button>
+      )}
+    </div>
+  );
+};
+
+const SettingsModal = ({
+  settings,
+  onSave,
+  onClose
+}: {
+  settings: AppSettings,
+  onSave: (settings: AppSettings) => void,
+  onClose: () => void
+}) => {
+  const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
+
+  return (
+    <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="bg-white w-full max-w-xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+        <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+          <div>
+            <h3 className="text-2xl font-black text-slate-900 tracking-tight">Configurações</h3>
+            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Painel de Preferências e Notificações</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+            <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div className="p-8 space-y-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
+          <div className="space-y-4">
+            <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2">Geral / Saúde</h4>
+
+            <div className="flex items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-blue-200 transition-all">
+              <div className="flex-1">
+                <p className="text-sm font-bold text-slate-900 mb-1">Hábitos de Hoje</p>
+                <p className="text-[11px] text-slate-500 font-medium">Abrir lembrete para marcar hábitos cumpridos</p>
+              </div>
+              <div className="flex items-center gap-4">
+                <input
+                  type="time"
+                  value={localSettings.notifications.habitsReminder.time}
+                  onChange={(e) => setLocalSettings({
+                    ...localSettings,
+                    notifications: {
+                      ...localSettings.notifications,
+                      habitsReminder: { ...localSettings.notifications.habitsReminder, time: e.target.value }
+                    }
+                  })}
+                  className="bg-white border-none rounded-lg px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  onClick={() => setLocalSettings({
+                    ...localSettings,
+                    notifications: {
+                      ...localSettings.notifications,
+                      habitsReminder: { ...localSettings.notifications.habitsReminder, enabled: !localSettings.notifications.habitsReminder.enabled }
+                    }
+                  })}
+                  className={`w-12 h-6 rounded-full transition-all relative ${localSettings.notifications.habitsReminder.enabled ? 'bg-blue-600' : 'bg-slate-300'}`}
+                >
+                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.notifications.habitsReminder.enabled ? 'left-7' : 'left-1'}`} />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-col p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-rose-200 transition-all gap-4">
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <p className="text-sm font-bold text-slate-900 mb-1">Lembrete de Pesagem</p>
+                  <p className="text-[11px] text-slate-500 font-medium">Registrar peso na balança</p>
+                </div>
+                <button
+                  onClick={() => setLocalSettings({
+                    ...localSettings,
+                    notifications: {
+                      ...localSettings.notifications,
+                      weighInReminder: { ...localSettings.notifications.weighInReminder, enabled: !localSettings.notifications.weighInReminder.enabled }
+                    }
+                  })}
+                  className={`w-12 h-6 rounded-full transition-all relative ${localSettings.notifications.weighInReminder.enabled ? 'bg-rose-600' : 'bg-slate-300'}`}
+                >
+                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.notifications.weighInReminder.enabled ? 'left-7' : 'left-1'}`} />
+                </button>
+              </div>
+              {localSettings.notifications.weighInReminder.enabled && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <select
+                    value={localSettings.notifications.weighInReminder.frequency}
+                    onChange={(e) => setLocalSettings({
+                      ...localSettings,
+                      notifications: {
+                        ...localSettings.notifications,
+                        weighInReminder: { ...localSettings.notifications.weighInReminder, frequency: e.target.value as any }
+                      }
+                    })}
+                    className="bg-white border-none rounded-lg px-3 py-1.5 text-[10px] font-black uppercase text-slate-900 focus:ring-2 focus:ring-rose-500"
+                  >
+                    <option value="weekly">Semanal</option>
+                    <option value="biweekly">Quinzenal</option>
+                    <option value="monthly">Mensal</option>
+                  </select>
+                  <select
+                    value={localSettings.notifications.weighInReminder.dayOfWeek}
+                    onChange={(e) => setLocalSettings({
+                      ...localSettings,
+                      notifications: {
+                        ...localSettings.notifications,
+                        weighInReminder: { ...localSettings.notifications.weighInReminder, dayOfWeek: Number(e.target.value) }
+                      }
+                    })}
+                    className="bg-white border-none rounded-lg px-3 py-1.5 text-[10px] font-black uppercase text-slate-900 focus:ring-2 focus:ring-rose-500"
+                  >
+                    <option value={0}>Domingo</option>
+                    <option value={1}>Segunda</option>
+                    <option value={2}>Terça</option>
+                    <option value={3}>Quarta</option>
+                    <option value={4}>Quinta</option>
+                    <option value={5}>Sexta</option>
+                    <option value={6}>Sábado</option>
+                  </select>
+                  <input
+                    type="time"
+                    value={localSettings.notifications.weighInReminder.time}
+                    onChange={(e) => setLocalSettings({
+                      ...localSettings,
+                      notifications: {
+                        ...localSettings.notifications,
+                        weighInReminder: { ...localSettings.notifications.weighInReminder, time: e.target.value }
+                      }
+                    })}
+                    className="bg-white border-none rounded-lg px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-rose-500"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2">Financeiro / Ações</h4>
+
+            <div className="flex items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-emerald-200 transition-all">
+              <div className="flex-1">
+                <p className="text-sm font-bold text-slate-900 mb-1">Risco Orçamentário</p>
+                <p className="text-[11px] text-slate-500 font-medium">Avisar se gastos estiverem acima do esperado</p>
+              </div>
+              <button
+                onClick={() => setLocalSettings({
+                  ...localSettings,
+                  notifications: {
+                    ...localSettings.notifications,
+                    budgetRisk: { ...localSettings.notifications.budgetRisk, enabled: !localSettings.notifications.budgetRisk.enabled }
+                  }
+                })}
+                className={`w-12 h-6 rounded-full transition-all relative ${localSettings.notifications.budgetRisk.enabled ? 'bg-emerald-600' : 'bg-slate-300'}`}
+              >
+                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.notifications.budgetRisk.enabled ? 'left-7' : 'left-1'}`} />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-blue-200 transition-all">
+              <div className="flex-1">
+                <p className="text-sm font-bold text-slate-900 mb-1">Ações Vencidas</p>
+                <p className="text-[11px] text-slate-500 font-medium">Alertar sobre tarefas fora do prazo</p>
+              </div>
+              <button
+                onClick={() => setLocalSettings({
+                  ...localSettings,
+                  notifications: {
+                    ...localSettings.notifications,
+                    overdueTasks: { ...localSettings.notifications.overdueTasks, enabled: !localSettings.notifications.overdueTasks.enabled }
+                  }
+                })}
+                className={`w-12 h-6 rounded-full transition-all relative ${localSettings.notifications.overdueTasks.enabled ? 'bg-blue-600' : 'bg-slate-300'}`}
+              >
+                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.notifications.overdueTasks.enabled ? 'left-7' : 'left-1'}`} />
+              </button>
+            </div>
+
+            <div className="flex flex-col p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-amber-200 transition-all gap-4">
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <p className="text-sm font-bold text-slate-900 mb-1">Audit PGC</p>
+                  <p className="text-[11px] text-slate-500 font-medium">Verificar vínculos antes do fim do mês</p>
+                </div>
+                <button
+                  onClick={() => setLocalSettings({
+                    ...localSettings,
+                    notifications: {
+                      ...localSettings.notifications,
+                      pgcAudit: { ...localSettings.notifications.pgcAudit, enabled: !localSettings.notifications.pgcAudit.enabled }
+                    }
+                  })}
+                  className={`w-12 h-6 rounded-full transition-all relative ${localSettings.notifications.pgcAudit.enabled ? 'bg-amber-600' : 'bg-slate-300'}`}
+                >
+                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.notifications.pgcAudit.enabled ? 'left-7' : 'left-1'}`} />
+                </button>
+              </div>
+              {localSettings.notifications.pgcAudit.enabled && (
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] font-black text-slate-400 uppercase">Avisar</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="28"
+                    value={localSettings.notifications.pgcAudit.daysBeforeEnd}
+                    onChange={(e) => setLocalSettings({
+                      ...localSettings,
+                      notifications: {
+                        ...localSettings.notifications,
+                        pgcAudit: { ...localSettings.notifications.pgcAudit, daysBeforeEnd: Number(e.target.value) }
+                      }
+                    })}
+                    className="w-16 bg-white border-2 border-slate-100 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                  <span className="text-[10px] font-black text-slate-400 uppercase">dias antes</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-4">
+          <button onClick={onClose} className="flex-1 px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all">Cancelar</button>
+          <button
+            onClick={() => {
+              onSave(localSettings);
+              onClose();
+            }}
+            className="flex-1 bg-blue-600 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
+          >
+            Salvar Alterações
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const DailyHabitsModal = ({
+  habits,
+  onUpdateHabits,
+  onClose
+}: {
+  habits: DailyHabits,
+  onUpdateHabits: (date: string, updates: Partial<DailyHabits>) => void,
+  onClose: () => void
+}) => {
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  const handleHabitToggle = (habitKey: keyof DailyHabits) => {
+    if (habitKey === 'id') return;
+    onUpdateHabits(todayStr, { [habitKey]: !habits[habitKey] });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+        <div className="p-8 border-b border-slate-100 bg-amber-500/5 flex items-center justify-between">
+          <div>
+            <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3">
+              <span className="w-2 h-8 bg-amber-500 rounded-full"></span>
+              Hábitos de Hoje
+            </h3>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Lembrete Diário</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+            <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div className="p-8 space-y-3">
+          {[
+            { id: 'noSugar', label: 'Sem Açúcar', color: 'rose' },
+            { id: 'noAlcohol', label: 'Sem Álcool', color: 'purple' },
+            { id: 'noSnacks', label: 'Sem Lanches/Delivery', color: 'orange' },
+            { id: 'workout', label: 'Treino do Dia', color: 'emerald' },
+            { id: 'eatUntil18', label: 'Comer até as 18h', color: 'blue' },
+            { id: 'eatSlowly', label: 'Comer Devagar', color: 'indigo' }
+          ].map((habit) => {
+            const colorMap: Record<string, { bg: string, border: string, text: string, dot: string }> = {
+              rose: { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', dot: 'bg-rose-500' },
+              purple: { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700', dot: 'bg-purple-500' },
+              orange: { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', dot: 'bg-orange-500' },
+              emerald: { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', dot: 'bg-emerald-500' },
+              blue: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', dot: 'bg-blue-500' },
+              indigo: { bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700', dot: 'bg-indigo-500' }
+            };
+            const colors = colorMap[habit.color] || colorMap.rose;
+            const isActive = !!habits[habit.id as keyof DailyHabits];
+
+            return (
+              <button
+                key={habit.id}
+                onClick={() => handleHabitToggle(habit.id as keyof DailyHabits)}
+                className={`w-full flex items-center justify-between p-4 rounded-2xl border-2 transition-all duration-300 ${isActive
+                  ? `${colors.bg} ${colors.border} shadow-sm`
+                  : 'bg-white border-slate-100 hover:border-slate-200'
+                  }`}
+              >
+                <span className={`text-sm font-bold ${isActive ? colors.text : 'text-slate-600'}`}>
+                  {habit.label}
+                </span>
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${isActive
+                  ? `${colors.dot} text-white scale-110`
+                  : 'border-2 border-slate-200'
+                  }`}>
+                  {isActive && (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="p-8 bg-slate-50 border-t border-slate-100">
+          <button
+            onClick={onClose}
+            className="w-full bg-slate-900 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all"
+          >
+            Concluir Registro
+          </button>
         </div>
       </div>
     </div>
@@ -1642,8 +2093,19 @@ const App: React.FC = () => {
   const [financeGoals, setFinanceGoals] = useState<FinanceGoal[]>([]);
   const [financeSettings, setFinanceSettings] = useState<FinanceSettings>({
     monthlyBudget: 5000,
-    sprintDates: { 1: "08", 2: "15", 3: "22", 4: "01" }
+    monthlyBudgets: {},
+    sprintDates: { 1: "08", 2: "15", 3: "22", 4: "01" },
+    emergencyReserveTarget: 0,
+    emergencyReserveCurrent: 0,
+    billCategories: ['Conta Fixa', 'Poupança', 'Investimento'],
+    incomeCategories: ['Renda Principal', 'Renda Extra', 'Dividendos', 'Outros']
   });
+
+
+  // Health State
+  const [healthWeights, setHealthWeights] = useState<HealthWeight[]>([]);
+  const [healthDailyHabits, setHealthDailyHabits] = useState<DailyHabits[]>([]);
+  const [healthSettings, setHealthSettings] = useState<HealthSettings>({ targetWeight: 0 });
 
   // Finance Sync
   useEffect(() => {
@@ -1665,13 +2127,43 @@ const App: React.FC = () => {
       setFixedBills(data);
     });
 
+    const unsubRubrics = onSnapshot(collection(db, 'bill_rubrics'), (snapshot) => {
+      setBillRubrics(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as BillRubric)));
+    });
+
+    const unsubIncomeEntries = onSnapshot(collection(db, 'income_entries'), (snapshot) => {
+      setIncomeEntries(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as IncomeEntry)));
+    });
+
+    const unsubIncomeRubrics = onSnapshot(collection(db, 'income_rubrics'), (snapshot) => {
+      setIncomeRubrics(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as IncomeRubric)));
+    });
+
+    // Health Sync
+    const unsubHealthWeights = onSnapshot(collection(db, 'health_weights'), (snapshot) => {
+      setHealthWeights(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as HealthWeight)));
+    });
+    const unsubHealthHabits = onSnapshot(collection(db, 'health_daily_habits'), (snapshot) => {
+      setHealthDailyHabits(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DailyHabits)));
+    });
+    const unsubHealthSettings = onSnapshot(doc(db, 'health_settings', 'config'), (doc) => {
+      if (doc.exists()) setHealthSettings(doc.data() as HealthSettings);
+    });
+
     return () => {
       unsubTransactions();
       unsubGoals();
       unsubSettings();
       unsubFixedBills();
+      unsubRubrics();
+      unsubIncomeEntries();
+      unsubIncomeRubrics();
+      unsubHealthWeights();
+      unsubHealthHabits();
+      unsubHealthSettings();
     };
   }, []);
+
 
   // Finance Processing Logic (The Listener)
   useEffect(() => {
@@ -1705,21 +2197,34 @@ const App: React.FC = () => {
             // Lógica original de sprint: < 8, < 15, < 22, resto (4)
             const sprintOriginal = day < 8 ? 1 : day < 15 ? 2 : day < 22 ? 3 : 4;
 
-            const existingTransaction = financeTransactions.find(ft => ft.originalTaskId === task.id);
+            // Busca por ID original ou por período (título idêntico para Gasto Semanal)
+            // Isso garante que se uma tarefa for apagada e recriada, ela atualize a transação existente em vez de duplicar
+            const existingTransaction = financeTransactions.find(ft =>
+              ft.originalTaskId === task.id ||
+              (ft.category === 'Gasto Semanal' && ft.description.toLowerCase() === task.titulo.toLowerCase())
+            );
 
             if (existingTransaction) {
-              // UPDATE: Se já existe, verifica se o valor mudou
-              if (existingTransaction.amount !== amount) {
+              // UPDATE: Se já existe, verifica se houve mudança significativa
+              const hasChanged = existingTransaction.amount !== amount ||
+                existingTransaction.date !== transactionDate ||
+                existingTransaction.originalTaskId !== task.id;
+
+              if (hasChanged) {
                 await updateDoc(doc(db, 'finance_transactions', existingTransaction.id), {
                   amount,
                   date: transactionDate,
                   sprint: sprintOriginal,
-                  description: task.titulo
+                  description: task.titulo,
+                  originalTaskId: task.id // Atualiza o vínculo para a tarefa mais recente
                 });
-                showToast(`Valor atualizado: R$ ${amount.toLocaleString('pt-BR')}`, 'info');
+
+                if (existingTransaction.amount !== amount) {
+                  showToast(`Valor atualizado: R$ ${amount.toLocaleString('pt-BR')}`, 'info');
+                }
               }
             } else {
-              // CREATE: Se não existe, cria
+              // CREATE: Se não existe transação para este período/tarefa, cria uma nova
               await addDoc(collection(db, 'finance_transactions'), {
                 description: task.titulo,
                 amount,
@@ -1729,7 +2234,7 @@ const App: React.FC = () => {
                 originalTaskId: task.id
               });
 
-              // Marca como concluída apenas se ainda não estiver (para evitar updates desnecessários)
+              // Marca como concluída apenas se ainda não estiver
               if (normalizeStatus(task.status) !== 'concluido') {
                 await updateDoc(doc(db, 'tarefas', task.id), {
                   status: 'concluído',
@@ -1799,6 +2304,9 @@ const App: React.FC = () => {
   // Dashboard states
   const [dashboardViewMode, setDashboardViewMode] = useState<'list' | 'calendar'>('list');
   const [fixedBills, setFixedBills] = useState<FixedBill[]>([]);
+  const [billRubrics, setBillRubrics] = useState<BillRubric[]>([]);
+  const [incomeEntries, setIncomeEntries] = useState<IncomeEntry[]>([]);
+  const [incomeRubrics, setIncomeRubrics] = useState<IncomeRubric[]>([]);
   const [calendarViewMode, setCalendarViewMode] = useState<'month' | 'week'>('month');
   const [calendarDate, setCalendarDate] = useState(new Date());
 
@@ -1807,17 +2315,219 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeModule, setActiveModule] = useState<'home' | 'acoes' | 'financeiro' | 'ferramentas'>('home');
-  const [viewMode, setViewMode] = useState<'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'plano-trabalho' | 'ferramentas'>('gallery');
+  const [activeModule, setActiveModule] = useState<'home' | 'acoes' | 'financeiro' | 'ferramentas' | 'saude'>('home');
+  const [viewMode, setViewMode] = useState<'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'plano-trabalho' | 'ferramentas' | 'finance' | 'saude'>('gallery');
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
   const [planosTrabalho, setPlanosTrabalho] = useState<PlanoTrabalho[]>([]);
   const [statusFilter, setStatusFilter] = useState<Status[]>(['em andamento']);
   const [sortOption, setSortOption] = useState<SortOption>('date-asc');
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [syncData, setSyncData] = useState<any>(null);
-  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  const [activePopup, setActivePopup] = useState<Notification | null>(null);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
+  const [isHabitsReminderOpen, setIsHabitsReminderOpen] = useState(false);
+
+  // --- Notification System & App Settings ---
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'configuracoes', 'geral'), (snap) => {
+      if (snap.exists()) {
+        setAppSettings(snap.data() as AppSettings);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  const handleUpdateAppSettings = async (newSettings: AppSettings) => {
+    try {
+      await setDoc(doc(db, 'configuracoes', 'geral'), newSettings);
+      showToast("Configurações atualizadas!", "success");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao salvar configurações.", "error");
+    }
+  };
+
+  const handleUpdateOverdueTasks = async () => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const overdue = tarefas.filter(t =>
+      normalizeStatus(t.status) !== 'concluido' &&
+      t.status !== 'excluído' as any &&
+      t.data_limite && t.data_limite !== "-" && t.data_limite !== "0000-00-00" &&
+      t.data_limite < todayStr
+    );
+
+    try {
+      const promises = overdue.map(t => updateDoc(doc(db, 'tarefas', t.id), {
+        data_limite: todayStr,
+        data_atualizacao: new Date().toISOString()
+      }));
+      await Promise.all(promises);
+      showToast(`${overdue.length} ações atualizadas para hoje!`, 'success');
+      const targetNotif = notifications.find(n => n.title === "Ações Vencidas");
+      if (targetNotif) handleDismissNotification(targetNotif.id);
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao atualizar tarefas.", 'error');
+    }
+  };
+
+  // Notification System Triggers (Time-based: Habits, Weigh-in)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = new Date();
+      const current_time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const todayStr = now.toISOString().split('T')[0];
+
+      // 1. Habits Reminder
+      if (appSettings.notifications.habitsReminder.enabled && current_time === appSettings.notifications.habitsReminder.time) {
+        const lastOpen = localStorage.getItem('lastHabitsReminderDate');
+        if (lastOpen !== todayStr) {
+          setIsHabitsReminderOpen(true);
+          localStorage.setItem('lastHabitsReminderDate', todayStr);
+        }
+      }
+
+      // 2. Weigh-in Reminder (Bell Notification)
+      if (appSettings.notifications.weighInReminder.enabled && current_time === appSettings.notifications.weighInReminder.time) {
+        const lastWeighInRemind = localStorage.getItem('lastWeighInRemindDate');
+        if (lastWeighInRemind !== todayStr) {
+          const dayMatch = now.getDay() === appSettings.notifications.weighInReminder.dayOfWeek;
+          let shouldRemind = false;
+
+          if (appSettings.notifications.weighInReminder.frequency === 'weekly' && dayMatch) {
+            shouldRemind = true;
+          } else if (appSettings.notifications.weighInReminder.frequency === 'biweekly') {
+            const weekRef = Math.floor(now.getTime() / (7 * 24 * 60 * 60 * 1000));
+            if (dayMatch && weekRef % 2 === 0) shouldRemind = true;
+          } else if (appSettings.notifications.weighInReminder.frequency === 'monthly' && now.getDate() === 1) {
+            shouldRemind = true;
+          }
+
+          if (shouldRemind) {
+            const newNotif: Notification = {
+              id: Math.random().toString(36).substring(2, 9),
+              title: "Lembrete de Pesagem",
+              message: "Hora de registrar seu peso para acompanhar sua evolução no módulo Saúde!",
+              type: 'info',
+              timestamp: new Date().toISOString(),
+              isRead: false,
+              link: 'saude'
+            };
+            setNotifications(prev => [newNotif, ...prev]);
+            setActivePopup(newNotif);
+            localStorage.setItem('lastWeighInRemindDate', todayStr);
+          }
+        }
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [appSettings.notifications]);
+
+  // Data-driven Notifications (Budget, Overdue, PGC)
+  useEffect(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const newNotifications: Notification[] = [];
+
+    // 1. Overdue Tasks (Once a day check)
+    if (appSettings.notifications.overdueTasks.enabled && localStorage.getItem('lastOverdueCheckDate') !== todayStr) {
+      const overdueCount = tarefas.filter(t =>
+        normalizeStatus(t.status) !== 'concluido' &&
+        t.status !== 'excluído' as any &&
+        t.data_limite && t.data_limite !== "-" && t.data_limite !== "0000-00-00" &&
+        t.data_limite < todayStr
+      ).length;
+
+      if (overdueCount > 0) {
+        newNotifications.push({
+          id: `overdue-${todayStr}`,
+          title: "Ações Vencidas",
+          message: `Você tem ${overdueCount} ações fora do prazo. Que tal atualizá-las para hoje?`,
+          type: 'warning',
+          timestamp: new Date().toISOString(),
+          isRead: false,
+          link: 'acoes'
+        });
+        localStorage.setItem('lastOverdueCheckDate', todayStr);
+      }
+    }
+
+    // 2. Budget Risk (Whenever data changes, throttled to once per day notification)
+    if (appSettings.notifications.budgetRisk.enabled && localStorage.getItem('lastBudgetRiskNotifyDate') !== todayStr) {
+      const now = new Date();
+      const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const monthlyBudget = financeSettings.monthlyBudgets?.[currentMonthStr] || financeSettings.monthlyBudget;
+      const totalSpend = financeTransactions.filter(t => t.date.startsWith(currentMonthStr)).reduce((acc, t) => acc + t.amount, 0);
+
+      if (monthlyBudget > 0) {
+        const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+        const currentDay = now.getDate();
+        const budgetRatio = totalSpend / monthlyBudget;
+        const timeRatio = currentDay / daysInMonth;
+
+        if (budgetRatio > timeRatio * 1.15 && budgetRatio > 0.1) {
+          newNotifications.push({
+            id: `budget-${todayStr}`,
+            title: "Alerta de Orçamento",
+            message: `Atenção: Gastos elevados! Você já utilizou ${(budgetRatio * 100).toFixed(0)}% do orçamento em ${(timeRatio * 100).toFixed(0)}% do mês.`,
+            type: 'warning',
+            timestamp: new Date().toISOString(),
+            isRead: false,
+            link: 'financeiro'
+          });
+          localStorage.setItem('lastBudgetRiskNotifyDate', todayStr);
+        }
+      }
+    }
+
+    // 3. Audit PGC
+    if (appSettings.notifications.pgcAudit.enabled && localStorage.getItem('lastPgcNotifyDate') !== todayStr) {
+      const now = new Date();
+      const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      if ((daysInMonth - now.getDate()) <= appSettings.notifications.pgcAudit.daysBeforeEnd) {
+        newNotifications.push({
+          id: `pgc-${todayStr}`,
+          title: "Auditoria PGC",
+          message: "O mês está acabando. Verifique no módulo PGC se todas as entregas possuem ações vinculadas.",
+          type: 'info',
+          timestamp: new Date().toISOString(),
+          isRead: false,
+          link: 'pgc'
+        });
+        localStorage.setItem('lastPgcNotifyDate', todayStr);
+      }
+    }
+
+    if (newNotifications.length > 0) {
+      setNotifications(prev => {
+        const existingIds = new Set(prev.map(n => n.id));
+        const filteredNew = newNotifications.filter(n => !existingIds.has(n.id));
+        return [...filteredNew, ...prev];
+      });
+    }
+  }, [tarefas, financeTransactions, financeSettings, planosTrabalho, appSettings.notifications]);
+
+  // Welcome Notification
+  useEffect(() => {
+    if (notifications.length === 0) {
+      const welcomeNote: Notification = {
+        id: 'welcome',
+        title: 'Bem-vindo ao Hermes',
+        message: 'Sistema de notificações ativo. Configure suas preferências no ícone de engrenagem.',
+        type: 'info',
+        timestamp: new Date().toISOString(),
+        isRead: false
+      };
+      setNotifications([welcomeNote]);
+      setTimeout(() => setActivePopup(welcomeNote), 2000);
+    }
+  }, []);
 
   // Sync Logic
   useEffect(() => {
@@ -2140,21 +2850,76 @@ const App: React.FC = () => {
 
   const handleCreateEntregaFromPlan = async (item: PlanoTrabalhoItem): Promise<string | null> => {
     try {
-      const docRef = await addDoc(collection(db, 'atividades'), {
+      const docRef = await addDoc(collection(db, 'entregas'), {
         entrega: item.entrega,
-        area: item.unidade,
-        descricao_trabalho: item.descricao || '',
+        area: item.origem,
+        unidade: item.unidade,
         mes: currentMonth,
-        ano: currentYear,
-        status: 'planejada'
+        ano: currentYear
       });
       return docRef.id;
-    } catch (e) {
-      console.error(e);
-      showToast("Erro ao registrar entrega.", "error");
+    } catch (err) {
+      console.error(err);
       return null;
     }
   };
+
+  // Health Handlers
+  const handleUpdateHealthSettings = async (settings: HealthSettings) => {
+    await setDoc(doc(db, 'health_settings', 'config'), settings);
+    showToast("Meta de peso atualizada!", "success");
+  };
+
+  const handleAddHealthWeight = async (weight: number, date: string) => {
+    await addDoc(collection(db, 'health_weights'), { weight, date });
+    showToast("Peso registrado com sucesso!", "success");
+  };
+
+  const handleUpdateFinanceGoal = async (goal: FinanceGoal) => {
+    try {
+      await updateDoc(doc(db, 'finance_goals', goal.id), goal as any);
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao atualizar meta.", "error");
+    }
+  };
+
+  const handleReorderFinanceGoals = async (reorderedGoals: FinanceGoal[]) => {
+    try {
+      const promises = reorderedGoals.map((goal, index) =>
+        updateDoc(doc(db, 'finance_goals', goal.id), { priority: index + 1 })
+      );
+      await Promise.all(promises);
+      showToast("Prioridades atualizadas!", "success");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao reordenar metas.", "error");
+    }
+  };
+
+  const handleDeleteFinanceGoal = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'finance_goals', id));
+      showToast("Meta removida!", "info");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao remover meta.", "error");
+    }
+  };
+
+  const handleUpdateHealthHabits = async (date: string, habits: Partial<DailyHabits>) => {
+    await setDoc(doc(db, 'health_daily_habits', date), habits, { merge: true });
+  };
+
+  const handleMarkNotificationRead = (id: string) => {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
+  };
+
+  const handleDismissNotification = (id: string) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+    if (activePopup?.id === id) setActivePopup(null);
+  };
+
 
   const stats = useMemo(() => ({
     total: tarefas.length,
@@ -2387,11 +3152,74 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col relative">
 
+      {/* Pop-up de Notificação */}
+      {activePopup && (
+        <div className="fixed bottom-8 left-4 right-4 md:left-8 md:right-auto z-[200] max-w-sm ml-auto mr-auto md:ml-0 md:mr-0 bg-white rounded-[2.5rem] shadow-[0_30px_60px_rgba(0,0,0,0.25)] border border-slate-100 overflow-hidden animate-in slide-in-from-bottom-12 duration-500">
+          <div className={`h-2 w-full ${activePopup.type === 'success' ? 'bg-emerald-500' :
+            activePopup.type === 'warning' ? 'bg-amber-500' :
+              activePopup.type === 'error' ? 'bg-rose-500' : 'bg-blue-600'
+            }`} />
+          <div className="p-8">
+            <div className="flex justify-between items-start mb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em]">{activePopup.title}</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse"></span>
+              </div>
+              <button onClick={() => setActivePopup(null)} className="text-slate-300 hover:text-slate-600 transition-colors p-1">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500 leading-relaxed font-bold">{activePopup.message}</p>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setActivePopup(null)}
+                className="flex-1 px-5 py-3 bg-slate-900 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all hover:bg-slate-800 shadow-lg shadow-slate-200"
+              >
+                Entendido
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Menu Inicial (Home) */}
       {activeModule === 'home' && (
         <div className="min-h-screen flex flex-col items-center justify-center p-4 md:p-8">
           <div className="max-w-6xl w-full">
             {/* Logo e Título */}
+            <div className="flex justify-end p-4 md:absolute md:top-12 md:right-12 gap-3">
+              <div className="relative">
+                <button
+                  onClick={() => setIsSettingsModalOpen(true)}
+                  className="bg-white border-2 border-slate-100 text-slate-700 p-4 rounded-2xl shadow-xl hover:bg-slate-50 transition-all active:scale-95 group"
+                  aria-label="Configurações"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                </button>
+              </div>
+
+              <div className="relative">
+                <button
+                  onClick={() => setIsNotificationCenterOpen(!isNotificationCenterOpen)}
+                  className="bg-white border-2 border-slate-100 text-slate-700 p-4 rounded-2xl shadow-xl hover:bg-slate-50 transition-all active:scale-95 group relative"
+                  aria-label="Notificações"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+                  {notifications.some(n => !n.isRead) && (
+                    <span className="absolute top-4 right-4 w-3.5 h-3.5 bg-rose-500 border-4 border-white rounded-full"></span>
+                  )}
+                </button>
+                <NotificationCenter
+                  notifications={notifications}
+                  onMarkAsRead={handleMarkNotificationRead}
+                  onDismiss={handleDismissNotification}
+                  isOpen={isNotificationCenterOpen}
+                  onClose={() => setIsNotificationCenterOpen(false)}
+                  onUpdateOverdue={handleUpdateOverdueTasks}
+                />
+              </div>
+            </div>
+
             <div className="text-center mb-12 md:mb-16">
               <div className="flex items-center justify-center gap-4 mb-4">
                 <img src="/logo.png" alt="Hermes" className="w-16 h-16 md:w-20 md:h-20 object-contain" />
@@ -2401,18 +3229,22 @@ const App: React.FC = () => {
             </div>
 
             {/* Cards dos Módulos */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
 
               {/* Card Ações */}
               <button
-                onClick={() => setActiveModule('acoes')}
+                onClick={() => {
+                  setActiveModule('acoes');
+                  setViewMode('gallery');
+                }}
                 className="group bg-white border-2 border-slate-200 rounded-[2.5rem] p-8 md:p-10 hover:border-blue-500 hover:shadow-2xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden"
               >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                 <div className="relative z-10">
                   <div className="w-16 h-16 md:w-20 md:h-20 bg-blue-500 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
                     <svg className="w-8 h-8 md:w-10 md:h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 14l2 2 4-4" />
                     </svg>
                   </div>
                   <h2 className="text-2xl md:text-3xl font-black text-slate-900 mb-3 group-hover:text-blue-600 transition-colors">Ações</h2>
@@ -2444,6 +3276,32 @@ const App: React.FC = () => {
                   <h2 className="text-2xl md:text-3xl font-black text-slate-900 mb-3 group-hover:text-emerald-600 transition-colors">Financeiro</h2>
                   <p className="text-slate-500 text-sm md:text-base font-medium leading-relaxed">Gestão financeira e orçamentária</p>
                   <div className="mt-6 flex items-center gap-2 text-emerald-600 font-black text-xs uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span>Acessar</span>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
+                </div>
+              </button>
+
+              {/* Card Saúde */}
+              <button
+                onClick={() => {
+                  setActiveModule('saude');
+                  setViewMode('saude');
+                }}
+                className="group bg-white border-2 border-slate-200 rounded-[2.5rem] p-8 md:p-10 hover:border-rose-500 hover:shadow-2xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
+                <div className="relative z-10">
+                  <div className="w-16 h-16 md:w-20 md:h-20 bg-rose-500 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                    <svg className="w-8 h-8 md:w-10 md:h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                    </svg>
+                  </div>
+                  <h2 className="text-2xl md:text-3xl font-black text-slate-900 mb-3 group-hover:text-rose-600 transition-colors">Saúde</h2>
+                  <p className="text-slate-500 text-sm md:text-base font-medium leading-relaxed">Acompanhamento de saúde, exames e bem-estar</p>
+                  <div className="mt-6 flex items-center gap-2 text-rose-600 font-black text-xs uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
                     <span>Acessar</span>
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" />
@@ -2506,7 +3364,35 @@ const App: React.FC = () => {
                   <h1 className="text-lg font-black tracking-tighter text-slate-900">HERMES</h1>
                 </div>
                 <div className="flex items-center gap-2">
-                  {/* Lógica de botões removida daqui para usar barra inferior */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setIsSettingsModalOpen(true)}
+                      className="p-2.5 rounded-xl hover:bg-slate-100 transition-colors"
+                      aria-label="Configurações"
+                    >
+                      <svg className="w-6 h-6 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <button
+                      onClick={() => setIsNotificationCenterOpen(!isNotificationCenterOpen)}
+                      className="p-2.5 rounded-xl hover:bg-slate-100 transition-colors relative"
+                      aria-label="Notificações"
+                    >
+                      <svg className="w-6 h-6 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+                      {notifications.some(n => !n.isRead) && (
+                        <span className="absolute top-2.5 right-2.5 w-2.5 h-2.5 bg-rose-500 border-2 border-white rounded-full"></span>
+                      )}
+                    </button>
+                    <NotificationCenter
+                      notifications={notifications}
+                      onMarkAsRead={handleMarkNotificationRead}
+                      onDismiss={handleDismissNotification}
+                      isOpen={isNotificationCenterOpen}
+                      onClose={() => setIsNotificationCenterOpen(false)}
+                      onUpdateOverdue={handleUpdateOverdueTasks}
+                    />
+                  </div>
                   {viewMode !== 'ferramentas' && (
                     <button
                       onClick={() => setIsCreateModalOpen(true)}
@@ -2548,7 +3434,7 @@ const App: React.FC = () => {
                     <img src="/logo.png" alt="Hermes" className="w-9 h-9 object-contain" />
                     <h1 className="text-xl font-black tracking-tighter text-slate-900">HERMES</h1>
                   </div>
-                  {viewMode !== 'ferramentas' && activeModule !== 'financeiro' && (
+                  {viewMode !== 'ferramentas' && activeModule !== 'financeiro' && activeModule !== 'saude' && (
                     <nav className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
                       <button
                         onClick={() => {
@@ -2580,6 +3466,25 @@ const App: React.FC = () => {
 
                 {viewMode !== 'ferramentas' && (
                   <div className="flex items-center gap-4">
+                    <div className="relative">
+                      <button
+                        onClick={() => setIsNotificationCenterOpen(!isNotificationCenterOpen)}
+                        className="bg-white border border-slate-200 text-slate-700 p-2 rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
+                        aria-label="Notificações"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+                        {notifications.some(n => !n.isRead) && (
+                          <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-rose-500 border-2 border-white rounded-full"></span>
+                        )}
+                      </button>
+                      <NotificationCenter
+                        notifications={notifications}
+                        onMarkAsRead={handleMarkNotificationRead}
+                        onDismiss={handleDismissNotification}
+                        isOpen={isNotificationCenterOpen}
+                        onClose={() => setIsNotificationCenterOpen(false)}
+                      />
+                    </div>
                     <div className="hidden lg:flex items-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 w-64 group focus-within:ring-2 focus-within:ring-blue-500 focus-within:bg-white transition-all">
                       <svg className="w-4 h-4 text-slate-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                       <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none outline-none text-xs font-bold text-slate-900 w-full" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
@@ -2992,6 +3897,15 @@ const App: React.FC = () => {
                     </table>
                   </div>
                 </div>
+              ) : viewMode === 'saude' ? (
+                <HealthView
+                  weights={healthWeights}
+                  dailyHabits={healthDailyHabits}
+                  settings={healthSettings}
+                  onUpdateSettings={handleUpdateHealthSettings}
+                  onAddWeight={handleAddHealthWeight}
+                  onUpdateHabits={handleUpdateHealthHabits}
+                />
               ) : viewMode === 'ferramentas' ? (
                 <FerramentasView
                   ideas={brainstormIdeas}
@@ -3009,17 +3923,68 @@ const App: React.FC = () => {
               ) : viewMode === 'finance' ? (
                 <FinanceView
                   transactions={financeTransactions}
-                  goals={financeGoals}
+                  goals={(() => {
+                    const totalSavings = fixedBills
+                      .filter(b => b.category === 'Poupança' && b.isPaid)
+                      .reduce((acc, curr) => acc + curr.amount, 0);
+
+                    const emergencyCurrent = financeSettings.emergencyReserveCurrent || 0;
+                    let remaining = Math.max(0, totalSavings + emergencyCurrent - (financeSettings.emergencyReserveTarget || 0));
+                    // Note: The logic here is a bit tricky. If "Poupança" bills are the ONLY thing that fills goals,
+                    // and emergency reserve is a manual pot, then typically goals = totalSavings if emergency is full.
+                    // But if emergency is manual, maybe the user wants: Remaining = total_saved_in_savings_bills.
+                    // Let's assume goals are filled by "Poupança" items, but only if the manual emergency reserve is >= target.
+
+                    const isEmergencyFull = emergencyCurrent >= (financeSettings.emergencyReserveTarget || 0);
+                    let availableForGoals = isEmergencyFull ? totalSavings : 0;
+
+                    return [...financeGoals].sort((a, b) => a.priority - b.priority).map(goal => {
+                      const allocated = Math.min(availableForGoals, goal.targetAmount);
+                      availableForGoals -= allocated;
+                      return { ...goal, currentAmount: allocated };
+                    });
+                  })()}
+                  emergencyReserve={{
+                    target: financeSettings.emergencyReserveTarget || 0,
+                    current: financeSettings.emergencyReserveCurrent || 0
+                  }}
                   settings={financeSettings}
-                  currentMonthTotal={financeTransactions.filter(t => new Date(t.date).getMonth() === new Date().getMonth()).reduce((acc, curr) => acc + curr.amount, 0)}
+                  currentMonth={currentMonth}
+                  currentYear={currentYear}
+                  onMonthChange={(m, y) => {
+                    setCurrentMonth(m);
+                    setCurrentYear(y);
+                  }}
+                  currentMonthTotal={financeTransactions.filter(t => {
+                    const d = new Date(t.date);
+                    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+                  }).reduce((acc, curr) => acc + curr.amount, 0)}
+                  currentMonthIncome={incomeEntries.filter(e => {
+                    return e.month === currentMonth && e.year === currentYear;
+                  }).reduce((acc, curr) => acc + curr.amount, 0)}
                   fixedBills={fixedBills}
+                  billRubrics={billRubrics}
+                  incomeEntries={incomeEntries}
+                  incomeRubrics={incomeRubrics}
+                  onAddRubric={async (rubric) => { await addDoc(collection(db, 'bill_rubrics'), rubric); }}
+                  onUpdateRubric={async (rubric) => { await updateDoc(doc(db, 'bill_rubrics', rubric.id), rubric as any); }}
+                  onDeleteRubric={async (id) => { await deleteDoc(doc(db, 'bill_rubrics', id)); }}
+                  onAddIncomeRubric={async (rubric) => { await addDoc(collection(db, 'income_rubrics'), rubric); }}
+                  onUpdateIncomeRubric={async (rubric) => { await updateDoc(doc(db, 'income_rubrics', rubric.id), rubric as any); }}
+                  onDeleteIncomeRubric={async (id) => { await deleteDoc(doc(db, 'income_rubrics', id)); }}
+                  onAddIncomeEntry={async (entry) => { await addDoc(collection(db, 'income_entries'), { ...entry, month: currentMonth, year: currentYear }); }}
+                  onUpdateIncomeEntry={async (entry) => { await updateDoc(doc(db, 'income_entries', entry.id), entry as any); }}
+                  onDeleteIncomeEntry={async (id) => { await deleteDoc(doc(db, 'income_entries', id)); }}
                   onUpdateSettings={(newSettings) => setDoc(doc(db, 'finance_settings', 'config'), newSettings)}
-                  onAddGoal={(goal) => addDoc(collection(db, 'finance_goals'), goal)}
-                  onUpdateGoal={(goal) => updateDoc(doc(db, 'finance_goals', goal.id), goal as any)}
-                  onAddBill={async (bill) => { await addDoc(collection(db, 'fixed_bills'), bill); }}
+                  onAddGoal={(goal) => addDoc(collection(db, 'finance_goals'), { ...goal, priority: financeGoals.length + 1 })}
+                  onUpdateGoal={handleUpdateFinanceGoal}
+                  onDeleteGoal={handleDeleteFinanceGoal}
+                  onReorderGoals={handleReorderFinanceGoals}
+                  onAddBill={async (bill) => { await addDoc(collection(db, 'fixed_bills'), { ...bill, month: currentMonth, year: currentYear }); }}
                   onUpdateBill={async (bill) => { await updateDoc(doc(db, 'fixed_bills', bill.id), bill as any); }}
                   onDeleteBill={async (id) => { await deleteDoc(doc(db, 'fixed_bills', id)); }}
                 />
+
               ) : (
                 <div className="space-y-10">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white p-8 rounded-[2rem] border border-slate-200 shadow-xl">
@@ -3182,207 +4147,235 @@ const App: React.FC = () => {
                 </div>
               )}
             </main>
-
-            <ToastContainer toasts={toasts} removeToast={removeToast} />
-
-            {
-              isCreateModalOpen && (
-                <TaskCreateModal
-                  onSave={handleCreateTarefa}
-                  onClose={() => setIsCreateModalOpen(false)}
-                />
-              )
-            }
-
-            {
-              selectedTask && (
-                selectedTask.categoria === 'CLC' ? (
-                  <TaskExecutionView
-                    task={selectedTask}
-                    onSave={handleUpdateTarefa}
-                    onClose={() => setSelectedTask(null)}
-                  />
-                ) : (
-                  <TaskEditModal
-                    task={selectedTask}
-                    onSave={handleUpdateTarefa}
-                    onDelete={handleDeleteTarefa}
-                    onClose={() => setSelectedTask(null)}
-                  />
-                )
-              )
-            }
-
-            {
-              isTerminalOpen && (
-                <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-300">
-                  <div className="bg-[#0C0C0C] w-full max-w-2xl rounded-[2rem] shadow-[0_0_100px_rgba(37,99,235,0.2)] border border-white/10 overflow-hidden flex flex-col h-[500px] animate-in zoom-in-95">
-                    <div className="p-6 bg-white/5 border-b border-white/5 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="flex gap-1.5">
-                          <div className="w-3 h-3 rounded-full bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.5)]"></div>
-                          <div className="w-3 h-3 rounded-full bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]"></div>
-                          <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_100px_rgba(16,185,129,0.5)]"></div>
-                        </div>
-                        <h3 className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em] ml-2">Google Sync Console v2</h3>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        {isSyncing && (
-                          <button
-                            onClick={async () => {
-                              await setDoc(doc(db, 'system', 'sync'), { status: 'idle', logs: [...(syncData?.logs || []), "--- INTERROMPIDO PELO USUÁRIO ---"] });
-                              setIsSyncing(false);
-                            }}
-                            className="text-[9px] font-bold text-rose-500/60 hover:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-3 py-1 rounded-full transition-all"
-                          >
-                            FORÇAR INTERRUPÇÃO
-                          </button>
-                        )}
-                        <button onClick={() => setIsTerminalOpen(false)} className="text-white/40 hover:text-white transition-colors">
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto p-6 font-mono text-[11px] space-y-2 selection:bg-blue-500/30">
-                      <div className="text-blue-400 opacity-60"># hermes_cli.py --sync-mode automatic</div>
-                      {syncData?.logs?.map((log: string, i: number) => (
-                        <div key={i} className={`flex gap-3 ${log.includes('ERRO') ? 'text-rose-400' : log.includes('PUSH') ? 'text-blue-400' : log.includes('PULL') ? 'text-emerald-400' : 'text-slate-400'}`}>
-                          <span className="opacity-30 shrink-0">[{i}]</span>
-                          <span className="leading-relaxed">{log}</span>
-                        </div>
-                      ))}
-                      {isSyncing && (
-                        <div className="flex items-center gap-2 text-white/50 animate-pulse">
-                          <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
-                          <span>Processando transações em tempo real...</span>
-                        </div>
-                      )}
-                      {!isSyncing && syncData?.status === 'completed' && (
-                        <div className="pt-4 border-t border-white/5 text-emerald-400 font-bold">
-                          ✓ SINCROIZAÇÃO CONCLUÍDA COM SUCESSO.
-                        </div>
-                      )}
-                      {syncData?.status === 'error' && (
-                        <div className="pt-4 border-t border-white/5 text-rose-500 font-bold">
-                          ⚠ FALHA NO PROCESSAMENTO: {syncData.error_message}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="p-4 bg-white/5 text-[9px] font-bold text-white/20 uppercase tracking-widest flex justify-between items-center">
-                      <span>Core: Firebase Firestore + Google Tasks API</span>
-                      <span>Encerrado: {syncData?.last_success ? formatDate(syncData.last_success.split('T')[0]) : '-'}</span>
-                    </div>
-                  </div>
-                </div>
-              )
-            }
-
-            {
-              isImportPlanOpen && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-                  <div className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-                    <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
-                      <div>
-                        <h3 className="text-2xl font-black text-slate-900 tracking-tight">Importar Plano Mensal</h3>
-                        <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Cole o JSON do plano de trabalho abaixo</p>
-                      </div>
-                      <button onClick={() => setIsImportPlanOpen(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
-                        <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-                      </button>
-                    </div>
-
-                    <div className="p-8 space-y-6">
-                      <div className="grid grid-cols-2 gap-6">
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Ano</label>
-                          <input type="number" id="import-year" defaultValue={currentYear} className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900" />
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Mês</label>
-                          <select id="import-month" defaultValue={currentMonth + 1} className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900">
-                            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => <option key={m} value={m}>{m}</option>)}
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Dump JSON</label>
-                        <textarea
-                          id="import-json"
-                          rows={10}
-                          className="w-full bg-slate-900 text-blue-400 border-none rounded-2xl px-6 py-4 text-[10px] font-mono focus:ring-2 focus:ring-blue-500 transition-all resize-none"
-                          placeholder='[ { "entrega": "Exemplo", "percentual": 50 }, ... ]'
-                        />
-                      </div>
-                    </div>
-
-                    <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-4">
-                      <button
-                        onClick={() => setIsImportPlanOpen(false)}
-                        className="flex-1 px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        onClick={async () => {
-                          try {
-                            const year = (document.getElementById('import-year') as HTMLInputElement).value;
-                            const month = (document.getElementById('import-month') as HTMLSelectElement).value.padStart(2, '0');
-                            const rawText = (document.getElementById('import-json') as HTMLTextAreaElement).value;
-
-                            let items: PlanoTrabalhoItem[] = [];
-
-                            // Tenta detectar se é JSON ou o formato de texto/tabela
-                            if (rawText.trim().startsWith('[') || rawText.trim().startsWith('{')) {
-                              items = JSON.parse(rawText);
-                            } else {
-                              // Parser para o formato de tabela de texto
-                              const lines = rawText.split('\n').map(l => l.trim()).filter(l => l !== '');
-                              for (let i = 0; i < lines.length; i++) {
-                                const line = lines[i];
-                                if (line === 'Própria Unidade' || line === 'Outra Unidade') {
-                                  const item: Partial<PlanoTrabalhoItem> = { origem: line };
-                                  item.unidade = lines[++i] || '';
-                                  item.entrega = lines[++i] || '';
-                                  // Opcional: pular "Curtir"
-                                  if (lines[i + 1] === 'Curtir') i++;
-                                  const pctStr = lines[++i] || '0';
-                                  item.percentual = parseFloat(pctStr.replace('%', '')) || 0;
-                                  item.descricao = lines[++i] || '';
-                                  items.push(item as PlanoTrabalhoItem);
-                                }
-                              }
-                            }
-
-                            if (items.length === 0) throw new Error("Nenhum item identificado no texto colado.");
-
-                            const docId = `${year}-${month}`;
-                            await setDoc(doc(db, 'planos_trabalho', docId), {
-                              mes_ano: docId,
-                              itens: items,
-                              data_atualizacao: new Date().toISOString()
-                            });
-
-                            setIsImportPlanOpen(false);
-                            alert(`Sucesso! ${items.length} entregas importadas para o plano ${docId}.`);
-                          } catch (err: any) {
-                            alert("Erro ao processar dados: " + err.message);
-                          }
-                        }}
-                        className="flex-1 bg-blue-600 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
-                      >
-                        Processar e Gravar
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )
-            }
           </div>
         </>
       )}
+
+      <ToastContainer toasts={toasts} removeToast={removeToast} />
+
+      {
+        isCreateModalOpen && (
+          <TaskCreateModal
+            onSave={handleCreateTarefa}
+            onClose={() => setIsCreateModalOpen(false)}
+          />
+        )
+      }
+
+      {
+        selectedTask && (
+          selectedTask.categoria === 'CLC' ? (
+            <TaskExecutionView
+              task={selectedTask}
+              onSave={handleUpdateTarefa}
+              onClose={() => setSelectedTask(null)}
+            />
+          ) : (
+            <TaskEditModal
+              task={selectedTask}
+              onSave={handleUpdateTarefa}
+              onDelete={handleDeleteTarefa}
+              onClose={() => setSelectedTask(null)}
+            />
+          )
+        )
+      }
+
+      {
+        isTerminalOpen && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-300">
+            <div className="bg-[#0C0C0C] w-full max-w-2xl rounded-[2rem] shadow-[0_0_100px_rgba(37,99,235,0.2)] border border-white/10 overflow-hidden flex flex-col h-[500px] animate-in zoom-in-95">
+              <div className="p-6 bg-white/5 border-b border-white/5 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex gap-1.5">
+                    <div className="w-3 h-3 rounded-full bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.5)]"></div>
+                    <div className="w-3 h-3 rounded-full bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]"></div>
+                    <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_100px_rgba(16,185,129,0.5)]"></div>
+                  </div>
+                  <h3 className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em] ml-2">Google Sync Console v2</h3>
+                </div>
+                <div className="flex items-center gap-4">
+                  {isSyncing && (
+                    <button
+                      onClick={async () => {
+                        await setDoc(doc(db, 'system', 'sync'), { status: 'idle', logs: [...(syncData?.logs || []), "--- INTERROMPIDO PELO USUÁRIO ---"] });
+                        setIsSyncing(false);
+                      }}
+                      className="text-[9px] font-bold text-rose-500/60 hover:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-3 py-1 rounded-full transition-all"
+                    >
+                      FORÇAR INTERRUPÇÃO
+                    </button>
+                  )}
+                  <button onClick={() => setIsTerminalOpen(false)} className="text-white/40 hover:text-white transition-colors">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6 font-mono text-[11px] space-y-2 selection:bg-blue-500/30">
+                <div className="text-blue-400 opacity-60"># hermes_cli.py --sync-mode automatic</div>
+                {syncData?.logs?.map((log: string, i: number) => (
+                  <div key={i} className={`flex gap-3 ${log.includes('ERRO') ? 'text-rose-400' : log.includes('PUSH') ? 'text-blue-400' : log.includes('PULL') ? 'text-emerald-400' : 'text-slate-400'}`}>
+                    <span className="opacity-30 shrink-0">[{i}]</span>
+                    <span className="leading-relaxed">{log}</span>
+                  </div>
+                ))}
+                {isSyncing && (
+                  <div className="flex items-center gap-2 text-white/50 animate-pulse">
+                    <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                    <span>Processando transações em tempo real...</span>
+                  </div>
+                )}
+                {!isSyncing && syncData?.status === 'completed' && (
+                  <div className="pt-4 border-t border-white/5 text-emerald-400 font-bold">
+                    ✓ SINCROIZAÇÃO CONCLUÍDA COM SUCESSO.
+                  </div>
+                )}
+                {syncData?.status === 'error' && (
+                  <div className="pt-4 border-t border-white/5 text-rose-500 font-bold">
+                    ⚠ FALHA NO PROCESSAMENTO: {syncData.error_message}
+                  </div>
+                )}
+              </div>
+
+              <div className="p-4 bg-white/5 text-[9px] font-bold text-white/20 uppercase tracking-widest flex justify-between items-center">
+                <span>Core: Firebase Firestore + Google Tasks API</span>
+                <span>Encerrado: {syncData?.last_success ? formatDate(syncData.last_success.split('T')[0]) : '-'}</span>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {
+        isSettingsModalOpen && (
+          <SettingsModal
+            settings={appSettings}
+            onSave={handleUpdateAppSettings}
+            onClose={() => setIsSettingsModalOpen(false)}
+          />
+        )
+      }
+
+      {
+        isHabitsReminderOpen && (
+          <DailyHabitsModal
+            habits={healthDailyHabits.find(h => h.id === new Date().toISOString().split('T')[0]) || {
+              id: new Date().toISOString().split('T')[0],
+              noSugar: false,
+              noAlcohol: false,
+              noSnacks: false,
+              workout: false,
+              eatUntil18: false,
+              eatSlowly: false
+            }}
+            onUpdateHabits={handleUpdateHealthHabits}
+            onClose={() => setIsHabitsReminderOpen(false)}
+          />
+        )
+      }
+
+      {
+        isImportPlanOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+            <div className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+              <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                <div>
+                  <h3 className="text-2xl font-black text-slate-900 tracking-tight">Importar Plano Mensal</h3>
+                  <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Cole o JSON do plano de trabalho abaixo</p>
+                </div>
+                <button onClick={() => setIsImportPlanOpen(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+                  <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+
+              <div className="p-8 space-y-6">
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Ano</label>
+                    <input type="number" id="import-year" defaultValue={currentYear} className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Mês</label>
+                    <select id="import-month" defaultValue={currentMonth + 1} className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900">
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Dump JSON</label>
+                  <textarea
+                    id="import-json"
+                    rows={10}
+                    className="w-full bg-slate-900 text-blue-400 border-none rounded-2xl px-6 py-4 text-[10px] font-mono focus:ring-2 focus:ring-blue-500 transition-all resize-none"
+                    placeholder='[ { "entrega": "Exemplo", "percentual": 50 }, ... ]'
+                  />
+                </div>
+              </div>
+
+              <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-4">
+                <button
+                  onClick={() => setIsImportPlanOpen(false)}
+                  className="flex-1 px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      const year = (document.getElementById('import-year') as HTMLInputElement).value;
+                      const month = (document.getElementById('import-month') as HTMLSelectElement).value.padStart(2, '0');
+                      const rawText = (document.getElementById('import-json') as HTMLTextAreaElement).value;
+
+                      let items: PlanoTrabalhoItem[] = [];
+
+                      // Tenta detectar se é JSON ou o formato de texto/tabela
+                      if (rawText.trim().startsWith('[') || rawText.trim().startsWith('{')) {
+                        items = JSON.parse(rawText);
+                      } else {
+                        // Parser para o formato de tabela de texto
+                        const lines = rawText.split('\n').map(l => l.trim()).filter(l => l !== '');
+                        for (let i = 0; i < lines.length; i++) {
+                          const line = lines[i];
+                          if (line === 'Própria Unidade' || line === 'Outra Unidade') {
+                            const item: Partial<PlanoTrabalhoItem> = { origem: line };
+                            item.unidade = lines[++i] || '';
+                            item.entrega = lines[++i] || '';
+                            // Opcional: pular "Curtir"
+                            if (lines[i + 1] === 'Curtir') i++;
+                            const pctStr = lines[++i] || '0';
+                            item.percentual = parseFloat(pctStr.replace('%', '')) || 0;
+                            item.descricao = lines[++i] || '';
+                            items.push(item as PlanoTrabalhoItem);
+                          }
+                        }
+                      }
+
+                      if (items.length === 0) throw new Error("Nenhum item identificado no texto colado.");
+
+                      const docId = `${year}-${month}`;
+                      await setDoc(doc(db, 'planos_trabalho', docId), {
+                        mes_ano: docId,
+                        itens: items,
+                        data_atualizacao: new Date().toISOString()
+                      });
+
+                      setIsImportPlanOpen(false);
+                      alert(`Sucesso! ${items.length} entregas importadas para o plano ${docId}.`);
+                    } catch (err: any) {
+                      alert("Erro ao processar dados: " + err.message);
+                    }
+                  }}
+                  className="flex-1 bg-blue-600 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
+                >
+                  Processar e Gravar
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
     </div>
   );
 };

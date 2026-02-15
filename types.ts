@@ -100,18 +100,125 @@ export interface FinanceGoal {
 }
 
 export interface FinanceSettings {
-    monthlyBudget: number;
-    sprintDates: { [key: number]: string }; // Sprint 1: "08", Sprint 2: "15", etc.
+    monthlyBudget: number; // Global default (fall-back)
+    monthlyBudgets: { [key: string]: number }; // Specific budgets: "2026-02": 5000
+    sprintDates: { [key: number]: string };
+    emergencyReserveTarget: number;
+    emergencyReserveCurrent: number;
+    billCategories: string[];
+    incomeCategories: string[];
 }
+
 
 export interface FixedBill {
     id: string;
     description: string;
-    amount: number; // Valor estimado ou fixo
-    dueDay: number; // Dia de vencimento (1-31)
+    amount: number;
+    dueDay: number;
+    month: number; // 0-11
+    year: number;
     barcode?: string;
     pixCode?: string;
-    attachmentUrl?: string; // URL da imagem/PDF
-    isPaid: boolean; // Estado de pagamento no MÊS ATUAL (precisará de lógica de reset mensal)
-    category?: string; // 'Poupança', 'Conta Fixa', etc.
+    category: string;
+    isPaid: boolean;
+    attachmentUrl?: string;
+    rubricId?: string;
 }
+
+export interface BillRubric {
+    id: string;
+    description: string;
+    dueDay: number;
+    category: string;
+    defaultAmount?: number;
+}
+
+export interface IncomeEntry {
+    id: string;
+    description: string;
+    amount: number;
+    day: number;
+    month: number;
+    year: number;
+    category: string;
+    isReceived: boolean;
+    rubricId?: string;
+}
+
+export interface IncomeRubric {
+    id: string;
+    description: string;
+    expectedDay: number;
+    category: string;
+    defaultAmount?: number;
+}
+
+
+// Health Module Types
+export interface HealthWeight {
+    id: string;
+    date: string;
+    weight: number;
+}
+
+export interface DailyHabits {
+    id: string; // date string (YYYY-MM-DD)
+    noSugar: boolean;
+    noAlcohol: boolean;
+    noSnacks: boolean;
+    workout: boolean;
+    eatUntil18: boolean;
+    eatSlowly: boolean;
+}
+
+export interface HealthSettings {
+    targetWeight: number;
+}
+
+export interface Notification {
+    id: string;
+    title: string;
+    message: string;
+    type: 'info' | 'warning' | 'success' | 'error';
+    timestamp: string;
+    isRead: boolean;
+    link?: string;
+}
+
+export interface AppSettings {
+    notifications: {
+        habitsReminder: {
+            enabled: boolean;
+            time: string; // format "HH:mm"
+        };
+        weighInReminder: {
+            enabled: boolean;
+            frequency: 'weekly' | 'biweekly' | 'monthly';
+            time: string; // format "HH:mm"
+            dayOfWeek: number; // 0-6 (Sunday-Saturday)
+        };
+        budgetRisk: {
+            enabled: boolean;
+        };
+        overdueTasks: {
+            enabled: boolean;
+        };
+        pgcAudit: {
+            enabled: boolean;
+            daysBeforeEnd: number;
+        };
+    }
+}
+
+export const formatDate = (dateStr: string) => {
+    if (!dateStr || dateStr === "-" || dateStr === "0000-00-00" || dateStr.trim() === "") return 'Sem Data';
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return dateStr;
+    const [year, month, day] = parts.map(Number);
+    const date = new Date(year, month - 1, day);
+    if (isNaN(date.getTime())) return dateStr;
+    const dayOfWeek = new Intl.DateTimeFormat('pt-BR', { weekday: 'long' }).format(date);
+    const capitalizedDay = dayOfWeek.charAt(0).toUpperCase() + dayOfWeek.slice(1);
+    return `${parts[2]}/${parts[1]}/${parts[0]} (${capitalizedDay})`;
+};
+
