@@ -80,3 +80,38 @@ export interface BrainstormIdea {
     timestamp: string;
     status?: 'active' | 'archived';
 }
+export interface FinanceTransaction {
+    id: string;
+    description: string;
+    amount: number;
+    date: string;
+    sprint: number;
+    category: string;
+    originalTaskId?: string;
+}
+
+export interface FinanceGoal {
+    id: string;
+    name: string;
+    targetAmount: number;
+    currentAmount: number;
+    priority: number;
+    status: 'active' | 'queued' | 'completed';
+}
+
+export interface FinanceSettings {
+    monthlyBudget: number;
+    sprintDates: { [key: number]: string }; // Sprint 1: "08", Sprint 2: "15", etc.
+}
+
+export interface FixedBill {
+    id: string;
+    description: string;
+    amount: number; // Valor estimado ou fixo
+    dueDay: number; // Dia de vencimento (1-31)
+    barcode?: string;
+    pixCode?: string;
+    attachmentUrl?: string; // URL da imagem/PDF
+    isPaid: boolean; // Estado de pagamento no MÊS ATUAL (precisará de lógica de reset mensal)
+    category?: string; // 'Poupança', 'Conta Fixa', etc.
+}

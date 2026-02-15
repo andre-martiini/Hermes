@@ -3,3 +3,13 @@ body {
   margin: 0;
   padding: 0;
 }
+
+/* Utility: Truncate text to 3 lines with ellipsis */
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  line-clamp: 3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

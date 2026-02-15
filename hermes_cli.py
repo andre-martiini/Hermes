@@ -142,28 +142,40 @@ def sync_google_tasks(db, log_list=None, sync_ref=None):
             if existing_data:
                 doc_id, t_old = existing_data
                 
-                # Se não tem google_id mas o título coincide, vincula
+                # Se não tem google_id mas o título coincide, vincula e ATUALIZA TUDO
                 if not t_old.get('google_id'):
-                    db.collection('tarefas').document(doc_id).update({'google_id': g_id, 'data_atualizacao': g_updated})
+                    db.collection('tarefas').document(doc_id).update({
+                        'google_id': g_id, 
+                        'data_atualizacao': g_updated,
+                        'notas': gt.get('notes', '')
+                    })
                     log(f"[*] VINCULADA: {title}")
+                    # Remove o continue para garantir que verifique outras discrepâncias se necessário, ou assumimos que o link atualizou
                     continue
 
-                # Só atualiza se o Google tiver algo mais novo
+                # Verifica discrepância de notas
+                notes_present = gt.get('notes')
+                local_notes = t_old.get('notas')
+                notes_changed = notes_present and (not local_notes or local_notes != notes_present)
+
+                # Só atualiza se o Google for mais recente, SALVO SE as notas mudaram (correção de bug)
                 h_updated = t_old.get('data_atualizacao', '')
-                if h_updated and g_updated and h_updated >= g_updated:
+                if h_updated and g_updated and h_updated >= g_updated and not notes_changed:
                     continue
 
                 has_changed = (
                     t_old.get('status') != h_status or
                     t_old.get('titulo') != title or
                     t_old.get('data_conclusao') != gt.get('completed') or
-                    t_old.get('data_limite') != deadline
+                    t_old.get('data_limite') != deadline or
+                    notes_changed
                 )
                 
                 if has_changed:
                     db.collection('tarefas').document(doc_id).update({
                         'titulo': title, 'data_limite': deadline, 'status': h_status,
-                        'data_conclusao': gt.get('completed'), 'data_atualizacao': g_updated
+                        'data_conclusao': gt.get('completed'), 'data_atualizacao': g_updated,
+                        'notas': gt.get('notes', '')
                     })
                     log(f"[-] ATUALIZADA: {title}")
             else:
@@ -171,7 +183,8 @@ def sync_google_tasks(db, log_list=None, sync_ref=None):
                     'titulo': title, 'projeto': 'GOOGLE', 'data_limite': deadline,
                     'google_id': g_id, 'status': h_status, 'data_criacao': datetime.now().isoformat(),
                     'data_conclusao': gt.get('completed'), 'data_atualizacao': g_updated,
-                    'categoria': categoria, 'contabilizar_meta': contabilizar_meta
+                    'categoria': categoria, 'contabilizar_meta': contabilizar_meta,
+                    'notas': gt.get('notes', '')
                 })
                 log(f"[+] IMPORTADA: {title}")
                 
