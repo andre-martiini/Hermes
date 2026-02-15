@@ -13,6 +13,7 @@ export interface Tarefa {
     id: string;
     titulo: string;
     projeto: string;
+    data_inicio: string;
     data_limite: string;
     status: Status;
     prioridade: Prioridade;
@@ -24,6 +25,9 @@ export interface Tarefa {
     sistema?: string;
     acompanhamento?: Acompanhamento[];
     entregas_relacionadas?: string[];
+    is_single_day?: boolean;
+    chat_gemini_url?: string;
+    tempo_total_segundos?: number;
 }
 
 export interface AtividadeRealizada {
@@ -67,4 +71,12 @@ export interface PlanoTrabalho {
     mes_ano: string;
     itens: PlanoTrabalhoItem[];
     data_atualizacao: string;
+}
+
+export interface BrainstormIdea {
+    id: string;
+    text: string;
+    audioUrl?: string;
+    timestamp: string;
+    status?: 'active' | 'archived';
 }

@@ -1,0 +1,7 @@
+{
+  "name": "Audio Transcribe Chat",
+  "description": "Um chat moderno e intuitivo que utiliza a IA do Gemini para transcrever mensagens de áudio em tempo real com alta precisão.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

@@ -1,10 +1,11 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Tarefa, Status, EntregaInstitucional, Prioridade, AtividadeRealizada, Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento } from './types';
+import { Tarefa, Status, EntregaInstitucional, Prioridade, AtividadeRealizada, Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento, BrainstormIdea } from './types';
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
 import { db } from './firebase';
 import { collection, onSnapshot, query, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 
 type SortOption = 'date-asc' | 'date-desc' | 'priority-high' | 'priority-low';
@@ -172,7 +173,7 @@ const CalendarView = ({
       if (!t.data_limite || t.data_limite === '-' || t.data_limite === '0000-00-00') return;
 
       const endStr = t.data_limite;
-      const startStr = t.data_criacao ? t.data_criacao.split('T')[0] : endStr;
+      const startStr = t.is_single_day ? endStr : (t.data_inicio || t.data_criacao?.split('T')[0] || endStr);
 
       // Create dates using UTC to avoid timezone shifts
       let current = new Date(startStr + 'T12:00:00Z');
@@ -282,7 +283,7 @@ const CalendarView = ({
                 {dayTasks.map(t => {
                   // Show full card ONLY on start date and end date
                   // Show slim bar on all intermediate days
-                  const startStr = t.data_criacao ? t.data_criacao.split('T')[0] : (t.data_limite || '');
+                  const startStr = t.is_single_day ? (t.data_limite || '') : (t.data_inicio || t.data_criacao?.split('T')[0] || t.data_limite || '');
                   const endStr = t.data_limite || '';
 
                   const isStart = startStr === dayStr;
@@ -331,29 +332,56 @@ const CalendarView = ({
   );
 };
 
-const RowCard = React.memo(({ task, onClick, onToggle }: { task: Tarefa, onClick?: () => void, onToggle: (id: string, currentStatus: string) => void }) => {
+const RowCard = React.memo(({ task, onClick, onToggle, onDelete }: { task: Tarefa, onClick?: () => void, onToggle: (id: string, currentStatus: string) => void, onDelete: (id: string) => void }) => {
   const statusValue = normalizeStatus(task.status);
   const isCompleted = statusValue === 'concluido';
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
 
   // Date Logic for Right Side
-  const startDate = task.data_criacao ? task.data_criacao.split('T')[0] : null;
+  const isSingleDay = task.is_single_day;
+  const startDate = task.data_inicio;
   const endDate = task.data_limite;
 
   let dateDisplay = '';
-  if (startDate && endDate) {
-    if (startDate === endDate) {
-      dateDisplay = formatDate(endDate);
-    } else {
-      dateDisplay = `${formatDate(startDate)} - ${formatDate(endDate)}`;
-    }
-  } else if (endDate) {
+  if (isSingleDay || !startDate || startDate === endDate) {
     dateDisplay = formatDate(endDate);
+  } else {
+    dateDisplay = `${formatDate(startDate).split(' ')[0]} - ${formatDate(endDate)}`;
   }
 
   return (
     <div
-      className={`group bg-white w-full p-8 border-b border-slate-200 hover:bg-slate-50 transition-all flex flex-col md:flex-row md:items-center gap-6 md:gap-8 animate-in ${isCompleted ? 'opacity-60' : ''}`}
+      onClick={onClick}
+      onMouseLeave={() => setIsConfirmingDelete(false)}
+      className={`group bg-white w-full p-8 border-b border-slate-200 hover:bg-slate-50 transition-all flex flex-col md:flex-row md:items-center gap-6 md:gap-8 animate-in cursor-pointer relative ${isCompleted ? 'opacity-60' : ''}`}
     >
+      {/* Botão de Excluir Flutuante */}
+      <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-all z-20">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (isConfirmingDelete) {
+              onDelete(task.id);
+            } else {
+              setIsConfirmingDelete(true);
+            }
+          }}
+          className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all border flex items-center gap-2 ${isConfirmingDelete
+            ? 'bg-rose-600 text-white border-rose-600 shadow-lg shadow-rose-200 animate-in zoom-in-95'
+            : 'bg-white text-rose-500 border-rose-100 hover:bg-rose-50 shadow-sm'
+            }`}
+        >
+          {isConfirmingDelete ? (
+            <>
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+              Confirmar?
+            </>
+          ) : (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+          )}
+        </button>
+      </div>
+
       <div className="flex-shrink-0">
         <button
           onClick={(e) => {
@@ -366,7 +394,7 @@ const RowCard = React.memo(({ task, onClick, onToggle }: { task: Tarefa, onClick
         </button>
       </div>
 
-      <div className="flex-1 cursor-pointer" onClick={onClick}>
+      <div className="flex-1">
         <div className="flex items-center gap-2 mb-2">
           {task.categoria && task.categoria !== 'NÃO CLASSIFICADA' && (
             <span className={`text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider 
@@ -390,7 +418,9 @@ const RowCard = React.memo(({ task, onClick, onToggle }: { task: Tarefa, onClick
         <div className="text-sm font-bold text-slate-700">
           {dateDisplay || '-'}
         </div>
-        {/* Show status only if NOT 'Em Andamento' (optional per request interpretation, or just remove if cleaner) */}
+        <div className="text-[9px] font-medium text-slate-400 mt-1">
+          Criada em: {task.data_criacao ? formatDate(task.data_criacao.split('T')[0]).split(' ')[0] : '-'}
+        </div>
         {task.status !== 'em andamento' && (
           <span className={`mt-1 text-[9px] font-black uppercase px-2 py-0.5 rounded ${STATUS_COLORS[statusValue] || 'bg-slate-100 text-slate-500'}`}>
             {task.status}
@@ -515,11 +545,13 @@ const CategoryView = ({ tasks, viewMode, onSelectTask }: { tasks: Tarefa[], view
 const TaskCreateModal = ({ onSave, onClose }: { onSave: (data: Partial<Tarefa>) => void, onClose: () => void }) => {
   const [formData, setFormData] = useState({
     titulo: '',
+    data_inicio: new Date().toISOString().split('T')[0],
     data_limite: '',
-    data_criacao: new Date().toISOString().split('T')[0],
+    data_criacao: new Date().toISOString(), // Actual creation timestamp
     status: 'em andamento' as Status,
     categoria: 'NÃO CLASSIFICADA' as Categoria,
-    notas: ''
+    notas: '',
+    is_single_day: false
   });
 
   return (
@@ -545,23 +577,50 @@ const TaskCreateModal = ({ onSave, onClose }: { onSave: (data: Partial<Tarefa>) 
             />
           </div>
 
+          <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+            <input
+              type="checkbox"
+              id="single-day"
+              checked={formData.is_single_day}
+              onChange={e => {
+                const checked = e.target.checked;
+                setFormData(prev => ({
+                  ...prev,
+                  is_single_day: checked,
+                  data_inicio: checked ? prev.data_limite || prev.data_inicio : prev.data_inicio
+                }));
+              }}
+              className="w-5 h-5 rounded-lg border-slate-300 text-blue-600 focus:ring-blue-500 transition-all cursor-pointer"
+            />
+            <label htmlFor="single-day" className="text-xs font-bold text-slate-700 cursor-pointer select-none">Tarefa de um dia só (Apenas Prazo Final)</label>
+          </div>
+
           <div className="grid grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Data de Início</label>
-              <input
-                type="date"
-                value={formData.data_criacao}
-                onChange={e => setFormData({ ...formData, data_criacao: e.target.value })}
-                className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
-              />
-            </div>
-            <div className="space-y-2">
+            {!formData.is_single_day && (
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Data de Início</label>
+                <input
+                  type="date"
+                  value={formData.data_inicio}
+                  onChange={e => setFormData({ ...formData, data_inicio: e.target.value })}
+                  className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                />
+              </div>
+            )}
+            <div className={`space-y-2 ${formData.is_single_day ? 'col-span-2' : ''}`}>
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Prazo Final</label>
               <input
                 type="date"
                 value={formData.data_limite}
-                onChange={e => setFormData({ ...formData, data_limite: e.target.value })}
-                className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+                onChange={e => {
+                  const newLimit = e.target.value;
+                  setFormData(prev => ({
+                    ...prev,
+                    data_limite: newLimit,
+                    data_inicio: prev.is_single_day ? newLimit : prev.data_inicio
+                  }));
+                }}
+                className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
               />
             </div>
           </div>
@@ -609,16 +668,27 @@ const TaskCreateModal = ({ onSave, onClose }: { onSave: (data: Partial<Tarefa>) 
           <button onClick={onClose} className="flex-1 px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all">Cancelar</button>
           <button
             onClick={() => {
-              if (!formData.titulo) return alert('O título é obrigatório.');
+              if (!formData.titulo || !formData.data_limite) {
+                alert("Preencha o título e o prazo final.");
+                return;
+              }
+
+              // Validation
+              if (!formData.is_single_day && formData.data_inicio > formData.data_limite) {
+                alert("A data de início deve ser anterior ou igual ao prazo final.");
+                return;
+              }
+
               let finalNotes = formData.notas;
               if (formData.categoria !== 'NÃO CLASSIFICADA') {
                 const tagStr = `Tag: ${formData.categoria}`;
                 finalNotes = finalNotes ? `${finalNotes}\n\n${tagStr}` : tagStr;
               }
+
               onSave({
                 ...formData,
                 notas: finalNotes,
-                data_criacao: `${formData.data_criacao}T12:00:00Z`
+                data_criacao: new Date().toISOString()
               });
               onClose();
             }}
@@ -635,12 +705,14 @@ const TaskCreateModal = ({ onSave, onClose }: { onSave: (data: Partial<Tarefa>) 
 const TaskEditModal = ({ task, onSave, onDelete, onClose }: { task: Tarefa, onSave: (id: string, updates: Partial<Tarefa>) => void, onDelete: (id: string) => void, onClose: () => void }) => {
   const [formData, setFormData] = useState({
     titulo: task.titulo,
+    data_inicio: task.data_inicio || (task.data_criacao ? task.data_criacao.split('T')[0] : ''),
     data_limite: task.data_limite === '-' ? '' : task.data_limite,
-    data_criacao: task.data_criacao ? task.data_criacao.split('T')[0] : '',
+    data_criacao: task.data_criacao,
     status: task.status,
     categoria: task.categoria || 'NÃO CLASSIFICADA',
     notas: task.notas || '',
-    acompanhamento: task.acompanhamento || []
+    acompanhamento: task.acompanhamento || [],
+    is_single_day: !!task.is_single_day
   });
 
   const [newFollowUp, setNewFollowUp] = useState('');
@@ -683,23 +755,50 @@ const TaskEditModal = ({ task, onSave, onDelete, onClose }: { task: Tarefa, onSa
             />
           </div>
 
+          <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+            <input
+              type="checkbox"
+              id="edit-single-day"
+              checked={formData.is_single_day}
+              onChange={e => {
+                const checked = e.target.checked;
+                setFormData(prev => ({
+                  ...prev,
+                  is_single_day: checked,
+                  data_inicio: checked ? prev.data_limite || prev.data_inicio : prev.data_inicio
+                }));
+              }}
+              className="w-5 h-5 rounded-lg border-slate-300 text-blue-600 focus:ring-blue-500 transition-all cursor-pointer"
+            />
+            <label htmlFor="edit-single-day" className="text-xs font-bold text-slate-700 cursor-pointer select-none">Tarefa de um dia só (Apenas Prazo Final)</label>
+          </div>
+
           <div className="grid grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Data de Criação</label>
-              <input
-                type="date"
-                value={formData.data_criacao}
-                onChange={e => setFormData({ ...formData, data_criacao: e.target.value })}
-                className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
-              />
-            </div>
-            <div className="space-y-2">
+            {!formData.is_single_day && (
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Data de Início</label>
+                <input
+                  type="date"
+                  value={formData.data_inicio}
+                  onChange={e => setFormData({ ...formData, data_inicio: e.target.value })}
+                  className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                />
+              </div>
+            )}
+            <div className={`space-y-2 ${formData.is_single_day ? 'col-span-2' : ''}`}>
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Prazo Final</label>
               <input
                 type="date"
                 value={formData.data_limite}
-                onChange={e => setFormData({ ...formData, data_limite: e.target.value })}
-                className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+                onChange={e => {
+                  const newLimit = e.target.value;
+                  setFormData(prev => ({
+                    ...prev,
+                    data_limite: newLimit,
+                    data_inicio: prev.is_single_day ? newLimit : prev.data_inicio
+                  }));
+                }}
+                className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
               />
             </div>
           </div>
@@ -814,6 +913,17 @@ const TaskEditModal = ({ task, onSave, onDelete, onClose }: { task: Tarefa, onSa
           </button>
           <button
             onClick={() => {
+              if (!formData.titulo || !formData.data_limite) {
+                alert("Preencha o título e o prazo final.");
+                return;
+              }
+
+              // Validation
+              if (!formData.is_single_day && formData.data_inicio > formData.data_limite) {
+                alert("A data de início deve ser anterior ou igual ao prazo final.");
+                return;
+              }
+
               // Verifica se tem algo no input de follow-up não adicionado
               let finalAcompanhamento = [...formData.acompanhamento];
               if (newFollowUp.trim()) {
@@ -825,8 +935,7 @@ const TaskEditModal = ({ task, onSave, onDelete, onClose }: { task: Tarefa, onSa
 
               onSave(task.id, {
                 ...formData,
-                acompanhamento: finalAcompanhamento,
-                data_criacao: formData.data_criacao ? `${formData.data_criacao}T12:00:00Z` : task.data_criacao
+                acompanhamento: finalAcompanhamento
               });
               onClose();
             }}
@@ -835,6 +944,566 @@ const TaskEditModal = ({ task, onSave, onDelete, onClose }: { task: Tarefa, onSa
             Salvar Alterações
           </button>
         </div>
+      </div>
+    </div>
+  );
+};
+
+const TaskExecutionView = ({ task, onSave, onClose }: { task: Tarefa, onSave: (id: string, updates: Partial<Tarefa>) => void, onClose: () => void }) => {
+  const [newFollowUp, setNewFollowUp] = useState('');
+  const [chatUrl, setChatUrl] = useState(task.chat_gemini_url || '');
+  const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+  const [sessionTotalSeconds, setSessionTotalSeconds] = useState(task.tempo_total_segundos || 0);
+
+  useEffect(() => {
+    let interval: number | null = null;
+    if (isTimerRunning) {
+      interval = window.setInterval(() => {
+        setSeconds(prev => prev + 1);
+        setSessionTotalSeconds(prev => prev + 1);
+      }, 1000);
+    } else {
+      if (interval) clearInterval(interval);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isTimerRunning]);
+
+  const handleToggleTimer = () => {
+    if (isTimerRunning) {
+      // Quando parar, salvar o tempo total
+      onSave(task.id, { tempo_total_segundos: sessionTotalSeconds });
+    }
+    setIsTimerRunning(!isTimerRunning);
+  };
+
+  const formatTime = (totalSeconds: number) => {
+    const hrs = Math.floor(totalSeconds / 3600);
+    const mins = Math.floor((totalSeconds % 3600) / 60);
+    const secs = totalSeconds % 60;
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const handleAddFollowUp = () => {
+    if (!newFollowUp.trim()) return;
+    const newEntry: Acompanhamento = {
+      data: new Date().toISOString(),
+      nota: newFollowUp
+    };
+    const updatedAcompanhamento = [...(task.acompanhamento || []), newEntry];
+    onSave(task.id, { acompanhamento: updatedAcompanhamento });
+    setNewFollowUp('');
+  };
+
+  const handleSaveChatUrl = () => {
+    onSave(task.id, { chat_gemini_url: chatUrl });
+  };
+
+  return (
+    <div className={`fixed inset-0 z-[200] flex flex-col transition-all duration-700 ease-in-out ${isTimerRunning ? 'bg-[#050505] text-white' : 'bg-slate-50 text-slate-900'} overflow-hidden`}>
+      {/* Botão de Fechar Geral */}
+      <button
+        onClick={() => {
+          if (isTimerRunning) handleToggleTimer();
+          onClose();
+        }}
+        className={`fixed top-8 right-8 z-[210] p-3 rounded-2xl transition-all ${isTimerRunning ? 'bg-white/5 hover:bg-white/10 text-white/20' : 'bg-white shadow-lg text-slate-400 hover:text-slate-900 border border-slate-100'}`}
+      >
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+      </button>
+
+      {isTimerRunning ? (
+        /* --- MODO FOCO ATIVO --- */
+        <div className="flex-1 flex flex-col items-center justify-center p-12 relative animate-in fade-in zoom-in-95 duration-1000 gap-16">
+          <div className="text-center px-12 z-10">
+            <span className="text-blue-400 text-[10px] font-black uppercase tracking-[0.4em] mb-6 block animate-pulse">Sessão em Execução</span>
+            <h1 className="text-3xl md:text-5xl lg:text-6xl font-black tracking-tighter text-white/90 max-w-5xl mx-auto leading-tight">
+              {task.titulo}
+            </h1>
+          </div>
+
+          <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+            <div className="flex flex-col items-center justify-center">
+              <div className="text-[8rem] md:text-[10rem] lg:text-[12rem] font-black tracking-tighter tabular-nums text-white leading-none drop-shadow-[0_0_50px_rgba(37,99,235,0.3)] relative">
+                {formatTime(seconds).split(':').slice(1).join(':')}
+                <span className="text-3xl md:text-4xl text-blue-500/50 absolute -right-16 bottom-8 uppercase tracking-widest leading-none">
+                  {formatTime(seconds).split(':')[0]}h
+                </span>
+              </div>
+
+              <button
+                onClick={handleToggleTimer}
+                className="flex items-center gap-4 px-12 py-6 mt-8 rounded-full bg-rose-500 text-white text-sm font-black uppercase tracking-widest shadow-[0_0_40px_rgba(244,63,94,0.4)] hover:bg-rose-600 transition-all hover:scale-105 active:scale-95"
+              >
+                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+                Finalizar Sessão de Foco
+              </button>
+            </div>
+
+            {/* Diário de Execução no Modo Foco */}
+            <div className="w-full h-[400px] bg-white/5 rounded-[2.5rem] border border-white/10 p-8 flex flex-col backdrop-blur-sm">
+              <div className="flex items-center justify-between mb-6 flex-shrink-0">
+                <h4 className="text-[10px] font-black text-white/40 uppercase tracking-widest">Diário de Execução</h4>
+                <div className="flex gap-2 w-full max-w-xs">
+                  <input
+                    type="text"
+                    value={newFollowUp}
+                    onChange={e => setNewFollowUp(e.target.value)}
+                    placeholder="Registre o que você está fazendo..."
+                    className="bg-white/10 border border-white/10 rounded-lg px-4 py-2 text-[11px] font-medium outline-none focus:ring-1 focus:ring-blue-500 text-white placeholder:text-white/20 w-full"
+                    onKeyDown={e => e.key === 'Enter' && handleAddFollowUp()}
+                  />
+                  <button onClick={handleAddFollowUp} className="bg-blue-600 text-white px-4 rounded-lg text-[9px] font-black uppercase transition-all hover:bg-blue-500">Enviar</button>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
+                {task.acompanhamento && task.acompanhamento.length > 0 ? (
+                  task.acompanhamento.slice().reverse().map((entry, idx) => (
+                    <div key={idx} className="bg-white/5 p-4 rounded-2xl border border-white/5 flex gap-4 hover:bg-white/10 transition-colors">
+                      <div className="flex-shrink-0 text-[8px] font-black text-white/30 uppercase leading-none min-w-[50px] pt-1">
+                        {new Date(entry.data).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                      <p className="text-[11px] font-medium text-white/80 leading-snug">{entry.nota}</p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="h-full flex items-center justify-center text-white/20 text-[10px] font-black uppercase tracking-widest italic">Nenhum registro nesta sessão</div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Overlay de Vinheta para Foco Distante */}
+          <div className="fixed inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_20%,rgba(0,0,0,0.9)_100%)] z-[-1]"></div>
+        </div>
+      ) : (
+        /* --- MODO PREPARAÇÃO --- */
+        <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in duration-500">
+          <div className="p-10 pb-4">
+            <span className="text-blue-600 text-[10px] font-black uppercase tracking-[0.3em] mb-2 block">Central de Execução / CLC</span>
+            <h1 className="text-4xl font-black text-slate-900 tracking-tighter leading-none">{task.titulo}</h1>
+          </div>
+
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-8 p-10 pt-4 overflow-hidden">
+            {/* Esquerda: Botão de Play Gigante */}
+            <div className="flex flex-col items-center justify-center bg-white rounded-[3rem] border border-slate-200 shadow-2xl relative group overflow-hidden">
+              <div className="absolute inset-0 bg-blue-50 opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
+
+              <div className="relative text-center space-y-8 z-10">
+                <div className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em]">Pronto para Começar?</div>
+                <button
+                  onClick={handleToggleTimer}
+                  className="w-48 h-48 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-[0_20px_60px_rgba(37,99,235,0.4)] hover:scale-110 active:scale-95 transition-all duration-500 group/play"
+                >
+                  <svg className="w-20 h-20 ml-3 group-hover/play:scale-110 transition-transform" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                </button>
+                <div className="space-y-1">
+                  <div className="text-4xl font-black text-slate-900 tabular-nums">
+                    {formatTime(sessionTotalSeconds)}
+                  </div>
+                  <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Tempo Total Acumulado</div>
+                </div>
+              </div>
+
+              {/* Status da Demanda no Canto */}
+              <div className="absolute bottom-10 left-10 flex items-center gap-3">
+                <button
+                  onClick={() => onSave(task.id, { status: task.status === 'concluído' ? 'em andamento' : 'concluído' })}
+                  className={`px-6 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${task.status === 'concluído' ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                    }`}
+                >
+                  {task.status === 'concluído' ? 'Concluída' : 'Marcar Concluída'}
+                </button>
+              </div>
+            </div>
+
+            {/* Direita: Especialista e Histórico */}
+            <div className="flex flex-col gap-6 overflow-hidden">
+              {/* Especialista */}
+              <div className="bg-gradient-to-br from-indigo-600 to-blue-700 rounded-[2.5rem] p-6 text-white shadow-xl flex-shrink-0">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-md">
+                      <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L14.85 8.15L21 11L14.85 13.85L12 20L9.15 13.85L3 11L9.15 8.15L12 2Z" /></svg>
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black uppercase tracking-widest">Especialista CLC</h4>
+                      <p className="text-[8px] text-white/50 uppercase font-bold tracking-widest">Chat Contextual</p>
+                    </div>
+                  </div>
+                  <a
+                    href={task.chat_gemini_url || "https://gemini.google.com/gem/096c0e51e1b9"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-white text-indigo-600 px-6 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all flex items-center gap-2"
+                  >
+                    Abrir Chat
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                  </a>
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Cole o link do chat aqui para salvar..."
+                    value={chatUrl}
+                    onChange={e => setChatUrl(e.target.value)}
+                    className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-[11px] font-medium focus:ring-1 focus:ring-white/30 outline-none text-white placeholder:text-white/30"
+                  />
+                  {chatUrl !== (task.chat_gemini_url || '') && (
+                    <button onClick={handleSaveChatUrl} className="absolute right-2 top-2 bg-white text-blue-600 px-3 py-1.5 rounded-lg text-[8px] font-black uppercase shadow-lg">Salvar</button>
+                  )}
+                </div>
+              </div>
+
+              {/* Log de Atividade */}
+              <div className="flex-1 bg-white rounded-[2.5rem] border border-slate-200 shadow-xl p-8 flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between mb-4 flex-shrink-0">
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Diário de Execução</h4>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newFollowUp}
+                      onChange={e => setNewFollowUp(e.target.value)}
+                      placeholder="Registre o que foi feito..."
+                      className="bg-slate-50 border border-slate-100 rounded-lg px-4 py-2 text-[11px] font-medium outline-none focus:ring-1 focus:ring-blue-500 w-48"
+                      onKeyDown={e => e.key === 'Enter' && handleAddFollowUp()}
+                    />
+                    <button onClick={handleAddFollowUp} className="bg-slate-900 text-white px-4 rounded-lg text-[9px] font-black uppercase transition-all">Add</button>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
+                  {task.acompanhamento && task.acompanhamento.length > 0 ? (
+                    task.acompanhamento.slice().reverse().map((entry, idx) => (
+                      <div key={idx} className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex gap-4 hover:border-blue-200 transition-colors">
+                        <div className="flex-shrink-0 text-[8px] font-black text-slate-400 uppercase leading-none min-w-[50px] pt-1">
+                          {new Date(entry.data).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                        </div>
+                        <p className="text-[11px] font-medium text-slate-700 leading-snug">{entry.nota}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-slate-300 text-[10px] font-black uppercase tracking-widest italic opacity-50">Nenhum registro</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const AudioRecorder = React.memo(({ onAudioReady, disabled }: { onAudioReady: (blob: Blob, base64: string, url: string) => void, disabled: boolean }) => {
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<number | null>(null);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      chunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const reader = new FileReader();
+        reader.readAsDataURL(audioBlob);
+        reader.onloadend = () => {
+          const base64String = (reader.result as string).split(',')[1];
+          onAudioReady(audioBlob, base64String, audioUrl);
+        };
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+      timerRef.current = window.setInterval(() => setRecordingTime(prev => prev + 1), 1000);
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao acessar microfone.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      if (timerRef.current) {
+        window.clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    }
+  };
+
+  const formatTime = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m}:${sec.toString().padStart(2, '0')}`;
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-4">
+      {isRecording ? (
+        <div className="flex items-center gap-6 bg-rose-50 px-8 py-4 rounded-[2rem] border border-rose-100 shadow-xl animate-pulse">
+          <div className="flex items-center gap-3">
+            <div className="w-3 h-3 bg-rose-600 rounded-full"></div>
+            <span className="text-rose-600 font-black tabular-nums text-lg">{formatTime(recordingTime)}</span>
+          </div>
+          <button
+            onClick={stopRecording}
+            className="bg-rose-600 text-white p-4 rounded-full shadow-lg hover:bg-rose-700 transition-all active:scale-95"
+          >
+            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={startRecording}
+          disabled={disabled}
+          className="bg-blue-600 text-white p-4 md:p-8 rounded-full shadow-2xl hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-50 group relative"
+        >
+          <div className="absolute inset-0 bg-blue-400 rounded-full animate-ping opacity-20 group-hover:block hidden"></div>
+          <svg className="w-6 h-6 md:w-10 md:h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+        </button>
+      )}
+      <p className="hidden md:block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{isRecording ? 'Gravando sua ideia...' : 'Clique para começar a gravar'}</p>
+    </div>
+  );
+});
+
+const FerramentasView = ({ ideas, onAudioReady, onDeleteIdea, onArchiveIdea, onAddTextIdea, onUpdateIdea, isProcessing, activeTool, setActiveTool }: {
+  ideas: BrainstormIdea[],
+  onAudioReady: (blob: Blob, base64: string, url: string) => void,
+  onDeleteIdea: (id: string) => void,
+  onArchiveIdea: (id: string) => void,
+  onAddTextIdea: (text: string) => void,
+  onUpdateIdea: (id: string, text: string) => void,
+  isProcessing: boolean,
+  activeTool: 'brainstorming' | null,
+  setActiveTool: (tool: 'brainstorming' | null) => void
+}) => {
+  const [isAddingText, setIsAddingText] = useState(false);
+  const [textInput, setTextInput] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+
+  const activeIdeas = ideas.filter(i => i.status !== 'archived');
+
+  if (!activeTool) {
+    return (
+      <div className="animate-in grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 pb-20">
+        <button
+          onClick={() => setActiveTool('brainstorming')}
+          className="bg-white p-12 rounded-[3rem] border border-slate-200 shadow-xl hover:shadow-2xl transition-all group text-left flex flex-col items-start gap-6"
+        >
+          <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all">
+            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+          </div>
+          <div>
+            <h3 className="text-2xl font-black text-slate-900 tracking-tighter mb-2">Brainstorming</h3>
+            <p className="text-slate-500 font-medium leading-relaxed">Grave ideias rápidas e transcreva com IA.</p>
+          </div>
+        </button>
+
+        <button
+          disabled
+          className="bg-white p-12 rounded-[3rem] border border-slate-100 shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-col items-start gap-6 relative overflow-hidden"
+        >
+          <div className="absolute top-4 right-4 bg-slate-100 text-slate-400 text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Em Breve</div>
+          <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400">
+            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          </div>
+          <div>
+            <h3 className="text-2xl font-black text-slate-400 tracking-tighter mb-2">Criação de DFD</h3>
+            <p className="text-slate-400 font-medium leading-relaxed italic text-sm">Documento de Formalização de Demanda assistido.</p>
+          </div>
+        </button>
+
+        <button
+          disabled
+          className="bg-white p-12 rounded-[3rem] border border-slate-100 shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-col items-start gap-6 relative overflow-hidden"
+        >
+          <div className="absolute top-4 right-4 bg-slate-100 text-slate-400 text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Em Breve</div>
+          <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400">
+            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+          </div>
+          <div>
+            <h3 className="text-2xl font-black text-slate-400 tracking-tighter mb-2">Termo de Referência</h3>
+            <p className="text-slate-400 font-medium leading-relaxed italic text-sm">Elabore TRs completos com ajuda de IA.</p>
+          </div>
+        </button>
+
+        <button
+          disabled
+          className="bg-white p-12 rounded-[3rem] border border-slate-100 shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-col items-start gap-6 relative overflow-hidden"
+        >
+          <div className="absolute top-4 right-4 bg-slate-100 text-slate-400 text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Em Breve</div>
+          <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400">
+            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+          </div>
+          <div>
+            <h3 className="text-2xl font-black text-slate-400 tracking-tighter mb-2">Pesquisa CATMAT/SER</h3>
+            <p className="text-slate-400 font-medium leading-relaxed italic text-sm">Busca inteligente de códigos de itens e serviços.</p>
+          </div>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="animate-in space-y-12 pb-20">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => setActiveTool(null)}
+            className="p-3 bg-white border border-slate-200 rounded-2xl text-slate-400 hover:text-slate-900 transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
+          </button>
+          <h3 className="text-2xl font-black text-slate-900 tracking-tight uppercase tracking-widest text-[10px]">Ferramentas / Brainstorming</h3>
+        </div>
+      </div>
+
+      <div className="flex flex-col items-center justify-center gap-6">
+        {isAddingText ? (
+          <div className="flex items-center gap-2 animate-in zoom-in-95 w-full max-w-xl">
+            <input
+              type="text"
+              autoFocus
+              placeholder="Sua ideia aqui..."
+              className="flex-1 bg-white border border-slate-200 rounded-2xl px-6 py-4 text-sm font-medium focus:ring-4 focus:ring-blue-100 outline-none shadow-xl transition-all"
+              value={textInput}
+              onChange={e => setTextInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && textInput.trim()) {
+                  onAddTextIdea(textInput);
+                  setTextInput('');
+                  setIsAddingText(false);
+                }
+              }}
+            />
+            <button
+              onClick={() => {
+                if (textInput.trim()) {
+                  onAddTextIdea(textInput);
+                  setTextInput('');
+                  setIsAddingText(false);
+                } else {
+                  setIsAddingText(false);
+                }
+              }}
+              className="bg-blue-600 text-white p-4 rounded-2xl hover:bg-blue-700 transition-all shadow-xl shadow-blue-100"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setIsAddingText(true)}
+            className="bg-white border border-slate-200 text-slate-600 px-10 py-5 rounded-3xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-slate-50 transition-all flex items-center gap-3 shadow-xl hover:shadow-2xl active:scale-95"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+            Adicionar Nova Ideia
+          </button>
+        )}
+      </div>
+
+      <div className="fixed bottom-6 right-6 z-[100] md:relative md:inset-auto md:flex md:flex-col md:items-center md:py-10">
+        <div className="bg-white/80 md:bg-transparent backdrop-blur-xl md:backdrop-blur-none p-1.5 md:p-0 rounded-full md:rounded-none shadow-2xl md:shadow-none border border-slate-200/50 md:border-none flex flex-col items-center">
+          <AudioRecorder onAudioReady={onAudioReady} disabled={isProcessing} />
+          {isProcessing && (
+            <div className="mt-4 md:mt-8 flex items-center gap-3 text-blue-600 font-black uppercase text-[8px] md:text-[10px] tracking-widest animate-pulse absolute -top-12 md:relative md:top-auto">
+              <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+              <span className="hidden md:inline">Hermes está processando seu áudio...</span>
+              <span className="md:hidden bg-white/90 px-3 py-1 rounded-full border border-blue-100 shadow-sm">Processando...</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-col md:grid md:grid-cols-2 lg:grid-cols-3 gap-2 md:gap-8 mb-32 md:mb-0">
+        {activeIdeas.map(idea => (
+          <div key={idea.id} className="bg-white p-5 md:p-8 rounded-2xl md:rounded-[2.5rem] border border-slate-100 md:border-slate-200 shadow-sm md:shadow-lg hover:shadow-md md:hover:shadow-2xl transition-all group flex flex-col relative overflow-hidden">
+            <div className="flex items-center justify-between mb-3 md:mb-6">
+              <span className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">{formatDate(idea.timestamp.split('T')[0])}</span>
+              <div className="flex items-center gap-1 md:gap-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-all">
+                {editingId === idea.id ? (
+                  <button
+                    onClick={() => {
+                      if (editText.trim()) {
+                        onUpdateIdea(idea.id, editText);
+                        setEditingId(null);
+                      }
+                    }}
+                    className="text-blue-600 hover:bg-blue-50 p-2 rounded-xl transition-colors"
+                  >
+                    <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setEditingId(idea.id);
+                      setEditText(idea.text);
+                    }}
+                    className="text-slate-400 hover:text-blue-600 p-2 rounded-xl transition-colors"
+                    title="Editar"
+                  >
+                    <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                  </button>
+                )}
+                <button
+                  onClick={() => onArchiveIdea(idea.id)}
+                  className="text-emerald-500 hover:bg-emerald-50 p-2 rounded-xl transition-colors"
+                  title="Concluir / Arquivar"
+                >
+                  <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                </button>
+                <button
+                  onClick={() => onDeleteIdea(idea.id)}
+                  className="text-slate-300 hover:text-rose-500 p-2 rounded-xl transition-colors"
+                  title="Excluir Permanentemente"
+                >
+                  <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                </button>
+              </div>
+            </div>
+
+            {editingId === idea.id ? (
+              <textarea
+                autoFocus
+                className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm md:text-lg font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 min-h-[100px] resize-none"
+                value={editText}
+                onChange={e => setEditText(e.target.value)}
+              />
+            ) : (
+              <p className="text-slate-800 font-bold leading-relaxed mb-3 md:mb-6 flex-1 text-sm md:text-lg">"{idea.text}"</p>
+            )}
+
+            {idea.audioUrl && (
+              <audio controls src={idea.audioUrl} className="w-full h-10 opacity-50 hover:opacity-100 transition-opacity" />
+            )}
+          </div>
+        ))}
+        {activeIdeas.length === 0 && !isProcessing && (
+          <div className="col-span-full py-20 text-center border-4 border-dashed border-slate-100 rounded-[3rem]">
+            <p className="text-slate-300 font-black text-xl uppercase tracking-widest">Nenhuma ideia ativa</p>
+            <p className="text-slate-400 text-sm font-medium mt-2">Grave ou digite uma ideia para começar.</p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -901,7 +1570,7 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [viewMode, setViewMode] = useState<'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'plano-trabalho'>('gallery');
+  const [viewMode, setViewMode] = useState<'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'plano-trabalho' | 'ferramentas'>('gallery');
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
   const [planosTrabalho, setPlanosTrabalho] = useState<PlanoTrabalho[]>([]);
   const [statusFilter, setStatusFilter] = useState<Status[]>(['em andamento']);
@@ -909,42 +1578,38 @@ const App: React.FC = () => {
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [syncData, setSyncData] = useState<any>(null);
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
 
   // Sync Logic
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'system', 'sync'), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setSyncData(data);
+        if (data.status === 'processing' || data.status === 'requested') setIsSyncing(true);
+        if (data.status === 'completed' || data.status === 'error') setIsSyncing(false);
+      }
+    });
+    return () => unsub();
+  }, []);
+
   const handleSync = async () => {
-    if (isSyncing) return;
+    if (isSyncing) {
+      setIsTerminalOpen(true);
+      return;
+    }
+
+    setIsTerminalOpen(true);
     setIsSyncing(true);
-    showToast("Solicitando sincronização com Google...", "info");
+    showToast("Iniciando Sincronização Profunda...", "info");
 
     try {
       await setDoc(doc(db, 'system', 'sync'), {
         status: 'requested',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        logs: ["Aguardando resposta do Bot..."]
       });
-
-      // Simple feedback loop - wait for completion or timeout
-      const unsubscribe = onSnapshot(doc(db, 'system', 'sync'), (doc) => {
-        const data = doc.data();
-        if (data?.status === 'completed') {
-          showToast("Sincronização concluída com sucesso!", "success");
-          setIsSyncing(false);
-          unsubscribe();
-        } else if (data?.status === 'error') {
-          showToast(`Erro na sincronização: ${data.error_message}`, "error");
-          setIsSyncing(false);
-          unsubscribe();
-        }
-      });
-
-      // Timeout safety
-      setTimeout(() => {
-        if (isSyncing) {
-          setIsSyncing(false);
-          // unsubscribe is local scope, can't easily unsubscribe here without more complex logic, 
-          // but for a simple button it's fine. The snapshot listener will just detach naturally on unmount or ignore.
-        }
-      }, 15000);
-
     } catch (e) {
       console.error(e);
       showToast("Erro ao solicitar sincronização.", "error");
@@ -963,6 +1628,9 @@ const App: React.FC = () => {
 
   const [isImportPlanOpen, setIsImportPlanOpen] = useState(false);
   const [isCompletedTasksOpen, setIsCompletedTasksOpen] = useState(false);
+  const [brainstormIdeas, setBrainstormIdeas] = useState<BrainstormIdea[]>([]);
+  const [isProcessingIdea, setIsProcessingIdea] = useState(false);
+  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | null>(null);
 
   const handleUpdateTarefa = async (id: string, updates: Partial<Tarefa>) => {
     try {
@@ -1011,6 +1679,91 @@ const App: React.FC = () => {
       showToast("Erro ao excluir.", 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAudioReady = async (blob: Blob, base64: string, url: string) => {
+    if (isProcessingIdea) return;
+    setIsProcessingIdea(true);
+    showToast("Transcrevendo áudio...", "info");
+
+    try {
+      // Usando a chave que já deve estar configurada no ambiente
+      const genAI = new GoogleGenerativeAI(((import.meta as any).env.VITE_GEMINI_API_KEY || 'AIzaSyD3g8j8mDoJtbSX-ryOHvxEp3kAK4WQMvY'));
+      const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+
+      const result = await model.generateContent([
+        {
+          inlineData: {
+            mimeType: blob.type,
+            data: base64
+          }
+        },
+        { text: "Transcreva o áudio acima. Se for uma ideia ou tarefa, tente resumir de forma clara. Retorne apenas o texto transcrito/resumido em português." },
+      ]);
+
+      const response = await result.response;
+      const text = response.text();
+
+      await addDoc(collection(db, 'brainstorm_ideas'), {
+        text: text || "Transcrição vazia",
+        audioUrl: url,
+        timestamp: new Date().toISOString(),
+        status: 'active'
+      });
+
+      showToast("Ideia processada e salva!", "success");
+    } catch (err) {
+      console.error("Erro no processamento Gemini:", err);
+      showToast("Erro ao transcrever áudio.", "error");
+    } finally {
+      setIsProcessingIdea(false);
+    }
+  };
+
+  const handleUpdateIdea = async (id: string, text: string) => {
+    try {
+      await updateDoc(doc(db, 'brainstorm_ideas', id), { text });
+      showToast("Ideia atualizada!", "success");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao atualizar ideia.", "error");
+    }
+  };
+
+  const handleArchiveIdea = async (id: string) => {
+    try {
+      await updateDoc(doc(db, 'brainstorm_ideas', id), {
+        status: 'archived'
+      });
+      showToast("Ideia concluída e arquivada!", "success");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao arquivar.", "error");
+    }
+  };
+
+  const handleAddTextIdea = async (text: string) => {
+    try {
+      await addDoc(collection(db, 'brainstorm_ideas'), {
+        text,
+        timestamp: new Date().toISOString(),
+        status: 'active'
+      });
+      showToast("Ideia registrada!", "success");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao salvar ideia.", "error");
+    }
+  };
+
+  const handleDeleteIdea = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'brainstorm_ideas', id));
+      showToast("Ideia removida.", "info");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao remover.", "error");
     }
   };
 
@@ -1108,6 +1861,15 @@ const App: React.FC = () => {
       setPlanosTrabalho(data);
     });
     return () => unsubscribePlanos();
+  }, []);
+
+  useEffect(() => {
+    const qBrainstorm = query(collection(db, 'brainstorm_ideas'));
+    const unsubscribeBrainstorm = onSnapshot(qBrainstorm, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BrainstormIdea));
+      setBrainstormIdeas(data.sort((a, b) => b.timestamp.localeCompare(a.timestamp)));
+    });
+    return () => unsubscribeBrainstorm();
   }, []);
 
 
@@ -1447,6 +2209,7 @@ const App: React.FC = () => {
                 <button onClick={() => setViewMode('assistencia')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'assistencia' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>AE</button>
                 <button onClick={() => setViewMode('pgc')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pgc' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>Audit PGC</button>
                 <button onClick={() => setViewMode('plano-trabalho')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'plano-trabalho' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>Plano</button>
+                <button onClick={() => { setViewMode('ferramentas'); setActiveFerramenta(null); }} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'ferramentas' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>Ferramentas</button>
               </nav>
             </div>
 
@@ -1457,11 +2220,11 @@ const App: React.FC = () => {
               </div>
               <button
                 onClick={handleSync}
-                disabled={isSyncing}
-                className={`bg-white border border-slate-200 text-slate-700 px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-3 shadow-sm hover:bg-slate-50 transition-all active:scale-95 ${isSyncing ? 'opacity-50 cursor-wait' : ''}`}
+                className={`bg-white border border-slate-200 text-slate-700 px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-3 shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative`}
               >
-                <svg className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                {isSyncing ? 'Sincronizar' : 'Sync Google'}
+                <svg className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                {isSyncing ? 'Monitorar Sync' : 'Sync Google'}
+                {isSyncing && <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full animate-ping"></span>}
               </button>
               <button
                 onClick={() => setIsCreateModalOpen(true)}
@@ -1536,16 +2299,26 @@ const App: React.FC = () => {
               >
                 📅 Plano de Trabalho
               </button>
+              <button
+                onClick={() => {
+                  setViewMode('ferramentas');
+                  setActiveFerramenta(null);
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`px-4 py-3 rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'ferramentas' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
+              >
+                🛠️ Ferramentas
+              </button>
               <div className="pt-4 border-t border-slate-200 mt-2">
                 <button
                   onClick={() => {
                     handleSync();
                     setIsMobileMenuOpen(false);
                   }}
-                  disabled={isSyncing}
-                  className={`w-full px-4 py-3 rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left bg-blue-50 text-blue-700 hover:bg-blue-100 ${isSyncing ? 'opacity-50' : ''}`}
+                  className={`w-full px-4 py-3 rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left bg-blue-50 text-blue-700 hover:bg-blue-100 relative`}
                 >
-                  🔄 {isSyncing ? 'Sincronizando...' : 'Sync Google'}
+                  🔄 {isSyncing ? 'Monitorar Sincronização...' : 'Sync Google'}
+                  {isSyncing && <span className="absolute top-4 right-4 w-2 h-2 bg-blue-500 rounded-full animate-ping"></span>}
                 </button>
               </div>
             </nav>
@@ -1637,17 +2410,24 @@ const App: React.FC = () => {
                           </thead>
                           <tbody className="divide-y divide-slate-50">
                             {filteredAndSortedTarefas.map((task) => (
-                              <tr key={task.id} className={`hover:bg-slate-50 transition-colors ${selectedTaskIds.includes(task.id) ? 'bg-blue-50/30' : ''}`}>
+                              <tr
+                                key={task.id}
+                                onClick={() => setSelectedTask(task)}
+                                className={`hover:bg-slate-50 transition-colors cursor-pointer ${selectedTaskIds.includes(task.id) ? 'bg-blue-50/30' : ''}`}
+                              >
                                 <td className="px-8 py-4 text-center">
                                   <input
                                     type="checkbox"
                                     checked={selectedTaskIds.includes(task.id)}
-                                    onChange={() => setSelectedTaskIds(prev => prev.includes(task.id) ? prev.filter(id => id !== task.id) : [...prev, task.id])}
+                                    onChange={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedTaskIds(prev => prev.includes(task.id) ? prev.filter(id => id !== task.id) : [...prev, task.id]);
+                                    }}
                                     className="w-5 h-5 rounded-lg border-slate-300 text-slate-900 focus:ring-slate-900 cursor-pointer"
                                   />
                                 </td>
                                 <td className="px-8 py-4">
-                                  <div onClick={() => setSelectedTask(task)} className="text-[13px] font-bold text-slate-800 cursor-pointer hover:text-blue-600 transition-colors leading-snug">
+                                  <div className="text-[13px] font-bold text-slate-800 hover:text-blue-600 transition-colors leading-snug">
                                     {task.titulo}
                                   </div>
                                 </td>
@@ -1693,6 +2473,7 @@ const App: React.FC = () => {
                                     task={task}
                                     onClick={() => setSelectedTask(task)}
                                     onToggle={handleToggleTarefaStatus}
+                                    onDelete={handleDeleteTarefa}
                                   />
                                 ))}
                               </div>
@@ -1735,6 +2516,7 @@ const App: React.FC = () => {
                                 task={t}
                                 onClick={() => setSelectedTask(t)}
                                 onToggle={handleToggleTarefaStatus}
+                                onDelete={handleDeleteTarefa}
                               />
                             ))
                         ) : (
@@ -1848,6 +2630,18 @@ const App: React.FC = () => {
                 </table>
               </div>
             </div>
+          ) : viewMode === 'ferramentas' ? (
+            <FerramentasView
+              ideas={brainstormIdeas}
+              onAudioReady={handleAudioReady}
+              onDeleteIdea={handleDeleteIdea}
+              onArchiveIdea={handleArchiveIdea}
+              onAddTextIdea={handleAddTextIdea}
+              onUpdateIdea={handleUpdateIdea}
+              isProcessing={isProcessingIdea}
+              activeTool={activeFerramenta}
+              setActiveTool={setActiveFerramenta}
+            />
           ) : (
             <div className="space-y-10">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white p-8 rounded-[2rem] border border-slate-200 shadow-xl">
@@ -1865,7 +2659,6 @@ const App: React.FC = () => {
                       <option key={i} value={i}>{m}</option>
                     ))}
                   </select>
-
                 </div>
               </div>
 
@@ -1880,7 +2673,6 @@ const App: React.FC = () => {
 
               {pgcSubView === 'audit' && (
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-220px)] pb-4">
-                  {/* LEFT: Pending Tasks */}
                   <div className="lg:col-span-3 bg-white rounded-[2rem] border border-slate-200 shadow-xl flex flex-col overflow-hidden h-full">
                     <div className="p-6 border-b border-slate-100 flex-shrink-0 bg-slate-50/50">
                       <div className="flex items-center justify-between">
@@ -1902,7 +2694,6 @@ const App: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* RIGHT: Plan & Deliveries */}
                   <div className="lg:col-span-9 bg-white rounded-[2rem] border border-slate-200 overflow-hidden shadow-xl flex flex-col h-full">
                     <div className="flex-1 overflow-y-auto divide-y divide-slate-100 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
                       {(() => {
@@ -1935,7 +2726,6 @@ const App: React.FC = () => {
                                 if (tarefaId) {
                                   let targetId = entregaId;
                                   if (!targetId) {
-                                    // Implicit creation
                                     const newId = await handleCreateEntregaFromPlan(item);
                                     if (newId) targetId = newId;
                                   }
@@ -2014,133 +2804,206 @@ const App: React.FC = () => {
             </div>
           )}
         </main>
-      </div>
 
-      <ToastContainer toasts={toasts} removeToast={removeToast} />
+        <ToastContainer toasts={toasts} removeToast={removeToast} />
 
-      {
-        isCreateModalOpen && (
-          <TaskCreateModal
-            onSave={handleCreateTarefa}
-            onClose={() => setIsCreateModalOpen(false)}
-          />
-        )
-      }
+        {
+          isCreateModalOpen && (
+            <TaskCreateModal
+              onSave={handleCreateTarefa}
+              onClose={() => setIsCreateModalOpen(false)}
+            />
+          )
+        }
 
-      {
-        selectedTask && (
-          <TaskEditModal
-            task={selectedTask}
-            onSave={handleUpdateTarefa}
-            onDelete={handleDeleteTarefa}
-            onClose={() => setSelectedTask(null)}
-          />
+        {
+          selectedTask && (
+            selectedTask.categoria === 'CLC' ? (
+              <TaskExecutionView
+                task={selectedTask}
+                onSave={handleUpdateTarefa}
+                onClose={() => setSelectedTask(null)}
+              />
+            ) : (
+              <TaskEditModal
+                task={selectedTask}
+                onSave={handleUpdateTarefa}
+                onDelete={handleDeleteTarefa}
+                onClose={() => setSelectedTask(null)}
+              />
+            )
+          )
+        }
 
-        )
-      }
-
-      {
-        isImportPlanOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-            <div className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-              <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
-                <div>
-                  <h3 className="text-2xl font-black text-slate-900 tracking-tight">Importar Plano Mensal</h3>
-                  <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Cole o JSON do plano de trabalho abaixo</p>
-                </div>
-                <button onClick={() => setIsImportPlanOpen(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
-                  <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-                </button>
-              </div>
-
-              <div className="p-8 space-y-6">
-                <div className="grid grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Ano</label>
-                    <input type="number" id="import-year" defaultValue={currentYear} className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900" />
+        {
+          isTerminalOpen && (
+            <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-300">
+              <div className="bg-[#0C0C0C] w-full max-w-2xl rounded-[2rem] shadow-[0_0_100px_rgba(37,99,235,0.2)] border border-white/10 overflow-hidden flex flex-col h-[500px] animate-in zoom-in-95">
+                <div className="p-6 bg-white/5 border-b border-white/5 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="flex gap-1.5">
+                      <div className="w-3 h-3 rounded-full bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.5)]"></div>
+                      <div className="w-3 h-3 rounded-full bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]"></div>
+                      <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_100px_rgba(16,185,129,0.5)]"></div>
+                    </div>
+                    <h3 className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em] ml-2">Google Sync Console v2</h3>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Mês</label>
-                    <select id="import-month" defaultValue={currentMonth + 1} className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900">
-                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => <option key={m} value={m}>{m}</option>)}
-                    </select>
+                  <div className="flex items-center gap-4">
+                    {isSyncing && (
+                      <button
+                        onClick={async () => {
+                          await setDoc(doc(db, 'system', 'sync'), { status: 'idle', logs: [...(syncData?.logs || []), "--- INTERROMPIDO PELO USUÁRIO ---"] });
+                          setIsSyncing(false);
+                        }}
+                        className="text-[9px] font-bold text-rose-500/60 hover:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-3 py-1 rounded-full transition-all"
+                      >
+                        FORÇAR INTERRUPÇÃO
+                      </button>
+                    )}
+                    <button onClick={() => setIsTerminalOpen(false)} className="text-white/40 hover:text-white transition-colors">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Dump JSON</label>
-                  <textarea
-                    id="import-json"
-                    rows={10}
-                    className="w-full bg-slate-900 text-blue-400 border-none rounded-2xl px-6 py-4 text-[10px] font-mono focus:ring-2 focus:ring-blue-500 transition-all resize-none"
-                    placeholder='[ { "entrega": "Exemplo", "percentual": 50 }, ... ]'
-                  />
+                <div className="flex-1 overflow-y-auto p-6 font-mono text-[11px] space-y-2 selection:bg-blue-500/30">
+                  <div className="text-blue-400 opacity-60"># hermes_cli.py --sync-mode automatic</div>
+                  {syncData?.logs?.map((log: string, i: number) => (
+                    <div key={i} className={`flex gap-3 ${log.includes('ERRO') ? 'text-rose-400' : log.includes('PUSH') ? 'text-blue-400' : log.includes('PULL') ? 'text-emerald-400' : 'text-slate-400'}`}>
+                      <span className="opacity-30 shrink-0">[{i}]</span>
+                      <span className="leading-relaxed">{log}</span>
+                    </div>
+                  ))}
+                  {isSyncing && (
+                    <div className="flex items-center gap-2 text-white/50 animate-pulse">
+                      <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                      <span>Processando transações em tempo real...</span>
+                    </div>
+                  )}
+                  {!isSyncing && syncData?.status === 'completed' && (
+                    <div className="pt-4 border-t border-white/5 text-emerald-400 font-bold">
+                      ✓ SINCROIZAÇÃO CONCLUÍDA COM SUCESSO.
+                    </div>
+                  )}
+                  {syncData?.status === 'error' && (
+                    <div className="pt-4 border-t border-white/5 text-rose-500 font-bold">
+                      ⚠ FALHA NO PROCESSAMENTO: {syncData.error_message}
+                    </div>
+                  )}
                 </div>
-              </div>
 
-              <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-4">
-                <button
-                  onClick={() => setIsImportPlanOpen(false)}
-                  className="flex-1 px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={async () => {
-                    try {
-                      const year = (document.getElementById('import-year') as HTMLInputElement).value;
-                      const month = (document.getElementById('import-month') as HTMLSelectElement).value.padStart(2, '0');
-                      const rawText = (document.getElementById('import-json') as HTMLTextAreaElement).value;
-
-                      let items: PlanoTrabalhoItem[] = [];
-
-                      // Tenta detectar se é JSON ou o formato de texto/tabela
-                      if (rawText.trim().startsWith('[') || rawText.trim().startsWith('{')) {
-                        items = JSON.parse(rawText);
-                      } else {
-                        // Parser para o formato de tabela de texto
-                        const lines = rawText.split('\n').map(l => l.trim()).filter(l => l !== '');
-                        for (let i = 0; i < lines.length; i++) {
-                          const line = lines[i];
-                          if (line === 'Própria Unidade' || line === 'Outra Unidade') {
-                            const item: Partial<PlanoTrabalhoItem> = { origem: line };
-                            item.unidade = lines[++i] || '';
-                            item.entrega = lines[++i] || '';
-                            // Opcional: pular "Curtir"
-                            if (lines[i + 1] === 'Curtir') i++;
-                            const pctStr = lines[++i] || '0';
-                            item.percentual = parseFloat(pctStr.replace('%', '')) || 0;
-                            item.descricao = lines[++i] || '';
-                            items.push(item as PlanoTrabalhoItem);
-                          }
-                        }
-                      }
-
-                      if (items.length === 0) throw new Error("Nenhum item identificado no texto colado.");
-
-                      const docId = `${year}-${month}`;
-                      await setDoc(doc(db, 'planos_trabalho', docId), {
-                        mes_ano: docId,
-                        itens: items,
-                        data_atualizacao: new Date().toISOString()
-                      });
-
-                      setIsImportPlanOpen(false);
-                      alert(`Sucesso! ${items.length} entregas importadas para o plano ${docId}.`);
-                    } catch (err: any) {
-                      alert("Erro ao processar dados: " + err.message);
-                    }
-                  }}
-                  className="flex-1 bg-blue-600 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
-                >
-                  Processar e Gravar
-                </button>
+                <div className="p-4 bg-white/5 text-[9px] font-bold text-white/20 uppercase tracking-widest flex justify-between items-center">
+                  <span>Core: Firebase Firestore + Google Tasks API</span>
+                  <span>Encerrado: {syncData?.last_success ? formatDate(syncData.last_success.split('T')[0]) : '-'}</span>
+                </div>
               </div>
             </div>
-          </div>
-        )
-      }
-    </div >
+          )
+        }
+
+        {
+          isImportPlanOpen && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+              <div className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+                <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-2xl font-black text-slate-900 tracking-tight">Importar Plano Mensal</h3>
+                    <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Cole o JSON do plano de trabalho abaixo</p>
+                  </div>
+                  <button onClick={() => setIsImportPlanOpen(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+                    <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </div>
+
+                <div className="p-8 space-y-6">
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Ano</label>
+                      <input type="number" id="import-year" defaultValue={currentYear} className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Mês</label>
+                      <select id="import-month" defaultValue={currentMonth + 1} className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900">
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => <option key={m} value={m}>{m}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Dump JSON</label>
+                    <textarea
+                      id="import-json"
+                      rows={10}
+                      className="w-full bg-slate-900 text-blue-400 border-none rounded-2xl px-6 py-4 text-[10px] font-mono focus:ring-2 focus:ring-blue-500 transition-all resize-none"
+                      placeholder='[ { "entrega": "Exemplo", "percentual": 50 }, ... ]'
+                    />
+                  </div>
+                </div>
+
+                <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-4">
+                  <button
+                    onClick={() => setIsImportPlanOpen(false)}
+                    className="flex-1 px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const year = (document.getElementById('import-year') as HTMLInputElement).value;
+                        const month = (document.getElementById('import-month') as HTMLSelectElement).value.padStart(2, '0');
+                        const rawText = (document.getElementById('import-json') as HTMLTextAreaElement).value;
+
+                        let items: PlanoTrabalhoItem[] = [];
+
+                        // Tenta detectar se é JSON ou o formato de texto/tabela
+                        if (rawText.trim().startsWith('[') || rawText.trim().startsWith('{')) {
+                          items = JSON.parse(rawText);
+                        } else {
+                          // Parser para o formato de tabela de texto
+                          const lines = rawText.split('\n').map(l => l.trim()).filter(l => l !== '');
+                          for (let i = 0; i < lines.length; i++) {
+                            const line = lines[i];
+                            if (line === 'Própria Unidade' || line === 'Outra Unidade') {
+                              const item: Partial<PlanoTrabalhoItem> = { origem: line };
+                              item.unidade = lines[++i] || '';
+                              item.entrega = lines[++i] || '';
+                              // Opcional: pular "Curtir"
+                              if (lines[i + 1] === 'Curtir') i++;
+                              const pctStr = lines[++i] || '0';
+                              item.percentual = parseFloat(pctStr.replace('%', '')) || 0;
+                              item.descricao = lines[++i] || '';
+                              items.push(item as PlanoTrabalhoItem);
+                            }
+                          }
+                        }
+
+                        if (items.length === 0) throw new Error("Nenhum item identificado no texto colado.");
+
+                        const docId = `${year}-${month}`;
+                        await setDoc(doc(db, 'planos_trabalho', docId), {
+                          mes_ano: docId,
+                          itens: items,
+                          data_atualizacao: new Date().toISOString()
+                        });
+
+                        setIsImportPlanOpen(false);
+                        alert(`Sucesso! ${items.length} entregas importadas para o plano ${docId}.`);
+                      } catch (err: any) {
+                        alert("Erro ao processar dados: " + err.message);
+                      }
+                    }}
+                    className="flex-1 bg-blue-600 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
+                  >
+                    Processar e Gravar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )
+        }
+      </div>
+    </div>
   );
 };
 

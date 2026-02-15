@@ -19,6 +19,7 @@ from googleapiclient.errors import HttpError
 
 # Escopo para leitura e escrita de tarefas (Push/Pull)
 SCOPES = ['https://www.googleapis.com/auth/tasks']
+DEBUG_MODE = True # Ativa log detalhado de cada tarefa no terminal do sistema
 
 # Configuração do Firebase
 KEY_FILE = 'firebase_service_account_key.json'
@@ -54,301 +55,202 @@ def get_tasks_service():
             
     return build('tasks', 'v1', credentials=creds)
 
-def sync_google_tasks(db):
+def sync_google_tasks(db, log_list=None, sync_ref=None):
     """
     Busca tarefas pendentes no Google e sincroniza com Firestore.
     """
+    last_ui_update = [0]
+    def log(msg, force_ui=False):
+        print(msg)
+        if log_list is not None: 
+            log_list.append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+            now_ts = time.time()
+            if sync_ref and (force_ui or now_ts - last_ui_update[0] > 1.2):
+                try: 
+                    sync_ref.update({'logs': log_list})
+                    last_ui_update[0] = now_ts
+                except: pass
+
     try:
         service = get_tasks_service()
-        
-        # Busca todas as listas de tarefas
         results = service.tasklists().list().execute()
         tasklists = results.get('items', [])
-        
-        # Procura a lista específica 'tarefa-gerais' - Busca mais flexível
         tasklist_id = None
         target_name = 'tarefa-gerais'
         
-        print(f"Listas encontradas: {[l['title'] for l in tasklists]}")
-
         for item in tasklists:
-            # Match exato ou flexível (sem plurais/traços)
             clean_title = item['title'].lower().replace(' ', '-').replace('s', '') if 'tarefa' in item['title'].lower() else item['title'].lower()
-            clean_target = target_name.replace('s', '')
-            
-            if item['title'].lower() == target_name or clean_title == clean_target:
+            if item['title'].lower() == target_name or clean_title == target_name.replace('s', ''):
                 tasklist_id = item['id']
-                print(f"Sincronizando tarefas da lista: {item['title']} (ID: {tasklist_id})")
+                log(f"Iniciando PULL de: {item['title']}")
                 break
         
         if not tasklist_id:
-            print(f"ERRO: Lista '{target_name}' não encontrada.")
-            print("Listas disponíveis:")
-            for l in tasklists:
-                print(f" - {l['title']}")
+            log("ERRO: Lista não encontrada.")
             return
-
-        # Busca todas as tarefas pendentes com paginação
-        # Otimização: Traz concluídas apenas a partir do dia 1º do mês atual
-        now = datetime.now()
-        start_month_rfc = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).strftime('%Y-%m-%dT00:00:00Z')
 
         g_tasks = []
         next_page_token = None
-        
         while True:
-            tasks_results = service.tasks().list(
+            # REMOVIDO: completedMin para garantir que pegamos tarefas de ontem mesmo que o Google atrase o selo de tempo
+            g_results = service.tasks().list(
                 tasklist=tasklist_id, 
                 showCompleted=True, 
-                showHidden=True,
-                completedMin=start_month_rfc, # FILTER: Current month onwards
-                pageToken=next_page_token,
-                maxResults=100
+                showHidden=True, 
+                maxResults=100,
+                pageToken=next_page_token
             ).execute()
             
-            g_tasks.extend(tasks_results.get('items', []))
-            next_page_token = tasks_results.get('nextPageToken')
-            if not next_page_token:
+            items = g_results.get('items', [])
+            g_tasks.extend(items)
+            
+            # Limite de segurança se não quiser ler milhares de tarefas antigas
+            if len(g_tasks) >= 200 or not g_results.get('nextPageToken'):
                 break
+            next_page_token = g_results.get('nextPageToken')
 
-        print(f"Total de tarefas identificadas (incluindo concluídas): {len(g_tasks)}")
-        today = datetime.now().date()
+        log(f"Total de {len(g_tasks)} tarefas identificadas no Google. Analisando...", force_ui=True)
+
+        # OTIMIZAÇÃO: Carrega tarefas locais de uma vez (apenas as que têm google_id)
+        local_docs = db.collection('tarefas').get() # Carrega tudo para garantir que pegamos tarefas novas sem ID
+        local_tasks = {}
+        for t in local_docs:
+            d = t.to_dict()
+            gid = d.get('google_id')
+            if gid:
+                local_tasks[gid] = (t.id, d)
+            else:
+                # Indexa por título para evitar duplicatas se a tarefa já existe mas está sem ID
+                local_tasks[f"title_{d.get('titulo')}"] = (t.id, d)
 
         for gt in g_tasks:
             g_id = gt['id']
             title = gt.get('title', '(Sem Título)')
-            notes = gt.get('notes', '')
+            g_updated = gt.get('updated', '')
             due = gt.get('due', None)
-            g_status = gt.get('status')
-            completed_at = gt.get('completed') # RFC3339
+            deadline = due.split('T')[0] if due else '-'
+            h_status = 'concluído' if gt.get('status') == 'completed' else 'em andamento'
             
-            # Formatação de data limite
-            deadline = '-'
-            if due:
-                deadline = due.split('T')[0]
-
-            # Mapeamento de status: Google -> Hermes
-            # 'completed' -> 'concluído', 'needsAction' -> 'em andamento'
-            h_status = 'concluído' if g_status == 'completed' else 'em andamento'
+            # Log de processamento para auditoria no terminal
+            if DEBUG_MODE:
+                log(f"Google encontrou: {title} (ID: {g_id[:8]}...)")
             
-            # Classificação inteligente
-            categoria, sistema, contabilizar_meta = classify_task(title, notes)
+            categoria, sistema, contabilizar_meta = classify_task(title, gt.get('notes', ''))
             
-            # Busca se já existe no firestore pelo google_id
-            existing = db.collection('tarefas').where('google_id', '==', g_id).limit(1).get()
+            existing_data = local_tasks.get(g_id) or local_tasks.get(f"title_{title}")
             
-            if len(existing) > 0:
-                t_old = existing[0].to_dict()
-                doc_ref = existing[0].reference
+            if existing_data:
+                doc_id, t_old = existing_data
                 
-                # Comparação de versão: Last Write Wins
-                h_updated = t_old.get('data_atualizacao', '')
-                g_updated = gt.get('updated', '') # RFC3339 from Google
-                
-                # Se a versão local (Hermes) for estritamente mais recente que a do Google,
-                # não sobrescrevemos localmente. O usuário deve usar push-tasks para enviar ao Google.
-                if h_updated and g_updated and h_updated > g_updated:
-                    print(f"[!] PRESERVADA (Local mais recente): {title}")
+                # Se não tem google_id mas o título coincide, vincula
+                if not t_old.get('google_id'):
+                    db.collection('tarefas').document(doc_id).update({'google_id': g_id, 'data_atualizacao': g_updated})
+                    log(f"[*] VINCULADA: {title}")
                     continue
 
-                # Otimização: Só atualiza se houver mudança REAL nos campos observados
+                # Só atualiza se o Google tiver algo mais novo
+                h_updated = t_old.get('data_atualizacao', '')
+                if h_updated and g_updated and h_updated >= g_updated:
+                    continue
+
                 has_changed = (
                     t_old.get('status') != h_status or
                     t_old.get('titulo') != title or
-                    t_old.get('notas') != notes or
-                    t_old.get('data_conclusao') != completed_at
+                    t_old.get('data_conclusao') != gt.get('completed') or
+                    t_old.get('data_limite') != deadline
                 )
                 
-                if not has_changed:
-                    continue
-
-                # Preserva a data_criacao original
-                data_criacao = t_old.get('data_criacao')
-                
-                task_data = {
-                    'titulo': title,
-                    'data_limite': deadline,
-                    'categoria': categoria,
-                    'contabilizar_meta': contabilizar_meta,
-                    'notas': notes,
-                    'status': h_status,
-                    'data_conclusao': completed_at,
-                    'data_atualizacao': g_updated # Sincroniza o timestamp com o do Google
-                }
-                if sistema: task_data['sistema'] = sistema
-                
-                doc_ref.update(task_data)
-                print(f"[-] PULL OK (Sincronizado): {title} | Status: {h_status}")
+                if has_changed:
+                    db.collection('tarefas').document(doc_id).update({
+                        'titulo': title, 'data_limite': deadline, 'status': h_status,
+                        'data_conclusao': gt.get('completed'), 'data_atualizacao': g_updated
+                    })
+                    log(f"[-] ATUALIZADA: {title}")
             else:
-                # Nova Tarefa: Google já filtrou concluídas antigas via completedMin
-                # Mas por segurança, se houver algo concluído, importamos pois passou no filtro
+                db.collection('tarefas').add({
+                    'titulo': title, 'projeto': 'GOOGLE', 'data_limite': deadline,
+                    'google_id': g_id, 'status': h_status, 'data_criacao': datetime.now().isoformat(),
+                    'data_conclusao': gt.get('completed'), 'data_atualizacao': g_updated,
+                    'categoria': categoria, 'contabilizar_meta': contabilizar_meta
+                })
+                log(f"[+] IMPORTADA: {title}")
                 
-                # Tenta extrair data do título ou notas (ex: 14/02/2026)
-                data_match = re.search(r'(\d{2})/(\d{2})/(\d{4})', f"{title} {notes}")
-                if data_match:
-                    d, m, y = data_match.groups()
-                    data_criacao = f"{y}-{m}-{d}T00:00:00"
-                else:
-                    data_criacao = datetime.now().isoformat()
-
-                task_data = {
-                    'titulo': title,
-                    'projeto': 'GOOGLE', # Unidade padrão para importados
-                    'data_limite': deadline,
-                    'categoria': categoria,
-                    'contabilizar_meta': contabilizar_meta,
-                    'google_id': g_id,
-                    'notas': notes,
-                    'status': h_status,
-                    'data_criacao': data_criacao,
-                    'data_conclusao': completed_at,
-                    'data_atualizacao': gt.get('updated') # Sincroniza o timestamp inicial
-                }
-                if sistema: task_data['sistema'] = sistema
-                
-                db.collection('tarefas').add(task_data)
-                print(f"[+] IMPORTADA: {title} [{categoria}] | Criada em: {data_criacao}")
-                
-        print(f"\nSINCROIZAÇÃO CONCLUÍDA: {len(g_tasks)} tarefas processadas.")
-
-    except HttpError as err:
-        print(f"ERRO GOOGLE API: {err}")
+        log("PULL CONCLUÍDO.", force_ui=True)
     except Exception as e:
-        print(f"ERRO INESPERADO: {str(e)}")
+        log(f"ERRO PULL: {e}", force_ui=True)
 
-def push_google_tasks(db):
+def push_google_tasks(db, log_list=None, sync_ref=None):
     """
     Pega as tarefas do Firestore (que possuem google_id) e atualiza o Google Tasks.
     """
+    last_ui_update = [0]
+    def log(msg, force_ui=False):
+        print(msg)
+        if log_list is not None: 
+            log_list.append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+            now_ts = time.time()
+            if sync_ref and (force_ui or now_ts - last_ui_update[0] > 1.2):
+                try: 
+                    sync_ref.update({'logs': log_list})
+                    last_ui_update[0] = now_ts
+                except: pass
+
     try:
         service = get_tasks_service()
-        
-        # Busca todas as listas de tarefas
         results = service.tasklists().list().execute()
         tasklists = results.get('items', [])
-        
-        # Procura a lista específica 'tarefa-gerais' - Busca mais flexível
         tasklist_id = None
         target_name = 'tarefa-gerais'
         
         for item in tasklists:
-            # Match exato ou flexível (sem plurais/traços)
             clean_title = item['title'].lower().replace(' ', '-').replace('s', '') if 'tarefa' in item['title'].lower() else item['title'].lower()
-            clean_target = target_name.replace('s', '')
-            
-            if item['title'].lower() == target_name or clean_title == clean_target:
+            if item['title'].lower() == target_name or clean_title == target_name.replace('s', ''):
                 tasklist_id = item['id']
-                print(f"Enviando atualizações para a lista: {item['title']} (ID: {tasklist_id})")
+                log(f"Iniciando PUSH para: {item['title']}")
                 break
         
         if not tasklist_id:
-            print(f"ERRO: Lista '{target_name}' não encontrada para o PUSH.")
+            log("ERRO: Lista destino não encontrada.")
             return
 
-        # Busca versões do Google para comparar (para os que já existem)
         g_results = service.tasks().list(tasklist=tasklist_id, showCompleted=True, showHidden=True, maxResults=100).execute()
         g_tasks_map = {item['id']: item for item in g_results.get('items', [])}
-
-        # Busca todas as tarefas do Firestore que podem precisar de PUSH
-        tasks_ref = db.collection('tarefas').stream()
+        tasks = db.collection('tarefas').stream()
         
         count = 0
-        for doc in tasks_ref:
+        for doc in tasks:
             t = doc.to_dict()
             g_id = t.get('google_id')
             h_status = t.get('status')
             
-            # FILTRO DE OTIMIZAÇÃO: Ignorar concluídas antigas (antes do mês atual)
-            # Isso impede que o push tente sincronizar histórico legado desnecessariamente
-            if h_status == 'concluído':
-                data_conclusao = t.get('data_conclusao')
-                # Start of month in ISO format for string comparison
-                start_month_iso = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
-                
-                # Se não tem data de conclusão (antiga) ou é anterior ao mês atual, PULA.
-                if not data_conclusao or data_conclusao < start_month_iso:
-                    continue
-            
-            # 0. DELEÇÃO: Se a tarefa foi marcada como excluída no Hermes
             if h_status == 'excluído':
                 if g_id:
-                    try:
-                        service.tasks().delete(tasklist=tasklist_id, task=g_id).execute()
-                        print(f"[X] G-DELETE OK: {t['titulo']}")
-                    except HttpError as e:
-                        if e.resp.status == 404:
-                            print(f"[!] SKIP DELETE (Não encontrada no Google): {t['titulo']}")
-                        else:
-                            print(f"[X] ERRO AO DELETAR NO GOOGLE ({t['titulo']}): {e}")
-                
-                # Independente se deletou no Google ou não (podia nem existir lá), removemos do Firestore
+                    try: service.tasks().delete(tasklist=tasklist_id, task=g_id).execute()
+                    except: pass
+                    log(f"[X] REMOVIDA: {t['titulo']}")
                 doc.reference.delete()
-                print(f"[*] FS-REMOVE OK: {t['titulo']}")
-                count += 1
                 continue
 
-            # 1. Preparação comum
-            due_date = None
-            if t.get('data_limite') and t.get('data_limite') != '-':
-                due_date = f"{t['data_limite']}T00:00:00Z"
-            
+            # Só processa se houve mudança real ou tarefa nova
+            due_date = f"{t['data_limite']}T00:00:00Z" if t.get('data_limite') and t.get('data_limite') != '-' else None
             g_status = 'completed' if t.get('status') == 'concluído' else 'needsAction'
 
             if not g_id:
-                # 2. CRIAÇÃO: Sem google_id ainda
-                new_task_body = {
-                    'title': t['titulo'],
-                    'notes': t.get('notas', ''),
-                    'status': g_status
-                }
-                if due_date: new_task_body['due'] = due_date
-                
-                try:
-                    g_new_task = service.tasks().insert(tasklist=tasklist_id, body=new_task_body).execute()
-                    doc.reference.update({
-                        'google_id': g_new_task['id'],
-                        'data_atualizacao': g_new_task.get('updated')
-                    })
-                    print(f"[+] PUSH NEW: {t['titulo']}")
-                    count += 1
-                except HttpError as e:
-                    print(f"[X] ERRO AO CRIAR NO GOOGLE ({t['titulo']}): {e}")
+                new_task = service.tasks().insert(tasklist=tasklist_id, body={'title': t['titulo'], 'notes': t.get('notas', ''), 'status': g_status, 'due': due_date}).execute()
+                doc.reference.update({'google_id': new_task['id'], 'data_atualizacao': new_task.get('updated')})
+                log(f"[+] ENVIADA: {t['titulo']}")
+                count += 1
                 continue
 
-            # 3. ATUALIZAÇÃO: Conferência de versão
             g_task = g_tasks_map.get(g_id)
-            if g_task:
-                h_updated = t.get('data_atualizacao', '')
-                g_updated = g_task.get('updated', '')
-                
-                if h_updated and g_updated and g_updated > h_updated:
-                    print(f"[!] SKIP PUSH: {t['titulo']} (Versão no Google é mais recente)")
-                    continue
-                
-                if h_updated == g_updated:
-                    continue
-
-            # Prepara body de update
-            updated_task_body = {
-                'id': g_id,
-                'title': t['titulo'],
-                'notes': t.get('notas', ''),
-                'status': g_status
-            }
-            if due_date: updated_task_body['due'] = due_date
-
-            try:
-                g_updated_task = service.tasks().update(tasklist=tasklist_id, task=g_id, body=updated_task_body).execute()
-                doc.reference.update({'data_atualizacao': g_updated_task.get('updated')})
-                print(f"[^] PUSH OK: {t['titulo']}")
+            if g_task and t.get('data_atualizacao', '') > g_task.get('updated', ''):
+                service.tasks().update(tasklist=tasklist_id, task=g_id, body={'id': g_id, 'title': t['titulo'], 'notes': t.get('notas', ''), 'status': g_status, 'due': due_date}).execute()
+                log(f"[^] ATUALIZADA NO GOOGLE: {t['titulo']}")
                 count += 1
-            except HttpError as e:
-                print(f"[X] ERRO NO PUSH ({t['titulo']}): {e}")
 
-        print(f"\nSINCROIZAÇÃO (PUSH) CONCLUÍDA: {count} tarefas processadas.")
-
+        log(f"PUSH FINALIZADO: {count} atualizações.", force_ui=True)
     except Exception as e:
-        print(f"ERRO NO PUSH: {str(e)}")
+        log(f"ERRO PUSH: {e}", force_ui=True)
 
 def list_tasks(db):
     tasks_ref = db.collection('tarefas')
@@ -473,7 +375,6 @@ def watch_commands(db):
     
     sync_doc_ref = db.collection('system').document('sync')
     
-    # Callback para mudanças em tempo real
     def on_snapshot(doc_snapshot, changes, read_time):
         for doc in doc_snapshot:
             data = doc.to_dict()
@@ -481,31 +382,36 @@ def watch_commands(db):
             
             status = data.get('status')
             if status == 'requested':
-                print(f"\n[{datetime.now().strftime('%H:%M:%S')}] COMANDO RECEBIDO: Inciando sincronização...")
+                print(f"\n[{datetime.now().strftime('%H:%M:%S')}] COMANDO RECEBIDO")
                 
-                # Marca como processando
-                sync_doc_ref.update({'status': 'processing'})
+                log_entries = ["Iniciando processamento..."]
+                sync_doc_ref.update({
+                    'status': 'processing',
+                    'logs': log_entries
+                })
                 
                 try:
-                    # Executa Push (Hermes -> Google)
-                    print(">>> Enviando dados para o Google...")
-                    push_google_tasks(db)
+                    # Executa Push
+                    push_google_tasks(db, log_entries, sync_doc_ref)
                     
-                    # Executa Pull (Google -> Hermes) - Opcional, mas bom para garantir consistência
-                    print(">>> Buscando novidades do Google...")
-                    sync_google_tasks(db)
+                    # Executa Pull
+                    sync_google_tasks(db, log_entries, sync_doc_ref)
                     
+                    # Finaliza Logs
                     sync_doc_ref.update({
                         'status': 'completed',
-                        'last_success': datetime.now().isoformat()
+                        'last_success': datetime.now().isoformat(),
+                        'logs': log_entries
                     })
-                    print("SKU: Sincronização concluída com sucesso.")
+                    print("Sincronização concluída.")
                     
                 except Exception as e:
-                    print(f"ERRO DE SINCRONIZAÇÃO: {e}")
+                    print(f"ERRO: {e}")
+                    log_entries.append(f"ERRO FATAL: {str(e)}")
                     sync_doc_ref.update({
                         'status': 'error',
-                        'error_message': str(e)
+                        'error_message': str(e),
+                        'logs': log_entries
                     })
             
     doc_watch = sync_doc_ref.on_snapshot(on_snapshot)
