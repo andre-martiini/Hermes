@@ -30,6 +30,8 @@ export interface Tarefa {
     tempo_total_segundos?: number;
     sync_status?: 'new' | 'updated' | 'synced' | null;
     last_sync_date?: string;
+    horario_inicio?: string; // format "HH:mm"
+    horario_fim?: string;    // format "HH:mm"
 }
 
 export interface AtividadeRealizada {
