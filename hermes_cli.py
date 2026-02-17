@@ -22,7 +22,8 @@ from googleapiclient.errors import HttpError
 SCOPES = [
     'https://www.googleapis.com/auth/tasks',
     'https://www.googleapis.com/auth/gmail.readonly',
-    'https://www.googleapis.com/auth/calendar.readonly'
+    'https://www.googleapis.com/auth/calendar.readonly',
+    'https://www.googleapis.com/auth/drive'
 ]
 
 DEBUG_MODE = True # Ativa log detalhado de cada tarefa no terminal do sistema
@@ -250,6 +251,28 @@ def sync_google_calendar(db, log_list=None, sync_ref=None):
                 'last_sync': datetime.now().isoformat()
             }, merge=True)
             count += 1
+
+        # Cleanup: Remove eventos que não vieram na resposta (excluídos do Google)
+        # Mas apenas dentro da janela de tempo consultada
+        fetched_ids = {e['id'] for e in events}
+        try:
+            existing_docs = db.collection('google_calendar_events').stream()
+            deleted_count = 0
+            for doc in existing_docs:
+                d = doc.to_dict()
+                e_start = d.get('data_inicio')
+                if not e_start: continue
+                
+                # Verifica se o evento está dentro da janela de sincronização
+                if time_min <= e_start <= time_max:
+                    if doc.id not in fetched_ids:
+                        doc.reference.delete()
+                        deleted_count += 1
+                        
+            if deleted_count > 0:
+                log(f"[CAL] {deleted_count} eventos excluídos localmente.", force_ui=True)
+        except Exception as cleanup_err:
+            log(f"Erro na limpeza do calendário: {cleanup_err}")
 
         log(f"[CAL] {count} eventos sincronizados.", force_ui=True)
     except Exception as e:

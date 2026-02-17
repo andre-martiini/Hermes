@@ -34,6 +34,7 @@ export interface Tarefa {
     acompanhamento?: Acompanhamento[];
     entregas_relacionadas?: string[];
     is_single_day?: boolean;
+    descricao?: string;
     chat_gemini_url?: string;
     tempo_total_segundos?: number;
     sync_status?: 'new' | 'updated' | 'synced' | null;

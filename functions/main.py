@@ -23,7 +23,7 @@ def get_google_creds():
         'https://www.googleapis.com/auth/tasks',
         'https://www.googleapis.com/auth/gmail.readonly',
         'https://www.googleapis.com/auth/calendar.readonly',
-        'https://www.googleapis.com/auth/drive.file'
+        'https://www.googleapis.com/auth/drive'
     ]
     return Credentials(
         token=creds_data.get('token'),
