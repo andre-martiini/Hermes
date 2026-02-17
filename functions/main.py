@@ -1,6 +1,6 @@
 
 from firebase_functions import firestore_fn, scheduler_fn, options, https_fn
-from firebase_admin import initialize_app, firestore
+from firebase_admin import initialize_app, firestore, messaging
 
 # Inicializa o Firebase Admin apenas uma vez no escopo global
 initialize_app()
@@ -50,6 +50,22 @@ def get_drive_service():
     from googleapiclient.discovery import build
     return build('drive', 'v3', credentials=get_google_creds())
 
+def emit_notification_backend(title, message, n_type='info', link=None):
+    from datetime import datetime
+    import uuid
+    db = get_db()
+    notif_id = str(uuid.uuid4())[:9]
+    db.collection('notificacoes').document(notif_id).set({
+        'id': notif_id,
+        'title': title,
+        'message': message,
+        'type': n_type,
+        'timestamp': datetime.now().isoformat(),
+        'isRead': False,
+        'link': link,
+        'sent_to_push': False
+    })
+
 def log_to_firestore(sync_ref, logs, message, force_update=False):
     from datetime import datetime
     timestamp = datetime.now().strftime('%H:%M:%S')
@@ -58,6 +74,12 @@ def log_to_firestore(sync_ref, logs, message, force_update=False):
     print(log_entry)
     if force_update:
         sync_ref.update({'logs': logs})
+
+    # Se for um erro crítico ou importação importante, gera notificação push
+    if "ERRO" in message.upper():
+        emit_notification_backend("Erro de Sincronização", message, 'error')
+    elif "[PIX]" in message.upper():
+        emit_notification_backend("Novo Pix Recebido", message, 'success', 'financeiro')
 
 def classify_task(title, notes):
     import re
@@ -311,6 +333,56 @@ def on_sync_request(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.D
 def scheduled_sync(event: scheduler_fn.ScheduledEvent) -> None:
     """Trigger agendado para rodar a cada 30 minutos"""
     run_full_sync()
+
+@firestore_fn.on_document_created(document="notificacoes/{notification_id}")
+def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]):
+    """Trigger disparado quando uma nova notificação é criada"""
+    if not event.data: return
+
+    notif = event.data.to_dict()
+    if not notif or notif.get('sent_to_push'): return
+
+    title = notif.get('title', 'Hermes')
+    message = notif.get('message', '')
+
+    db = get_db()
+    tokens_docs = db.collection('fcm_tokens').stream()
+    tokens = [doc.id for doc in tokens_docs]
+
+    if not tokens:
+        print("Nenhum token FCM encontrado para enviar push.")
+        return
+
+    # Prepara a mensagem multicast (envia para múltiplos tokens)
+    push_message = messaging.MulticastMessage(
+        notification=messaging.Notification(
+            title=title,
+            body=message,
+        ),
+        data={
+            'id': notif.get('id', ''),
+            'link': notif.get('link', ''),
+            'type': notif.get('type', 'info')
+        },
+        tokens=tokens,
+    )
+
+    try:
+        response = messaging.send_multicast(push_message)
+        print(f"Push enviado: {response.success_count} sucesso, {response.failure_count} falha.")
+
+        # Opcional: Limpar tokens que falharam por não estarem mais registrados
+        if response.failure_count > 0:
+            for idx, resp in enumerate(response.responses):
+                if not resp.success:
+                    if resp.exception and "registration-token-not-registered" in str(resp.exception).lower():
+                        bad_token = tokens[idx]
+                        db.collection('fcm_tokens').document(bad_token).delete()
+                        print(f"Token inválido removido: {bad_token}")
+
+        event.data.reference.update({'sent_to_push': True})
+    except Exception as e:
+        print(f"Erro ao enviar push notification: {str(e)}")
 
 @https_fn.on_call()
 def upload_to_drive(req: https_fn.CallableRequest):
