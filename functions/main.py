@@ -21,7 +21,8 @@ def get_google_creds():
     creds_data = creds_doc.to_dict()
     SCOPES = [
         'https://www.googleapis.com/auth/tasks',
-        'https://www.googleapis.com/auth/gmail.readonly'
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/calendar.readonly'
     ]
     return Credentials(
         token=creds_data.get('token'),
@@ -39,6 +40,10 @@ def get_tasks_service():
 def get_gmail_service():
     from googleapiclient.discovery import build
     return build('gmail', 'v1', credentials=get_google_creds())
+
+def get_calendar_service():
+    from googleapiclient.discovery import build
+    return build('calendar', 'v3', credentials=get_google_creds())
 
 def log_to_firestore(sync_ref, logs, message, force_update=False):
     from datetime import datetime
@@ -151,6 +156,46 @@ def sync_google_tasks_push(service, sync_ref, logs):
     except Exception as e:
         log_to_firestore(sync_ref, logs, f"ERRO PUSH: {e}")
 
+def sync_google_calendar(service, sync_ref, logs):
+    from datetime import datetime, timedelta
+    db = get_db()
+    try:
+        log_to_firestore(sync_ref, logs, "Sincronizando Google Calendar...", True)
+        now = datetime.utcnow().isoformat() + 'Z'
+        # Busca eventos dos próximos 30 dias e dos últimos 7 dias
+        time_min = (datetime.utcnow() - timedelta(days=7)).isoformat() + 'Z'
+        time_max = (datetime.utcnow() + timedelta(days=30)).isoformat() + 'Z'
+
+        events_result = service.events().list(
+            calendarId='primary', timeMin=time_min, timeMax=time_max,
+            singleEvents=True, orderBy='startTime'
+        ).execute()
+        events = events_result.get('items', [])
+
+        # Limpa eventos antigos no Firestore para manter sincronizado
+        # (Opcional: deletar todos e reinserir ou fazer merge inteligente)
+        # Vamos fazer um merge por ID
+
+        count = 0
+        for event in events:
+            event_id = event['id']
+            summary = event.get('summary', '(Sem título)')
+            start = event['start'].get('dateTime', event['start'].get('date'))
+            end = event['end'].get('dateTime', event['end'].get('date'))
+
+            db.collection('google_calendar_events').document(event_id).set({
+                'google_id': event_id,
+                'titulo': summary,
+                'data_inicio': start,
+                'data_fim': end,
+                'last_sync': datetime.now().isoformat()
+            }, merge=True)
+            count += 1
+
+        log_to_firestore(sync_ref, logs, f"[CAL] {count} eventos sincronizados.")
+    except Exception as e:
+        log_to_firestore(sync_ref, logs, f"ERRO CALENDAR: {e}")
+
 def sync_pix_emails(service, sync_ref, logs):
     from datetime import datetime
     import re
@@ -231,9 +276,10 @@ def run_full_sync():
     sync_ref = db.collection('system').document('sync')
     logs = [f"Iniciando sincronização ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})..."]
     try:
-        ts, gs = get_tasks_service(), get_gmail_service()
+        ts, gs, cs = get_tasks_service(), get_gmail_service(), get_calendar_service()
         sync_google_tasks_push(ts, sync_ref, logs)
         sync_google_tasks_pull(ts, sync_ref, logs)
+        sync_google_calendar(cs, sync_ref, logs)
         sync_pix_emails(gs, sync_ref, logs)
         sync_ref.update({
             'status': 'completed',

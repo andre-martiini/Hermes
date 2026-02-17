@@ -183,7 +183,7 @@ export interface HealthSettings {
     targetWeight: number;
 }
 
-export interface Notification {
+export interface HermesNotification {
     id: string;
     title: string;
     message: string;
@@ -317,3 +317,11 @@ export interface AjusteSistema {
     status: Status;
 }
 
+export interface GoogleCalendarEvent {
+    id: string;
+    google_id: string;
+    titulo: string;
+    data_inicio: string;
+    data_fim: string;
+    last_sync: string;
+}
