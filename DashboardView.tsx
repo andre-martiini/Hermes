@@ -1,6 +1,6 @@
 
-import React, { useMemo, useState } from 'react';
-import { Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry, HealthWeight, Sistema, SistemaStatus, formatDate, Categoria } from './types';
+import React, { useMemo } from 'react';
+import { Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry, HealthWeight } from './types';
 
 interface DashboardViewProps {
   tarefas: Tarefa[];
@@ -56,16 +56,6 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   const todayStr = new Date().toISOString().split('T')[0];
 
   // --- ACTIONS LOGIC ---
-  const actionsByArea = useMemo(() => {
-    const counts: Record<string, number> = {};
-    tarefas.forEach(t => {
-      if (t.status === 'concluído') return;
-      const area = t.categoria || 'NÃO CLASSIFICADA';
-      counts[area] = (counts[area] || 0) + 1;
-    });
-    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  }, [tarefas]);
-
   const overdueActionsCount = useMemo(() => {
     return tarefas.filter(t =>
       t.status !== 'concluído' &&
@@ -75,30 +65,28 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     ).length;
   }, [tarefas, todayStr]);
 
+  const todayActionsCount = useMemo(() => {
+    return tarefas.filter(t =>
+        t.status !== 'concluído' &&
+        t.data_limite === todayStr
+    ).length;
+  }, [tarefas, todayStr]);
+
   // --- FINANCE LOGIC ---
   const periodKey = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
   const currentBudget = financeSettings.monthlyBudgets?.[periodKey] || financeSettings.monthlyBudget || 0;
 
-  const currentMonthTotalSpent = useMemo(() => {
-    return financeTransactions
-      .filter(t => {
+  const currentMonthTransactions = useMemo(() => {
+    return financeTransactions.filter(t => {
         const d = new Date(t.date);
         return d.getMonth() === currentMonth && d.getFullYear() === currentYear && t.status !== 'deleted';
-      })
-      .reduce((acc, curr) => acc + curr.amount, 0);
+    });
   }, [financeTransactions, currentMonth, currentYear]);
 
-  const currentMonthIncome = useMemo(() => {
-    return incomeEntries
-      .filter(e => e.month === currentMonth && e.year === currentYear && e.status !== 'deleted')
-      .reduce((acc, curr) => acc + curr.amount, 0);
-  }, [incomeEntries, currentMonth, currentYear]);
+  const currentMonthTotalSpent = useMemo(() => {
+    return currentMonthTransactions.reduce((acc, curr) => acc + curr.amount, 0);
+  }, [currentMonthTransactions]);
 
-  const currentMonthObligations = useMemo(() => {
-    return fixedBills
-      .filter(b => b.month === currentMonth && b.year === currentYear)
-      .reduce((acc, curr) => acc + curr.amount, 0);
-  }, [fixedBills, currentMonth, currentYear]);
 
   const emergencyReserveTarget = financeSettings.emergencyReserveTarget || 0;
   const emergencyReserveCurrent = financeSettings.emergencyReserveCurrent || 0;
@@ -116,6 +104,20 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   const totalWeightLost = initialWeight > 0 ? initialWeight - currentWeight : 0;
 
   // --- SYSTEMS LOGIC ---
+  const concludedTasksThisMonth = useMemo(() => {
+    return tarefas.filter(t => {
+        if (t.status !== 'concluído' || !t.data_conclusao) return false;
+        const d = new Date(t.data_conclusao);
+        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+    });
+  }, [tarefas, currentMonth, currentYear]);
+
+  const productivityEfficacy = useMemo(() => {
+    if (concludedTasksThisMonth.length === 0) return 0;
+    const highImpact = concludedTasksThisMonth.filter(t => t.contabilizar_meta || t.prioridade === 'alta').length;
+    return (highImpact / concludedTasksThisMonth.length) * 100;
+  }, [concludedTasksThisMonth]);
+
   const systems = useMemo(() => {
     return unidades.filter(u => u.nome.startsWith('SISTEMA:'));
   }, [unidades]);
@@ -131,255 +133,306 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   }, [systems, sistemasDetalhes]);
 
   // --- RENDERING HELPERS ---
-  const budgetPercent = currentBudget > 0 ? Math.min((currentMonthTotalSpent / currentBudget) * 100, 100) : 0;
+  const budgetPercent = currentBudget > 0 ? (currentMonthTotalSpent / currentBudget) * 100 : 0;
+  const availableBalance = currentBudget - currentMonthTotalSpent;
+
+  // Last 7 days spending for Sparkline
+  const last7DaysSpending = useMemo(() => {
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const dStr = d.toISOString().split('T')[0];
+        const dayTotal = financeTransactions
+            .filter(t => t.date === dStr && t.status !== 'deleted')
+            .reduce((acc, curr) => acc + curr.amount, 0);
+        days.push(dayTotal);
+    }
+    return days;
+  }, [financeTransactions]);
+
+  const last7DaysWeight = useMemo(() => {
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const dStr = d.toISOString().split('T')[0];
+        // Find weight for this day or the closest previous one
+        const weightEntry = [...healthWeights]
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+            .find(w => w.date <= dStr);
+        days.push(weightEntry ? weightEntry.weight : initialWeight);
+    }
+    return days;
+  }, [healthWeights, initialWeight]);
+
+  const weightDelta = useMemo(() => {
+    if (last7DaysWeight.length < 2) return 0;
+    const current = last7DaysWeight[6];
+    const previous = last7DaysWeight[0];
+    return previous > 0 ? ((current - previous) / previous) * 100 : 0;
+  }, [last7DaysWeight]);
+
+  const dailyAverageSpent = useMemo(() => {
+      const total = last7DaysSpending.reduce((a, b) => a + b, 0);
+      return total / 7;
+  }, [last7DaysSpending]);
+
+  const spendingVariance = useMemo(() => {
+    if (last7DaysSpending.length === 0) return 0;
+    const mean = dailyAverageSpent;
+    const squareDiffs = last7DaysSpending.map(value => Math.pow(value - mean, 2));
+    const avgSquareDiff = squareDiffs.reduce((a, b) => a + b, 0) / last7DaysSpending.length;
+    return Math.sqrt(avgSquareDiff);
+  }, [last7DaysSpending, dailyAverageSpent]);
+
+  const spendingVolatility = dailyAverageSpent > 0 ? (spendingVariance / dailyAverageSpent) * 100 : 0;
+
+  const spentToday = last7DaysSpending[6];
+  const deltaVsAverage = dailyAverageSpent > 0 ? ((spentToday - dailyAverageSpent) / dailyAverageSpent) * 100 : 0;
+
+  const offendingCategories = useMemo(() => {
+    const cats: Record<string, number> = {};
+    currentMonthTransactions.forEach(t => {
+        cats[t.category] = (cats[t.category] || 0) + t.amount;
+    });
+    return Object.entries(cats)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([name, amount]) => ({ name, amount, percent: (amount / (currentMonthTotalSpent || 1)) * 100 }));
+  }, [currentMonthTransactions, currentMonthTotalSpent]);
+
+  const Sparkline = ({ data, color }: { data: number[], color: string }) => {
+    if (!data || data.length === 0) return null;
+    const max = Math.max(...data, 1);
+    const min = Math.min(...data);
+    const range = max - min || 1;
+    const width = 100;
+    const height = 30;
+    const points = data.map((d, i) => {
+        const x = (i / (data.length - 1)) * width;
+        const y = height - ((d - min) / range) * height;
+        return `${x},${y}`;
+    }).join(' ');
+
+    return (
+        <svg viewBox={`0 0 ${width} ${height}`} className="w-24 h-8 overflow-visible">
+            <polyline
+                fill="none"
+                stroke={color}
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                points={points}
+            />
+        </svg>
+    );
+  };
+
+  interface CompositeCardProps {
+    title: string;
+    value: string;
+    delta: number;
+    sparkData: number[];
+    isAlert: boolean;
+  }
+
+  const CompositeCard = ({ title, value, delta, sparkData, isAlert }: CompositeCardProps) => (
+    <div className={`bg-white p-6 rounded-[2rem] border ${isAlert ? 'border-rose-200 bg-rose-50/30' : 'border-slate-200 shadow-sm'} flex flex-col justify-between h-full transition-all hover:shadow-md`}>
+        <div>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{title}</p>
+            <div className={`text-2xl font-black ${isAlert ? 'text-rose-600' : 'text-slate-900'}`}>
+                {value}
+            </div>
+        </div>
+        <div className="flex items-center justify-between mt-4">
+            <div className={`text-[10px] font-bold ${delta > 0 ? (isAlert ? 'text-rose-500' : 'text-emerald-500') : 'text-slate-400'}`}>
+                {delta > 0 ? '▲' : delta < 0 ? '▼' : ''} {Math.abs(delta).toFixed(0)}% vs média
+            </div>
+            <Sparkline data={sparkData} color={isAlert ? '#e11d48' : '#64748b'} />
+        </div>
+    </div>
+  );
 
   return (
     <div className="animate-in fade-in duration-700 space-y-8 pb-12">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-8 rounded-none md:rounded-[2.5rem] border border-slate-200 shadow-xl">
-        <div>
-          <h2 className="text-3xl font-black text-slate-900 tracking-tighter">Dashboard Geral</h2>
-          <p className="text-slate-500 font-bold mt-1 uppercase tracking-widest text-[10px]">
-            {new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(new Date(currentYear, currentMonth))}
-          </p>
-        </div>
-        <div className="flex gap-4">
-            <div className="bg-slate-50 px-6 py-3 rounded-lg md:rounded-2xl border border-slate-100 flex flex-col items-center">
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Ações Vencidas</span>
-                <span className={`text-xl font-black ${overdueActionsCount > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                    {overdueActionsCount}
-                </span>
+      {/* Header: SITUAÇÃO SITUACIONAL */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
+        <div className="lg:col-span-8 bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+            <div className="space-y-1">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Saldo Disponível do Mês</p>
+                <div className={`text-[3.5rem] leading-none font-black tracking-tighter ${availableBalance < 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+                    R$ {availableBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${budgetPercent > 90 ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                        {budgetPercent.toFixed(1)}% do orçamento
+                    </span>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">
+                        {new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(new Date(currentYear, currentMonth))}
+                    </span>
+                </div>
             </div>
-            <div className="bg-slate-50 px-6 py-3 rounded-lg md:rounded-2xl border border-slate-100 flex flex-col items-center">
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Saldo Atual</span>
-                <span className={`text-xl font-black ${currentBudget - currentMonthTotalSpent >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
-                    R$ {(currentBudget - currentMonthTotalSpent).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                </span>
+
+            <div className="flex gap-4">
+                <div className={`px-6 py-4 rounded-3xl border ${overdueActionsCount > 0 ? 'bg-rose-50 border-rose-100' : 'bg-slate-50 border-slate-100'} flex flex-col`}>
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Ações Imediatas</span>
+                    <div className="flex items-baseline gap-2">
+                        <span className={`text-3xl font-black ${overdueActionsCount > 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+                            {overdueActionsCount + todayActionsCount}
+                        </span>
+                        {overdueActionsCount > 0 && (
+                            <span className="text-[10px] font-black text-rose-500 uppercase">({overdueActionsCount} Atrasadas)</span>
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div className="lg:col-span-4 grid grid-cols-1 gap-4">
+            <div className="bg-slate-900 p-6 rounded-[2.5rem] shadow-xl text-white flex flex-col justify-center">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Eficácia: Orçamento</p>
+                <div className={`text-3xl font-black ${budgetPercent <= 100 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {Math.max(0, 100 - budgetPercent).toFixed(1)}%
+                </div>
+                <p className="text-[9px] font-medium text-slate-500 uppercase">Economia Potencial</p>
+            </div>
+            <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-xl flex flex-col justify-center">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Qualidade das Ações</p>
+                <div className={`text-3xl font-black ${productivityEfficacy > 70 ? 'text-emerald-600' : productivityEfficacy > 40 ? 'text-amber-500' : 'text-rose-500'}`}>
+                    {productivityEfficacy.toFixed(0)}%
+                </div>
+                <p className="text-[9px] font-medium text-slate-400 uppercase">Impacto Real vs Volume</p>
             </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-
-        {/* Coluna 1: Ações */}
+        {/* LADO ESQUERDO: Ação Imediata */}
         <div className="lg:col-span-4 space-y-8">
-            <DashboardSection
-                title="Ações por Área"
-                iconColor="bg-blue-600"
-            >
-                <div className="space-y-6">
-                    {/* Donut Chart (Simples com SVG) */}
-                    <div className="relative flex justify-center py-4">
-                        <svg viewBox="0 0 36 36" className="w-48 h-48">
-                            <path
-                                className="text-slate-100"
-                                stroke="currentColor"
-                                strokeWidth="3"
-                                fill="none"
-                                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                            />
-                            {(() => {
-                                let accumulatedPercent = 0;
-                                const total = actionsByArea.reduce((acc, curr) => acc + curr[1], 0);
-                                const colors = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
-
-                                return actionsByArea.map((area, idx) => {
-                                    const percent = (area[1] / (total || 1)) * 100;
-                                    const dashArray = `${percent} ${100 - percent}`;
-                                    const dashOffset = -accumulatedPercent;
-                                    accumulatedPercent += percent;
-
-                                    return (
-                                        <path
-                                            key={area[0]}
-                                            stroke={colors[idx % colors.length]}
-                                            strokeWidth="3.5"
-                                            strokeDasharray={dashArray}
-                                            strokeDashoffset={dashOffset}
-                                            strokeLinecap="round"
-                                            fill="none"
-                                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                                        />
-                                    );
-                                });
-                            })()}
-                        </svg>
-                        <div className="absolute inset-0 flex flex-col items-center justify-center">
-                            <span className="text-4xl font-black text-slate-900">
-                                {actionsByArea.reduce((acc, curr) => acc + curr[1], 0)}
-                            </span>
-                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Ativas</span>
+            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-lg h-full">
+                <h3 className="text-xl font-black text-slate-900 mb-6 flex items-center gap-3">
+                    <span className="w-2 h-8 bg-rose-500 rounded-full"></span>
+                    O que exige atenção agora
+                </h3>
+                <div className="space-y-4">
+                    {overdueActionsCount > 0 && (
+                        <div className="p-4 bg-rose-50 rounded-2xl border border-rose-100 flex items-center justify-between">
+                            <span className="text-sm font-bold text-rose-700">Ações Vencidas</span>
+                            <span className="bg-rose-600 text-white px-3 py-1 rounded-full text-xs font-black">{overdueActionsCount}</span>
                         </div>
-                    </div>
+                    )}
+                    {todayActionsCount > 0 && (
+                        <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 flex items-center justify-between">
+                            <span className="text-sm font-bold text-amber-700">Ações para Hoje</span>
+                            <span className="bg-amber-500 text-white px-3 py-1 rounded-full text-xs font-black">{todayActionsCount}</span>
+                        </div>
+                    )}
+                    {budgetPercent > 90 && (
+                        <div className="p-4 bg-rose-50 rounded-2xl border border-rose-100 flex items-center justify-between">
+                            <span className="text-sm font-bold text-rose-700">Risco de Orçamento</span>
+                            <span className="text-[10px] font-black text-rose-600 uppercase">Crítico</span>
+                        </div>
+                    )}
+                    {overdueActionsCount === 0 && todayActionsCount === 0 && budgetPercent <= 90 && (
+                        <div className="py-12 flex flex-col items-center text-center">
+                            <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-4">
+                                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                            </div>
+                            <p className="text-sm font-bold text-slate-500">Tudo sob controle!</p>
+                        </div>
+                    )}
+                </div>
 
-                    <div className="space-y-3">
-                        {actionsByArea.map((area, idx) => {
-                            const colors = ['bg-blue-600', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-violet-500', 'bg-pink-500'];
-                            return (
-                                <div key={area[0]} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg md:rounded-2xl border border-slate-100">
-                                    <div className="flex items-center gap-3">
-                                        <div className={`w-3 h-3 rounded-full ${colors[idx % colors.length]}`}></div>
-                                        <span className="text-xs font-black text-slate-700 uppercase tracking-wider">{area[0]}</span>
-                                    </div>
-                                    <span className="text-sm font-black text-slate-900">{area[1]}</span>
+                <div className="mt-8 pt-8 border-t border-slate-50">
+                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Categorias Ofensoras (Gastos)</h4>
+                    <div className="space-y-3 mb-6">
+                        {offendingCategories.map(cat => (
+                            <div key={cat.name} className="flex flex-col gap-1">
+                                <div className="flex justify-between text-[11px] font-bold">
+                                    <span className="text-slate-600 uppercase">{cat.name}</span>
+                                    <span className="text-slate-900">{cat.percent.toFixed(1)}%</span>
                                 </div>
-                            );
-                        })}
-                    </div>
-                </div>
-            </DashboardSection>
-        </div>
-
-        {/* Coluna 2: Financeiro */}
-        <div className="lg:col-span-5 space-y-8">
-            <DashboardSection
-                title="Saúde Financeira"
-                iconColor="bg-emerald-500"
-            >
-                <div className="space-y-8">
-
-                {/* Gasto Acumulado vs Disponível */}
-                <div className="space-y-4">
-                    <div className="flex justify-between items-end">
-                        <div>
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Gasto Acumulado vs Disponível</p>
-                            <div className="text-3xl font-black text-slate-900">
-                                R$ {currentMonthTotalSpent.toLocaleString('pt-BR')}
-                                <span className="text-slate-300 text-lg ml-2">/ R$ {currentBudget.toLocaleString('pt-BR')}</span>
-                            </div>
-                        </div>
-                        <span className={`text-xs font-black uppercase px-3 py-1 rounded-lg ${budgetPercent > 90 ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                            {budgetPercent.toFixed(1)}%
-                        </span>
-                    </div>
-                    <div className="h-4 bg-slate-100 rounded-full overflow-hidden shadow-inner">
-                        <div
-                            className={`h-full transition-all duration-1000 ${budgetPercent > 90 ? 'bg-rose-500' : 'bg-emerald-500'}`}
-                            style={{ width: `${budgetPercent}%` }}
-                        />
-                    </div>
-                </div>
-
-                {/* Reserva de Emergência */}
-                <div className="space-y-4 pt-6 border-t border-slate-50">
-                    <div className="flex justify-between items-end">
-                        <div>
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Reserva de Emergência</p>
-                            <div className="text-3xl font-black text-emerald-600">
-                                {emergencyReservePercent.toFixed(1)}%
-                            </div>
-                            <p className="text-[10px] font-bold text-slate-400 mt-1">
-                                R$ {emergencyReserveCurrent.toLocaleString('pt-BR')} de R$ {emergencyReserveTarget.toLocaleString('pt-BR')}
-                            </p>
-                        </div>
-                        <div className="w-12 h-12 bg-emerald-50 rounded-lg md:rounded-2xl flex items-center justify-center text-emerald-600">
-                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
-                        </div>
-                    </div>
-                    <div className="h-4 bg-slate-100 rounded-full overflow-hidden shadow-inner">
-                        <div
-                            className="h-full bg-emerald-500 rounded-full transition-all duration-1000"
-                            style={{ width: `${emergencyReservePercent}%` }}
-                        />
-                    </div>
-                </div>
-
-                {/* Comparativo Renda vs Obrigações */}
-                <div className="pt-6 border-t border-slate-50">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-8">Projeção: Renda vs Obrigações</p>
-                    <div className="flex items-end gap-8 h-32 px-4">
-                        {(() => {
-                            const max = Math.max(currentMonthIncome, currentMonthObligations, 1);
-                            const incomeHeight = (currentMonthIncome / max) * 100;
-                            const obligationsHeight = (currentMonthObligations / max) * 100;
-
-                            return (
-                                <>
-                                    <div className="flex-1 flex flex-col items-center gap-2 h-full justify-end">
-                                        <div className="w-full bg-emerald-500 rounded-t-xl relative group transition-all hover:bg-emerald-600" style={{ height: `${incomeHeight}%` }}>
-                                            <div className="absolute -top-7 left-1/2 -translate-x-1/2 text-[10px] font-black text-emerald-600 whitespace-nowrap">
-                                                R$ {currentMonthIncome.toLocaleString('pt-BR')}
-                                            </div>
-                                        </div>
-                                        <span className="text-[9px] font-black text-slate-400 uppercase">Rendas</span>
-                                    </div>
-                                    <div className="flex-1 flex flex-col items-center gap-2 h-full justify-end">
-                                        <div
-                                            className="w-full bg-rose-500 rounded-t-xl relative group transition-all hover:bg-rose-600"
-                                            style={{ height: `${obligationsHeight}%` }}
-                                        >
-                                            <div className="absolute -top-7 left-1/2 -translate-x-1/2 text-[10px] font-black text-rose-600 whitespace-nowrap">
-                                                R$ {currentMonthObligations.toLocaleString('pt-BR')}
-                                            </div>
-                                        </div>
-                                        <span className="text-[9px] font-black text-slate-400 uppercase">Obrigações</span>
-                                    </div>
-                                </>
-                            );
-                        })()}
-                    </div>
-                </div>
-                </div>
-            </DashboardSection>
-        </div>
-
-        {/* Coluna 3: Saúde e Sistemas */}
-        <div className="lg:col-span-3 space-y-8">
-            {/* Saúde */}
-            <div className="bg-gradient-to-br from-rose-500 to-rose-600 p-8 rounded-none md:rounded-[2.5rem] shadow-lg text-white relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-4 opacity-20">
-                    <svg className="w-20 h-20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg>
-                </div>
-                <div className="relative z-10">
-                    <h3 className="text-xl font-black mb-6 uppercase tracking-widest text-[12px]">Saúde & Peso</h3>
-                    <div className="space-y-6">
-                        <div>
-                            <p className="text-rose-100 text-[10px] font-black uppercase tracking-widest mb-1">Peso Atual</p>
-                            <div className="flex items-baseline gap-2">
-                                <span className="text-5xl font-black tracking-tighter">{currentWeight.toFixed(1)}</span>
-                                <span className="text-lg font-bold text-rose-200">kg</span>
-                            </div>
-                        </div>
-                        <div className="bg-white/10 backdrop-blur-md rounded-lg md:rounded-2xl p-4 border border-white/10">
-                            <p className="text-rose-100 text-[9px] font-black uppercase tracking-widest mb-1">Total Eliminado</p>
-                            <div className="flex items-baseline gap-2">
-                                <span className="text-2xl font-black text-emerald-300">-{totalWeightLost.toFixed(1)}</span>
-                                <span className="text-sm font-bold text-emerald-200">kg</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Sistemas */}
-            <DashboardSection
-                title="Sistemas"
-                iconColor="bg-violet-600"
-            >
-                <div className="space-y-4">
-                    <div className="flex items-center justify-between mb-2">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Status dos Projetos</span>
-                        <span className="bg-violet-100 text-violet-700 px-3 py-1 rounded-full text-[10px] font-black">{systemStats.length}</span>
-                    </div>
-                    <div className="space-y-2">
-                        {systemStats.map(sys => (
-                            <div key={sys.name} className="p-4 bg-slate-50 rounded-lg md:rounded-2xl border border-slate-100 flex items-center justify-between group hover:border-violet-300 transition-all">
-                                <span className="text-xs font-bold text-slate-700">{sys.name}</span>
-                                <span className={`text-[8px] font-black uppercase px-2 py-1 rounded-lg ${
-                                    sys.status === 'producao' ? 'bg-emerald-100 text-emerald-700' :
-                                    sys.status === 'desenvolvimento' ? 'bg-blue-100 text-blue-700' :
-                                    sys.status === 'testes' ? 'bg-amber-100 text-amber-700' :
-                                    'bg-slate-200 text-slate-500'
-                                }`}>
-                                    {sys.status}
-                                </span>
+                                <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                    <div className="h-full bg-slate-400" style={{ width: `${cat.percent}%` }} />
+                                </div>
                             </div>
                         ))}
                     </div>
+
+                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Volatilidade de Gastos (7d)</p>
+                        <div className="flex items-center justify-between">
+                            <span className={`text-lg font-black ${spendingVolatility > 50 ? 'text-rose-500' : 'text-slate-700'}`}>
+                                {spendingVolatility.toFixed(0)}%
+                            </span>
+                            <span className="text-[9px] font-bold text-slate-400 uppercase">
+                                {spendingVolatility > 50 ? 'Desvio Alto' : 'Estável'}
+                            </span>
+                        </div>
+                    </div>
+                </div>
                 </div>
             </DashboardSection>
         </div>
 
+        {/* LADO DIREITO: Tendências e Eficácia */}
+        <div className="lg:col-span-8 space-y-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <CompositeCard
+                    title="Fluxo de Caixa (Hoje)"
+                    value={`R$ ${spentToday.toLocaleString('pt-BR')}`}
+                    delta={deltaVsAverage}
+                    sparkData={last7DaysSpending}
+                    isAlert={spentToday > dailyAverageSpent * 1.2}
+                />
+                <CompositeCard
+                    title="Saúde & Peso"
+                    value={`${currentWeight.toFixed(1)} kg`}
+                    delta={weightDelta}
+                    sparkData={last7DaysWeight}
+                    isAlert={weightDelta > 0}
+                />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Reserva de Emergência */}
+                <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-lg">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Reserva de Emergência</p>
+                    <div className="flex items-center gap-6">
+                        <div className="relative w-24 h-24">
+                            <svg viewBox="0 0 36 36" className="w-24 h-24 transform -rotate-90">
+                                <path className="text-slate-100" stroke="currentColor" strokeWidth="3" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                                <path className="text-emerald-500" stroke="currentColor" strokeWidth="3" strokeDasharray={`${emergencyReservePercent}, 100`} fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                            </svg>
+                            <div className="absolute inset-0 flex items-center justify-center text-xs font-black text-slate-900">
+                                {emergencyReservePercent.toFixed(0)}%
+                            </div>
+                        </div>
+                        <div className="flex-1">
+                            <div className="text-xl font-black text-slate-900">R$ {emergencyReserveCurrent.toLocaleString('pt-BR')}</div>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">de R$ {emergencyReserveTarget.toLocaleString('pt-BR')}</p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Sistemas */}
+                <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-lg">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Status de Sistemas</p>
+                    <div className="flex flex-wrap gap-2">
+                        {systemStats.map(sys => (
+                            <div key={sys.name} className="px-3 py-1 bg-slate-50 border border-slate-100 rounded-lg flex items-center gap-2">
+                                <span className="text-[10px] font-bold text-slate-600">{sys.name}</span>
+                                <div className={`w-1.5 h-1.5 rounded-full ${sys.status === 'producao' ? 'bg-emerald-500' : 'bg-blue-500'}`} />
+                            </div>
+                        ))}
+                    </div>
+                    <div className="mt-4 text-[10px] font-bold text-slate-400">
+                        {systemStats.filter(s => s.status === 'producao').length} de {systemStats.length} em produção
+                    </div>
+                </div>
+            </DashboardSection>
+        </div>
       </div>
     </div>
   );
