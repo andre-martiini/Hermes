@@ -1,0 +1,84 @@
+--- FINANCE TRANSACTIONS ---
+ID: 299Sx8bTtuLwVl3ZLVKk | Desc: Pix: Seu Pix de R$10,00 no Google Pay foi realizado com sucesso | Val: 10.0 | Date: 2026-02-03T23:25:57+00:00
+ID: 3Qdj61SAXa0dX72oZW4A | Desc: Pix: Seu Pix de R$2,00 no Google Pay foi realizado com sucesso | Val: 2.0 | Date: 2026-02-16T16:07:47+00:00
+ID: 7irnGpaZjBkevaRcFzHd | Desc: Pix: Seu Pix de R$5,00 no Google Pay foi realizado com sucesso | Val: 5.0 | Date: 2026-02-07T14:32:09+00:00
+ID: 9QBsvq5L1FTxBYAROGNb | Desc: Pix: Seu Pix de R$55,00 no Google Pay foi realizado com sucesso | Val: 55.0 | Date: 2026-02-05T17:30:14+00:00
+ID: 9QzlvQN45B6XdNXO8lnM | Desc: Pix: Seu Pix de R$12,00 no Google Pay foi realizado com sucesso | Val: 12.0 | Date: 2026-02-08T13:19:03+00:00
+ID: AAzyS2Xyn1uMyoKJGhEM | Desc: Pix: Pix realizado | Val: 290.0 | Date: 2026-02-04T11:31:07+00:00
+ID: BvguH9rEnS0ggRfPldC3 | Desc: Gasto Semanal 08/02/2026 a 14/02/2026 | Val: 2009.07 | Date: 2026-02-08T03:00:00.000Z
+ID: EQUWwPJ7eU4AsdkHf4YI | Desc: Pix: Seu Pix de R$12,00 no Google Pay foi realizado com sucesso | Val: 12.0 | Date: 2026-02-07T14:30:33+00:00
+ID: FbAFcgl25ACbVVp34q8U | Desc: Pix: Seu Pix de R$22,00 no Google Pay foi realizado com sucesso | Val: 22.0 | Date: 2026-02-15T14:42:55+00:00
+ID: Hl0IX5yqQbaFmW8aLeJ3 | Desc: Pix: Seu Pix de R$8,00 no Google Pay foi realizado com sucesso | Val: 8.0 | Date: 2026-02-02T20:05:05+00:00
+ID: KM4MZ4CsHczUwlv8MqNZ | Desc: Pix: Seu Pix de R$13,00 no Google Pay foi realizado com sucesso | Val: 13.0 | Date: 2026-02-02T18:56:06+00:00
+ID: MqSfcvsVTddfHdnUPMRm | Desc: Pix: Seu Pix de R$194,32 no Google Pay foi realizado com sucesso | Val: 194.32 | Date: 2026-02-05T10:23:34+00:00
+ID: OMQJPF65ao358E9DX8LU | Desc: Pix: Seu Pix de R$100,00 no Google Pay foi realizado com sucesso | Val: 100.0 | Date: 2026-02-15T23:13:12+00:00
+ID: OwqNvwKTsklsA9e7vKpm | Desc: Pix: Pix realizado | Val: 406.56 | Date: 2026-02-04T11:28:42+00:00
+ID: QDDv9TGSQXt1Yw85DAgk | Desc: Pix: Seu Pix de R$45,50 no Google Pay foi realizado com sucesso | Val: 45.5 | Date: 2026-02-06T22:45:49+00:00
+ID: QLNyKgpJWpLL4KqNh13Z | Desc: Pix: Pix realizado | Val: 1600.0 | Date: 2026-02-06T08:33:32+00:00
+ID: RsgRnArcx0hK40NmhTFa | Desc: Pix: Seu Pix de R$197,00 no Google Pay foi realizado com sucesso | Val: 197.0 | Date: 2026-02-07T14:25:27+00:00
+ID: W80siym7d6LUbrfk706k | Desc: Pix: Pix realizado | Val: 50.0 | Date: 2026-02-04T11:32:44+00:00
+ID: WSWPYe9abhkt4LSUsobR | Desc: Pix: Seu Pix de R$277,90 no Google Pay foi realizado com sucesso | Val: 277.9 | Date: 2026-02-06T21:30:25+00:00
+ID: aV10IFan9YZ9DMzBDNMN | Desc: Pix: Pix realizado | Val: 351.88 | Date: 2026-02-04T11:29:08+00:00
+ID: aa5bgggsDjD9tu4fb8x1 | Desc: Pix: Seu Pix de R$10,00 no Google Pay foi realizado com sucesso | Val: 10.0 | Date: 2026-02-08T13:58:48+00:00
+ID: awKbZjHgk9Eu0SfIb0ZE | Desc: Pix: Seu Pix de R$60,00 no Google Pay foi realizado com sucesso | Val: 60.0 | Date: 2026-02-07T12:47:36+00:00
+ID: cg60LTiDewX8y0deWjXl | Desc: Pix: Pix realizado | Val: 1870.0 | Date: 2026-02-04T16:17:43+00:00
+ID: cmsVZ4NV54h1AiFJJd4W | Desc: Pix: Seu Pix de R$44,00 no Google Pay foi realizado com sucesso | Val: 44.0 | Date: 2026-02-07T14:28:53+00:00
+ID: dZ4YC7WGIOZDSU6P8OQH | Desc: Pix: Seu Pix de R$300,00 no Google Pay foi realizado com sucesso | Val: 300.0 | Date: 2026-02-11T19:11:35+00:00
+ID: e28bpEDAqwnY9Pfs3KJ2 | Desc: Pix: Seu Pix de R$10,90 no Google Pay foi realizado com sucesso | Val: 10.9 | Date: 2026-02-10T19:16:15+00:00
+ID: eiGKlK9JM8v2xVaYQvME | Desc: Pix: Seu Pix de R$456,46 no Google Pay foi realizado com sucesso | Val: 456.46 | Date: 2026-02-07T21:45:02+00:00
+ID: fZO8dMHfjzXf22kkoWu7 | Desc: Pix: Pix realizado | Val: 139.99 | Date: 2026-02-04T11:29:30+00:00
+ID: hAepx3xcQkMDUWg3FQEy | Desc: Pix: Pix realizado | Val: 38.0 | Date: 2026-02-04T11:32:04+00:00
+ID: icmcRSSoI4DDmyJxUMUb | Desc: Pix: Seu Pix de R$27,64 no Google Pay foi realizado com sucesso | Val: 27.64 | Date: 2026-02-15T20:04:21+00:00
+ID: mGhub4Ntl3akB28Wr8Ix | Desc: Pix: Seu Pix de R$12,00 no Google Pay foi realizado com sucesso | Val: 12.0 | Date: 2026-02-11T22:36:21+00:00
+ID: nEFcaOxrRMYu4kHHRcnA | Desc: Pix: Seu Pix de R$42,00 no Google Pay foi realizado com sucesso | Val: 42.0 | Date: 2026-02-04T16:44:30+00:00
+ID: nwmcxyoPG0720RFmGJ8k | Desc: Pix: Seu Pix de R$8,50 no Google Pay foi realizado com sucesso | Val: 8.5 | Date: 2026-02-07T14:35:03+00:00
+ID: sV2TcpqMNwVtyN26E98B | Desc: Pix: Seu Pix de R$63,16 no Google Pay foi realizado com sucesso | Val: 63.16 | Date: 2026-02-07T21:46:09+00:00
+ID: sWrsuY6zzY7VVnsrZwHW | Desc: Gasto Semanal 01/02/2026 a 07/02/2026 | Val: 1197.34 | Date: 2026-02-01T03:00:00.000Z
+ID: sn1b1sFGdR25jRDYISGk | Desc: Pix: Seu Pix de R$104,71 no Google Pay foi realizado com sucesso | Val: 104.71 | Date: 2026-02-07T14:18:02+00:00
+ID: tkCCzmrj7UzGMLw2b6Rh | Desc: Pix: Seu Pix de R$3,00 no Google Pay foi realizado com sucesso | Val: 3.0 | Date: 2026-02-07T12:44:20+00:00
+ID: yprAE4Egh6f5ru46EItU | Desc: Pix: Seu Pix de R$52,50 no Google Pay foi realizado com sucesso | Val: 52.5 | Date: 2026-02-12T23:58:04+00:00
+
+--- FINANCE INCOME ---
+
+--- TAREFAS (HIDDEN AUTO-SYNC) ---
+ID: OerddiXf8vj2kSWlhXaT | Titulo: Gasto Semanal 08/02/2026 a 14/02/2026 | Status: concluído
+ID: xSlXyhZhLewq15aVastB | Titulo: Gasto Semanal 01/02/2026 a 07/02/2026 | Status: concluído
+
+--- PROCESSED EMAILS ---
+Total processed IDs: 36
+19c34dd05397a58f
+19c2edac1316026c
+19c1ff573f7290a2
+19c3d67e38330780
+19c286ba196b5da5
+19c28696a12ddcdc
+19c63945c90a8d33
+19c38778302ede52
+19c4ed92ede0c11b
+19c3821bd939d655
+19c286a22623efe0
+19c544a5b1ed5f84
+19c61c12bcc29af9
+19c388470d72ccf6
+19c3a10c0e9c781a
+19c3d8c4560bfecf
+19c3882f95543a77
+19c67353a4411037
+19c286c7e120f2db
+19c3215c3f875e6a
+19c62e777fa90b42
+19c35220c8e3a14d
+19c387e513c82d8b
+19c48fba181b1ff9
+19c3a11c911cc462
+19c297203d729a9b
+19c1fb64f33aac9c
+19c4e1db5f6760c3
+19c3824b93b167fb
+19c25d3b576545db
+19c286d1ca5cd0a7
+19c298a8a62db091
+19c2d5424a02c19d
+19c2869d38a829f5
+19c38871806b88ed
+19c388171ddbcdcd

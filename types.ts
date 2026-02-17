@@ -7,7 +7,7 @@ export interface Acompanhamento {
     nota: string;
 }
 
-export type Categoria = 'CLC' | 'ASSISTÊNCIA' | 'GERAL' | 'NÃO CLASSIFICADA';
+export type Categoria = string;
 
 export interface Tarefa {
     id: string;
@@ -28,6 +28,8 @@ export interface Tarefa {
     is_single_day?: boolean;
     chat_gemini_url?: string;
     tempo_total_segundos?: number;
+    sync_status?: 'new' | 'updated' | 'synced' | null;
+    last_sync_date?: string;
 }
 
 export interface AtividadeRealizada {
@@ -88,6 +90,8 @@ export interface FinanceTransaction {
     sprint: number;
     category: string;
     originalTaskId?: string;
+    google_message_id?: string;
+    status?: 'active' | 'deleted';
 }
 
 export interface FinanceGoal {
@@ -143,6 +147,8 @@ export interface IncomeEntry {
     category: string;
     isReceived: boolean;
     rubricId?: string;
+    google_message_id?: string;
+    status?: 'active' | 'deleted';
 }
 
 export interface IncomeRubric {
@@ -221,4 +227,27 @@ export const formatDate = (dateStr: string) => {
     const capitalizedDay = dayOfWeek.charAt(0).toUpperCase() + dayOfWeek.slice(1);
     return `${parts[2]}/${parts[1]}/${parts[0]} (${capitalizedDay})`;
 };
+
+export type SistemaStatus = 'ideia' | 'prototipacao' | 'desenvolvimento' | 'testes' | 'producao';
+
+export interface Sistema {
+    id: string;
+    nome: string;
+    status: SistemaStatus;
+    link_documentacao?: string;
+    link_google_ai_studio?: string;
+    link_github?: string;
+    link_hospedado?: string;
+    data_criacao: string;
+    data_atualizacao: string;
+}
+
+export interface AjusteSistema {
+    id: string;
+    sistema_id: string;
+    tarefa_id: string;
+    titulo: string;
+    data_criacao: string;
+    status: Status;
+}
 

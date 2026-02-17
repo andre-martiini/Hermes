@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Tarefa, Status, EntregaInstitucional, Prioridade, AtividadeRealizada, Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento, BrainstormIdea, FinanceTransaction, FinanceGoal, FinanceSettings, FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight, DailyHabits, HealthSettings, Notification, AppSettings, formatDate } from './types';
+import { Tarefa, Status, EntregaInstitucional, Prioridade, AtividadeRealizada, Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento, BrainstormIdea, FinanceTransaction, FinanceGoal, FinanceSettings, FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight, DailyHabits, HealthSettings, Notification, AppSettings, formatDate, Sistema, SistemaStatus } from './types';
 import HealthView from './HealthView';
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
 import { db } from './firebase';
@@ -127,11 +127,23 @@ const PgcMiniTaskCard = React.memo(({ task, onClick }: { task: Tarefa, onClick?:
       onClick={onClick}
       className={`bg-white border border-slate-200 p-3 rounded-xl shadow-sm hover:shadow-md hover:border-blue-400 transition-all ${onClick ? 'cursor-pointer' : 'cursor-grab'} active:cursor-grabbing w-full md:w-[280px] group`}
     >
-      <div className="flex items-center gap-2 mb-2">
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
         <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${PROJECT_COLORS[task.projeto] || 'bg-slate-100 text-slate-600'}`}>
           {task.projeto}
         </span>
         <span className="text-[8px] font-black text-slate-400 uppercase">{formatDate(task.data_limite)}</span>
+        
+        {/* Badge de Sincronização */}
+        {task.sync_status === 'new' && (
+          <span className="text-[7px] font-black px-1.5 py-0.5 rounded uppercase bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-sm animate-pulse">
+            Novo
+          </span>
+        )}
+        {task.sync_status === 'updated' && (
+          <span className="text-[7px] font-black px-1.5 py-0.5 rounded uppercase bg-gradient-to-r from-amber-400 to-orange-500 text-white shadow-sm">
+            Atualizada
+          </span>
+        )}
       </div>
       <h5 className="text-[11px] font-bold text-slate-900 leading-tight group-hover:text-blue-600 line-clamp-2">{task.titulo}</h5>
     </div>
@@ -350,7 +362,14 @@ const CalendarView = ({
   );
 };
 
-const RowCard = React.memo(({ task, onClick, onToggle, onDelete }: { task: Tarefa, onClick?: () => void, onToggle: (id: string, currentStatus: string) => void, onDelete: (id: string) => void }) => {
+const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, onExecute }: { 
+  task: Tarefa, 
+  onClick?: () => void, 
+  onToggle: (id: string, currentStatus: string) => void, 
+  onDelete: (id: string) => void,
+  onEdit: (t: Tarefa) => void,
+  onExecute: (t: Tarefa) => void 
+}) => {
   const statusValue = normalizeStatus(task.status);
   const isCompleted = statusValue === 'concluido';
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
@@ -367,14 +386,31 @@ const RowCard = React.memo(({ task, onClick, onToggle, onDelete }: { task: Taref
     dateDisplay = `${formatDate(startDate).split(' ')[0]} - ${formatDate(endDate)}`;
   }
 
+  const getTagStyle = (name: string, type: 'category' | 'project') => {
+    const n = name.toUpperCase();
+    if (type === 'category') {
+      if (n === 'CLC') return 'bg-blue-100 text-blue-800 border-blue-200';
+      if (n === 'ASSISTÊNCIA' || n === 'ASSISTÊNCIA ESTUDANTIL') return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+    }
+    
+    // Project Colors
+    if (n.includes('MAGO')) return 'bg-purple-100 text-purple-800 border-purple-200';
+    if (n.includes('SIGEX')) return 'bg-indigo-100 text-indigo-800 border-indigo-200';
+    if (n.includes('PROEN')) return 'bg-cyan-100 text-cyan-800 border-cyan-200';
+    if (n.includes('PLS')) return 'bg-orange-100 text-orange-800 border-orange-200';
+    if (n.includes('PDI')) return 'bg-teal-100 text-teal-800 border-teal-200';
+    
+    return 'bg-slate-100 text-slate-600 border-slate-200';
+  };
+
   return (
     <div
       onClick={onClick}
       onMouseLeave={() => setIsConfirmingDelete(false)}
-      className={`group bg-white w-full p-8 border-b border-slate-200 hover:bg-slate-50 transition-all flex flex-col md:flex-row md:items-center gap-6 md:gap-8 animate-in cursor-pointer relative ${isCompleted ? 'opacity-60' : ''}`}
+      className={`group bg-white w-full p-4 md:p-8 border-b border-slate-100 hover:bg-slate-50 transition-all flex flex-col md:flex-row items-start md:items-center gap-4 md:gap-8 animate-in cursor-pointer relative ${isCompleted ? 'opacity-60' : ''}`}
     >
       {/* Botão de Excluir Flutuante */}
-      <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-all z-20">
+      <div className="absolute top-2 right-2 md:top-4 md:right-4 opacity-0 group-hover:opacity-100 transition-all z-20">
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -400,38 +436,64 @@ const RowCard = React.memo(({ task, onClick, onToggle, onDelete }: { task: Taref
         </button>
       </div>
 
-      <div className="flex-shrink-0">
-        <button
+      <div className="flex-shrink-0 mt-1 md:mt-0 flex items-center gap-4">
+         <button
           onClick={(e) => {
             e.stopPropagation();
             onToggle(task.id, task.status);
           }}
-          className={`w-8 h-8 rounded-xl border-2 flex items-center justify-center transition-all ${isCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-200 hover:border-slate-400 text-transparent'}`}
+          className={`w-6 h-6 md:w-8 md:h-8 rounded-lg md:rounded-xl border-2 flex items-center justify-center transition-all ${isCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-200 hover:border-slate-400 text-transparent'}`}
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+          <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
         </button>
       </div>
 
-      <div className="flex-1">
-        <div className="flex items-center gap-2 mb-2">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1.5 flex-wrap">
           {task.categoria && task.categoria !== 'NÃO CLASSIFICADA' && (
-            <span className={`text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider 
-              ${task.categoria === 'CLC' ? 'bg-blue-100 text-blue-700' :
-                task.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-100 text-emerald-700' :
-                  'bg-slate-100 text-slate-600'}`}>
+            <span className={`text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider border ${getTagStyle(task.categoria, 'category')}`}>
               {task.categoria}
             </span>
           )}
-          <span className={`text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider bg-slate-100 border border-slate-200 text-slate-600`}>
+          <span className={`text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider border ${getTagStyle(task.projeto, 'project')}`}>
             {task.projeto}
           </span>
+          
+          {/* Badge de Sincronização */}
+          {task.sync_status === 'new' && (
+            <span className="text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-sm animate-pulse flex items-center gap-1">
+              <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z" /></svg>
+              Novo
+            </span>
+          )}
+          {task.sync_status === 'updated' && (
+            <span className="text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider bg-gradient-to-r from-amber-400 to-orange-500 text-white shadow-sm flex items-center gap-1">
+              <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" /></svg>
+              Atualizada
+            </span>
+          )}
         </div>
-        <div className={`text-lg font-bold text-slate-900 leading-snug group-hover:text-blue-600 transition-colors ${isCompleted ? 'line-through text-slate-400' : ''}`}>
+        <div className={`text-sm md:text-base font-bold text-slate-800 leading-snug group-hover:text-blue-600 transition-colors ${isCompleted ? 'line-through text-slate-400' : ''}`}>
           {task.titulo}
         </div>
       </div>
 
-      <div className="hidden md:flex flex-col items-end gap-1 min-w-[150px]">
+      <div className="hidden md:flex flex-col items-end gap-1 min-w-[200px]">
+         <div className="flex gap-2 mb-2 mr-12">
+            <button
+               onClick={(e) => { e.stopPropagation(); onEdit(task); }}
+               className="px-3 py-1.5 bg-slate-100 text-slate-500 rounded-lg text-[9px] font-black uppercase tracking-wider hover:bg-slate-200 transition-colors"
+             >
+               Editar
+             </button>
+             <button
+               onClick={(e) => { e.stopPropagation(); onExecute(task); }}
+               className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-[9px] font-black uppercase tracking-wider hover:bg-slate-700 transition-colors shadow-sm"
+             >
+               Executar
+             </button>
+         </div>
+
         <div className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Período</div>
         <div className="text-sm font-bold text-slate-700">
           {dateDisplay || '-'}
@@ -449,7 +511,7 @@ const RowCard = React.memo(({ task, onClick, onToggle, onDelete }: { task: Taref
   );
 });
 
-const CategoryView = ({ tasks, viewMode, onSelectTask }: { tasks: Tarefa[], viewMode: string, onSelectTask: (t: Tarefa) => void }) => {
+const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask }: { tasks: Tarefa[], viewMode: string, onSelectTask: (t: Tarefa) => void, onExecuteTask: (t: Tarefa) => void }) => {
   const isCLC = viewMode === 'licitacoes';
   const categoria = isCLC ? 'CLC' : 'ASSISTÊNCIA';
   const color = isCLC ? 'blue' : 'emerald';
@@ -487,19 +549,20 @@ const CategoryView = ({ tasks, viewMode, onSelectTask }: { tasks: Tarefa[], view
     <div className="animate-in grid grid-cols-1 lg:grid-cols-12 gap-10">
       {/* Lado Esquerdo: Ações Pendentes */}
       <div className="lg:col-span-8 flex flex-col gap-6">
-        <div className={`bg-white border-l-8 border-${color}-600 p-8 rounded-[2rem] shadow-xl`}>
+        <div className={`bg-white border-l-8 border-${color}-600 p-8 rounded-none md:rounded-[2rem] shadow-xl`}>
           <h3 className="text-2xl font-black text-slate-900 tracking-tight flex items-center justify-between">
             Ações em Aberto - {title}
             <span className={`bg-${color}-100 text-${color}-600 text-[10px] font-black px-4 py-1.5 rounded-full`}>{pendentes.length}</span>
           </h3>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-[2rem] overflow-hidden shadow-2xl">
+        <div className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl">
           <table className="w-full text-left">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Demanda</th>
                 <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-[200px]">Prazo</th>
+                <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-[250px] text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -510,6 +573,22 @@ const CategoryView = ({ tasks, viewMode, onSelectTask }: { tasks: Tarefa[], view
                     <div className="text-sm font-black text-slate-900 leading-tight">{t.titulo}</div>
                   </td>
                   <td className="px-8 py-6 text-sm font-bold text-slate-600 whitespace-nowrap">{formatDate(t.data_limite)}</td>
+                  <td className="px-8 py-6 text-right">
+                    <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onSelectTask(t); }}
+                        className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-[9px] font-black uppercase tracking-wider hover:bg-slate-200 transition-colors"
+                      >
+                        Editar
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onExecuteTask(t); }}
+                        className="px-4 py-2 bg-slate-900 text-white rounded-xl text-[9px] font-black uppercase tracking-wider hover:bg-slate-800 transition-colors shadow-lg shadow-slate-200"
+                      >
+                        Executar
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
               {pendentes.length === 0 && (
@@ -524,7 +603,7 @@ const CategoryView = ({ tasks, viewMode, onSelectTask }: { tasks: Tarefa[], view
 
       {/* Lado Direito: Linha do Tempo (Concluídas + Iniciadas) */}
       <div className="lg:col-span-4 flex flex-col gap-6">
-        <div className="bg-slate-900 text-white p-8 rounded-[2rem] shadow-xl">
+        <div className="bg-slate-900 text-white p-8 rounded-none md:rounded-[2rem] shadow-xl">
           <h3 className="text-xl font-black tracking-tight uppercase tracking-widest">Histórico Realizado</h3>
           <p className="text-slate-400 text-[10px] font-black uppercase mt-1">Audit de Atividades</p>
         </div>
@@ -538,7 +617,7 @@ const CategoryView = ({ tasks, viewMode, onSelectTask }: { tasks: Tarefa[], view
             return (
               <div key={t.id} className="relative group">
                 <div className={`absolute -left-8 mt-1.5 w-6 h-6 rounded-full border-4 border-white ${isConcluido ? `bg-${color}-500` : 'bg-slate-400'} shadow-sm z-10 transition-transform group-hover:scale-125`}></div>
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer" onClick={() => onSelectTask(t)}>
+                <div className="bg-white p-5 rounded-none md:rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer" onClick={() => onSelectTask(t)}>
                   <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{formatDate(displayDate || '')}</p>
                   <h4 className="text-xs font-bold text-slate-900 leading-tight line-clamp-2">{t.titulo}</h4>
                   <div className="mt-3 flex items-center gap-2">
@@ -579,7 +658,12 @@ const NotificationCenter = ({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      const target = event.target as Element;
+      if (
+        dropdownRef.current && 
+        !dropdownRef.current.contains(target as Node) &&
+        !target.closest('.notification-trigger')
+      ) {
         onClose();
       }
     };
@@ -672,222 +756,464 @@ const NotificationCenter = ({
 
 const SettingsModal = ({
   settings,
+  unidades,
   onSave,
-  onClose
+  onClose,
+  onAddUnidade,
+  onDeleteUnidade,
+  onUpdateUnidade,
+  initialTab
 }: {
   settings: AppSettings,
+  unidades: { id: string, nome: string, palavras_chave?: string[] }[],
   onSave: (settings: AppSettings) => void,
-  onClose: () => void
+  onClose: () => void,
+  onAddUnidade: (nome: string) => void,
+  onDeleteUnidade: (id: string) => void,
+  onUpdateUnidade: (id: string, updates: any) => void,
+  initialTab?: 'notifications' | 'context' | 'sistemas'
 }) => {
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
+  const [activeTab, setActiveTab] = useState<'notifications' | 'context' | 'sistemas'>(initialTab || 'notifications');
+  const [newUnidadeNome, setNewUnidadeNome] = useState('');
+  const [newKeywordMap, setNewKeywordMap] = useState<{ [key: string]: string }>({});
+
+  // Check for protected units only for deletion logic, not for hiding them
+  // We process all units from the 'unidades' prop.
+
+  const handleAddKeyword = (uId: string, current: string[]) => {
+    const val = newKeywordMap[uId]?.trim();
+    if (!val) return;
+    const updated = Array.from(new Set([...current, val]));
+    onUpdateUnidade(uId, { palavras_chave: updated });
+    setNewKeywordMap({ ...newKeywordMap, [uId]: '' });
+  };
+
+  const handleRemoveKeyword = (uId: string, current: string[], kw: string) => {
+    const updated = current.filter(k => k !== kw);
+    onUpdateUnidade(uId, { palavras_chave: updated });
+  };
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className="bg-white w-full max-w-xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-        <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
-          <div>
-            <h3 className="text-2xl font-black text-slate-900 tracking-tight">Configurações</h3>
-            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Painel de Preferências e Notificações</p>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
-            <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-
-        <div className="p-8 space-y-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
-          <div className="space-y-4">
-            <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2">Geral / Saúde</h4>
-
-            <div className="flex items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-blue-200 transition-all">
-              <div className="flex-1">
-                <p className="text-sm font-bold text-slate-900 mb-1">Hábitos de Hoje</p>
-                <p className="text-[11px] text-slate-500 font-medium">Abrir lembrete para marcar hábitos cumpridos</p>
-              </div>
-              <div className="flex items-center gap-4">
-                <input
-                  type="time"
-                  value={localSettings.notifications.habitsReminder.time}
-                  onChange={(e) => setLocalSettings({
-                    ...localSettings,
-                    notifications: {
-                      ...localSettings.notifications,
-                      habitsReminder: { ...localSettings.notifications.habitsReminder, time: e.target.value }
-                    }
-                  })}
-                  className="bg-white border-none rounded-lg px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-blue-500"
-                />
-                <button
-                  onClick={() => setLocalSettings({
-                    ...localSettings,
-                    notifications: {
-                      ...localSettings.notifications,
-                      habitsReminder: { ...localSettings.notifications.habitsReminder, enabled: !localSettings.notifications.habitsReminder.enabled }
-                    }
-                  })}
-                  className={`w-12 h-6 rounded-full transition-all relative ${localSettings.notifications.habitsReminder.enabled ? 'bg-blue-600' : 'bg-slate-300'}`}
-                >
-                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.notifications.habitsReminder.enabled ? 'left-7' : 'left-1'}`} />
-                </button>
-              </div>
+    <div className="fixed inset-0 z-[150] flex items-center justify-center p-0 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="bg-white w-full h-full md:h-auto md:max-w-2xl rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh]">
+        <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex flex-col gap-6 flex-shrink-0">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-2xl font-black text-slate-900 tracking-tight">Configurações</h3>
+              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Painel de Preferências</p>
             </div>
-
-            <div className="flex flex-col p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-rose-200 transition-all gap-4">
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <p className="text-sm font-bold text-slate-900 mb-1">Lembrete de Pesagem</p>
-                  <p className="text-[11px] text-slate-500 font-medium">Registrar peso na balança</p>
-                </div>
-                <button
-                  onClick={() => setLocalSettings({
-                    ...localSettings,
-                    notifications: {
-                      ...localSettings.notifications,
-                      weighInReminder: { ...localSettings.notifications.weighInReminder, enabled: !localSettings.notifications.weighInReminder.enabled }
-                    }
-                  })}
-                  className={`w-12 h-6 rounded-full transition-all relative ${localSettings.notifications.weighInReminder.enabled ? 'bg-rose-600' : 'bg-slate-300'}`}
-                >
-                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.notifications.weighInReminder.enabled ? 'left-7' : 'left-1'}`} />
-                </button>
-              </div>
-              {localSettings.notifications.weighInReminder.enabled && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <select
-                    value={localSettings.notifications.weighInReminder.frequency}
-                    onChange={(e) => setLocalSettings({
-                      ...localSettings,
-                      notifications: {
-                        ...localSettings.notifications,
-                        weighInReminder: { ...localSettings.notifications.weighInReminder, frequency: e.target.value as any }
-                      }
-                    })}
-                    className="bg-white border-none rounded-lg px-3 py-1.5 text-[10px] font-black uppercase text-slate-900 focus:ring-2 focus:ring-rose-500"
-                  >
-                    <option value="weekly">Semanal</option>
-                    <option value="biweekly">Quinzenal</option>
-                    <option value="monthly">Mensal</option>
-                  </select>
-                  <select
-                    value={localSettings.notifications.weighInReminder.dayOfWeek}
-                    onChange={(e) => setLocalSettings({
-                      ...localSettings,
-                      notifications: {
-                        ...localSettings.notifications,
-                        weighInReminder: { ...localSettings.notifications.weighInReminder, dayOfWeek: Number(e.target.value) }
-                      }
-                    })}
-                    className="bg-white border-none rounded-lg px-3 py-1.5 text-[10px] font-black uppercase text-slate-900 focus:ring-2 focus:ring-rose-500"
-                  >
-                    <option value={0}>Domingo</option>
-                    <option value={1}>Segunda</option>
-                    <option value={2}>Terça</option>
-                    <option value={3}>Quarta</option>
-                    <option value={4}>Quinta</option>
-                    <option value={5}>Sexta</option>
-                    <option value={6}>Sábado</option>
-                  </select>
-                  <input
-                    type="time"
-                    value={localSettings.notifications.weighInReminder.time}
-                    onChange={(e) => setLocalSettings({
-                      ...localSettings,
-                      notifications: {
-                        ...localSettings.notifications,
-                        weighInReminder: { ...localSettings.notifications.weighInReminder, time: e.target.value }
-                      }
-                    })}
-                    className="bg-white border-none rounded-lg px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-rose-500"
-                  />
-                </div>
-              )}
-            </div>
+            <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+              <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
           </div>
 
-          <div className="space-y-4">
-            <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2">Financeiro / Ações</h4>
-
-            <div className="flex items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-emerald-200 transition-all">
-              <div className="flex-1">
-                <p className="text-sm font-bold text-slate-900 mb-1">Risco Orçamentário</p>
-                <p className="text-[11px] text-slate-500 font-medium">Avisar se gastos estiverem acima do esperado</p>
-              </div>
-              <button
-                onClick={() => setLocalSettings({
-                  ...localSettings,
-                  notifications: {
-                    ...localSettings.notifications,
-                    budgetRisk: { ...localSettings.notifications.budgetRisk, enabled: !localSettings.notifications.budgetRisk.enabled }
-                  }
-                })}
-                className={`w-12 h-6 rounded-full transition-all relative ${localSettings.notifications.budgetRisk.enabled ? 'bg-emerald-600' : 'bg-slate-300'}`}
-              >
-                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.notifications.budgetRisk.enabled ? 'left-7' : 'left-1'}`} />
-              </button>
-            </div>
-
-            <div className="flex items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-blue-200 transition-all">
-              <div className="flex-1">
-                <p className="text-sm font-bold text-slate-900 mb-1">Ações Vencidas</p>
-                <p className="text-[11px] text-slate-500 font-medium">Alertar sobre tarefas fora do prazo</p>
-              </div>
-              <button
-                onClick={() => setLocalSettings({
-                  ...localSettings,
-                  notifications: {
-                    ...localSettings.notifications,
-                    overdueTasks: { ...localSettings.notifications.overdueTasks, enabled: !localSettings.notifications.overdueTasks.enabled }
-                  }
-                })}
-                className={`w-12 h-6 rounded-full transition-all relative ${localSettings.notifications.overdueTasks.enabled ? 'bg-blue-600' : 'bg-slate-300'}`}
-              >
-                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.notifications.overdueTasks.enabled ? 'left-7' : 'left-1'}`} />
-              </button>
-            </div>
-
-            <div className="flex flex-col p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-amber-200 transition-all gap-4">
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <p className="text-sm font-bold text-slate-900 mb-1">Audit PGC</p>
-                  <p className="text-[11px] text-slate-500 font-medium">Verificar vínculos antes do fim do mês</p>
-                </div>
-                <button
-                  onClick={() => setLocalSettings({
-                    ...localSettings,
-                    notifications: {
-                      ...localSettings.notifications,
-                      pgcAudit: { ...localSettings.notifications.pgcAudit, enabled: !localSettings.notifications.pgcAudit.enabled }
-                    }
-                  })}
-                  className={`w-12 h-6 rounded-full transition-all relative ${localSettings.notifications.pgcAudit.enabled ? 'bg-amber-600' : 'bg-slate-300'}`}
-                >
-                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.notifications.pgcAudit.enabled ? 'left-7' : 'left-1'}`} />
-                </button>
-              </div>
-              {localSettings.notifications.pgcAudit.enabled && (
-                <div className="flex items-center gap-3">
-                  <span className="text-[10px] font-black text-slate-400 uppercase">Avisar</span>
-                  <input
-                    type="number"
-                    min="1"
-                    max="28"
-                    value={localSettings.notifications.pgcAudit.daysBeforeEnd}
-                    onChange={(e) => setLocalSettings({
-                      ...localSettings,
-                      notifications: {
-                        ...localSettings.notifications,
-                        pgcAudit: { ...localSettings.notifications.pgcAudit, daysBeforeEnd: Number(e.target.value) }
-                      }
-                    })}
-                    className="w-16 bg-white border-2 border-slate-100 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
-                  />
-                  <span className="text-[10px] font-black text-slate-400 uppercase">dias antes</span>
-                </div>
-              )}
-            </div>
+          <div className="flex bg-slate-200/50 p-1 rounded-2xl">
+            <button
+              onClick={() => setActiveTab('notifications')}
+              className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'notifications' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              🔔 Notificações
+            </button>
+            <button
+              onClick={() => setActiveTab('context')}
+              className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'context' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              🏷️ Contexto & Áreas
+            </button>
+            <button
+              onClick={() => setActiveTab('sistemas')}
+              className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'sistemas' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              💻 Sistemas
+            </button>
           </div>
         </div>
 
-        <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-4">
+        <div className="p-8 space-y-10 overflow-y-auto custom-scrollbar flex-1">
+          {activeTab === 'notifications' ? (
+            <>
+              {/* Geral / Saúde Section */}
+              <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500">
+                <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
+                  <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
+                  Geral / Saúde
+                </h4>
+
+                <div className="flex items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-blue-200 transition-all">
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-slate-900 mb-1">Hábitos de Hoje</p>
+                    <p className="text-[11px] text-slate-500 font-medium">Abrir lembrete para marcar hábitos cumpridos</p>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <input
+                      type="time"
+                      value={localSettings.notifications.habitsReminder.time}
+                      onChange={(e) => setLocalSettings({
+                        ...localSettings,
+                        notifications: {
+                          ...localSettings.notifications,
+                          habitsReminder: { ...localSettings.notifications.habitsReminder, time: e.target.value }
+                        }
+                      })}
+                      className="bg-white border-none rounded-lg px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button
+                      onClick={() => setLocalSettings({
+                        ...localSettings,
+                        notifications: {
+                          ...localSettings.notifications,
+                          habitsReminder: { ...localSettings.notifications.habitsReminder, enabled: !localSettings.notifications.habitsReminder.enabled }
+                        }
+                      })}
+                      className={`w-12 h-6 rounded-full transition-all relative ${localSettings.notifications.habitsReminder.enabled ? 'bg-blue-600' : 'bg-slate-300'}`}
+                    >
+                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.notifications.habitsReminder.enabled ? 'left-7' : 'left-1'}`} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-col p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-rose-200 transition-all gap-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <p className="text-sm font-bold text-slate-900 mb-1">Lembrete de Pesagem</p>
+                      <p className="text-[11px] text-slate-500 font-medium">Registrar peso na balança</p>
+                    </div>
+                    <button
+                      onClick={() => setLocalSettings({
+                        ...localSettings,
+                        notifications: {
+                          ...localSettings.notifications,
+                          weighInReminder: { ...localSettings.notifications.weighInReminder, enabled: !localSettings.notifications.weighInReminder.enabled }
+                        }
+                      })}
+                      className={`w-12 h-6 rounded-full transition-all relative ${localSettings.notifications.weighInReminder.enabled ? 'bg-rose-600' : 'bg-slate-300'}`}
+                    >
+                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.notifications.weighInReminder.enabled ? 'left-7' : 'left-1'}`} />
+                    </button>
+                  </div>
+                  {localSettings.notifications.weighInReminder.enabled && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <select
+                        value={localSettings.notifications.weighInReminder.frequency}
+                        onChange={(e) => setLocalSettings({
+                          ...localSettings,
+                          notifications: {
+                            ...localSettings.notifications,
+                            weighInReminder: { ...localSettings.notifications.weighInReminder, frequency: e.target.value as any }
+                          }
+                        })}
+                        className="bg-white border-none rounded-lg px-3 py-1.5 text-[10px] font-black uppercase text-slate-900 focus:ring-2 focus:ring-rose-500"
+                      >
+                        <option value="weekly">Semanal</option>
+                        <option value="biweekly">Quinzenal</option>
+                        <option value="monthly">Mensal</option>
+                      </select>
+                      <select
+                        value={localSettings.notifications.weighInReminder.dayOfWeek}
+                        onChange={(e) => setLocalSettings({
+                          ...localSettings,
+                          notifications: {
+                            ...localSettings.notifications,
+                            weighInReminder: { ...localSettings.notifications.weighInReminder, dayOfWeek: Number(e.target.value) }
+                          }
+                        })}
+                        className="bg-white border-none rounded-lg px-3 py-1.5 text-[10px] font-black uppercase text-slate-900 focus:ring-2 focus:ring-rose-500"
+                      >
+                        <option value={0}>Domingo</option>
+                        <option value={1}>Segunda</option>
+                        <option value={2}>Terça</option>
+                        <option value={3}>Quarta</option>
+                        <option value={4}>Quinta</option>
+                        <option value={5}>Sexta</option>
+                        <option value={6}>Sábado</option>
+                      </select>
+                      <input
+                        type="time"
+                        value={localSettings.notifications.weighInReminder.time}
+                        onChange={(e) => setLocalSettings({
+                          ...localSettings,
+                          notifications: {
+                            ...localSettings.notifications,
+                            weighInReminder: { ...localSettings.notifications.weighInReminder, time: e.target.value }
+                          }
+                        })}
+                        className="bg-white border-none rounded-lg px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-rose-500"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Financeiro / Ações Section */}
+              <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500 delay-100">
+                <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
+                  <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
+                  Financeiro / Ações
+                </h4>
+
+                <div className="flex items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-emerald-200 transition-all">
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-slate-900 mb-1">Risco Orçamentário</p>
+                    <p className="text-[11px] text-slate-500 font-medium">Avisar se gastos estiverem acima do esperado</p>
+                  </div>
+                  <button
+                    onClick={() => setLocalSettings({
+                      ...localSettings,
+                      notifications: {
+                        ...localSettings.notifications,
+                        budgetRisk: { ...localSettings.notifications.budgetRisk, enabled: !localSettings.notifications.budgetRisk.enabled }
+                      }
+                    })}
+                    className={`w-12 h-6 rounded-full transition-all relative ${localSettings.notifications.budgetRisk.enabled ? 'bg-emerald-600' : 'bg-slate-300'}`}
+                  >
+                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.notifications.budgetRisk.enabled ? 'left-7' : 'left-1'}`} />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-blue-200 transition-all">
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-slate-900 mb-1">Ações Vencidas</p>
+                    <p className="text-[11px] text-slate-500 font-medium">Alertar sobre tarefas fora do prazo</p>
+                  </div>
+                  <button
+                    onClick={() => setLocalSettings({
+                      ...localSettings,
+                      notifications: {
+                        ...localSettings.notifications,
+                        overdueTasks: { ...localSettings.notifications.overdueTasks, enabled: !localSettings.notifications.overdueTasks.enabled }
+                      }
+                    })}
+                    className={`w-12 h-6 rounded-full transition-all relative ${localSettings.notifications.overdueTasks.enabled ? 'bg-blue-600' : 'bg-slate-300'}`}
+                  >
+                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.notifications.overdueTasks.enabled ? 'left-7' : 'left-1'}`} />
+                  </button>
+                </div>
+
+                <div className="flex flex-col p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-amber-200 transition-all gap-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <p className="text-sm font-bold text-slate-900 mb-1">Audit PGC</p>
+                      <p className="text-[11px] text-slate-500 font-medium">Verificar vínculos antes do fim do mês</p>
+                    </div>
+                    <button
+                      onClick={() => setLocalSettings({
+                        ...localSettings,
+                        notifications: {
+                          ...localSettings.notifications,
+                          pgcAudit: { ...localSettings.notifications.pgcAudit, enabled: !localSettings.notifications.pgcAudit.enabled }
+                        }
+                      })}
+                      className={`w-12 h-6 rounded-full transition-all relative ${localSettings.notifications.pgcAudit.enabled ? 'bg-amber-600' : 'bg-slate-300'}`}
+                    >
+                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.notifications.pgcAudit.enabled ? 'left-7' : 'left-1'}`} />
+                    </button>
+                  </div>
+                  {localSettings.notifications.pgcAudit.enabled && (
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] font-black text-slate-400 uppercase">Avisar</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="28"
+                        value={localSettings.notifications.pgcAudit.daysBeforeEnd}
+                        onChange={(e) => setLocalSettings({
+                          ...localSettings,
+                          notifications: {
+                            ...localSettings.notifications,
+                            pgcAudit: { ...localSettings.notifications.pgcAudit, daysBeforeEnd: Number(e.target.value) }
+                          }
+                        })}
+                        className="w-16 bg-white border-2 border-slate-100 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
+                      />
+                      <span className="text-[10px] font-black text-slate-400 uppercase">dias antes</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          ) : activeTab === 'context' ? (
+            /* Unidades / áreas e Palavras-Chave TAB */
+            <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
+              <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
+                <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
+                Áreas e Palavras-Chave
+              </h4>
+
+              <div className="space-y-4">
+                {unidades.map((u) => {
+                  const isProtected = ['CLC', 'ASSISTÊNCIA', 'ASSISTÊNCIA ESTUDANTIL'].includes(u.nome.toUpperCase());
+                  return (
+                    <div key={u.id} className={`p-6 bg-slate-50 rounded-[2rem] border ${isProtected ? 'border-amber-200 bg-amber-50/30' : 'border-slate-100'} space-y-4 shadow-sm`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <h5 className="text-xs font-black text-slate-900 uppercase tracking-widest">{u.nome}</h5>
+                          {isProtected && <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest">Protegido</span>}
+                        </div>
+                        
+                        {!isProtected && (
+                          <button
+                            onClick={() => onDeleteUnidade(u.id)}
+                            className="p-2 text-rose-300 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-all"
+                            title="Remover Área"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        {(u.palavras_chave || []).map((kw, i) => (
+                          <span key={i} className="inline-flex items-center gap-1 px-3 py-1 bg-white border border-slate-200 rounded-full text-[9px] font-black text-slate-600 uppercase group/kw">
+                            {kw}
+                            <button onClick={() => handleRemoveKeyword(u.id, u.palavras_chave || [], kw)} className="text-slate-300 hover:text-rose-500 transition-colors">
+                              <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                          </span>
+                        ))}
+                        {(u.palavras_chave || []).length === 0 && (
+                          <p className="text-[10px] text-slate-400 italic">Sem palavras-chave definidas</p>
+                        )}
+                      </div>
+
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="Nova palavra-chave..."
+                          value={newKeywordMap[u.id] || ''}
+                          onChange={(e) => setNewKeywordMap({ ...newKeywordMap, [u.id]: e.target.value })}
+                          onKeyDown={(e) => e.key === 'Enter' && handleAddKeyword(u.id, u.palavras_chave || [])}
+                          className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 text-[10px] font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                        />
+                        <button
+                          onClick={() => handleAddKeyword(u.id, u.palavras_chave || [])}
+                          className="bg-blue-600 text-white px-4 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-md shadow-blue-100"
+                        >
+                          Add
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                <div className="p-6 bg-blue-50/50 rounded-[2rem] border-2 border-dashed border-blue-200 flex flex-col gap-4">
+                  <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest text-center">Cadastrar Nova Área de Contexto</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Nome da Unidade (ex: DEV, MARKETING)"
+                      value={newUnidadeNome}
+                      onChange={(e) => setNewUnidadeNome(e.target.value)}
+                      className="flex-1 bg-white border border-blue-100 rounded-xl px-4 py-3 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"
+                    />
+                    <button
+                      onClick={() => {
+                        if (newUnidadeNome.trim()) {
+                          onAddUnidade(newUnidadeNome.trim().toUpperCase());
+                          setNewUnidadeNome('');
+                        }
+                      }}
+                      className="bg-blue-600 text-white px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-200"
+                    >
+                      Criar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : activeTab === 'sistemas' ? (
+            <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
+              <div className="space-y-4">
+                <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
+                  <span className="w-2 h-2 bg-violet-500 rounded-full"></span>
+                  Sistemas em Desenvolvimento
+                </h4>
+
+                <p className="text-xs text-slate-500 font-medium">
+                  Cadastre os sistemas que você está desenvolvendo para gerenciá-los no módulo Sistemas.
+                </p>
+
+                {/* Lista de Sistemas */}
+                <div className="space-y-3">
+                  {unidades.filter(u => u.nome.startsWith('SISTEMA:')).length > 0 ? (
+                    unidades.filter(u => u.nome.startsWith('SISTEMA:')).map(sistema => (
+                      <div key={sistema.id} className="bg-violet-50 border border-violet-100 rounded-2xl p-6 group hover:border-violet-300 transition-all">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-violet-500 rounded-xl flex items-center justify-center">
+                              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                              </svg>
+                            </div>
+                            <div>
+                              <p className="text-sm font-black text-slate-900">{sistema.nome.replace('SISTEMA:', '').trim()}</p>
+                              <p className="text-[10px] text-slate-500 font-medium">Sistema cadastrado</p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => onDeleteUnidade(sistema.id)}
+                            className="opacity-0 group-hover:opacity-100 p-2 hover:bg-rose-100 rounded-xl transition-all text-rose-600"
+                            title="Remover sistema"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-12 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+                      <div className="w-16 h-16 bg-violet-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <svg className="w-8 h-8 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                        </svg>
+                      </div>
+                      <p className="text-slate-400 font-bold text-sm">Nenhum sistema cadastrado</p>
+                      <p className="text-slate-400 text-xs mt-1">Adicione seu primeiro sistema abaixo</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Formulário para adicionar novo sistema */}
+                <div className="bg-gradient-to-br from-violet-50 to-purple-50 border-2 border-violet-200 rounded-2xl p-6">
+                  <p className="text-[10px] font-black text-violet-600 uppercase tracking-widest text-center mb-4">Cadastrar Novo Sistema</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Nome do Sistema (ex: Hermes, Portal Web, API REST)"
+                      value={newUnidadeNome}
+                      onChange={(e) => setNewUnidadeNome(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newUnidadeNome.trim()) {
+                          onAddUnidade(`SISTEMA: ${newUnidadeNome.trim()}`);
+                          setNewUnidadeNome('');
+                        }
+                      }}
+                      className="flex-1 bg-white border border-violet-100 rounded-xl px-4 py-3 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-violet-500 outline-none shadow-sm"
+                    />
+                    <button
+                      onClick={() => {
+                        if (newUnidadeNome.trim()) {
+                          onAddUnidade(`SISTEMA: ${newUnidadeNome.trim()}`);
+                          setNewUnidadeNome('');
+                        }
+                      }}
+                      className="bg-violet-600 text-white px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-violet-700 transition-all shadow-lg shadow-violet-200"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" />
+                      </svg>
+                    </button>
+                  </div>
+                  <p className="text-[9px] text-violet-600 font-medium mt-2 text-center">Pressione Enter ou clique no botão + para adicionar</p>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-4 flex-shrink-0">
           <button onClick={onClose} className="flex-1 px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all">Cancelar</button>
           <button
             onClick={() => {
@@ -921,8 +1247,8 @@ const DailyHabitsModal = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-0 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="bg-white w-full h-full md:h-auto md:max-w-md rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
         <div className="p-8 border-b border-slate-100 bg-amber-500/5 flex items-center justify-between">
           <div>
             <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3">
@@ -994,7 +1320,31 @@ const DailyHabitsModal = ({
   );
 };
 
-const TaskCreateModal = ({ onSave, onClose }: { onSave: (data: Partial<Tarefa>) => void, onClose: () => void }) => {
+// Função para detectar automaticamente a área baseada em palavras-chave
+const detectAreaFromTitle = (titulo: string): Categoria => {
+  const tituloLower = titulo.toLowerCase();
+  
+  // Palavras-chave para CLC
+  const clcKeywords = ['licitação', 'licitacao', 'pregão', 'pregao', 'contrato', 'dispensa', 'inexigibilidade', 'compra', 'aquisição', 'aquisicao'];
+  
+  // Palavras-chave para Assistência Estudantil
+  const assistenciaKeywords = ['assistência', 'assistencia', 'estudantil', 'aluno', 'bolsa', 'auxílio', 'auxilio', 'permanência', 'permanencia'];
+  
+  // Verifica CLC primeiro
+  if (clcKeywords.some(keyword => tituloLower.includes(keyword))) {
+    return 'CLC';
+  }
+  
+  // Verifica Assistência Estudantil
+  if (assistenciaKeywords.some(keyword => tituloLower.includes(keyword))) {
+    return 'ASSISTÊNCIA';
+  }
+  
+  // Se não encontrar palavras-chave específicas, retorna GERAL
+  return 'GERAL';
+};
+
+const TaskCreateModal = ({ unidades, onSave, onClose }: { unidades: { id: string, nome: string }[], onSave: (data: Partial<Tarefa>) => void, onClose: () => void }) => {
   const [formData, setFormData] = useState({
     titulo: '',
     data_inicio: new Date().toISOString().split('T')[0],
@@ -1005,10 +1355,12 @@ const TaskCreateModal = ({ onSave, onClose }: { onSave: (data: Partial<Tarefa>) 
     notas: '',
     is_single_day: false
   });
+  
+  const [autoClassified, setAutoClassified] = useState(false);
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className="bg-white w-full max-w-xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-0 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="bg-white w-full h-full md:h-auto md:max-w-xl rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
         <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
           <h3 className="text-2xl font-black text-slate-900 tracking-tight">Nova Ação</h3>
           <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
@@ -1018,15 +1370,32 @@ const TaskCreateModal = ({ onSave, onClose }: { onSave: (data: Partial<Tarefa>) 
 
         <div className="p-8 space-y-6">
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Título da Tarefa</label>
+            <label htmlFor="task-title-input" className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Título da Tarefa</label>
             <input
+              id="task-title-input"
               type="text"
               autoFocus
               value={formData.titulo}
-              onChange={e => setFormData({ ...formData, titulo: e.target.value })}
+              onChange={e => {
+                const newTitulo = e.target.value;
+                const detectedArea = detectAreaFromTitle(newTitulo);
+                
+                setFormData({ 
+                  ...formData, 
+                  titulo: newTitulo,
+                  // Só atualiza a categoria automaticamente se ainda não foi manualmente alterada
+                  categoria: autoClassified ? formData.categoria : detectedArea
+                });
+              }}
               className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
               placeholder="O que precisa ser feito?"
             />
+            {formData.categoria !== 'NÃO CLASSIFICADA' && formData.categoria !== 'GERAL' && !autoClassified && (
+              <p className="text-[9px] font-bold text-blue-600 pl-1 flex items-center gap-1">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                Área detectada automaticamente. Você pode alterá-la abaixo.
+              </p>
+            )}
           </div>
 
           <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-100">
@@ -1093,13 +1462,19 @@ const TaskCreateModal = ({ onSave, onClose }: { onSave: (data: Partial<Tarefa>) 
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Tag (Classificação)</label>
               <select
                 value={formData.categoria}
-                onChange={e => setFormData({ ...formData, categoria: e.target.value as Categoria })}
-                className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+                onChange={e => {
+                  setFormData({ ...formData, categoria: e.target.value as Categoria });
+                  setAutoClassified(true); // Marca que o usuário alterou manualmente
+                }}
+                className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[10px] tracking-widest"
               >
-                <option value="CLC">CLC</option>
-                <option value="ASSISTÊNCIA">Assistência Estudantil</option>
                 <option value="GERAL">Geral</option>
                 <option value="NÃO CLASSIFICADA">Não Classificada</option>
+                <option value="CLC">CLC</option>
+                <option value="ASSISTÊNCIA">Assistência Estudantil</option>
+                {unidades.filter(u => u.nome !== 'CLC' && u.nome !== 'Assistência Estudantil').map(u => (
+                  <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -1154,7 +1529,7 @@ const TaskCreateModal = ({ onSave, onClose }: { onSave: (data: Partial<Tarefa>) 
   );
 };
 
-const TaskEditModal = ({ task, onSave, onDelete, onClose }: { task: Tarefa, onSave: (id: string, updates: Partial<Tarefa>) => void, onDelete: (id: string) => void, onClose: () => void }) => {
+const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose }: { unidades: { id: string, nome: string }[], task: Tarefa, onSave: (id: string, updates: Partial<Tarefa>) => void, onDelete: (id: string) => void, onClose: () => void }) => {
   const [formData, setFormData] = useState({
     titulo: task.titulo,
     data_inicio: task.data_inicio || (task.data_criacao ? task.data_criacao.split('T')[0] : ''),
@@ -1187,8 +1562,8 @@ const TaskEditModal = ({ task, onSave, onDelete, onClose }: { task: Tarefa, onSa
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className="bg-white w-full max-w-xl max-h-[90vh] flex flex-col rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-0 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="bg-white w-full h-full md:h-auto md:max-w-xl md:max-h-[90vh] flex flex-col rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
         <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between flex-shrink-0">
           <h3 className="text-2xl font-black text-slate-900 tracking-tight">Editar Demanda</h3>
           <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
@@ -1261,12 +1636,15 @@ const TaskEditModal = ({ task, onSave, onDelete, onClose }: { task: Tarefa, onSa
               <select
                 value={formData.categoria}
                 onChange={e => setFormData({ ...formData, categoria: e.target.value as Categoria })}
-                className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[10px] tracking-widest"
               >
-                <option value="CLC">CLC</option>
-                <option value="ASSISTÊNCIA">Assistência Estudantil</option>
                 <option value="GERAL">Geral</option>
                 <option value="NÃO CLASSIFICADA">Não Classificada</option>
+                <option value="CLC">CLC</option>
+                <option value="ASSISTÊNCIA">Assistência Estudantil</option>
+                {unidades.filter(u => u.nome !== 'CLC' && u.nome !== 'Assistência Estudantil').map(u => (
+                  <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -1317,17 +1695,6 @@ const TaskEditModal = ({ task, onSave, onDelete, onClose }: { task: Tarefa, onSa
                 Adicionar
               </button>
             </div>
-          </div>
-
-          <div className="space-y-2 opacity-60">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Notas / Observações Originais (Imutável)</label>
-            <textarea
-              rows={2}
-              value={formData.notas}
-              readOnly
-              disabled
-              className="w-full bg-slate-100/50 border-none rounded-2xl px-6 py-4 text-xs font-medium text-slate-500 cursor-not-allowed resize-none"
-            />
           </div>
         </div>
 
@@ -1454,7 +1821,7 @@ const TaskExecutionView = ({ task, onSave, onClose }: { task: Tarefa, onSave: (i
   };
 
   return (
-    <div className={`fixed inset-0 z-[200] flex flex-col transition-all duration-700 ease-in-out ${isTimerRunning ? 'bg-[#050505] text-white' : 'bg-slate-50 text-slate-900'} overflow-hidden`}>
+    <div className={`fixed inset-0 z-[200] flex flex-col transition-all duration-700 ease-in-out ${isTimerRunning ? 'bg-[#050505] text-white' : 'bg-[#050505] text-white'} overflow-hidden`}>
       {/* Botão de Fechar Geral */}
       <button
         onClick={() => {
@@ -1478,7 +1845,7 @@ const TaskExecutionView = ({ task, onSave, onClose }: { task: Tarefa, onSave: (i
 
           <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
             <div className="flex flex-col items-center justify-center">
-              <div className="text-[8rem] md:text-[10rem] lg:text-[12rem] font-black tracking-tighter tabular-nums text-white leading-none drop-shadow-[0_0_50px_rgba(37,99,235,0.3)] relative">
+              <div className="text-[10rem] md:text-[14rem] lg:text-[16rem] font-black tracking-tighter tabular-nums text-white leading-none drop-shadow-[0_0_50px_rgba(37,99,235,0.3)] relative">
                 {formatTime(seconds).split(':').slice(1).join(':')}
                 <span className="text-3xl md:text-4xl text-blue-500/50 absolute -right-16 bottom-8 uppercase tracking-widest leading-none">
                   {formatTime(seconds).split(':')[0]}h
@@ -1533,16 +1900,16 @@ const TaskExecutionView = ({ task, onSave, onClose }: { task: Tarefa, onSave: (i
         </div>
       ) : (
         /* --- MODO PREPARAÇÃO --- */
-        <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in duration-500">
+        <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in duration-500 text-slate-300">
           <div className="p-10 pb-4">
-            <span className="text-blue-600 text-[10px] font-black uppercase tracking-[0.3em] mb-2 block">Central de Execução / CLC</span>
-            <h1 className="text-4xl font-black text-slate-900 tracking-tighter leading-none">{task.titulo}</h1>
+            <span className="text-blue-600 text-[10px] font-black uppercase tracking-[0.3em] mb-2 block">Central de Execução</span>
+            <h1 className="text-4xl font-black text-white tracking-tighter leading-none">{task.titulo}</h1>
           </div>
 
           <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-8 p-10 pt-4 overflow-hidden">
             {/* Esquerda: Botão de Play Gigante */}
-            <div className="flex flex-col items-center justify-center bg-white rounded-[3rem] border border-slate-200 shadow-2xl relative group overflow-hidden">
-              <div className="absolute inset-0 bg-blue-50 opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
+            <div className="flex flex-col items-center justify-center bg-white/5 rounded-[3rem] border border-white/10 shadow-2xl relative group overflow-hidden">
+              <div className="absolute inset-0 bg-blue-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
 
               <div className="relative text-center space-y-8 z-10">
                 <div className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em]">Pronto para Começar?</div>
@@ -1553,10 +1920,10 @@ const TaskExecutionView = ({ task, onSave, onClose }: { task: Tarefa, onSave: (i
                   <svg className="w-20 h-20 ml-3 group-hover/play:scale-110 transition-transform" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
                 </button>
                 <div className="space-y-1">
-                  <div className="text-4xl font-black text-slate-900 tabular-nums">
+                  <div className="text-4xl font-black text-white tabular-nums">
                     {formatTime(sessionTotalSeconds)}
                   </div>
-                  <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Tempo Total Acumulado</div>
+                  <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Tempo Total Acumulado</div>
                 </div>
               </div>
 
@@ -1564,7 +1931,7 @@ const TaskExecutionView = ({ task, onSave, onClose }: { task: Tarefa, onSave: (i
               <div className="absolute bottom-10 left-10 flex items-center gap-3">
                 <button
                   onClick={() => onSave(task.id, { status: task.status === 'concluído' ? 'em andamento' : 'concluído' })}
-                  className={`px-6 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${task.status === 'concluído' ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                  className={`px-6 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${task.status === 'concluído' ? 'bg-emerald-500 text-white' : 'bg-white/10 text-slate-400 hover:bg-white/20'
                     }`}
                 >
                   {task.status === 'concluído' ? 'Concluída' : 'Marcar Concluída'}
@@ -1582,12 +1949,12 @@ const TaskExecutionView = ({ task, onSave, onClose }: { task: Tarefa, onSave: (i
                       <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L14.85 8.15L21 11L14.85 13.85L12 20L9.15 13.85L3 11L9.15 8.15L12 2Z" /></svg>
                     </div>
                     <div>
-                      <h4 className="text-xs font-black uppercase tracking-widest">Especialista CLC</h4>
+                      <h4 className="text-xs font-black uppercase tracking-widest">Especialista Virtual</h4>
                       <p className="text-[8px] text-white/50 uppercase font-bold tracking-widest">Chat Contextual</p>
                     </div>
                   </div>
                   <a
-                    href={task.chat_gemini_url || "https://gemini.google.com/gem/096c0e51e1b9"}
+                    href={task.chat_gemini_url || (task.categoria === 'CLC' ? "https://gemini.google.com/gem/096c0e51e1b9" : "https://gemini.google.com/")}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="bg-white text-indigo-600 px-6 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all flex items-center gap-2"
@@ -1611,26 +1978,26 @@ const TaskExecutionView = ({ task, onSave, onClose }: { task: Tarefa, onSave: (i
               </div>
 
               {/* Log de Atividade */}
-              <div className="flex-1 bg-white rounded-[2.5rem] border border-slate-200 shadow-xl p-8 flex flex-col overflow-hidden">
+              <div className="flex-1 bg-white/5 rounded-[2.5rem] border border-white/10 shadow-xl p-8 flex flex-col overflow-hidden">
                 <div className="flex items-center justify-between mb-4 flex-shrink-0">
-                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Diário de Execução</h4>
+                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Diário de Execução</h4>
                   <div className="flex gap-2">
                     <input
                       type="text"
                       value={newFollowUp}
                       onChange={e => setNewFollowUp(e.target.value)}
                       placeholder="Registre o que foi feito..."
-                      className="bg-slate-50 border border-slate-100 rounded-lg px-4 py-2 text-[11px] font-medium outline-none focus:ring-1 focus:ring-blue-500 w-48"
+                      className="bg-black/20 border border-white/10 rounded-lg px-4 py-2 text-[11px] font-medium outline-none focus:ring-1 focus:ring-blue-500 w-48 text-slate-300 placeholder:text-slate-600"
                       onKeyDown={e => e.key === 'Enter' && handleAddFollowUp()}
                     />
-                    <button onClick={handleAddFollowUp} className="bg-slate-900 text-white px-4 rounded-lg text-[9px] font-black uppercase transition-all">Add</button>
+                    <button onClick={handleAddFollowUp} className="bg-white/10 text-slate-300 hover:text-white px-4 rounded-lg text-[9px] font-black uppercase transition-all">Add</button>
                   </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
                   {task.acompanhamento && task.acompanhamento.length > 0 ? (
                     task.acompanhamento.slice().reverse().map((entry, idx) => (
-                      <div key={idx} className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex gap-4 hover:border-blue-200 transition-colors">
+                      <div key={idx} className="bg-black/20 p-4 rounded-2xl border border-white/5 flex gap-4 hover:border-white/20 transition-colors">
                         <div className="flex-shrink-0 text-[8px] font-black text-slate-400 uppercase leading-none min-w-[50px] pt-1">
                           {new Date(entry.data).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
                         </div>
@@ -1734,7 +2101,7 @@ const AudioRecorder = React.memo(({ onAudioReady, disabled, compact }: { onAudio
   return (
     <div className="flex flex-col items-center gap-4">
       {isRecording ? (
-        <div className="flex items-center gap-6 bg-rose-50 px-8 py-4 rounded-[2rem] border border-rose-100 shadow-xl animate-pulse">
+        <div className="flex items-center gap-6 bg-rose-50 px-8 py-4 rounded-none md:rounded-[2rem] border border-rose-100 shadow-xl animate-pulse">
           <div className="flex items-center gap-3">
             <div className="w-3 h-3 bg-rose-600 rounded-full"></div>
             <span className="text-rose-600 font-black tabular-nums text-lg">{formatTime(recordingTime)}</span>
@@ -1807,7 +2174,7 @@ const FerramentasView = ({ ideas, onAudioReady, onDeleteIdea, onArchiveIdea, onA
       <div className="animate-in grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-8 pb-20 px-4 md:px-0">
         <button
           onClick={() => setActiveTool('brainstorming')}
-          className="bg-white p-6 md:p-12 rounded-[2rem] md:rounded-[3rem] border border-slate-200 shadow-xl hover:shadow-2xl transition-all group text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6"
+          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-200 shadow-xl hover:shadow-2xl transition-all group text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6"
         >
           <div className="w-12 h-12 md:w-16 md:h-16 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all flex-shrink-0">
             <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
@@ -1820,7 +2187,7 @@ const FerramentasView = ({ ideas, onAudioReady, onDeleteIdea, onArchiveIdea, onA
 
         <button
           disabled
-          className="bg-white p-6 md:p-12 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden"
+          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-100 shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden"
         >
           <div className="absolute top-2 right-2 md:top-4 md:right-4 bg-slate-100 text-slate-400 text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Em Breve</div>
           <div className="w-12 h-12 md:w-16 md:h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 flex-shrink-0">
@@ -1834,7 +2201,7 @@ const FerramentasView = ({ ideas, onAudioReady, onDeleteIdea, onArchiveIdea, onA
 
         <button
           disabled
-          className="bg-white p-6 md:p-12 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden"
+          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-100 shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden"
         >
           <div className="absolute top-2 right-2 md:top-4 md:right-4 bg-slate-100 text-slate-400 text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Em Breve</div>
           <div className="w-12 h-12 md:w-16 md:h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 flex-shrink-0">
@@ -1848,7 +2215,7 @@ const FerramentasView = ({ ideas, onAudioReady, onDeleteIdea, onArchiveIdea, onA
 
         <button
           disabled
-          className="bg-white p-6 md:p-12 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden"
+          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-100 shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden"
         >
           <div className="absolute top-2 right-2 md:top-4 md:right-4 bg-slate-100 text-slate-400 text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Em Breve</div>
           <div className="w-12 h-12 md:w-16 md:h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 flex-shrink-0">
@@ -1907,7 +2274,7 @@ const FerramentasView = ({ ideas, onAudioReady, onDeleteIdea, onArchiveIdea, onA
 
         <div className="flex flex-col md:grid md:grid-cols-2 lg:grid-cols-3 gap-2 md:gap-8 mb-32 md:mb-0">
           {activeIdeas.map(idea => (
-            <div key={idea.id} className="bg-white p-5 md:p-8 rounded-2xl md:rounded-[2.5rem] border border-slate-100 md:border-slate-200 shadow-sm md:shadow-lg hover:shadow-md md:hover:shadow-2xl transition-all group flex flex-col relative overflow-hidden">
+            <div key={idea.id} className="bg-white p-5 md:p-8 rounded-none md:rounded-[2.5rem] border border-slate-100 md:border-slate-200 shadow-sm md:shadow-lg hover:shadow-md md:hover:shadow-2xl transition-all group flex flex-col relative overflow-hidden">
               <div className="flex items-center justify-between mb-3 md:mb-6">
                 <span className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">{formatDate(idea.timestamp.split('T')[0])}</span>
                 <div className="flex items-center gap-1 md:gap-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-all">
@@ -2012,7 +2379,7 @@ const FerramentasView = ({ ideas, onAudioReady, onDeleteIdea, onArchiveIdea, onA
             </div>
           ))}
           {activeIdeas.length === 0 && !isProcessing && (
-            <div className="col-span-full py-20 text-center border-4 border-dashed border-slate-100 rounded-[3rem]">
+            <div className="col-span-full py-20 text-center border-4 border-dashed border-slate-100 rounded-none md:rounded-[3rem]">
               <p className="text-slate-300 font-black text-xl uppercase tracking-widest">Nenhuma ideia ativa</p>
               <p className="text-slate-400 text-sm font-medium mt-2">Grave ou digite uma ideia para começar.</p>
             </div>
@@ -2022,7 +2389,7 @@ const FerramentasView = ({ ideas, onAudioReady, onDeleteIdea, onArchiveIdea, onA
 
       {/* Input Flutuante Centralizado */}
       {isAddingText && (
-        <div className="fixed bottom-24 left-4 right-4 md:left-1/2 md:-translate-x-1/2 w-auto md:w-full md:max-w-2xl z-[110] flex items-center gap-2 animate-in zoom-in-95 slide-in-from-bottom-10 bg-white/90 backdrop-blur-md p-4 rounded-[2rem] shadow-2xl border border-slate-200">
+        <div className="fixed bottom-24 left-4 right-4 md:left-1/2 md:-translate-x-1/2 w-auto md:w-full md:max-w-2xl z-[110] flex items-center gap-2 animate-in zoom-in-95 slide-in-from-bottom-10 bg-white/90 backdrop-blur-md p-4 rounded-none md:rounded-[2rem] shadow-2xl border border-slate-200">
           <input
             type="text"
             autoFocus
@@ -2107,10 +2474,23 @@ const App: React.FC = () => {
   const [healthDailyHabits, setHealthDailyHabits] = useState<DailyHabits[]>([]);
   const [healthSettings, setHealthSettings] = useState<HealthSettings>({ targetWeight: 0 });
 
+  // Systems State
+  const [sistemasDetalhes, setSistemasDetalhes] = useState<Sistema[]>([]);
+  const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
+
+
+
   // Finance Sync
   useEffect(() => {
+    const unsubSistemas = onSnapshot(collection(db, 'sistemas_detalhes'), (snapshot) => {
+      setSistemasDetalhes(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Sistema)));
+    });
+
     const unsubTransactions = onSnapshot(collection(db, 'finance_transactions'), (snapshot) => {
-      setFinanceTransactions(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as FinanceTransaction)));
+      setFinanceTransactions(snapshot.docs
+        .map(d => ({ id: d.id, ...d.data() } as FinanceTransaction))
+        .filter(t => t.status !== 'deleted')
+      );
     });
     const unsubGoals = onSnapshot(collection(db, 'finance_goals'), (snapshot) => {
       setFinanceGoals(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as FinanceGoal)));
@@ -2132,7 +2512,10 @@ const App: React.FC = () => {
     });
 
     const unsubIncomeEntries = onSnapshot(collection(db, 'income_entries'), (snapshot) => {
-      setIncomeEntries(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as IncomeEntry)));
+      setIncomeEntries(snapshot.docs
+        .map(d => ({ id: d.id, ...d.data() } as IncomeEntry))
+        .filter(e => e.status !== 'deleted')
+      );
     });
 
     const unsubIncomeRubrics = onSnapshot(collection(db, 'income_rubrics'), (snapshot) => {
@@ -2151,6 +2534,7 @@ const App: React.FC = () => {
     });
 
     return () => {
+      unsubSistemas();
       unsubTransactions();
       unsubGoals();
       unsubSettings();
@@ -2318,8 +2702,19 @@ const App: React.FC = () => {
   const [activeModule, setActiveModule] = useState<'home' | 'acoes' | 'financeiro' | 'ferramentas' | 'saude'>('home');
   const [viewMode, setViewMode] = useState<'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'plano-trabalho' | 'ferramentas' | 'finance' | 'saude'>('gallery');
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
+
+  // Modal Mode State
+  const [taskModalMode, setTaskModalMode] = useState<'default' | 'edit' | 'execute'>('default');
+
+  // Reset modal mode when selected task is cleared
+  useEffect(() => {
+    if (!selectedTask) {
+      setTaskModalMode('default');
+    }
+  }, [selectedTask]);
   const [planosTrabalho, setPlanosTrabalho] = useState<PlanoTrabalho[]>([]);
   const [statusFilter, setStatusFilter] = useState<Status[]>(['em andamento']);
+  const [areaFilter, setAreaFilter] = useState<string>('TODAS');
   const [sortOption, setSortOption] = useState<SortOption>('date-asc');
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -2332,6 +2727,7 @@ const App: React.FC = () => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [isHabitsReminderOpen, setIsHabitsReminderOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'notifications' | 'context' | 'sistemas'>('notifications');
 
   // --- Notification System & App Settings ---
 
@@ -2383,7 +2779,11 @@ const App: React.FC = () => {
     const interval = setInterval(() => {
       const now = new Date();
       const current_time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-      const todayStr = now.toISOString().split('T')[0];
+      
+      // Calculate local date string (YYYY-MM-DD) to match local time configuration
+      const offset = now.getTimezoneOffset() * 60000;
+      const localDate = new Date(now.getTime() - offset);
+      const todayStr = localDate.toISOString().split('T')[0];
 
       // 1. Habits Reminder
       if (appSettings.notifications.habitsReminder.enabled && current_time === appSettings.notifications.habitsReminder.time) {
@@ -2426,7 +2826,7 @@ const App: React.FC = () => {
           }
         }
       }
-    }, 60000);
+    }, 10000); // Check every 10 seconds to ensure we don't miss the minute
     return () => clearInterval(interval);
   }, [appSettings.notifications]);
 
@@ -2515,7 +2915,8 @@ const App: React.FC = () => {
 
   // Welcome Notification
   useEffect(() => {
-    if (notifications.length === 0) {
+    const hasSeenWelcome = localStorage.getItem('hasSeenWelcome');
+    if (!hasSeenWelcome && notifications.length === 0) {
       const welcomeNote: Notification = {
         id: 'welcome',
         title: 'Bem-vindo ao Hermes',
@@ -2526,6 +2927,7 @@ const App: React.FC = () => {
       };
       setNotifications([welcomeNote]);
       setTimeout(() => setActivePopup(welcomeNote), 2000);
+      localStorage.setItem('hasSeenWelcome', 'true');
     }
   }, []);
 
@@ -2637,9 +3039,15 @@ const App: React.FC = () => {
     showToast("Transcrevendo áudio...", "info");
 
     try {
-      // Usando a chave que já deve estar configurada no ambiente
-      const genAI = new GoogleGenerativeAI(((import.meta as any).env.VITE_GEMINI_API_KEY || 'AIzaSyD3g8j8mDoJtbSX-ryOHvxEp3kAK4WQMvY'));
-      const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!apiKey || apiKey === 'PLACEHOLDER_API_KEY') {
+        showToast("Erro: Configure a VITE_GEMINI_API_KEY no arquivo .env.local", "error");
+        setIsProcessingIdea(false);
+        return;
+      }
+
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
       const result = await model.generateContent([
         {
@@ -2677,6 +3085,20 @@ const App: React.FC = () => {
     } catch (err) {
       console.error(err);
       showToast("Erro ao atualizar ideia.", "error");
+    }
+  };
+
+  const handleUpdateSistema = async (id: string, updates: Partial<Sistema>) => {
+    try {
+      // Check if document exists first or use setDoc with merge
+      await setDoc(doc(db, 'sistemas_detalhes', id), {
+        ...updates,
+        data_atualizacao: new Date().toISOString()
+      }, { merge: true });
+      showToast("Sistema atualizado!", "success");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao atualizar sistema.", "error");
     }
   };
 
@@ -2783,7 +3205,7 @@ const App: React.FC = () => {
 
     const qUnidades = query(collection(db, 'unidades'));
     const unsubscribeUnidades = onSnapshot(qUnidades, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as { id: string, nome: string }));
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as { id: string, nome: string, palavras_chave?: string[] }));
       setUnidades(data);
     });
 
@@ -2802,6 +3224,39 @@ const App: React.FC = () => {
       unsubscribeSistemas();
     };
   }, []);
+
+  const handleAddUnidade = async (nome: string) => {
+    try {
+      await addDoc(collection(db, 'unidades'), {
+        nome: nome,
+        palavras_chave: []
+      });
+      showToast(`Área ${nome} adicionada!`, 'success');
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao adicionar área.", 'error');
+    }
+  };
+
+  const handleDeleteUnidade = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'unidades', id));
+      showToast("Área removida.", 'info');
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao remover área.", 'error');
+    }
+  };
+
+  const handleUpdateUnidade = async (id: string, updates: any) => {
+    try {
+      await updateDoc(doc(db, 'unidades', id), updates);
+      showToast("Área atualizada!", 'success');
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao atualizar área.", 'error');
+    }
+  };
 
   useEffect(() => {
     const qPlanos = query(collection(db, 'planos_trabalho'));
@@ -2873,6 +3328,16 @@ const App: React.FC = () => {
   const handleAddHealthWeight = async (weight: number, date: string) => {
     await addDoc(collection(db, 'health_weights'), { weight, date });
     showToast("Peso registrado com sucesso!", "success");
+  };
+
+  const handleDeleteHealthWeight = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'health_weights', id));
+      showToast("Registro de peso removido.", "info");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao remover registro.", "error");
+    }
   };
 
   const handleUpdateFinanceGoal = async (goal: FinanceGoal) => {
@@ -2960,6 +3425,18 @@ const App: React.FC = () => {
       result = result.filter(t => statusFilter.some(sf => normalizeStatus(t.status) === normalizeStatus(sf)));
     }
 
+    if (areaFilter !== 'TODAS') {
+       const norm = (val: any) => (val || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+       const filterNorm = norm(areaFilter);
+       result = result.filter(t => {
+         const cat = norm(t.categoria);
+         if (filterNorm === 'CLC') return cat === 'CLC';
+         if (filterNorm === 'ASSISTENCIA') return cat === 'ASSISTENCIA' || cat === 'ASSISTENCIA ESTUDANTIL';
+         if (filterNorm === 'NAO CLASSIFICADA') return !t.categoria || cat === 'NAO CLASSIFICADA'; 
+         return cat === filterNorm;
+       });
+    }
+
     // Sempre remove excluídos
     result = result.filter(t => t.status !== 'excluído' as any);
 
@@ -2980,7 +3457,7 @@ const App: React.FC = () => {
       return 0;
     });
     return result;
-  }, [tarefas, searchTerm, statusFilter, sortOption]);
+  }, [tarefas, searchTerm, statusFilter, sortOption, areaFilter]);
 
   // Calcula tarefas não classificadas usando EXATAMENTE o mesmo filtro da exibição
   const unclassifiedTasksCount = useMemo(() => {
@@ -3190,6 +3667,20 @@ const App: React.FC = () => {
             <div className="flex justify-end p-4 md:absolute md:top-12 md:right-12 gap-3">
               <div className="relative">
                 <button
+                  onClick={() => {
+                    setActiveModule('acoes');
+                    setViewMode('ferramentas');
+                    setActiveFerramenta('brainstorming');
+                  }}
+                  className="bg-white border-2 border-slate-100 text-amber-500 p-4 rounded-2xl shadow-xl hover:bg-slate-50 transition-all active:scale-95 group"
+                  aria-label="Ideias Rápidas"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                </button>
+              </div>
+
+              <div className="relative">
+                <button
                   onClick={() => setIsSettingsModalOpen(true)}
                   className="bg-white border-2 border-slate-100 text-slate-700 p-4 rounded-2xl shadow-xl hover:bg-slate-50 transition-all active:scale-95 group"
                   aria-label="Configurações"
@@ -3201,7 +3692,7 @@ const App: React.FC = () => {
               <div className="relative">
                 <button
                   onClick={() => setIsNotificationCenterOpen(!isNotificationCenterOpen)}
-                  className="bg-white border-2 border-slate-100 text-slate-700 p-4 rounded-2xl shadow-xl hover:bg-slate-50 transition-all active:scale-95 group relative"
+                  className="bg-white border-2 border-slate-100 text-slate-700 p-4 rounded-2xl shadow-xl hover:bg-slate-50 transition-all active:scale-95 group relative notification-trigger"
                   aria-label="Notificações"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
@@ -3229,7 +3720,8 @@ const App: React.FC = () => {
             </div>
 
             {/* Cards dos Módulos */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
+            {/* Cards dos Módulos */}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 md:gap-6">
 
               {/* Card Ações */}
               <button
@@ -3237,18 +3729,18 @@ const App: React.FC = () => {
                   setActiveModule('acoes');
                   setViewMode('gallery');
                 }}
-                className="group bg-white border-2 border-slate-200 rounded-[2.5rem] p-8 md:p-10 hover:border-blue-500 hover:shadow-2xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden"
+                className="group bg-white border-2 border-slate-200 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-blue-500 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden"
               >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                 <div className="relative z-10">
-                  <div className="w-16 h-16 md:w-20 md:h-20 bg-blue-500 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
-                    <svg className="w-8 h-8 md:w-10 md:h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-500 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                    <svg className="w-5 h-5 md:w-6 md:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 14l2 2 4-4" />
                     </svg>
                   </div>
-                  <h2 className="text-2xl md:text-3xl font-black text-slate-900 mb-3 group-hover:text-blue-600 transition-colors">Ações</h2>
-                  <p className="text-slate-500 text-sm md:text-base font-medium leading-relaxed">Gestão de tarefas, CLC, Assistência Estudantil, PGC e Plano de Trabalho</p>
+                  <h2 className="text-lg md:text-xl font-black text-slate-900 mb-2 group-hover:text-blue-600 transition-colors">Ações</h2>
+                  <p className="text-slate-500 text-xs font-medium leading-relaxed">Tarefas, PGC e Plano de Trabalho</p>
                   <div className="mt-6 flex items-center gap-2 text-blue-600 font-black text-xs uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
                     <span>Acessar</span>
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3264,17 +3756,17 @@ const App: React.FC = () => {
                   setActiveModule('financeiro');
                   setViewMode('finance');
                 }}
-                className="group bg-white border-2 border-slate-200 rounded-[2.5rem] p-8 md:p-10 hover:border-emerald-500 hover:shadow-2xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden"
+                className="group bg-white border-2 border-slate-200 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-emerald-500 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden"
               >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                 <div className="relative z-10">
-                  <div className="w-16 h-16 md:w-20 md:h-20 bg-emerald-500 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
-                    <svg className="w-8 h-8 md:w-10 md:h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-emerald-500 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                    <svg className="w-5 h-5 md:w-6 md:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                   </div>
-                  <h2 className="text-2xl md:text-3xl font-black text-slate-900 mb-3 group-hover:text-emerald-600 transition-colors">Financeiro</h2>
-                  <p className="text-slate-500 text-sm md:text-base font-medium leading-relaxed">Gestão financeira e orçamentária</p>
+                  <h2 className="text-lg md:text-xl font-black text-slate-900 mb-2 group-hover:text-emerald-600 transition-colors">Financeiro</h2>
+                  <p className="text-slate-500 text-xs font-medium leading-relaxed">Gestão financeira e orçamentária</p>
                   <div className="mt-6 flex items-center gap-2 text-emerald-600 font-black text-xs uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
                     <span>Acessar</span>
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3290,17 +3782,17 @@ const App: React.FC = () => {
                   setActiveModule('saude');
                   setViewMode('saude');
                 }}
-                className="group bg-white border-2 border-slate-200 rounded-[2.5rem] p-8 md:p-10 hover:border-rose-500 hover:shadow-2xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden"
+                className="group bg-white border-2 border-slate-200 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-rose-500 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden"
               >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                 <div className="relative z-10">
-                  <div className="w-16 h-16 md:w-20 md:h-20 bg-rose-500 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
-                    <svg className="w-8 h-8 md:w-10 md:h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-rose-500 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                    <svg className="w-5 h-5 md:w-6 md:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                     </svg>
                   </div>
-                  <h2 className="text-2xl md:text-3xl font-black text-slate-900 mb-3 group-hover:text-rose-600 transition-colors">Saúde</h2>
-                  <p className="text-slate-500 text-sm md:text-base font-medium leading-relaxed">Acompanhamento de saúde, exames e bem-estar</p>
+                  <h2 className="text-lg md:text-xl font-black text-slate-900 mb-2 group-hover:text-rose-600 transition-colors">Saúde</h2>
+                  <p className="text-slate-500 text-xs font-medium leading-relaxed">Acompanhamento e bem-estar</p>
                   <div className="mt-6 flex items-center gap-2 text-rose-600 font-black text-xs uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
                     <span>Acessar</span>
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3317,19 +3809,45 @@ const App: React.FC = () => {
                   setViewMode('ferramentas');
                   setActiveFerramenta(null);
                 }}
-                className="group bg-white border-2 border-slate-200 rounded-[2.5rem] p-8 md:p-10 hover:border-amber-500 hover:shadow-2xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden"
+                className="group bg-white border-2 border-slate-200 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-amber-500 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden"
               >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                 <div className="relative z-10">
-                  <div className="w-16 h-16 md:w-20 md:h-20 bg-amber-500 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
-                    <svg className="w-8 h-8 md:w-10 md:h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-amber-500 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                    <svg className="w-5 h-5 md:w-6 md:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
                   </div>
-                  <h2 className="text-2xl md:text-3xl font-black text-slate-900 mb-3 group-hover:text-amber-600 transition-colors">Ferramentas</h2>
-                  <p className="text-slate-500 text-sm md:text-base font-medium leading-relaxed">Brainstorming, IA e outras ferramentas auxiliares</p>
+                  <h2 className="text-lg md:text-xl font-black text-slate-900 mb-2 group-hover:text-amber-600 transition-colors">Ferramentas</h2>
+                  <p className="text-slate-500 text-xs font-medium leading-relaxed">Brainstorming e IA</p>
                   <div className="mt-6 flex items-center gap-2 text-amber-600 font-black text-xs uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span>Acessar</span>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
+                </div>
+              </button>
+
+              {/* Card Sistemas */}
+              <button
+                onClick={() => {
+                  setActiveModule('acoes');
+                  setViewMode('sistemas-dev');
+                }}
+                className="group bg-white border-2 border-slate-200 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-violet-500 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
+                <div className="relative z-10">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-violet-500 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                    <svg className="w-5 h-5 md:w-6 md:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                    </svg>
+                  </div>
+                  <h2 className="text-lg md:text-xl font-black text-slate-900 mb-2 group-hover:text-violet-600 transition-colors">Sistemas</h2>
+                  <p className="text-slate-500 text-xs font-medium leading-relaxed">Ciclo de vida de software</p>
+                  <div className="mt-6 flex items-center gap-2 text-violet-600 font-black text-xs uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
                     <span>Acessar</span>
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" />
@@ -3353,33 +3871,46 @@ const App: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setActiveModule('home')}
-                    className="p-2 rounded-xl hover:bg-slate-100 transition-colors"
+                    className="p-1.5 md:p-2 rounded-xl hover:bg-slate-100 transition-colors"
                     aria-label="Voltar ao Menu"
                   >
                     <svg className="w-5 h-5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" />
                     </svg>
                   </button>
-                  <img src="/logo.png" alt="Hermes" className="w-10 h-10 object-contain" />
-                  <h1 className="text-lg font-black tracking-tighter text-slate-900">HERMES</h1>
+                  <img src="/logo.png" alt="Hermes" className="w-8 h-8 md:w-10 md:h-10 object-contain" />
+                  <h1 className="text-base md:text-lg font-black tracking-tighter text-slate-900">HERMES</h1>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="relative">
                     <button
+                      onClick={() => {
+                        setActiveModule('acoes');
+                        setViewMode('ferramentas');
+                        setActiveFerramenta('brainstorming');
+                      }}
+                       className="p-1.5 rounded-xl hover:bg-slate-100 transition-colors text-amber-500"
+                      aria-label="Ideias Rápidas"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <button
                       onClick={() => setIsSettingsModalOpen(true)}
-                      className="p-2.5 rounded-xl hover:bg-slate-100 transition-colors"
+                      className="p-1.5 rounded-xl hover:bg-slate-100 transition-colors"
                       aria-label="Configurações"
                     >
-                      <svg className="w-6 h-6 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                      <svg className="w-5 h-5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                     </button>
                   </div>
                   <div className="relative">
                     <button
                       onClick={() => setIsNotificationCenterOpen(!isNotificationCenterOpen)}
-                      className="p-2.5 rounded-xl hover:bg-slate-100 transition-colors relative"
+                      className="p-1.5 rounded-xl hover:bg-slate-100 transition-colors relative notification-trigger"
                       aria-label="Notificações"
                     >
-                      <svg className="w-6 h-6 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+                      <svg className="w-5 h-5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
                       {notifications.some(n => !n.isRead) && (
                         <span className="absolute top-2.5 right-2.5 w-2.5 h-2.5 bg-rose-500 border-2 border-white rounded-full"></span>
                       )}
@@ -3393,10 +3924,10 @@ const App: React.FC = () => {
                       onUpdateOverdue={handleUpdateOverdueTasks}
                     />
                   </div>
-                  {viewMode !== 'ferramentas' && (
+                  {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && (
                     <button
                       onClick={() => setIsCreateModalOpen(true)}
-                      className="bg-slate-900 text-white p-2.5 rounded-xl shadow-lg hover:bg-slate-800 transition-all active:scale-95"
+                      className="bg-slate-900 text-white p-1.5 rounded-xl shadow-lg hover:bg-slate-800 transition-all active:scale-95"
                       aria-label="Criar Ação"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
@@ -3404,10 +3935,10 @@ const App: React.FC = () => {
                   )}
                   <button
                     onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                    className="p-2.5 rounded-xl hover:bg-slate-100 transition-colors"
+                    className="p-1.5 rounded-xl hover:bg-slate-100 transition-colors"
                     aria-label="Menu"
                   >
-                    <svg className="w-6 h-6 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-5 h-5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       {isMobileMenuOpen ? (
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
                       ) : (
@@ -3434,7 +3965,7 @@ const App: React.FC = () => {
                     <img src="/logo.png" alt="Hermes" className="w-9 h-9 object-contain" />
                     <h1 className="text-xl font-black tracking-tighter text-slate-900">HERMES</h1>
                   </div>
-                  {viewMode !== 'ferramentas' && activeModule !== 'financeiro' && activeModule !== 'saude' && (
+                  {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && activeModule !== 'financeiro' && activeModule !== 'saude' && (
                     <nav className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
                       <button
                         onClick={() => {
@@ -3443,33 +3974,32 @@ const App: React.FC = () => {
                         }}
                         className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'gallery' && !searchTerm ? 'bg-white text-slate-900 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}
                       >
-                        Dashboard
+                        Ações
                       </button>
-                      {unclassifiedTasksCount > 0 && (
-                        <button
-                          onClick={() => {
-                            setViewMode('gallery');
-                            setSearchTerm(searchTerm === 'filter:unclassified' ? '' : 'filter:unclassified');
-                          }}
-                          className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${searchTerm === 'filter:unclassified' ? 'bg-rose-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}
-                        >
-                          Não Classificadas
-                        </button>
-                      )}
-                      <button onClick={() => setViewMode('licitacoes')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'licitacoes' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>CLC</button>
-                      <button onClick={() => setViewMode('assistencia')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'assistencia' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>AE</button>
-                      <button onClick={() => setViewMode('pgc')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pgc' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>Audit PGC</button>
-                      <button onClick={() => setViewMode('plano-trabalho')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'plano-trabalho' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>Plano</button>
+                      <button onClick={() => setViewMode('pgc')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pgc' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>PGC</button>
                     </nav>
                   )}
                 </div>
 
-                {viewMode !== 'ferramentas' && (
+                {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && (
                   <div className="flex items-center gap-4">
                     <div className="relative">
                       <button
+                        onClick={() => {
+                           setActiveModule('acoes');
+                           setViewMode('ferramentas');
+                           setActiveFerramenta('brainstorming');
+                        }}
+                         className="bg-white border border-slate-200 text-amber-500 p-2 rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
+                        aria-label="Ideias Rápidas"
+                      >
+                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <button
                         onClick={() => setIsNotificationCenterOpen(!isNotificationCenterOpen)}
-                        className="bg-white border border-slate-200 text-slate-700 p-2 rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
+                        className="bg-white border border-slate-200 text-slate-700 p-2 rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative notification-trigger"
                         aria-label="Notificações"
                       >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
@@ -3523,37 +4053,7 @@ const App: React.FC = () => {
                         }}
                         className={`px-4 py-3 rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'gallery' && !searchTerm ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
                       >
-                        📊 Dashboard
-                      </button>
-                      {unclassifiedTasksCount > 0 && (
-                        <button
-                          onClick={() => {
-                            setViewMode('gallery');
-                            setSearchTerm('filter:unclassified');
-                            setIsMobileMenuOpen(false);
-                          }}
-                          className={`px-4 py-3 rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${searchTerm === 'filter:unclassified' ? 'bg-rose-600 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
-                        >
-                          ⚠️ Não Classificadas
-                        </button>
-                      )}
-                      <button
-                        onClick={() => {
-                          setViewMode('licitacoes');
-                          setIsMobileMenuOpen(false);
-                        }}
-                        className={`px-4 py-3 rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'licitacoes' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
-                      >
-                        📋 CLC
-                      </button>
-                      <button
-                        onClick={() => {
-                          setViewMode('assistencia');
-                          setIsMobileMenuOpen(false);
-                        }}
-                        className={`px-4 py-3 rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'assistencia' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
-                      >
-                        🎓 Assistência Estudantil
+                        📊 Ações
                       </button>
                       <button
                         onClick={() => {
@@ -3562,16 +4062,7 @@ const App: React.FC = () => {
                         }}
                         className={`px-4 py-3 rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'pgc' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
                       >
-                        📈 Audit PGC
-                      </button>
-                      <button
-                        onClick={() => {
-                          setViewMode('plano-trabalho');
-                          setIsMobileMenuOpen(false);
-                        }}
-                        className={`px-4 py-3 rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'plano-trabalho' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
-                      >
-                        📅 Plano de Trabalho
+                        📈 PGC
                       </button>
                     </>
                   )}
@@ -3600,7 +4091,29 @@ const App: React.FC = () => {
                 <>
                   <div className="flex flex-col md:flex-row items-center justify-between mb-8 gap-4 px-4 md:px-0">
                     {/* Layout & Sort Controls */}
-                    <div className="flex items-center gap-4">
+                    <div className="flex flex-wrap items-center gap-4 justify-center md:justify-start">
+                      {/* Area Filter */}
+                       <div className="relative group">
+                        <select
+                          value={areaFilter}
+                          onChange={(e) => setAreaFilter(e.target.value)}
+                          className="appearance-none bg-white pl-4 pr-10 py-2 rounded-xl border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-700 outline-none focus:ring-2 focus:ring-slate-900 shadow-sm hover:border-slate-300 transition-all cursor-pointer"
+                        >
+                          <option value="TODAS">Todas as Áreas</option>
+                          <option value="CLC">CLC</option>
+                          <option value="ASSISTÊNCIA">Assistência Estudantil</option>
+                          <option value="GERAL">Geral</option>
+                          <option value="NÃO CLASSIFICADA">Não Classificada</option>
+                          {unidades.filter(u => !['CLC', 'ASSISTÊNCIA', 'ASSISTÊNCIA ESTUDANTIL'].includes(u.nome.toUpperCase())).map(u => (
+                            <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
+                          ))}
+                        </select>
+                        <div className="absolute inset-y-0 right-0 flex items-center px-3 pointer-events-none text-slate-400">
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
+                        </div>
+                      </div>
+
+
                       {searchTerm !== 'filter:unclassified' && (
                         <div className="bg-white p-0.5 md:p-1 rounded-xl border border-slate-200 inline-flex shadow-sm">
                           <button
@@ -3649,7 +4162,7 @@ const App: React.FC = () => {
                   ) : (
                     <>
                       {searchTerm === 'filter:unclassified' ? (
-                        <div className="animate-in bg-white border border-slate-200 rounded-[2rem] overflow-hidden shadow-2xl">
+                        <div className="animate-in bg-white border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl">
                           <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
                             <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3">
                               <span className="w-2 h-8 bg-rose-600 rounded-full"></span>
@@ -3694,8 +4207,20 @@ const App: React.FC = () => {
                                       />
                                     </td>
                                     <td className="px-8 py-4">
-                                      <div className="text-[13px] font-bold text-slate-800 hover:text-blue-600 transition-colors leading-snug">
-                                        {task.titulo}
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <div className="text-[13px] font-bold text-slate-800 hover:text-blue-600 transition-colors leading-snug">
+                                          {task.titulo}
+                                        </div>
+                                        {task.sync_status === 'new' && (
+                                          <span className="text-[8px] font-black px-1.5 py-0.5 rounded uppercase bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-sm animate-pulse">
+                                            Novo
+                                          </span>
+                                        )}
+                                        {task.sync_status === 'updated' && (
+                                          <span className="text-[8px] font-black px-1.5 py-0.5 rounded uppercase bg-gradient-to-r from-amber-400 to-orange-500 text-white shadow-sm">
+                                            Atualizada
+                                          </span>
+                                        )}
                                       </div>
                                     </td>
                                     <td className="px-8 py-4 text-center text-[10px] font-black text-slate-400 uppercase">
@@ -3714,21 +4239,20 @@ const App: React.FC = () => {
                         </div>
 
                       ) : (
-                        <div className="animate-in border border-slate-200 overflow-hidden shadow-2xl bg-white">
+                        <div className="animate-in border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl bg-white">
                           {Object.keys(tarefasAgrupadas).length > 0 ? (
                             Object.entries(tarefasAgrupadas).map(([label, tasks]: [string, Tarefa[]]) => (
                               <div key={label} className="border-b last:border-b-0 border-slate-200">
                                 <button
                                   onClick={() => toggleSection(label)}
-                                  className="w-full px-8 py-5 bg-slate-50 border-b border-slate-200 flex items-center justify-between hover:bg-slate-100 transition-colors group"
+                                  className="w-full px-6 py-3 bg-transparent border-b border-slate-100 flex items-center justify-between hover:bg-slate-50 transition-colors group"
                                 >
-                                  <div className="flex items-center gap-4">
-                                    <div className={`w-2 h-8 rounded-full ${label === 'Hoje' ? 'bg-blue-600' : 'bg-slate-300'}`}></div>
-                                    <span className="text-sm font-black text-slate-900 uppercase tracking-[0.2em]">{label}</span>
-                                    <span className="bg-white border border-slate-200 text-[10px] font-black px-2 py-0.5 rounded-md text-slate-500">{tasks.length}</span>
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">{label}</span>
+                                    <span className="text-[10px] font-bold text-slate-300">({tasks.length})</span>
                                   </div>
-                                  <svg className={`w-5 h-5 text-slate-400 transition-transform duration-300 ${expandedSections.includes(label) ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
+                                  <svg className={`w-4 h-4 text-slate-300 transition-transform duration-300 ${expandedSections.includes(label) ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
                                   </svg>
                                 </button>
 
@@ -3741,6 +4265,8 @@ const App: React.FC = () => {
                                         onClick={() => setSelectedTask(task)}
                                         onToggle={handleToggleTarefaStatus}
                                         onDelete={handleDeleteTarefa}
+                                        onEdit={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
+                                        onExecute={(t) => { setSelectedTask(t); setTaskModalMode('execute'); }}
                                       />
                                     ))}
                                   </div>
@@ -3771,7 +4297,7 @@ const App: React.FC = () => {
                         </button>
 
                         {isCompletedTasksOpen && (
-                          <div className="bg-white border border-slate-200 rounded-[2rem] overflow-hidden shadow-sm opacity-60 hover:opacity-100 transition-opacity animate-in slide-in-from-top-4 duration-300">
+                          <div className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-sm opacity-60 hover:opacity-100 transition-opacity animate-in slide-in-from-top-4 duration-300">
                             {tarefas.filter(t => normalizeStatus(t.status) === 'concluido' && t.status !== 'excluído' as any).length > 0 ? (
                               tarefas
                                 .filter(t => normalizeStatus(t.status) === 'concluido' && t.status !== 'excluído' as any)
@@ -3784,6 +4310,8 @@ const App: React.FC = () => {
                                     onClick={() => setSelectedTask(t)}
                                     onToggle={handleToggleTarefaStatus}
                                     onDelete={handleDeleteTarefa}
+                                    onEdit={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
+                                    onExecute={(t) => { setSelectedTask(t); setTaskModalMode('execute'); }}
                                   />
                                 ))
                             ) : (
@@ -3798,10 +4326,15 @@ const App: React.FC = () => {
                   )}
                 </>
               ) : (viewMode === 'licitacoes' || viewMode === 'assistencia') ? (
-                <CategoryView tasks={tarefas} viewMode={viewMode} onSelectTask={setSelectedTask} />
+                <CategoryView
+                  tasks={tarefas}
+                  viewMode={viewMode}
+                  onSelectTask={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
+                  onExecuteTask={(t) => { setSelectedTask(t); setTaskModalMode('execute'); }}
+                />
               ) : viewMode === 'sistemas' ? (
                 <div className="animate-in space-y-8">
-                  <div className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-xl">
+                  <div className="bg-white p-8 rounded-none md:rounded-[2rem] border border-slate-200 shadow-xl">
                     <h3 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-3">
                       <span className="w-2 h-8 bg-amber-500 rounded-full"></span>
                       Desenvolvimento de Sistemas
@@ -3812,7 +4345,7 @@ const App: React.FC = () => {
                       ? sistemasAtivos
                       : Array.from(new Set(tarefas.filter(t => t.categoria === 'SISTEMAS').map(t => t.sistema || 'OUTROS')))
                     ).map(sistema => (
-                      <div key={sistema} className="bg-white border border-slate-200 rounded-[2rem] overflow-hidden shadow-lg flex flex-col">
+                      <div key={sistema} className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-lg flex flex-col">
                         <div className="p-6 bg-slate-900 text-white flex justify-between items-center">
                           <h4 className="text-xs font-black uppercase tracking-[0.2em]">{sistema}</h4>
                           <span className="bg-white/20 px-3 py-1 rounded-full text-[10px] font-black">{tarefas.filter(t => t.categoria === 'SISTEMAS' && (t.sistema || 'OUTROS') === sistema).length}</span>
@@ -3831,72 +4364,9 @@ const App: React.FC = () => {
                     ))}
                   </div>
                 </div>
-              ) : viewMode === 'plano-trabalho' ? (
-                <div className="animate-in space-y-8">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white p-8 rounded-[2rem] border border-slate-200 shadow-xl">
-                    <div>
-                      <h3 className="text-2xl font-black text-slate-900 tracking-tight">Plano de Trabalho Mensal</h3>
-                      <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Acompanhamento de entregas vs execução real</p>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <select
-                        value={currentMonth}
-                        onChange={(e) => setCurrentMonth(Number(e.target.value))}
-                        className="text-[10px] font-black uppercase bg-slate-100 px-4 py-2 rounded-xl border-none outline-none focus:ring-2 focus:ring-slate-900"
-                      >
-                        {['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'].map((m, i) => (
-                          <option key={i} value={i}>{m}</option>
-                        ))}
-                      </select>
-                      <button
-                        onClick={() => setIsImportPlanOpen(true)}
-                        className="bg-slate-900 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center gap-3"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
-                        Importar Plano Mensal
-                      </button>
-                    </div>
-                  </div>
-                  <div className="bg-white border border-slate-200 rounded-[2rem] overflow-hidden shadow-2xl overflow-x-auto">
-                    <table className="w-full text-left min-w-[800px]">
-                      <thead className="bg-slate-50 border-b border-slate-200">
-                        <tr>
-                          <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Origem / Unidade</th>
-                          <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Entrega Institucional</th>
-                          <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Descrição</th>
-                          <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-[200px]">% Carga Horária</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)?.itens.map((item, i) => (
-                          <tr key={i} className="hover:bg-slate-50 transition-colors">
-                            <td className="px-8 py-6">
-                              <div className="text-[10px] font-black text-slate-400 uppercase mb-1">{item.origem}</div>
-                              <div className="text-xs font-black text-slate-900">{item.unidade}</div>
-                            </td>
-                            <td className="px-8 py-6 text-sm font-black text-slate-900">{item.entrega}</td>
-                            <td className="px-8 py-6 text-xs font-medium text-slate-600 leading-relaxed max-w-xs">{item.descricao}</td>
-                            <td className="px-8 py-6">
-                              <div className="flex items-center gap-4">
-                                <div className="flex-1 h-3 bg-slate-100 rounded-full overflow-hidden">
-                                  <div className="h-full bg-indigo-500 rounded-full transition-all duration-1000" style={{ width: `${item.percentual}%` }}></div>
-                                </div>
-                                <span className="text-[10px] font-black text-slate-900 w-10">{item.percentual}%</span>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                        {(!planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)) && (
-                          <tr>
-                            <td colSpan={4} className="px-8 py-20 text-center">
-                              <p className="text-slate-300 font-black text-sm uppercase tracking-widest italic">Nenhum plano de trabalho configurado para este período.</p>
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+              ) : viewMode === 'plano-trabalho-REMOVED' ? (
+                /* Removed Plano de Trabalho View as it is now inside PGC */
+                null
               ) : viewMode === 'saude' ? (
                 <HealthView
                   weights={healthWeights}
@@ -3904,6 +4374,7 @@ const App: React.FC = () => {
                   settings={healthSettings}
                   onUpdateSettings={handleUpdateHealthSettings}
                   onAddWeight={handleAddHealthWeight}
+                  onDeleteWeight={handleDeleteHealthWeight}
                   onUpdateHabits={handleUpdateHealthHabits}
                 />
               ) : viewMode === 'ferramentas' ? (
@@ -3972,9 +4443,9 @@ const App: React.FC = () => {
                   onAddIncomeRubric={async (rubric) => { await addDoc(collection(db, 'income_rubrics'), rubric); }}
                   onUpdateIncomeRubric={async (rubric) => { await updateDoc(doc(db, 'income_rubrics', rubric.id), rubric as any); }}
                   onDeleteIncomeRubric={async (id) => { await deleteDoc(doc(db, 'income_rubrics', id)); }}
-                  onAddIncomeEntry={async (entry) => { await addDoc(collection(db, 'income_entries'), { ...entry, month: currentMonth, year: currentYear }); }}
+                  onAddIncomeEntry={async (entry) => { await addDoc(collection(db, 'income_entries'), { ...entry, month: currentMonth, year: currentYear, status: 'active' }); }}
                   onUpdateIncomeEntry={async (entry) => { await updateDoc(doc(db, 'income_entries', entry.id), entry as any); }}
-                  onDeleteIncomeEntry={async (id) => { await deleteDoc(doc(db, 'income_entries', id)); }}
+                  onDeleteIncomeEntry={async (id) => { await updateDoc(doc(db, 'income_entries', id), { status: 'deleted' }); }}
                   onUpdateSettings={(newSettings) => setDoc(doc(db, 'finance_settings', 'config'), newSettings)}
                   onAddGoal={(goal) => addDoc(collection(db, 'finance_goals'), { ...goal, priority: financeGoals.length + 1 })}
                   onUpdateGoal={handleUpdateFinanceGoal}
@@ -3983,7 +4454,397 @@ const App: React.FC = () => {
                   onAddBill={async (bill) => { await addDoc(collection(db, 'fixed_bills'), { ...bill, month: currentMonth, year: currentYear }); }}
                   onUpdateBill={async (bill) => { await updateDoc(doc(db, 'fixed_bills', bill.id), bill as any); }}
                   onDeleteBill={async (id) => { await deleteDoc(doc(db, 'fixed_bills', id)); }}
+                  onAddTransaction={async (t) => { await addDoc(collection(db, 'finance_transactions'), { ...t, status: 'active' }); }}
+                  onUpdateTransaction={async (t) => { await updateDoc(doc(db, 'finance_transactions', t.id), t as any); }}
+                  onDeleteTransaction={async (id) => { await updateDoc(doc(db, 'finance_transactions', id), { status: 'deleted' }); }}
                 />
+
+              ) : viewMode === 'sistemas-dev' ? (
+                <div className="space-y-8 animate-in fade-in duration-500 pb-20">
+                  {!selectedSystemId ? (
+                    /* VISÃO GERAL - LISTA DE SISTEMAS */
+                    <>
+                      <div className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] p-8 shadow-sm flex items-center justify-between">
+                        <div>
+                          <h2 className="text-3xl font-black text-slate-900 tracking-tight">Sistemas em Desenvolvimento</h2>
+                          <p className="text-slate-500 font-bold mt-1">Gestão do Ciclo de Vida de Software</p>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <div className="bg-violet-100 text-violet-700 px-4 py-2 rounded-xl text-sm font-black uppercase tracking-widest">
+                            {unidades.filter(u => u.nome.startsWith('SISTEMA:')).length} Sistemas
+                          </div>
+                          <button
+                            onClick={() => {
+                              setSettingsTab('sistemas');
+                              setIsSettingsModalOpen(true);
+                            }}
+                            className="bg-slate-900 text-white px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center gap-3"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+                            Novo Sistema
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                        {unidades.filter(u => u.nome.startsWith('SISTEMA:')).map(unit => {
+                          const sysDetails = sistemasDetalhes.find(s => s.id === unit.id) || {
+                            id: unit.id,
+                            nome: unit.nome.replace('SISTEMA:', '').trim(),
+                            status: 'ideia' as SistemaStatus,
+                            data_criacao: new Date().toISOString(),
+                            data_atualizacao: new Date().toISOString()
+                          };
+                          const systemName = unit.nome.replace('SISTEMA:', '').trim();
+                          const ajustesPendentes = tarefas.filter(t =>
+                            t.status !== 'excluído' &&
+                            t.status !== 'concluído' &&
+                            (t.titulo.toLowerCase().includes(systemName.toLowerCase()) ||
+                              (t.projeto && t.projeto.toLowerCase().includes(systemName.toLowerCase())))
+                          ).length;
+
+                          return (
+                            <button
+                              key={unit.id}
+                              onClick={() => setSelectedSystemId(unit.id)}
+                              className="bg-white border border-slate-200 rounded-none md:rounded-[2.5rem] p-8 text-left hover:shadow-xl hover:border-violet-300 transition-all group relative overflow-hidden"
+                            >
+                              <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
+                              <div className="relative z-10 space-y-6">
+                                <div className="flex justify-between items-start">
+                                  <div className="w-14 h-14 bg-violet-100 text-violet-600 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                                    <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+                                  </div>
+                                  <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${sysDetails.status === 'producao' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                                    {sysDetails.status}
+                                  </span>
+                                </div>
+                                <div>
+                                  <h3 className="text-xl font-black text-slate-900 mb-1 group-hover:text-violet-700 transition-colors">{systemName}</h3>
+                                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                                    Atualizado em {formatDate(sysDetails.data_atualizacao?.split('T')[0] || new Date().toISOString().split('T')[0])}
+                                  </p>
+                                </div>
+                                <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
+                                  <span className="text-xs font-bold text-slate-500">{ajustesPendentes} ajustes pendentes</span>
+                                  <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-violet-500 group-hover:text-white transition-colors">
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
+                                  </div>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+
+                        {unidades.filter(u => u.nome.startsWith('SISTEMA:')).length === 0 && (
+                          <div className="col-span-full text-center py-20 bg-slate-50 rounded-[2.5rem] border-2 border-dashed border-slate-200">
+                            <p className="text-slate-400 font-bold text-lg mb-2">Nenhum sistema cadastrado</p>
+                            <button onClick={() => { setIsSettingsModalOpen(true); }} className="bg-slate-900 text-white px-6 py-3 rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-slate-800 transition-all mt-4">
+                              Ir para Configurações
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    /* VISÃO DETALHADA - SISTEMA SELECIONADO */
+                    (() => {
+                      const unit = unidades.find(u => u.id === selectedSystemId);
+                      if (!unit) return null;
+
+                      const sysDetails = sistemasDetalhes.find(s => s.id === unit.id) || {
+                        id: unit.id,
+                        nome: unit.nome.replace('SISTEMA:', '').trim(),
+                        status: 'ideia' as SistemaStatus,
+                        data_criacao: new Date().toISOString(),
+                        data_atualizacao: new Date().toISOString()
+                      };
+
+                      const systemName = unit.nome.replace('SISTEMA:', '').trim();
+                      const ajustes = tarefas.filter(t =>
+                        t.status !== 'excluído' &&
+                        t.status !== 'concluído' &&
+                        (t.titulo.toLowerCase().includes(systemName.toLowerCase()) ||
+                          (t.projeto && t.projeto.toLowerCase().includes(systemName.toLowerCase())))
+                      );
+
+                      const steps: SistemaStatus[] = ['ideia', 'prototipacao', 'desenvolvimento', 'testes', 'producao'];
+                      const currentStepIndex = steps.indexOf(sysDetails.status);
+
+                      return (
+                        <div className="animate-in fade-in slide-in-from-bottom-8 duration-500">
+                          {/* Navigation */}
+                          <button
+                            onClick={() => setSelectedSystemId(null)}
+                            className="mb-8 flex items-center gap-2 text-slate-500 hover:text-slate-800 font-bold text-xs uppercase tracking-widest transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+                            Voltar para Lista
+                          </button>
+
+                          <div className="bg-white border border-slate-200 rounded-none md:rounded-[2.5rem] overflow-hidden shadow-xl">
+                            {/* Header Detalhado */}
+                            <div className="bg-slate-900 p-8 md:p-12 text-white relative overflow-hidden">
+                              <div className="absolute top-0 right-0 w-64 h-64 bg-violet-500/20 rounded-full -mr-20 -mt-20 blur-3xl"></div>
+                              <div className="relative z-10 flex flex-col md:flex-row md:items-end justify-between gap-8">
+                                <div className="space-y-4">
+                                  <div className="inline-flex items-center gap-2 bg-white/10 px-3 py-1 rounded-lg backdrop-blur-sm border border-white/10">
+                                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                                    <span className="text-[10px] font-black uppercase tracking-widest">{sysDetails.status}</span>
+                                  </div>
+                                  <h2 className="text-4xl md:text-5xl font-black tracking-tight">{systemName}</h2>
+                                  <p className="text-slate-400 text-sm font-bold max-w-lg">
+                                    Gerencie o ciclo de vida deste sistema, desde a concepção até a produção.
+                                  </p>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-3xl font-black text-violet-400">{ajustes.length}</div>
+                                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Ajustes Pendentes</div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Workflow Stepper */}
+                            <div className="bg-slate-50 border-b border-slate-200 p-8 overflow-x-auto">
+                              <div className="flex items-center justify-between min-w-[600px] relative">
+                                {/* Linha de fundo */}
+                                <div className="absolute top-1/2 left-0 w-full h-1 bg-slate-200 -z-0 rounded-full"></div>
+                                {/* Linha de progresso */}
+                                <div
+                                  className="absolute top-1/2 left-0 h-1 bg-violet-500 -z-0 rounded-full transition-all duration-500 ease-out"
+                                  style={{ width: `${(currentStepIndex / (steps.length - 1)) * 100}%` }}
+                                ></div>
+
+                                {steps.map((step, index) => {
+                                  let state = 'upcoming'; // upcoming, current, completed
+                                  if (index < currentStepIndex) state = 'completed';
+                                  if (index === currentStepIndex) state = 'current';
+
+                                  return (
+                                    <button
+                                      key={step}
+                                      onClick={() => handleUpdateSistema(unit.id, { status: step })}
+                                      className="relative z-10 flex flex-col items-center gap-3 group focus:outline-none"
+                                    >
+                                      <div className={`w-10 h-10 rounded-full flex items-center justify-center border-4 transition-all duration-300 ${state === 'completed' ? 'bg-violet-500 border-violet-500 text-white' : state === 'current' ? 'bg-white border-violet-500 text-violet-600 shadow-lg scale-110' : 'bg-white border-slate-200 text-slate-300 hover:border-slate-300'}`}>
+                                        {state === 'completed' ? (
+                                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                        ) : (
+                                          <span className="text-xs font-black">{index + 1}</span>
+                                        )}
+                                      </div>
+                                      <span className={`text-[10px] font-black uppercase tracking-widest transition-colors ${state === 'current' ? 'text-violet-600' : state === 'completed' ? 'text-slate-900' : 'text-slate-400'}`}>
+                                        {step}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            <div className="p-8 grid grid-cols-1 lg:grid-cols-3 gap-12">
+                              {/* Coluna 1: Links e Recursos */}
+                              <div className="lg:col-span-1 space-y-8">
+                                <div>
+                                  <h4 className="text-xs font-black text-slate-900 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
+                                    <span className="w-1 h-4 bg-violet-500 rounded-full"></span>
+                                    Recursos Principais
+                                  </h4>
+
+                                  <div className="space-y-6">
+                                    {/* Documentação */}
+                                    <div className="group bg-slate-50 p-4 rounded-2xl border border-slate-100 hover:border-violet-200 hover:shadow-md transition-all">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-2">
+                                          <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                          Documentação
+                                        </label>
+                                        {sysDetails.link_documentacao && <span className="w-2 h-2 rounded-full bg-emerald-400"></span>}
+                                      </div>
+                                      <div className="flex gap-2">
+                                        <input
+                                          type="text"
+                                          value={sysDetails.link_documentacao || ''}
+                                          onChange={(e) => handleUpdateSistema(unit.id, { link_documentacao: e.target.value })}
+                                          placeholder="https://notion.so/..."
+                                          className="w-full bg-white border-none rounded-xl px-0 py-1 text-sm font-bold text-slate-700 outline-none placeholder:text-slate-300 focus:ring-0"
+                                        />
+                                        {sysDetails.link_documentacao && (
+                                          <a href={sysDetails.link_documentacao} target="_blank" rel="noreferrer" className="shrink-0 p-2 bg-violet-100 text-violet-600 rounded-lg hover:bg-violet-200 transition-colors">
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                          </a>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    {/* AI Studio */}
+                                    {(['prototipacao', 'desenvolvimento', 'testes', 'producao'].includes(sysDetails.status) || sysDetails.link_google_ai_studio) && (
+                                      <div className="group bg-slate-50 p-4 rounded-2xl border border-slate-100 hover:border-blue-200 hover:shadow-md transition-all animate-in slide-in-from-left-4">
+                                        <div className="flex items-center justify-between mb-2">
+                                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-2">
+                                            <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                            AI Studio
+                                          </label>
+                                          {sysDetails.link_google_ai_studio && <span className="w-2 h-2 rounded-full bg-emerald-400"></span>}
+                                        </div>
+                                        <div className="flex gap-2">
+                                          <input
+                                            type="text"
+                                            value={sysDetails.link_google_ai_studio || ''}
+                                            onChange={(e) => handleUpdateSistema(unit.id, { link_google_ai_studio: e.target.value })}
+                                            placeholder="Link do Prompt..."
+                                            className="w-full bg-white border-none rounded-xl px-0 py-1 text-sm font-bold text-slate-700 outline-none placeholder:text-slate-300 focus:ring-0"
+                                          />
+                                          {sysDetails.link_google_ai_studio && (
+                                            <a href={sysDetails.link_google_ai_studio} target="_blank" rel="noreferrer" className="shrink-0 p-2 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors">
+                                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                            </a>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* GitHub */}
+                                    {(['desenvolvimento', 'testes', 'producao'].includes(sysDetails.status) || sysDetails.link_github) && (
+                                      <div className="group bg-slate-900 p-4 rounded-2xl border border-slate-800 hover:border-slate-600 hover:shadow-md transition-all animate-in slide-in-from-left-4 delay-75">
+                                        <div className="flex items-center justify-between mb-2">
+                                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide flex items-center gap-2">
+                                            <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" /></svg>
+                                            GitHub Repo
+                                          </label>
+                                          {sysDetails.link_github && <span className="w-2 h-2 rounded-full bg-emerald-400"></span>}
+                                        </div>
+                                        <div className="flex gap-2">
+                                          <input
+                                            type="text"
+                                            value={sysDetails.link_github || ''}
+                                            onChange={(e) => handleUpdateSistema(unit.id, { link_github: e.target.value })}
+                                            placeholder="github.com/..."
+                                            className="w-full bg-slate-800 border-none rounded-xl px-0 py-1 text-sm font-bold text-white outline-none placeholder:text-slate-600 focus:ring-0"
+                                          />
+                                          {sysDetails.link_github && (
+                                            <a href={sysDetails.link_github} target="_blank" rel="noreferrer" className="shrink-0 p-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors">
+                                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                            </a>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Produção */}
+                                    {(['desenvolvimento', 'testes', 'producao'].includes(sysDetails.status) || sysDetails.link_hospedado) && (
+                                      <div className="group bg-emerald-50 p-4 rounded-2xl border border-emerald-100 hover:border-emerald-300 hover:shadow-md transition-all animate-in slide-in-from-left-4 delay-100">
+                                        <div className="flex items-center justify-between mb-2">
+                                          <label className="text-[10px] font-bold text-emerald-600 uppercase tracking-wide flex items-center gap-2">
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
+                                            Link Hospedado
+                                          </label>
+                                          {sysDetails.link_hospedado && <span className="w-2 h-2 rounded-full bg-emerald-500"></span>}
+                                        </div>
+                                        <div className="flex gap-2">
+                                          <input
+                                            type="text"
+                                            value={sysDetails.link_hospedado || ''}
+                                            onChange={(e) => handleUpdateSistema(unit.id, { link_hospedado: e.target.value })}
+                                            placeholder="https://..."
+                                            className="w-full bg-white border-none rounded-xl px-0 py-1 text-sm font-bold text-emerald-800 outline-none placeholder:text-emerald-200 focus:ring-0"
+                                          />
+                                          {sysDetails.link_hospedado && (
+                                            <a href={sysDetails.link_hospedado} target="_blank" rel="noreferrer" className="shrink-0 p-2 bg-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-300 transition-colors">
+                                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                            </a>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Coluna 2 e 3: Backlog de Ajustes */}
+                              <div className="lg:col-span-2">
+                                <div className="bg-white border border-slate-200 rounded-[2rem] overflow-hidden flex flex-col h-full shadow-sm hover:shadow-md transition-shadow">
+                                  <div className="p-6 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                      <div className="p-2 bg-amber-100 text-amber-600 rounded-lg">
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
+                                      </div>
+                                      <div>
+                                        <h4 className="text-sm font-black text-slate-900">Backlog de Ajustes</h4>
+                                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                                          Sincronizado via Google Tasks
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <span className="bg-amber-100 text-amber-700 text-[10px] font-black uppercase px-3 py-1.5 rounded-lg border border-amber-200">
+                                        {ajustes.filter(t => t.prioridade === 'alta').length} Prioritários
+                                      </span>
+                                      <span className="bg-slate-200 text-slate-600 text-[10px] font-black uppercase px-3 py-1.5 rounded-lg">
+                                        Total: {ajustes.length}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex-1 overflow-y-auto p-2 bg-slate-50/50 min-h-[400px] max-h-[600px] custom-scrollbar">
+                                    {ajustes.length > 0 ? (
+                                      <div className="space-y-2">
+                                        {ajustes.map(task => (
+                                          <div key={task.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-violet-300 transition-all group relative overflow-hidden flex items-start gap-4">
+                                            <div className={`w-1 h-full absolute left-0 top-0 bottom-0 ${task.prioridade === 'alta' ? 'bg-rose-500' : task.prioridade === 'média' ? 'bg-amber-500' : 'bg-green-500'}`}></div>
+                                            
+                                            <button 
+                                              onClick={() => setSelectedTask(task)}
+                                              className="flex-1 text-left"
+                                            >
+                                              <div className="flex justify-between items-start mb-1">
+                                                <h5 className="text-sm font-bold text-slate-800 leading-tight group-hover:text-violet-700 transition-colors line-clamp-2">{task.titulo}</h5>
+                                                {task.sync_status === 'new' && (
+                                                  <span className="text-[8px] font-black uppercase bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded ml-2 shrink-0">Novo</span>
+                                                )}
+                                              </div>
+                                              <div className="flex items-center gap-4 mt-2">
+                                                <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1 bg-slate-50 px-2 py-1 rounded-lg border border-slate-100">
+                                                  📅 {formatDate(task.data_limite)}
+                                                </span>
+                                                <span className={`text-[10px] font-bold uppercase tracking-wider ${task.status === 'em andamento' ? 'text-blue-500' : 'text-slate-400'}`}>
+                                                  {task.status}
+                                                </span>
+                                              </div>
+                                            </button>
+
+                                            <button 
+                                              onClick={() => setSelectedTask(task)}
+                                              className="p-2 bg-slate-50 text-slate-400 rounded-lg hover:bg-violet-100 hover:text-violet-600 transition-colors"
+                                            >
+                                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                            </button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <div className="h-full flex flex-col items-center justify-center text-slate-400 py-20">
+                                        <div className="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center mb-4">
+                                          <svg className="w-10 h-10 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                        </div>
+                                        <p className="text-xs font-black uppercase tracking-widest text-slate-300">Nenhum ajuste pendente</p>
+                                        <p className="text-[10px] text-slate-400 mt-2 max-w-[200px] text-center">
+                                          Tarefas no Google Tasks com "{systemName}" no título aparecerão aqui.
+                                        </p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()
+                  )}
+                </div>
+
+
 
               ) : (
                 <div className="space-y-10">
@@ -3993,6 +4854,16 @@ const App: React.FC = () => {
                       <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(new Date(currentYear, currentMonth))}</p>
                     </div>
                     <div className="flex items-center gap-4">
+                      {pgcSubView === 'plano' && (
+                        <button
+                          onClick={() => setIsImportPlanOpen(true)}
+                          className="bg-slate-900 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center gap-3"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+                          Importar Planilha
+                        </button>
+                      )}
+                      
                       <select
                         value={currentMonth}
                         onChange={(e) => setCurrentMonth(Number(e.target.value))}
@@ -4005,12 +4876,18 @@ const App: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="flex border-b border-slate-200">
+                  <div className="flex border-b border-slate-200 gap-8">
                     <button
                       onClick={() => setPgcSubView('audit')}
-                      className={`px-8 py-4 text-[10px] font-black uppercase tracking-[0.2em] transition-all border-b-4 ${pgcSubView === 'audit' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                      className={`px-2 py-4 text-[10px] font-black uppercase tracking-[0.2em] transition-all border-b-4 ${pgcSubView === 'audit' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
                     >
                       Resumo de Atividades
+                    </button>
+                    <button
+                      onClick={() => setPgcSubView('plano')}
+                      className={`px-2 py-4 text-[10px] font-black uppercase tracking-[0.2em] transition-all border-b-4 ${pgcSubView === 'plano' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                    >
+                      Plano de Trabalho
                     </button>
                   </div>
 
@@ -4144,6 +5021,50 @@ const App: React.FC = () => {
                       </div>
                     </div>
                   )}
+
+                  {pgcSubView === 'plano' && (
+                  <div className="animate-in space-y-8">
+                    <div className="bg-white border border-slate-200 rounded-[2rem] overflow-hidden shadow-2xl overflow-x-auto">
+                      <table className="w-full text-left min-w-[800px]">
+                        <thead className="bg-slate-50 border-b border-slate-200">
+                          <tr>
+                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Origem / Unidade</th>
+                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Entrega Institucional</th>
+                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Descrição</th>
+                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-[200px]">% Carga Horária</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)?.itens.map((item, i) => (
+                            <tr key={i} className="hover:bg-slate-50 transition-colors">
+                              <td className="px-8 py-6">
+                                <div className="text-[10px] font-black text-slate-400 uppercase mb-1">{item.origem}</div>
+                                <div className="text-xs font-black text-slate-900">{item.unidade}</div>
+                              </td>
+                              <td className="px-8 py-6 text-sm font-black text-slate-900">{item.entrega}</td>
+                              <td className="px-8 py-6 text-xs font-medium text-slate-600 leading-relaxed max-w-xs">{item.descricao}</td>
+                              <td className="px-8 py-6">
+                                <div className="flex items-center gap-4">
+                                  <div className="flex-1 h-3 bg-slate-100 rounded-full overflow-hidden">
+                                    <div className="h-full bg-indigo-500 rounded-full transition-all duration-1000" style={{ width: `${item.percentual}%` }}></div>
+                                  </div>
+                                  <span className="text-[10px] font-black text-slate-900 w-10">{item.percentual}%</span>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                          {(!planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)) && (
+                            <tr>
+                              <td colSpan={4} className="px-8 py-20 text-center">
+                                <p className="text-slate-300 font-black text-sm uppercase tracking-widest italic">Nenhum plano de trabalho configurado para este período.</p>
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                  )}
                 </div>
               )}
             </main>
@@ -4156,6 +5077,7 @@ const App: React.FC = () => {
       {
         isCreateModalOpen && (
           <TaskCreateModal
+            unidades={unidades}
             onSave={handleCreateTarefa}
             onClose={() => setIsCreateModalOpen(false)}
           />
@@ -4164,7 +5086,7 @@ const App: React.FC = () => {
 
       {
         selectedTask && (
-          selectedTask.categoria === 'CLC' ? (
+          (taskModalMode === 'execute' || (taskModalMode === 'default' && selectedTask.categoria === 'CLC')) ? (
             <TaskExecutionView
               task={selectedTask}
               onSave={handleUpdateTarefa}
@@ -4172,6 +5094,7 @@ const App: React.FC = () => {
             />
           ) : (
             <TaskEditModal
+              unidades={unidades}
               task={selectedTask}
               onSave={handleUpdateTarefa}
               onDelete={handleDeleteTarefa}
@@ -4251,8 +5174,16 @@ const App: React.FC = () => {
         isSettingsModalOpen && (
           <SettingsModal
             settings={appSettings}
+            unidades={unidades}
+            initialTab={settingsTab}
             onSave={handleUpdateAppSettings}
-            onClose={() => setIsSettingsModalOpen(false)}
+            onClose={() => {
+              setIsSettingsModalOpen(false);
+              setSettingsTab('notifications');
+            }}
+            onAddUnidade={handleAddUnidade}
+            onDeleteUnidade={handleDeleteUnidade}
+            onUpdateUnidade={handleUpdateUnidade}
           />
         )
       }

@@ -34,6 +34,9 @@ interface FinanceViewProps {
     onAddBill: (bill: Omit<FixedBill, 'id'>) => Promise<void>;
     onUpdateBill: (bill: FixedBill) => Promise<void>;
     onDeleteBill: (id: string) => Promise<void>;
+    onAddTransaction: (transaction: Omit<FinanceTransaction, 'id'>) => Promise<void>;
+    onUpdateTransaction: (transaction: FinanceTransaction) => Promise<void>;
+    onDeleteTransaction: (id: string) => Promise<void>;
 }
 
 const FinanceView = ({
@@ -66,10 +69,18 @@ const FinanceView = ({
     onDeleteIncomeEntry,
     onAddBill,
     onUpdateBill,
-    onDeleteBill
+    onDeleteBill,
+    onAddTransaction,
+    onUpdateTransaction,
+    onDeleteTransaction
 }: FinanceViewProps) => {
     const [activeTab, setActiveTab] = useState<'dashboard' | 'fixed'>('dashboard');
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+    // Transaction States
+    const [isAddingTransaction, setIsAddingTransaction] = useState(false);
+    const [editingTransaction, setEditingTransaction] = useState<FinanceTransaction | null>(null);
+    const [newTransaction, setNewTransaction] = useState<Partial<FinanceTransaction>>({});
 
     // Goals State
     // Goals State
@@ -272,7 +283,7 @@ const FinanceView = ({
             </div>
 
             {isSettingsOpen && (
-                <div className="bg-slate-900 text-white p-6 rounded-[2rem] shadow-xl animate-in slide-in-from-top-4 space-y-6">
+                <div className="bg-slate-900 text-white p-6 rounded-none md:rounded-[2rem] shadow-xl animate-in slide-in-from-top-4 space-y-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
                             <h4 className="text-sm font-black uppercase tracking-widest mb-4 text-white/60">Orçamento de {new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}</h4>
@@ -424,7 +435,7 @@ const FinanceView = ({
             {activeTab === 'dashboard' && (
                 <>
                     {/* Budget Bar Section */}
-                    <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-xl relative overflow-hidden">
+                    <div className="bg-white p-8 rounded-none md:rounded-[2.5rem] border border-slate-200 shadow-xl relative overflow-hidden">
                         <div className="flex justify-between items-end mb-6">
                             <div>
                                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">
@@ -432,7 +443,7 @@ const FinanceView = ({
                                 </h4>
                                 <div className="text-4xl md:text-5xl font-black text-slate-900 tracking-tighter">
                                     R$ {currentMonthTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                    <span className="text-slate-300 text-xl md:text-2xl ml-2">/ {currentBudget.toLocaleString('pt-BR')}</span>
+                                    <span className="text-slate-300 text-xl md:text-2xl ml-2">/ {currentBudget.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                                 </div>
                                 <div className="flex flex-wrap gap-4 mt-1">
                                     <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">
@@ -469,7 +480,7 @@ const FinanceView = ({
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         <div className="space-y-6">
                             {/* Emergency Reserve Section */}
-                            <div className="bg-white p-6 rounded-[2rem] border border-emerald-100 shadow-lg relative overflow-hidden group">
+                            <div className="bg-white p-6 rounded-none md:rounded-[2rem] border border-emerald-100 shadow-lg relative overflow-hidden group">
                                 <div className="absolute top-0 right-0 bg-emerald-500 text-white text-[9px] font-black px-3 py-1 rounded-bl-xl uppercase tracking-widest">Reserva de Emergência</div>
                                 <div className="mt-2">
                                     <h5 className="text-lg font-black text-slate-900 flex items-center gap-2">
@@ -488,7 +499,7 @@ const FinanceView = ({
                                                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                             </div>
                                         </div>
-                                        <span className="text-sm font-bold text-slate-400 mb-1">/ {emergencyReserve.target.toLocaleString('pt-BR')}</span>
+                                        <span className="text-sm font-bold text-slate-400 mb-1">/ {emergencyReserve.target.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                                     </div>
                                 </div>
                                 <div className="mt-4 h-3 bg-slate-100 rounded-full overflow-hidden">
@@ -522,7 +533,7 @@ const FinanceView = ({
                             {sortedGoals.length > 0 ? (
                                 <div className="space-y-4">
                                     {sortedGoals.map((goal, idx) => (
-                                        <div key={goal.id} className={`bg-white p-5 rounded-[2rem] border-2 transition-all relative group ${idx === 0 ? 'border-slate-900 shadow-xl' : 'border-slate-100 opacity-80 hover:opacity-100 shadow-sm'}`}>
+                                        <div key={goal.id} className={`bg-white p-5 rounded-none md:rounded-[2rem] border-2 transition-all relative group ${idx === 0 ? 'border-slate-900 shadow-xl' : 'border-slate-100 opacity-80 hover:opacity-100 shadow-sm'}`}>
                                             <div className="absolute top-4 right-5 flex items-center gap-1">
                                                 <button onClick={() => setEditingGoal(goal)} className="p-1 text-slate-300 hover:text-blue-500 transition-colors">
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
@@ -555,7 +566,7 @@ const FinanceView = ({
                                                 <div className="flex-1">
                                                     <h5 className="font-black text-slate-900 leading-tight">{goal.name}</h5>
                                                     <div className="text-[10px] font-bold text-slate-400 mt-0.5 uppercase tracking-widest">
-                                                        R$ {goal.currentAmount.toLocaleString('pt-BR')} de {goal.targetAmount.toLocaleString('pt-BR')}
+                                                        R$ {goal.currentAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de {goal.targetAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                     </div>
                                                 </div>
                                             </div>
@@ -570,13 +581,13 @@ const FinanceView = ({
                                     ))}
                                 </div>
                             ) : (
-                                <div className="p-8 border-2 border-dashed border-slate-200 rounded-[2rem] text-center">
+                                <div className="p-8 border-2 border-dashed border-slate-200 rounded-none md:rounded-[2rem] text-center">
                                     <p className="text-slate-400 font-bold">Nenhuma meta definida.</p>
                                 </div>
                             )}
 
                             {/* Add/Edit Goal Form */}
-                            <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-200 animate-in slide-in-from-bottom-2">
+                            <div className="bg-slate-50 p-6 rounded-none md:rounded-[2rem] border border-slate-200 animate-in slide-in-from-bottom-2">
                                 <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">{editingGoal ? 'Editar Meta' : 'Adicionar Nova Meta na Fila'}</h5>
                                 <div className="flex gap-3 mb-3">
                                     <input
@@ -629,8 +640,80 @@ const FinanceView = ({
                         </div>
 
                         {/* Transactions/Activity Feed */}
-                        <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-lg h-fit">
-                            <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-4">Lançamentos de {new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}</h4>
+                        <div className="bg-white p-6 rounded-none md:rounded-[2rem] border border-slate-200 shadow-lg h-fit">
+                            <div className="flex justify-between items-center mb-4">
+                                <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Lançamentos de {new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}</h4>
+                                <button 
+                                    onClick={() => {
+                                        setNewTransaction({ date: new Date().toISOString(), sprint: 1, category: 'Alimentação' });
+                                        setIsAddingTransaction(true);
+                                    }} 
+                                    className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:underline"
+                                >
+                                    + Novo
+                                </button>
+                            </div>
+
+                            {/* Form para Adicionar/Editar Transação */}
+                            {(isAddingTransaction || editingTransaction) && (
+                                <div className="mb-6 p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-3">
+                                    <h5 className="text-[10px] font-black uppercase text-slate-400">{editingTransaction ? 'Editar Lançamento' : 'Novo Lançamento'}</h5>
+                                    <input 
+                                        type="text" 
+                                        placeholder="Descrição"
+                                        className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold"
+                                        value={(editingTransaction || newTransaction).description || ''}
+                                        onChange={e => editingTransaction ? setEditingTransaction({...editingTransaction, description: e.target.value}) : setNewTransaction({...newTransaction, description: e.target.value})}
+                                    />
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <input 
+                                            type="number" 
+                                            placeholder="Valor"
+                                            className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold"
+                                            value={(editingTransaction || newTransaction).amount || ''}
+                                            onChange={e => editingTransaction ? setEditingTransaction({...editingTransaction, amount: Number(e.target.value)}) : setNewTransaction({...newTransaction, amount: Number(e.target.value)})}
+                                        />
+                                        <input 
+                                            type="date" 
+                                            className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold"
+                                            value={(editingTransaction || newTransaction).date?.split('T')[0] || ''}
+                                            onChange={e => {
+                                                const date = new Date(e.target.value).toISOString();
+                                                const day = new Date(e.target.value).getDate();
+                                                const sprint = day < 8 ? 1 : day < 15 ? 2 : day < 22 ? 3 : 4;
+                                                editingTransaction ? setEditingTransaction({...editingTransaction, date, sprint}) : setNewTransaction({...newTransaction, date, sprint});
+                                            }}
+                                        />
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button 
+                                            onClick={() => { setIsAddingTransaction(false); setEditingTransaction(null); }}
+                                            className="flex-1 px-4 py-2 bg-slate-200 text-slate-600 rounded-xl text-[10px] font-black uppercase"
+                                        >
+                                            Cancelar
+                                        </button>
+                                        <button 
+                                            onClick={async () => {
+                                                const data = (editingTransaction || newTransaction);
+                                                if (data.description && data.amount && data.date) {
+                                                    if (editingTransaction) {
+                                                        await onUpdateTransaction(editingTransaction);
+                                                    } else {
+                                                        await onAddTransaction(newTransaction as Omit<FinanceTransaction, 'id'>);
+                                                    }
+                                                    setIsAddingTransaction(false);
+                                                    setEditingTransaction(null);
+                                                    setNewTransaction({});
+                                                }
+                                            }}
+                                            className="flex-1 px-4 py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase"
+                                        >
+                                            Salvar
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin">
                                 {transactions
                                     .filter(t => {
@@ -639,18 +722,30 @@ const FinanceView = ({
                                     })
                                     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
                                     .map(t => (
-                                        <div key={t.id} className="flex justify-between items-center p-3 hover:bg-slate-50 rounded-xl transition-colors border-b border-slate-50 last:border-0">
+                                        <div key={t.id} className="group relative flex justify-between items-center p-3 hover:bg-slate-50 rounded-xl transition-colors border-b border-slate-50 last:border-0">
                                             <div className="flex items-center gap-3">
                                                 <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 font-bold text-xs">
-                                                    {new Date(t.date).getDate()}
+                                                    {new Date(t.date).getUTCDate()}
                                                 </div>
                                                 <div>
-                                                    <div className="text-xs font-black text-slate-800 uppercase">{t.description || 'Gasto Semanal'}</div>
-                                                    <div className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">{new Date(t.date).toLocaleDateString('pt-BR')} • Sprint {t.sprint}</div>
+                                                    <div className="text-xs font-black text-slate-800 uppercase line-clamp-1 pr-12">{t.description || 'Gasto Semanal'}</div>
+                                                    <div className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">
+                                                        {new Date(t.date).toLocaleDateString('pt-BR')} • Sprint {t.sprint}
+                                                    </div>
                                                 </div>
                                             </div>
-                                            <div className="font-mono font-bold text-slate-900">
-                                                - R$ {t.amount.toLocaleString('pt-BR')}
+                                            <div className="flex items-center gap-4">
+                                                <div className="font-mono font-bold text-slate-900 whitespace-nowrap">
+                                                    - R$ {t.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </div>
+                                                <div className="hidden group-hover:flex items-center gap-1">
+                                                    <button onClick={() => setEditingTransaction(t)} className="p-1 text-slate-300 hover:text-blue-500 transition-colors">
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                    </button>
+                                                    <button onClick={() => onDeleteTransaction(t.id)} className="p-1 text-slate-300 hover:text-rose-500 transition-colors">
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                     ))}
@@ -671,7 +766,7 @@ const FinanceView = ({
 
                     {/* HUB DE SAÚDE FINANCEIRA (COMPARATIVOS) */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-2 bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-xl flex flex-col justify-between relative overflow-hidden group">
+                        <div className="lg:col-span-2 bg-white p-8 rounded-none md:rounded-[2.5rem] border border-slate-200 shadow-xl flex flex-col justify-between relative overflow-hidden group">
                             <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
                                 <svg className="w-32 h-32" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" /></svg>
                             </div>
@@ -722,7 +817,7 @@ const FinanceView = ({
                             </div>
                         </div>
 
-                        <div className={`p-8 rounded-[2.5rem] border shadow-xl flex flex-col justify-center items-center text-center transition-all ${currentMonthIncome - currentTotalBills >= 0 ? 'bg-emerald-950 border-emerald-900 text-white' : 'bg-rose-950 border-rose-900 text-white'}`}>
+                        <div className={`p-8 rounded-none md:rounded-[2.5rem] border shadow-xl flex flex-col justify-center items-center text-center transition-all ${currentMonthIncome - currentTotalBills >= 0 ? 'bg-emerald-950 border-emerald-900 text-white' : 'bg-rose-950 border-rose-900 text-white'}`}>
                             <h4 className="text-[10px] font-black uppercase tracking-[0.2em] mb-2 opacity-60">Saldo Projetado</h4>
                             <div className="text-5xl font-black tracking-tighter mb-2">
                                 R$ {(currentMonthIncome - currentTotalBills).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -758,7 +853,7 @@ const FinanceView = ({
 
                         {/* Gestão de Rubricas de Renda */}
                         {isManagingIncomeRubrics && (
-                            <div className="bg-emerald-900 text-white p-8 rounded-[2.5rem] shadow-xl animate-in fade-in zoom-in-95 duration-300">
+                            <div className="bg-emerald-900 text-white p-8 rounded-none md:rounded-[2.5rem] shadow-xl animate-in fade-in zoom-in-95 duration-300">
                                 <div className="flex justify-between items-center mb-8">
                                     <div>
                                         <h5 className="text-lg font-black uppercase tracking-tighter text-emerald-100">Canais de Renda</h5>
@@ -774,7 +869,7 @@ const FinanceView = ({
                                                 <div className="text-sm font-bold">{rubric.description}</div>
                                                 <div className="text-[10px] text-emerald-200/40 font-bold italic mt-1">
                                                     Previsto dia {rubric.expectedDay}
-                                                    {rubric.defaultAmount ? ` • R$ ${rubric.defaultAmount.toLocaleString('pt-BR')}` : ' • Valor Variável'}
+                                                    {rubric.defaultAmount ? ` • R$ ${rubric.defaultAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : ' • Valor Variável'}
                                                 </div>
                                             </div>
                                             <div className="flex gap-1">
@@ -956,14 +1051,14 @@ const FinanceView = ({
                                                         Recebido dia {entry.day}
                                                         {diff !== 0 && (
                                                             <span className={`text-[8px] font-black ${diff > 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                                                {diff > 0 ? '↑' : '↓'} R$ {Math.abs(diff).toLocaleString('pt-BR')}
+                                                                {diff > 0 ? '↑' : '↓'} R$ {Math.abs(diff).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                             </span>
                                                         )}
                                                     </div>
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-4">
-                                                <div className="text-lg font-black text-emerald-600 tracking-tighter">R$ {entry.amount.toLocaleString('pt-BR')}</div>
+                                                <div className="text-lg font-black text-emerald-600 tracking-tighter">R$ {entry.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
                                                 <button onClick={() => onDeleteIncomeEntry(entry.id)} className="p-2 text-slate-200 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100">
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                                 </button>
@@ -1018,7 +1113,7 @@ const FinanceView = ({
                                                 <div className="text-sm font-bold">{rubric.description}</div>
                                                 <div className="text-[10px] text-white/50 font-bold italic mt-1">
                                                     Dia {rubric.dueDay}
-                                                    {rubric.defaultAmount ? ` • R$ ${rubric.defaultAmount.toLocaleString('pt-BR')}` : ' • Valor Variável'}
+                                                    {rubric.defaultAmount ? ` • R$ ${rubric.defaultAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : ' • Valor Variável'}
                                                 </div>
                                             </div>
                                             <div className="flex gap-1">

@@ -1,6 +1,13 @@
 {
     "functions": {
-        "source": "functions"
+        "source": "functions",
+        "runtime": "python311",
+        "ignore": [
+            "venv",
+            ".git",
+            "firebase-debug.log",
+            "firebase-debug.*.log"
+        ]
     },
     "hosting": {
         "public": "dist",

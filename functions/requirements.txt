@@ -1,5 +1,6 @@
-functions-framework==3.*
 google-cloud-firestore
 google-auth
 google-auth-oauthlib
 google-api-python-client
+firebase-functions
+firebase-admin

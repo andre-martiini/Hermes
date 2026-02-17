@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { HealthWeight, DailyHabits, HealthSettings, formatDate } from './types';
 
@@ -8,8 +7,78 @@ interface HealthViewProps {
     settings: HealthSettings;
     onUpdateSettings: (settings: HealthSettings) => void;
     onAddWeight: (weight: number, date: string) => void;
+    onDeleteWeight: (id: string) => void;
     onUpdateHabits: (date: string, habits: Partial<DailyHabits>) => void;
 }
+
+const HabitHeatmap = ({ habits }: { habits: DailyHabits[] }) => {
+    const today = new Date();
+    const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+    const monthName = new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(today);
+    
+    return (
+        <div className="bg-white p-8 rounded-none md:rounded-[2.5rem] border border-slate-200 shadow-2xl">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+                <div>
+                    <h3 className="text-2xl font-black text-slate-900 tracking-tight capitalize">Mapa de Consistência - {monthName}</h3>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Volume de hábitos cumpridos por dia</p>
+                </div>
+                <div className="flex items-center gap-4 bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Legenda:</span>
+                    <div className="flex gap-1.5">
+                        {[0, 1, 2, 3, 4, 5, 6].map(c => (
+                            <div key={c} className="w-4 h-4 rounded-md shadow-sm" title={`${c} hábitos`} style={{ backgroundColor: `hsl(${(c/6)*120}, 75%, 45%)` }}></div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+            
+            <div className="grid grid-cols-7 sm:grid-cols-10 md:grid-cols-15 lg:grid-cols-[repeat(31,minmax(0,1fr))] gap-2 sm:gap-3">
+                {Array.from({ length: daysInMonth }).map((_, i) => {
+                    const day = i + 1;
+                    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    const dayHabits = habits.find(h => h.id === dateStr);
+                    
+                    let completedCount = 0;
+                    let hasRecord = false;
+                    if (dayHabits) {
+                        hasRecord = true;
+                        if (dayHabits.noSugar) completedCount++;
+                        if (dayHabits.noAlcohol) completedCount++;
+                        if (dayHabits.noSnacks) completedCount++;
+                        if (dayHabits.workout) completedCount++;
+                        if (dayHabits.eatUntil18) completedCount++;
+                        if (dayHabits.eatSlowly) completedCount++;
+                    }
+                    
+                    const ratio = completedCount / 6;
+                    let style: React.CSSProperties = { backgroundColor: '#f8fafc', color: '#cbd5e1' };
+                    
+                    if (hasRecord) {
+                        // Hue: 0 (Red) -> 60 (Yellow) -> 120 (Green)
+                        const hue = ratio * 120;
+                        style = { 
+                            backgroundColor: `hsl(${hue}, 75%, 45%)`,
+                            color: 'white',
+                            boxShadow: `0 4px 12px -4px hsl(${hue}, 75%, 45%)`
+                        };
+                    }
+
+                    return (
+                        <div 
+                            key={day} 
+                            title={hasRecord ? `Dia ${day}: ${completedCount}/6 hábitos` : `Dia ${day}: Sem registro`}
+                            className={`aspect-square rounded-xl flex items-center justify-center text-[10px] md:text-sm font-black transition-all duration-300 hover:scale-125 hover:z-10 cursor-help ${hasRecord ? 'hover:shadow-lg' : 'hover:bg-slate-200'}`}
+                            style={style}
+                        >
+                            {day}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+};
 
 const HealthView: React.FC<HealthViewProps> = ({
     weights,
@@ -17,6 +86,7 @@ const HealthView: React.FC<HealthViewProps> = ({
     settings,
     onUpdateSettings,
     onAddWeight,
+    onDeleteWeight,
     onUpdateHabits
 }) => {
     const [newWeight, setNewWeight] = useState<string>('');
@@ -100,15 +170,15 @@ const HealthView: React.FC<HealthViewProps> = ({
         <div className="space-y-8 pb-20">
             {/* Header Metrics */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-xl flex flex-col justify-center">
+                <div className="bg-white p-6 rounded-none md:rounded-[2rem] border border-slate-200 shadow-xl flex flex-col justify-center">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Peso Atual</span>
                     <div className="flex items-baseline gap-2">
-                        <span className="text-4xl font-black text-slate-900">{currentWeight || '--'}</span>
+                        <span className="text-4xl font-black text-slate-900">{currentWeight.toFixed(1) || '--'}</span>
                         <span className="text-sm font-bold text-slate-400">kg</span>
                     </div>
                 </div>
 
-                <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-xl flex flex-col justify-center relative group">
+                <div className="bg-white p-6 rounded-none md:rounded-[2rem] border border-slate-200 shadow-xl flex flex-col justify-center relative group">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Meta</span>
                     <div className="flex items-baseline gap-2">
                         {isEditingTarget ? (
@@ -125,7 +195,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                             />
                         ) : (
                             <span className="text-4xl font-black text-rose-600" onClick={() => setIsEditingTarget(true)}>
-                                {settings.targetWeight || '--'}
+                                {settings.targetWeight?.toFixed(1) || '--'}
                             </span>
                         )}
                         <span className="text-sm font-bold text-slate-400">kg</span>
@@ -135,7 +205,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                     </button>
                 </div>
 
-                <div className="bg-emerald-500 p-6 rounded-[2rem] shadow-xl flex flex-col justify-center text-white">
+                <div className="bg-emerald-500 p-6 rounded-none md:rounded-[2rem] shadow-xl flex flex-col justify-center text-white">
                     <span className="text-[10px] font-black text-emerald-100 uppercase tracking-widest mb-1">Eliminado</span>
                     <div className="flex items-baseline gap-2">
                         <span className="text-4xl font-black">{totalLost > 0 ? `-${totalLost.toFixed(1)}` : '--'}</span>
@@ -143,7 +213,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                     </div>
                 </div>
 
-                <div className="bg-slate-900 p-6 rounded-[2rem] shadow-xl flex flex-col justify-center text-white">
+                <div className="bg-slate-900 p-6 rounded-none md:rounded-[2rem] shadow-xl flex flex-col justify-center text-white">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Previsão Meta</span>
                     <div className="flex flex-col">
                         <span className="text-xl font-black text-blue-400">{projection?.goalDate || 'Aguardando dados...'}</span>
@@ -154,9 +224,12 @@ const HealthView: React.FC<HealthViewProps> = ({
                 </div>
             </div>
 
+            {/* Habit Consistency Heatmap */}
+            <HabitHeatmap habits={dailyHabits} />
+
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                 {/* Daily Habits */}
-                <div className="lg:col-span-4 bg-white rounded-[2.5rem] border border-slate-200 shadow-2xl overflow-hidden flex flex-col">
+                <div className="lg:col-span-4 bg-white rounded-none md:rounded-[2.5rem] border border-slate-200 shadow-2xl overflow-hidden flex flex-col">
                     <div className="p-8 border-b border-slate-100 bg-slate-50/50">
                         <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3">
                             <span className="w-2 h-8 bg-amber-500 rounded-full"></span>
@@ -213,7 +286,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                 {/* Weight Tracking */}
                 <div className="lg:col-span-8 space-y-8">
                     {/* Weight Registry */}
-                    <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-2xl">
+                    <div className="bg-white p-8 rounded-none md:rounded-[2.5rem] border border-slate-200 shadow-2xl">
                         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
                             <div>
                                 <h3 className="text-xl font-black text-slate-900 tracking-tight">Registro de Peso</h3>
@@ -306,18 +379,28 @@ const HealthView: React.FC<HealthViewProps> = ({
                                     <tr>
                                         <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Data</th>
                                         <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Peso</th>
+                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-16"></th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-50">
                                     {sortedWeights.map((w) => (
-                                        <tr key={w.id} className="hover:bg-slate-50/50 transition-colors">
+                                        <tr key={w.id} className="hover:bg-slate-50/50 transition-colors group/row">
                                             <td className="px-6 py-4 text-xs font-black text-slate-700">{formatDate(w.date)}</td>
                                             <td className="px-6 py-4 text-sm font-black text-slate-900 text-right">{w.weight.toFixed(1)} kg</td>
+                                            <td className="px-6 py-4 text-right">
+                                                <button 
+                                                    onClick={() => onDeleteWeight(w.id)}
+                                                    className="p-2 text-rose-300 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all opacity-0 group-hover/row:opacity-100"
+                                                    title="Excluir Registro"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                </button>
+                                            </td>
                                         </tr>
                                     ))}
                                     {sortedWeights.length === 0 && (
                                         <tr>
-                                            <td colSpan={2} className="py-12 text-center text-slate-300 font-black uppercase tracking-widest italic text-[10px]">Tudo pronto para começar!</td>
+                                            <td colSpan={3} className="py-12 text-center text-slate-300 font-black uppercase tracking-widest italic text-[10px]">Tudo pronto para começar!</td>
                                         </tr>
                                     )}
                                 </tbody>
