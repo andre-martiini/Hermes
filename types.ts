@@ -9,6 +9,14 @@ export interface Acompanhamento {
 
 export type Categoria = string;
 
+export interface PoolItem {
+    id: string;
+    tipo: 'link' | 'telefone' | 'arquivo';
+    valor: string; // O link, o telefone ou o ID/Link do arquivo no Drive
+    nome?: string; // Nome do arquivo ou rótulo do link
+    data_criacao: string;
+}
+
 export interface Tarefa {
     id: string;
     titulo: string;
@@ -32,6 +40,7 @@ export interface Tarefa {
     last_sync_date?: string;
     horario_inicio?: string; // format "HH:mm"
     horario_fim?: string;    // format "HH:mm"
+    pool_dados?: PoolItem[];
 }
 
 export interface AtividadeRealizada {
@@ -194,6 +203,7 @@ export interface HermesNotification {
 }
 
 export interface AppSettings {
+    googleDriveFolderId?: string;
     notifications: {
         habitsReminder: {
             enabled: boolean;

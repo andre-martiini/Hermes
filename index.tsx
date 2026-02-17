@@ -9,12 +9,14 @@ const {
   FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight,
   DailyHabits, HealthSettings, HermesNotification, AppSettings,
   formatDate, Sistema, SistemaStatus, WorkItem, WorkItemPhase,
-  WorkItemPriority, QualityLog, WorkItemAudit, GoogleCalendarEvent
+  WorkItemPriority, QualityLog, WorkItemAudit, GoogleCalendarEvent,
+  PoolItem
 } = AllTypes as any;
 import HealthView from './HealthView';
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
-import { db } from './firebase';
+import { db, functions } from './firebase';
 import { collection, onSnapshot, query, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import FinanceView from './FinanceView';
 import DashboardView from './DashboardView';
@@ -393,8 +395,6 @@ const DayView = ({
       ) {
          // Return to backlog
          onTaskUpdate(dragging.id, { horario_inicio: null, horario_fim: null }, false);
-         // You might see the gray area here because the container has bg-slate-50, but the calendar grid has bg-white. 
-         // When content doesn't fill height, the gray background shows.
       }
     }
     setResizing(null);
@@ -430,15 +430,13 @@ const DayView = ({
         <div className="relative w-full" style={{ height: 24 * hourHeight }} onDrop={(e) => {
           const taskId = e.dataTransfer.getData('task-id');
           const rect = e.currentTarget.getBoundingClientRect();
-          const scrollContainer = e.currentTarget.parentElement;
-          const scrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
           const y = e.clientY - rect.top;
           const hour = Math.floor(y / hourHeight);
           if (taskId) {
             onTaskUpdate(taskId, {
               horario_inicio: `${hour.toString().padStart(2, '0')}:00`,
               horario_fim: `${(hour + 1).toString().padStart(2, '0')}:00`
-            });
+            }, true);
           }
         }}>
           {dayGoogleEvents.map(event => {
@@ -491,139 +489,48 @@ const DayView = ({
               >
                 <div className="flex justify-between items-start gap-2">
                   <div className="text-[11px] font-black leading-tight line-clamp-2">{task.titulo}</div>
-                  <button onClick={(e) => { e.stopPropagation(); onTaskClick(task); }} className="shrink-0 p-1 hover:bg-black/5 rounded">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                  </button>
+                  <div className="flex gap-1 shrink-0">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConfirmAction({
+                          taskId: task.id,
+                          newStatus: task.status === 'concluído' ? 'em andamento' : 'concluído'
+                        });
+                      }}
+                      className={`p-1 hover:bg-black/5 rounded ${task.status === 'concluído' ? 'text-emerald-600 bg-emerald-100' : 'text-slate-400 hover:text-emerald-600'}`}
+                      title={task.status === 'concluído' ? 'Reabrir' : 'Concluir'}
+                    >
+                       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); onExecuteTask(task); }} className="p-1 hover:bg-black/5 rounded text-indigo-600" title="Executar">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); onTaskClick(task); }} className="p-1 hover:bg-black/5 rounded" title="Editar">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                    </button>
+                  </div>
                 </div>
                 <div className="text-[9px] font-black mt-1 opacity-40 uppercase tracking-widest">{task.horario_inicio} - {task.horario_fim}</div>
 
-          <div className="relative w-full" style={{ height: 24 * hourHeight }} onDrop={(e) => {
-            const taskId = e.dataTransfer.getData('task-id');
-            const rect = e.currentTarget.getBoundingClientRect();
-            const scrollContainer = e.currentTarget.closest('.custom-scrollbar');
-            const scrollTop = scrollContainer ? (scrollContainer as HTMLElement).scrollTop : 0;
-            
-            // Adjust Y calculation to be relative to the grid container
-            // The rect.top already accounts for scroll if the container moves? 
-            // actually, rect includes viewport position.
-            // e.clientY is viewport Y.
-            // y = e.clientY - rect.top gives position relative to the VISIBLE top of the element.
-            // If the element is scrolled, its content is shifted.
-            // But here the element is "relative w-full" inside the scroll view.
-            // The "relative w-full" div has height 24 * hourHeight (1440px).
-            // It is inside "flex-1 relative bg-white" which is inside "flex-1 flex overflow-y-auto" (the scroller).
-            
-            // Wait, the Drop target is the inner div `style={{ height: 24 * hourHeight }}`.
-            // This div is TALL. It is NOT scrolling itself. It is inside a scrolling parent.
-            // So resizing/positioning logic relies on `top` CSS property relative to this tall div.
-            
-            // When we calculate `y`:
-            // e.clientY is mouse Y.
-            // rect.top is the top of the tall div relative to viewport.
-            // So (e.clientY - rect.top) IS the Y coordinate inside the tall div.
-            // We do NOT need to add scrollTop if we are measuring relative to the target element's bounding rect, 
-            // BECAUSE the target element moves UP when we scroll down.
-            // Example:
-            // Scrolled 0px. Top of div is at 100px. Mouse at 150px. Y = 150 - 100 = 50. Correct.
-            // Scrolled 1000px. Top of div is at -900px. Mouse at 150px. Y = 150 - (-900) = 1050. Correct.
-            
-            // So the original logic `const y = e.clientY - rect.top;` is implicitly correct if `e.currentTarget` is the tall div.
-            // In the original code: `onDrop` was on `style={{ height: 24 * hourHeight }}`, which IS the tall div.
-            // So `y` calculation remains valid without manual scrollTop adjustment.
-            
-            // However, the original code had:
-            // const scrollContainer = e.currentTarget.parentElement;
-            // const scrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
-            // But it didn't USE `scrollTop` in the `y` calculation in the snippet I saw!
-            // Snippet:
-            // const y = e.clientY - rect.top;
-            // const hour = Math.floor(y / hourHeight);
-            
-            // It seems `scrollTop` variable was defined but unused or I missed its usage?
-            // Let's re-read the specific block in the previous `view_file`.
-            
-            // Line 384: `const scrollTop = scrollContainer ? scrollContainer.scrollTop : 0;`
-            // Line 385: `const y = e.clientY - rect.top;`
-            
-            // The `scrollTop` was indeed unused in the calculation provided in the snippet.
-            // So I can safely ignore it or remove it.
-            // But to be safe and clean, I will just proceed with the same logic.
-            
-            const y = e.clientY - rect.top;
-            const hour = Math.floor(y / hourHeight);
-            if (taskId) {
-              onTaskUpdate(taskId, {
-                horario_inicio: `${hour.toString().padStart(2, '0')}:00`,
-                horario_fim: `${(hour + 1).toString().padStart(2, '0')}:00`
-              }, true);
-            }
-          }}>
-            {dayTasks.filter(t => t.horario_inicio).map(task => {
-              const startMin = timeToMinutes(task.horario_inicio!);
-              const endMin = timeToMinutes(task.horario_fim || minutesToTime(startMin + 60));
-              const top = (startMin / 60) * hourHeight;
-              const height = ((endMin - startMin) / 60) * hourHeight;
-  
-              return (
+                {/* Handles */}
                 <div
-                  key={task.id}
-                  className={`absolute left-4 right-4 rounded-xl border-2 p-3 shadow-md group transition-all cursor-grab active:cursor-grabbing overflow-hidden
-                    ${task.categoria === 'CLC' ? 'bg-blue-50 border-blue-200 text-blue-800' :
-                      task.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
-                        'bg-white border-slate-200 text-slate-800'}
-                  `}
-                  style={{ top, height: Math.max(30, height), minHeight: 30, zIndex: 10 }}
+                  className="resize-handle absolute top-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black/10 transition-colors"
                   onMouseDown={(e) => {
-                    const target = e.target as HTMLElement;
-                    if (target.classList.contains('resize-handle')) return;
-                    setDragging({ id: task.id, startY: e.clientY, startMin });
+                    e.stopPropagation();
+                    setResizing({ id: task.id, type: 'top', startY: e.clientY, startMin });
                   }}
-                >
-                  <div className="flex justify-between items-start gap-2">
-                    <div className="text-[11px] font-black leading-tight line-clamp-2">{task.titulo}</div>
-                    <div className="flex gap-1 shrink-0">
-                      <button 
-                        onClick={(e) => { 
-                          e.stopPropagation(); 
-                          setConfirmAction({ 
-                            taskId: task.id, 
-                            newStatus: task.status === 'concluído' ? 'em andamento' : 'concluído' 
-                          });
-                        }} 
-                        className={`p-1 hover:bg-black/5 rounded ${task.status === 'concluído' ? 'text-emerald-600 bg-emerald-100' : 'text-slate-400 hover:text-emerald-600'}`} 
-                        title={task.status === 'concluído' ? 'Reabrir' : 'Concluir'}
-                      >
-                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                      </button>
-                      <button onClick={(e) => { e.stopPropagation(); onExecuteTask(task); }} className="p-1 hover:bg-black/5 rounded text-indigo-600" title="Executar">
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                      </button>
-                      <button onClick={(e) => { e.stopPropagation(); onTaskClick(task); }} className="p-1 hover:bg-black/5 rounded" title="Editar">
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                      </button>
-                    </div>
-                  </div>
-                  <div className="text-[9px] font-black mt-1 opacity-40 uppercase tracking-widest">{task.horario_inicio} - {task.horario_fim}</div>
-  
-                  {/* Handles */}
-                  <div
-                    className="resize-handle absolute top-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black/10 transition-colors"
-                    onMouseDown={(e) => {
-                      e.stopPropagation();
-                      setResizing({ id: task.id, type: 'top', startY: e.clientY, startMin });
-                    }}
-                  />
-                  <div
-                    className="resize-handle absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black/10 transition-colors"
-                    onMouseDown={(e) => {
-                      e.stopPropagation();
-                      setResizing({ id: task.id, type: 'bottom', startY: e.clientY, startMin: endMin });
-                    }}
-                  />
-                </div>
-              );
-            })}
-          </div>
+                />
+                <div
+                  className="resize-handle absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black/10 transition-colors"
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    setResizing({ id: task.id, type: 'bottom', startY: e.clientY, startMin: endMin });
+                  }}
+                />
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -661,6 +568,19 @@ const DayView = ({
           )}
         </div>
       </div>
+
+      {confirmAction && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full shadow-2xl animate-in zoom-in-95">
+            <h3 className="text-xl font-black text-slate-900 mb-2">Confirmar Ação</h3>
+            <p className="text-slate-500 text-sm mb-8">Deseja marcar esta tarefa como <strong>{confirmAction.newStatus}</strong>?</p>
+            <div className="flex gap-4">
+              <button onClick={() => setConfirmAction(null)} className="flex-1 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50">Cancelar</button>
+              <button onClick={confirmTaskCompletion} className="flex-1 bg-slate-900 text-white py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-slate-200">Confirmar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1350,10 +1270,10 @@ const SettingsModal = ({
   onAddUnidade: (nome: string) => void,
   onDeleteUnidade: (id: string) => void,
   onUpdateUnidade: (id: string, updates: any) => void,
-  initialTab?: 'notifications' | 'context' | 'sistemas'
+  initialTab?: 'notifications' | 'context' | 'sistemas' | 'google'
 }) => {
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
-  const [activeTab, setActiveTab] = useState<'notifications' | 'context' | 'sistemas'>(initialTab || 'notifications');
+  const [activeTab, setActiveTab] = useState<'notifications' | 'context' | 'sistemas' | 'google'>(initialTab || 'notifications');
   const [newUnidadeNome, setNewUnidadeNome] = useState('');
   const [newKeywordMap, setNewKeywordMap] = useState<{ [key: string]: string }>({});
 
@@ -1405,6 +1325,12 @@ const SettingsModal = ({
               className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'sistemas' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
             >
               💻 Sistemas
+            </button>
+            <button
+              onClick={() => setActiveTab('google')}
+              className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'google' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              ☁️ Google
             </button>
           </div>
         </div>
@@ -1786,6 +1712,45 @@ const SettingsModal = ({
                     </button>
                   </div>
                   <p className="text-[9px] text-violet-600 font-medium mt-2 text-center">Pressione Enter ou clique no botão + para adicionar</p>
+                </div>
+              </div>
+            </div>
+          ) : activeTab === 'google' ? (
+            <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
+              <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
+                <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
+                Integração Google Drive
+              </h4>
+
+              <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100 space-y-4 shadow-sm">
+                <p className="text-xs text-slate-500 font-medium">
+                  Configure a pasta do Google Drive onde os arquivos do Pool de Dados serão armazenados.
+                </p>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">ID da Pasta no Drive</label>
+                  <input
+                    type="text"
+                    value={localSettings.googleDriveFolderId || ''}
+                    onChange={(e) => setLocalSettings({ ...localSettings, googleDriveFolderId: e.target.value })}
+                    placeholder="Ex: 1a2b3c4d5e6f7g8h9i0j..."
+                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-xs font-mono text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                  <p className="text-[9px] text-slate-400 italic">
+                    O ID da pasta é a parte final da URL da pasta no Google Drive.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-6 bg-amber-50 rounded-[2rem] border border-amber-100">
+                <div className="flex gap-3">
+                  <svg className="w-5 h-5 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                  <div>
+                    <p className="text-xs font-bold text-amber-800 uppercase tracking-wider mb-1">Nota sobre Permissões</p>
+                    <p className="text-[10px] text-amber-700 leading-relaxed">
+                      Ao adicionar novos escopos (como Google Drive), pode ser necessário re-autenticar o sistema usando o <strong>setup_credentials.bat</strong> para que o Hermes tenha permissão de escrita.
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2909,8 +2874,10 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
   );
 };
 
-const TaskExecutionView = ({ task, tarefas, onSave, onClose }: { task: Tarefa, tarefas: Tarefa[], onSave: (id: string, updates: Partial<Tarefa>) => void, onClose: () => void }) => {
+const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { task: Tarefa, tarefas: Tarefa[], appSettings: AppSettings, onSave: (id: string, updates: Partial<Tarefa>) => void, onClose: () => void }) => {
   const [newFollowUp, setNewFollowUp] = useState('');
+  const [newPoolItem, setNewPoolItem] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
   const [chatUrl, setChatUrl] = useState(task.chat_gemini_url || '');
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [seconds, setSeconds] = useState(0);
@@ -2978,6 +2945,84 @@ const TaskExecutionView = ({ task, tarefas, onSave, onClose }: { task: Tarefa, t
 
   const handleSaveChatUrl = () => {
     onSave(task.id, { chat_gemini_url: chatUrl });
+  };
+
+  const handleAddPoolItem = (valor: string) => {
+    if (!valor.trim()) return;
+
+    let tipo: 'link' | 'telefone' = 'link';
+    if (valor.match(/^\+?\d[\d\s\-\(\)]{8,}$/)) {
+      tipo = 'telefone';
+    } else if (!valor.includes('http') && valor.includes('.')) {
+      valor = 'https://' + valor;
+    }
+
+    const newItem: PoolItem = {
+      id: Math.random().toString(36).substr(2, 9),
+      tipo,
+      valor,
+      data_criacao: new Date().toISOString()
+    };
+
+    const updatedPool = [...(task.pool_dados || []), newItem];
+    onSave(task.id, { pool_dados: updatedPool });
+    setNewPoolItem('');
+  };
+
+  const handleFileUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    setIsUploading(true);
+    const uploadFunc = httpsCallable(functions, 'upload_to_drive');
+
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+
+        // Convert file to base64
+        const reader = new FileReader();
+        const fileContentB64 = await new Promise<string>((resolve, reject) => {
+          reader.onload = () => {
+            const result = reader.result as string;
+            resolve(result.split(',')[1]);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+        const result = await uploadFunc({
+          fileName: file.name,
+          fileContent: fileContentB64,
+          mimeType: file.type,
+          folderId: appSettings.googleDriveFolderId
+        });
+
+        const data = result.data as any;
+
+        const newItem: PoolItem = {
+          id: Math.random().toString(36).substr(2, 9),
+          tipo: 'arquivo',
+          valor: data.webViewLink,
+          nome: file.name,
+          data_criacao: new Date().toISOString()
+        };
+
+        // We need to use the most current state of task to avoid overwriting multiple uploads
+        // Since onSave might be async/throttled, we should be careful.
+        // But for simplicity in this context:
+        onSave(task.id, { pool_dados: [...(task.pool_dados || []), newItem] });
+      }
+    } catch (error) {
+      console.error("Erro no upload:", error);
+      alert("Erro ao fazer upload para o Google Drive. Verifique as credenciais.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const removePoolItem = (itemId: string) => {
+    const updatedPool = (task.pool_dados || []).filter(item => item.id !== itemId);
+    onSave(task.id, { pool_dados: updatedPool });
   };
 
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
@@ -3062,36 +3107,90 @@ const TaskExecutionView = ({ task, tarefas, onSave, onClose }: { task: Tarefa, t
               </button>
             </div>
 
-            {/* Diário de Execução no Modo Foco */}
-            <div className="w-full h-[400px] bg-white/5 rounded-[2.5rem] border border-white/10 p-8 flex flex-col backdrop-blur-sm">
-              <div className="flex items-center justify-between mb-6 flex-shrink-0">
-                <h4 className="text-[10px] font-black text-white/40 uppercase tracking-widest">Diário de Execução</h4>
-                <div className="flex gap-2 w-full max-w-xs">
-                  <input
-                    type="text"
-                    value={newFollowUp}
-                    onChange={e => setNewFollowUp(e.target.value)}
-                    placeholder="Registre o que você está fazendo..."
-                    className="bg-white/10 border border-white/10 rounded-lg px-4 py-2 text-[11px] font-medium outline-none focus:ring-1 focus:ring-blue-500 text-white placeholder:text-white/20 w-full"
-                    onKeyDown={e => e.key === 'Enter' && handleAddFollowUp()}
-                  />
-                  <button onClick={handleAddFollowUp} className="bg-blue-600 text-white px-4 rounded-lg text-[9px] font-black uppercase transition-all hover:bg-blue-500">Enviar</button>
+            {/* Pool e Diário no Modo Foco */}
+            <div className="w-full h-[500px] grid grid-rows-2 gap-6">
+              {/* Pool de Dados (Foco) */}
+              <div className="bg-white/5 rounded-[2.5rem] border border-white/10 p-6 flex flex-col backdrop-blur-sm overflow-hidden">
+                <div className="flex items-center justify-between mb-4 flex-shrink-0">
+                  <h4 className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Pool de Dados</h4>
+                  <div className="flex gap-2 w-full max-w-[200px]">
+                    <input
+                      type="text"
+                      value={newPoolItem}
+                      onChange={e => setNewPoolItem(e.target.value)}
+                      placeholder="Link/Telefone..."
+                      className="bg-white/10 border border-white/10 rounded-lg px-4 py-2 text-[10px] font-medium outline-none focus:ring-1 focus:ring-blue-500 text-white placeholder:text-white/20 w-full"
+                      onKeyDown={e => e.key === 'Enter' && handleAddPoolItem(newPoolItem)}
+                    />
+                    <button onClick={() => handleAddPoolItem(newPoolItem)} className="bg-blue-600 text-white px-3 rounded-lg text-[8px] font-black uppercase transition-all hover:bg-blue-500">Add</button>
+                  </div>
+                </div>
+                <div
+                  onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add('bg-white/10'); }}
+                  onDragLeave={e => { e.currentTarget.classList.remove('bg-white/10'); }}
+                  onDrop={e => {
+                    e.preventDefault();
+                    e.currentTarget.classList.remove('bg-white/10');
+                    handleFileUpload(e.dataTransfer.files);
+                  }}
+                  className={`flex-1 overflow-y-auto custom-scrollbar space-y-2 pr-2 border-2 border-dashed border-white/5 rounded-2xl p-2 transition-all ${isUploading ? 'opacity-50 pointer-events-none' : ''}`}
+                >
+                  {(task.pool_dados || []).map((item) => (
+                    <div key={item.id} className="bg-white/5 p-2 rounded-xl border border-white/5 flex items-center justify-between group/fitem">
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 ${
+                          item.tipo === 'arquivo' ? 'bg-amber-500/20 text-amber-500' :
+                          item.tipo === 'telefone' ? 'bg-emerald-500/20 text-emerald-500' :
+                          'bg-blue-500/20 text-blue-500'
+                        }`}>
+                          {item.tipo === 'arquivo' && <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
+                          {item.tipo === 'telefone' && <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.022-.014-.503-.245-.583-.273-.08-.027-.138-.04-.197.048-.058.088-.227.288-.278.346-.05.058-.1.066-.188.022-.088-.044-.372-.137-.708-.437-.26-.231-.437-.515-.487-.603-.05-.088-.005-.135.039-.179.04-.04.088-.103.131-.154.044-.051.059-.088.088-.146.03-.058.015-.11-.008-.154-.022-.044-.197-.474-.27-.65-.072-.172-.143-.149-.197-.151l-.168-.002c-.058 0-.154.022-.234.11-.08.088-.307.3-.307.732 0 .432.315.849.359.907.044.058.62 1.04 1.502 1.42.21.09.372.143.5.184.21.067.4.057.55.035.168-.024.503-.205.574-.403.072-.198.072-.367.051-.403-.021-.037-.08-.058-.168-.102z"/><path d="M12 2C6.477 2 2 6.477 2 12c0 1.891.524 3.66 1.434 5.168L2 22l4.958-1.412A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.96 7.96 0 01-4.07-1.112l-.292-.174-3.024.863.878-2.946-.19-.302A7.957 7.957 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z"/></svg>}
+                          {item.tipo === 'link' && <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>}
+                        </div>
+                        <div className="text-[10px] font-bold text-white/80 truncate">{item.nome || item.valor}</div>
+                      </div>
+                      <a href={item.valor} target="_blank" rel="noreferrer" className="p-1.5 text-white/20 hover:text-white transition-colors">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                      </a>
+                    </div>
+                  ))}
+                  {(task.pool_dados || []).length === 0 && (
+                     <div className="h-full flex items-center justify-center text-white/10 text-[8px] font-black uppercase tracking-widest text-center">Arraste arquivos aqui</div>
+                  )}
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
-                {task.acompanhamento && task.acompanhamento.length > 0 ? (
-                  task.acompanhamento.slice().reverse().map((entry, idx) => (
-                    <div key={idx} className="bg-white/5 p-4 rounded-2xl border border-white/5 flex gap-4 hover:bg-white/10 transition-colors">
-                      <div className="flex-shrink-0 text-[8px] font-black text-white/30 uppercase leading-none min-w-[50px] pt-1">
-                        {new Date(entry.data).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+              {/* Diário de Execução (Foco) */}
+              <div className="bg-white/5 rounded-[2.5rem] border border-white/10 p-6 flex flex-col backdrop-blur-sm overflow-hidden">
+                <div className="flex items-center justify-between mb-4 flex-shrink-0">
+                  <h4 className="text-[10px] font-black text-white/40 uppercase tracking-widest">Diário de Execução</h4>
+                  <div className="flex gap-2 w-full max-w-[200px]">
+                    <input
+                      type="text"
+                      value={newFollowUp}
+                      onChange={e => setNewFollowUp(e.target.value)}
+                      placeholder="Registrar..."
+                      className="bg-white/10 border border-white/10 rounded-lg px-4 py-2 text-[10px] font-medium outline-none focus:ring-1 focus:ring-blue-500 text-white placeholder:text-white/20 w-full"
+                      onKeyDown={e => e.key === 'Enter' && handleAddFollowUp()}
+                    />
+                    <button onClick={handleAddFollowUp} className="bg-blue-600 text-white px-3 rounded-lg text-[8px] font-black uppercase transition-all hover:bg-blue-500">Add</button>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 pr-2">
+                  {task.acompanhamento && task.acompanhamento.length > 0 ? (
+                    task.acompanhamento.slice().reverse().map((entry, idx) => (
+                      <div key={idx} className="bg-white/5 p-3 rounded-2xl border border-white/5 flex gap-3 hover:bg-white/10 transition-colors">
+                        <div className="flex-shrink-0 text-[7px] font-black text-white/30 uppercase leading-none min-w-[40px] pt-1">
+                          {new Date(entry.data).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                        <p className="text-[10px] font-medium text-white/80 leading-snug">{entry.nota}</p>
                       </div>
-                      <p className="text-[11px] font-medium text-white/80 leading-snug">{entry.nota}</p>
-                    </div>
-                  ))
-                ) : (
-                  <div className="h-full flex items-center justify-center text-white/20 text-[10px] font-black uppercase tracking-widest italic">Nenhum registro nesta sessão</div>
-                )}
+                    ))
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-white/20 text-[8px] font-black uppercase tracking-widest italic">Nenhum registro</div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -3202,8 +3301,83 @@ const TaskExecutionView = ({ task, tarefas, onSave, onClose }: { task: Tarefa, t
                 </div>
               </div>
 
+              {/* Pool de Dados */}
+              <div className="bg-white/5 rounded-[2.5rem] border border-white/10 shadow-xl p-8 flex flex-col overflow-hidden h-[350px]">
+                <div className="flex items-center justify-between mb-4 flex-shrink-0">
+                  <h4 className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Pool de Dados (Link/Drive)</h4>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newPoolItem}
+                      onChange={e => setNewPoolItem(e.target.value)}
+                      placeholder="Link ou Telefone..."
+                      className="bg-black/20 border border-white/10 rounded-lg px-4 py-2 text-[11px] font-medium outline-none focus:ring-1 focus:ring-blue-500 w-40 text-slate-300 placeholder:text-slate-600"
+                      onKeyDown={e => e.key === 'Enter' && handleAddPoolItem(newPoolItem)}
+                    />
+                    <button onClick={() => handleAddPoolItem(newPoolItem)} className="bg-blue-600 text-white px-4 rounded-lg text-[9px] font-black uppercase transition-all">Add</button>
+                  </div>
+                </div>
+
+                <div
+                  onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add('bg-white/10'); }}
+                  onDragLeave={e => { e.currentTarget.classList.remove('bg-white/10'); }}
+                  onDrop={e => {
+                    e.preventDefault();
+                    e.currentTarget.classList.remove('bg-white/10');
+                    handleFileUpload(e.dataTransfer.files);
+                  }}
+                  className={`flex-1 border-2 border-dashed border-white/10 rounded-2xl flex flex-col overflow-hidden transition-all relative ${isUploading ? 'opacity-50 pointer-events-none' : ''}`}
+                >
+                  {isUploading && (
+                    <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40">
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                        <span className="text-[10px] font-black text-white uppercase tracking-widest">Enviando...</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-2">
+                    {(task.pool_dados || []).length > 0 ? (
+                      task.pool_dados.map((item) => (
+                        <div key={item.id} className="bg-black/20 p-3 rounded-xl border border-white/5 flex items-center justify-between group/item">
+                          <div className="flex items-center gap-3 overflow-hidden">
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                              item.tipo === 'arquivo' ? 'bg-amber-500/20 text-amber-500' :
+                              item.tipo === 'telefone' ? 'bg-emerald-500/20 text-emerald-500' :
+                              'bg-blue-500/20 text-blue-500'
+                            }`}>
+                              {item.tipo === 'arquivo' && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
+                              {item.tipo === 'telefone' && <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.022-.014-.503-.245-.583-.273-.08-.027-.138-.04-.197.048-.058.088-.227.288-.278.346-.05.058-.1.066-.188.022-.088-.044-.372-.137-.708-.437-.26-.231-.437-.515-.487-.603-.05-.088-.005-.135.039-.179.04-.04.088-.103.131-.154.044-.051.059-.088.088-.146.03-.058.015-.11-.008-.154-.022-.044-.197-.474-.27-.65-.072-.172-.143-.149-.197-.151l-.168-.002c-.058 0-.154.022-.234.11-.08.088-.307.3-.307.732 0 .432.315.849.359.907.044.058.62 1.04 1.502 1.42.21.09.372.143.5.184.21.067.4.057.55.035.168-.024.503-.205.574-.403.072-.198.072-.367.051-.403-.021-.037-.08-.058-.168-.102z"/><path d="M12 2C6.477 2 2 6.477 2 12c0 1.891.524 3.66 1.434 5.168L2 22l4.958-1.412A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.96 7.96 0 01-4.07-1.112l-.292-.174-3.024.863.878-2.946-.19-.302A7.957 7.957 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z"/></svg>}
+                              {item.tipo === 'link' && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>}
+                            </div>
+                            <div className="overflow-hidden">
+                              <div className="text-[11px] font-bold text-slate-200 truncate">{item.nome || item.valor}</div>
+                              <div className="text-[8px] font-black text-white/30 uppercase tracking-widest">{item.tipo}</div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <a href={item.valor} target="_blank" rel="noreferrer" className="p-2 text-white/20 hover:text-white transition-colors">
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                            </a>
+                            <button onClick={() => removePoolItem(item.id)} className="p-2 text-white/10 hover:text-rose-500 opacity-0 group-hover/item:opacity-100 transition-all">
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="h-full flex flex-col items-center justify-center text-center px-4">
+                        <svg className="w-10 h-10 text-white/10 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+                        <p className="text-white/20 text-[10px] font-black uppercase tracking-widest leading-tight">Arraste arquivos ou cole links aqui</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               {/* Log de Atividade */}
-              <div className="flex-1 bg-white/5 rounded-[2.5rem] border border-white/10 shadow-xl p-8 flex flex-col overflow-hidden">
+              <div className="flex-1 bg-white/5 rounded-[2.5rem] border border-white/10 shadow-xl p-8 flex flex-col overflow-hidden min-h-[250px]">
                 <div className="flex items-center justify-between mb-4 flex-shrink-0">
                   <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Diário de Execução</h4>
                   <div className="flex gap-2">
@@ -6418,6 +6592,7 @@ const App: React.FC = () => {
             <TaskExecutionView
               task={selectedTask}
               tarefas={tarefas}
+              appSettings={appSettings}
               onSave={handleUpdateTarefa}
               onClose={() => setSelectedTask(null)}
             />

@@ -1,5 +1,5 @@
 
-from firebase_functions import firestore_fn, scheduler_fn, options
+from firebase_functions import firestore_fn, scheduler_fn, options, https_fn
 from firebase_admin import initialize_app, firestore
 
 # Inicializa o Firebase Admin apenas uma vez no escopo global
@@ -22,7 +22,8 @@ def get_google_creds():
     SCOPES = [
         'https://www.googleapis.com/auth/tasks',
         'https://www.googleapis.com/auth/gmail.readonly',
-        'https://www.googleapis.com/auth/calendar.readonly'
+        'https://www.googleapis.com/auth/calendar.readonly',
+        'https://www.googleapis.com/auth/drive.file'
     ]
     return Credentials(
         token=creds_data.get('token'),
@@ -44,6 +45,10 @@ def get_gmail_service():
 def get_calendar_service():
     from googleapiclient.discovery import build
     return build('calendar', 'v3', credentials=get_google_creds())
+
+def get_drive_service():
+    from googleapiclient.discovery import build
+    return build('drive', 'v3', credentials=get_google_creds())
 
 def log_to_firestore(sync_ref, logs, message, force_update=False):
     from datetime import datetime
@@ -311,3 +316,50 @@ def on_sync_request(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.D
 def scheduled_sync(event: scheduler_fn.ScheduledEvent) -> None:
     """Trigger agendado para rodar a cada 30 minutos"""
     run_full_sync()
+
+@https_fn.on_call()
+def upload_to_drive(req: https_fn.CallableRequest):
+    """Realiza o upload de um arquivo para o Google Drive"""
+    import base64
+    from googleapiclient.http import MediaIoBaseUpload
+    import io
+
+    data = req.data
+    file_name = data.get('fileName')
+    file_content_b64 = data.get('fileContent') # base64 string
+    mime_type = data.get('mimeType', 'application/octet-stream')
+    folder_id = data.get('folderId')
+
+    if not file_name or not file_content_b64:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="O nome e o conteúdo do arquivo são obrigatórios."
+        )
+
+    try:
+        service = get_drive_service()
+
+        file_metadata = {'name': file_name}
+        if folder_id:
+            file_metadata['parents'] = [folder_id]
+
+        file_content = base64.b64decode(file_content_b64)
+        fh = io.BytesIO(file_content)
+        media = MediaIoBaseUpload(fh, mimetype=mime_type, resumable=True)
+
+        file = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id, webViewLink'
+        ).execute()
+
+        return {
+            'fileId': file.get('id'),
+            'webViewLink': file.get('webViewLink')
+        }
+    except Exception as e:
+        print(f"Erro no upload para o Drive: {str(e)}")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=str(e)
+        )
