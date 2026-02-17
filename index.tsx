@@ -32,11 +32,11 @@ interface Toast {
 
 const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[], removeToast: (id: string) => void }) => {
   return (
-    <div className="fixed top-8 right-8 z-[200] flex flex-col gap-3 pointer-events-none">
+    <div className="fixed bottom-4 sm:top-8 right-4 sm:right-8 left-4 sm:left-auto z-[200] flex flex-col gap-3 pointer-events-none">
       {toasts.map(toast => (
         <div
           key={toast.id}
-          className={`pointer-events-auto px-8 py-5 rounded-[1.25rem] shadow-[0_20px_50px_rgba(0,0,0,0.2)] flex items-center gap-4 animate-in slide-in-from-right-12 fade-in duration-500 min-w-[320px] backdrop-blur-md ${toast.type === 'success' ? 'bg-emerald-500/95 text-white' :
+          className={`pointer-events-auto px-8 py-5 rounded-lg sm:rounded-lg md:rounded-[1.25rem] shadow-[0_20px_50px_rgba(0,0,0,0.2)] flex items-center gap-4 animate-in slide-in-from-bottom-12 sm:slide-in-from-right-12 fade-in duration-500 min-w-[320px] backdrop-blur-md ${toast.type === 'success' ? 'bg-emerald-500/95 text-white' :
             toast.type === 'error' ? 'bg-rose-500/95 text-white' :
               'bg-slate-900/95 text-white'
             }`}
@@ -136,7 +136,7 @@ const PgcMiniTaskCard = React.memo(({ task, onClick }: { task: Tarefa, onClick?:
         e.dataTransfer.effectAllowed = 'copy';
       }}
       onClick={onClick}
-      className={`bg-white border border-slate-200 p-3 rounded-xl shadow-sm hover:shadow-md hover:border-blue-400 transition-all ${onClick ? 'cursor-pointer' : 'cursor-grab'} active:cursor-grabbing w-full md:w-[280px] group`}
+      className={`bg-white border border-slate-200 p-3 rounded-lg md:rounded-xl shadow-sm hover:shadow-md hover:border-blue-400 transition-all ${onClick ? 'cursor-pointer' : 'cursor-grab'} active:cursor-grabbing w-full md:w-[280px] group`}
     >
       <div className="flex items-center gap-2 mb-2 flex-wrap">
         <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${PROJECT_COLORS[task.projeto] || 'bg-slate-100 text-slate-600'}`}>
@@ -226,7 +226,7 @@ const PgcAuditRow = ({
 
         <button
           onClick={() => setIsExpanded(!isExpanded)}
-          className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-[9px] font-black uppercase tracking-wider hover:bg-slate-50 transition-colors flex items-center gap-2 shadow-sm"
+          className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg md:rounded-xl text-[9px] font-black uppercase tracking-wider hover:bg-slate-50 transition-colors flex items-center gap-2 shadow-sm"
         >
           {isExpanded ? 'Ocultar Ações' : 'Ações Relacionadas'}
           <svg className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -238,7 +238,7 @@ const PgcAuditRow = ({
       {isExpanded && (
         <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 animate-in slide-in-from-top-2 duration-300">
           {atividadesRelacionadas.map(at => (
-            <div key={at.id} className="p-4 rounded-2xl bg-white border border-slate-200 shadow-sm hover:border-slate-300 transition-all">
+            <div key={at.id} className="p-4 rounded-none md:rounded-2xl bg-white border border-slate-200 shadow-sm hover:border-slate-300 transition-all">
               <p className="text-[8px] font-black text-slate-400 uppercase mb-1">{formatDate(at.data_inicio)}</p>
               <p className="text-[11px] font-bold text-slate-700 leading-tight">{at.descricao_atividade}</p>
               <div className="mt-2 text-[8px] font-black text-blue-500 uppercase tracking-widest">Atividade PGD</div>
@@ -248,7 +248,7 @@ const PgcAuditRow = ({
             <div
               key={t.id}
               onClick={() => onSelectTask(t)}
-              className="p-4 rounded-2xl bg-blue-50/30 border border-blue-100 shadow-sm hover:border-blue-300 hover:bg-blue-50/50 transition-all cursor-pointer group/task relative pr-10"
+              className="p-4 rounded-none md:rounded-2xl bg-blue-50/30 border border-blue-100 shadow-sm hover:border-blue-300 hover:bg-blue-50/50 transition-all cursor-pointer group/task relative pr-10"
             >
               <button
                 onClick={(e) => {
@@ -270,7 +270,7 @@ const PgcAuditRow = ({
             </div>
           ))}
           {atividadesRelacionadas.length === 0 && tarefasRelacionadas.length === 0 && (
-            <div className="col-span-full py-8 text-center bg-slate-50/50 rounded-2xl border-2 border-dashed border-slate-100">
+            <div className="col-span-full py-8 text-center bg-slate-50/50 rounded-none md:rounded-2xl border-2 border-dashed border-slate-100">
               <p className="text-slate-300 text-[10px] font-black uppercase tracking-widest italic">Nenhuma ação vinculada a esta entrega</p>
             </div>
           )}
@@ -493,7 +493,7 @@ const DayView = ({
               return (
                 <div
                   key={event.id}
-                  className="absolute left-16 right-4 rounded-xl border-l-4 p-2 shadow-sm bg-amber-50/90 border-amber-500 text-slate-800"
+                  className="absolute left-16 right-4 rounded-lg md:rounded-xl border-l-4 p-2 shadow-sm bg-amber-50/90 border-amber-500 text-slate-800"
                   style={{ top, height: Math.max(30, height), zIndex: 5 }}
                 >
                   <div className="flex justify-between items-start gap-2">
@@ -517,7 +517,7 @@ const DayView = ({
               return (
                 <div
                   key={task.id}
-                  className={`absolute left-16 right-4 rounded-xl border p-2 shadow-sm group transition-all cursor-grab active:cursor-grabbing overflow-hidden
+                  className={`absolute left-16 right-4 rounded-lg md:rounded-xl border p-2 shadow-sm group transition-all cursor-grab active:cursor-grabbing overflow-hidden
                     ${task.categoria === 'CLC' ? 'bg-blue-50 border-blue-200 text-blue-800' :
                       task.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
                         'bg-white border-slate-200 text-slate-800'}
@@ -592,7 +592,7 @@ const DayView = ({
                 key={task.id}
                 draggable
                 onDragStart={(e) => e.dataTransfer.setData('task-id', task.id)}
-                className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-400 hover:shadow-md transition-all cursor-grab active:cursor-grabbing"
+                className="bg-white p-4 rounded-none md:rounded-2xl border border-slate-200 shadow-sm hover:border-blue-400 hover:shadow-md transition-all cursor-grab active:cursor-grabbing"
               >
                 <div className="text-[10px] font-bold text-slate-700 leading-tight mb-2">{task.titulo}</div>
                 <div className="flex items-center gap-2">
@@ -604,7 +604,7 @@ const DayView = ({
               </div>
             ))}
             {dayTasks.filter(t => !t.horario_inicio).length === 0 && (
-              <div className="py-12 text-center border-2 border-dashed border-slate-200 rounded-[2rem]">
+              <div className="py-12 text-center border-2 border-dashed border-slate-200 rounded-none md:rounded-[2rem]">
                 <p className="text-slate-300 text-[10px] font-black uppercase italic">Tudo alocado</p>
               </div>
             )}
@@ -614,12 +614,12 @@ const DayView = ({
 
       {confirmAction && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full shadow-2xl animate-in zoom-in-95">
+          <div className="bg-white rounded-none md:rounded-[2rem] p-8 max-w-sm w-full shadow-2xl animate-in zoom-in-95">
             <h3 className="text-xl font-black text-slate-900 mb-2">Confirmar Ação</h3>
             <p className="text-slate-500 text-sm mb-8">Deseja marcar esta tarefa como <strong>{confirmAction.newStatus}</strong>?</p>
             <div className="flex gap-4">
-              <button onClick={() => setConfirmAction(null)} className="flex-1 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50">Cancelar</button>
-              <button onClick={confirmTaskCompletion} className="flex-1 bg-slate-900 text-white py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-slate-200">Confirmar</button>
+              <button onClick={() => setConfirmAction(null)} className="flex-1 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50">Cancelar</button>
+              <button onClick={confirmTaskCompletion} className="flex-1 bg-slate-900 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-slate-200">Confirmar</button>
             </div>
           </div>
         </div>
@@ -764,7 +764,7 @@ const CalendarView = ({
     : new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(currentDate);
 
   return (
-    <div className="bg-white rounded-[2rem] border border-slate-200 overflow-hidden shadow-sm animate-in fade-in">
+    <div className="bg-white rounded-none md:rounded-[2rem] border border-slate-200 overflow-hidden shadow-sm animate-in fade-in">
       <div className="p-6 border-b border-slate-100 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <h3 className="text-xl font-black text-slate-900 capitalize tracking-tight">{monthName}</h3>
@@ -956,7 +956,7 @@ const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit }: {
         e.dataTransfer.effectAllowed = 'move';
       }}
       title={task.data_criacao ? `Criada em: ${formatDate(task.data_criacao.split('T')[0])}` : ''}
-      className={`group bg-white w-full px-6 py-3 border-b border-slate-100 hover:bg-slate-50/80 transition-all flex items-center gap-6 animate-in cursor-pointer relative ${isCompleted ? 'opacity-60 grayscale-[0.5]' : ''}`}
+      className={`group bg-white w-full px-4 md:px-6 py-4 md:py-3 border-b border-slate-100 hover:bg-slate-50/80 transition-all flex flex-col sm:flex-row sm:items-center gap-4 md:gap-6 animate-in cursor-pointer relative ${isCompleted ? 'opacity-60 grayscale-[0.5]' : ''}`}
     >
       {/* Esquerda: Checkbox + Título */}
       <div className="flex items-center gap-4 flex-1 min-w-0">
@@ -965,81 +965,78 @@ const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit }: {
             e.stopPropagation();
             onToggle(task.id, task.status);
           }}
-          className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center transition-all flex-shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-200 hover:border-slate-400 text-transparent'}`}
+          className={`w-6 h-6 sm:w-5 sm:h-5 rounded-lg border-2 flex items-center justify-center transition-all flex-shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-200 hover:border-slate-400 text-transparent'}`}
         >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" /></svg>
+          <svg className="w-4 h-4 sm:w-3.5 sm:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" /></svg>
         </button>
         
-        <div className={`text-sm font-bold text-[#1a202c] leading-tight truncate transition-colors ${isCompleted ? 'line-through text-slate-400' : 'group-hover:text-blue-600'}`}>
+        <div className={`text-sm md:text-base font-bold text-[#1a202c] leading-tight transition-colors ${isCompleted ? 'line-through text-slate-400' : 'group-hover:text-blue-600'} line-clamp-2 sm:line-clamp-1`}>
           {task.titulo}
         </div>
       </div>
 
-      {/* Centro: Tags + Data */}
-      <div className="flex items-center gap-6 flex-shrink-0">
-        <div className="flex gap-1.5">
+      {/* Centro/Direita: Tags + Data + Ações */}
+      <div className="flex items-center justify-between sm:justify-end gap-4 md:gap-6 flex-wrap sm:flex-nowrap">
+        <div className="flex items-center gap-2 flex-wrap">
           {task.categoria && task.categoria !== 'NÃO CLASSIFICADA' && (
-            <span className={`text-[9px] font-black px-2.5 py-0.5 rounded-full border whitespace-nowrap ${getTagStyle(task.categoria, 'category')}`}>
+            <span className={`text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded-full border whitespace-nowrap ${getTagStyle(task.categoria, 'category')}`}>
               {task.categoria}
             </span>
           )}
-          <span className={`text-[9px] font-black px-2.5 py-0.5 rounded-full border whitespace-nowrap ${getTagStyle(task.projeto, 'project')}`}>
+          <span className={`text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded-full border whitespace-nowrap ${getTagStyle(task.projeto, 'project')}`}>
             {task.projeto}
           </span>
           
           {task.sync_status && (
-            <div className={`w-2 h-2 rounded-full mt-1.5 ${task.sync_status === 'new' ? 'bg-purple-500 animate-pulse' : 'bg-amber-500'}`} title={task.sync_status === 'new' ? 'Nova' : 'Atualizada'}></div>
+            <div className={`w-2 h-2 rounded-full ${task.sync_status === 'new' ? 'bg-purple-500 animate-pulse' : 'bg-amber-500'}`} title={task.sync_status === 'new' ? 'Nova' : 'Atualizada'}></div>
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 text-slate-400 font-black uppercase text-[10px] tracking-widest min-w-[70px]">
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-          {dateDisplay}
-        </div>
-      </div>
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-1.5 text-slate-400 font-black uppercase text-[9px] md:text-[10px] tracking-widest min-w-[65px]">
+            <svg className="w-3 h-3 md:w-3.5 md:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+            {dateDisplay}
+          </div>
 
-      {/* Direita: Ações */}
-      {!isCompleted && (
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
-          <button
-            onClick={(e) => { e.stopPropagation(); onEdit(task); }}
-            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
-            title="Editar Ação"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-          </button>
+          {/* Ações: Sempre visíveis no mobile (sm:opacity-0), hover no desktop */}
+          {!isCompleted && (
+            <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all">
+              <button
+                onClick={(e) => { e.stopPropagation(); onEdit(task); }}
+                className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg md:rounded-xl transition-all"
+                title="Editar Ação"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              </button>
 
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              if (isConfirmingDelete) {
-                onDelete(task.id);
-              } else {
-                setIsConfirmingDelete(true);
-              }
-            }}
-            className={`p-2 rounded-lg transition-all ${isConfirmingDelete ? 'bg-rose-500 text-white shadow-lg shadow-rose-200' : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'}`}
-            title={isConfirmingDelete ? "Confirmar?" : "Excluir"}
-          >
-            {isConfirmingDelete ? (
-               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-            ) : (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-            )}
-          </button>
-          {task.status !== 'em andamento' && (
-            <span className={`ml-2 text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${STATUS_COLORS[statusValue] || 'bg-slate-100 text-slate-500'}`}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (isConfirmingDelete) {
+                    onDelete(task.id);
+                  } else {
+                    setIsConfirmingDelete(true);
+                  }
+                }}
+                className={`p-2 rounded-lg md:rounded-xl transition-all ${isConfirmingDelete ? 'bg-rose-500 text-white shadow-lg shadow-rose-200' : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'}`}
+                title={isConfirmingDelete ? "Confirmar?" : "Excluir"}
+              >
+                {isConfirmingDelete ? (
+                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                )}
+              </button>
+            </div>
+          )}
+
+          {isCompleted && (
+            <span className={`text-[8px] md:text-[9px] font-black uppercase px-2 py-1 rounded-full ${STATUS_COLORS[statusValue] || 'bg-slate-100 text-slate-500'}`}>
               {task.status}
             </span>
           )}
         </div>
-      )}
-
-      {isCompleted && (
-        <span className={`ml-auto text-[9px] font-black uppercase px-2.5 py-1 rounded-full ${STATUS_COLORS[statusValue] || 'bg-slate-100 text-slate-500'}`}>
-          {task.status}
-        </span>
-      )}
+      </div>
     </div>
   );
 });
@@ -1090,7 +1087,8 @@ const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask }: { tasks:
         </div>
 
         <div className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl">
-          <table className="w-full text-left">
+          {/* Desktop Table View */}
+          <table className="w-full text-left hidden md:table">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Demanda</th>
@@ -1110,7 +1108,7 @@ const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask }: { tasks:
                     <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={(e) => { e.stopPropagation(); onSelectTask(t); }}
-                        className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-[9px] font-black uppercase tracking-wider hover:bg-slate-200 transition-colors"
+                        className="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg md:rounded-xl text-[9px] font-black uppercase tracking-wider hover:bg-slate-200 transition-colors"
                       >
                         Editar
                       </button>
@@ -1119,13 +1117,45 @@ const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask }: { tasks:
                   </td>
                 </tr>
               ))}
-              {pendentes.length === 0 && (
-                <tr>
-                  <td colSpan={2} className="py-20 text-center text-slate-300 font-black uppercase tracking-widest italic">Nenhuma ação em aberto</td>
-                </tr>
-              )}
             </tbody>
           </table>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden divide-y divide-slate-100">
+            {pendentes.map(t => (
+              <div key={t.id} className="p-6 space-y-4 hover:bg-slate-50 transition-colors cursor-pointer" onClick={() => onExecuteTask(t)}>
+                <div className="flex justify-between items-start gap-4">
+                  <div className="flex-1">
+                    <div className="text-[8px] font-black uppercase text-slate-400 mb-1">{t.projeto}</div>
+                    <div className="text-sm font-black text-slate-900 leading-tight">{t.titulo}</div>
+                  </div>
+                  <div className="text-[9px] font-black text-blue-600 uppercase tracking-widest bg-blue-50 px-2 py-1 rounded whitespace-nowrap">
+                    {formatDate(t.data_limite)}
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onSelectTask(t); }}
+                    className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 rounded-lg md:rounded-xl text-[9px] font-black uppercase tracking-wider text-center"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onExecuteTask(t); }}
+                    className="flex-1 px-4 py-3 bg-slate-900 text-white rounded-lg md:rounded-xl text-[9px] font-black uppercase tracking-wider text-center"
+                  >
+                    Executar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {pendentes.length === 0 && (
+            <div className="py-20 text-center text-slate-300 font-black uppercase tracking-widest italic border-t border-slate-100">
+              Nenhuma ação em aberto
+            </div>
+          )}
         </div>
       </div>
 
@@ -1157,7 +1187,7 @@ const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask }: { tasks:
             );
           })}
           {historyTasks.length === 0 && (
-            <div className="py-10 text-center bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+            <div className="py-10 text-center bg-slate-50 rounded-none md:rounded-2xl border-2 border-dashed border-slate-200">
               <p className="text-slate-300 font-black text-[10px] uppercase">Sem histórico</p>
             </div>
           )}
@@ -1206,7 +1236,11 @@ const NotificationCenter = ({
   if (!isOpen) return null;
 
   return (
-    <div ref={dropdownRef} className="fixed sm:absolute top-16 sm:top-full mt-2 sm:mt-4 inset-x-4 sm:inset-auto sm:right-0 w-auto sm:w-96 bg-white rounded-[2.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.2)] border border-slate-100 overflow-hidden z-[100] animate-in fade-in slide-in-from-top-4 sm:slide-in-from-right-4 duration-300">
+    <div
+      ref={dropdownRef}
+      className="fixed sm:absolute bottom-0 sm:bottom-auto sm:top-full left-0 right-0 sm:left-auto sm:right-0 w-full sm:w-96 bg-white rounded-t-[2rem] sm:rounded-none md:rounded-[2.5rem] shadow-[0_-20px_50px_rgba(0,0,0,0.1)] sm:shadow-[0_20px_50px_rgba(0,0,0,0.2)] border-t sm:border border-slate-100 overflow-hidden z-[100] animate-in fade-in slide-in-from-bottom-10 sm:slide-in-from-top-4 sm:slide-in-from-right-4 duration-300"
+    >
+      <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mt-4 mb-2 sm:hidden"></div>
       <div className="p-8 border-b border-slate-50 bg-slate-50/50 flex items-center justify-between">
         <div>
           <h3 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em]">Notificações</h3>
@@ -1216,7 +1250,7 @@ const NotificationCenter = ({
           {notifications.filter(n => !n.isRead).length}
         </span>
       </div>
-      <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
+      <div className="max-h-[70vh] sm:max-h-[400px] overflow-y-auto custom-scrollbar">
         {notifications.length > 0 ? (
           notifications.map(n => (
             <div
@@ -1252,7 +1286,7 @@ const NotificationCenter = ({
                         onUpdateOverdue();
                         onMarkAsRead(n.id);
                       }}
-                      className="mt-4 w-full py-2.5 bg-slate-900 text-white text-[9px] font-black uppercase tracking-widest rounded-xl shadow-lg hover:bg-blue-600 transition-all active:scale-95"
+                      className="mt-4 w-full py-2.5 bg-slate-900 text-white text-[9px] font-black uppercase tracking-widest rounded-lg md:rounded-xl shadow-lg hover:bg-blue-600 transition-all active:scale-95"
                     >
                       Atualizar tudo para hoje
                     </button>
@@ -1336,28 +1370,28 @@ const SettingsModal = ({
             </button>
           </div>
 
-          <div className="flex bg-slate-200/50 p-1 rounded-2xl">
+          <div className="flex bg-slate-200/50 p-1 rounded-none md:rounded-2xl">
             <button
               onClick={() => setActiveTab('notifications')}
-              className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'notifications' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+              className={`flex-1 py-3 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'notifications' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
             >
               🔔 Notificações
             </button>
             <button
               onClick={() => setActiveTab('context')}
-              className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'context' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+              className={`flex-1 py-3 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'context' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
             >
               🏷️ Contexto & Áreas
             </button>
             <button
               onClick={() => setActiveTab('sistemas')}
-              className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'sistemas' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+              className={`flex-1 py-3 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'sistemas' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
             >
               💻 Sistemas
             </button>
             <button
               onClick={() => setActiveTab('google')}
-              className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'google' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+              className={`flex-1 py-3 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'google' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
             >
               ☁️ Google
             </button>
@@ -1374,7 +1408,7 @@ const SettingsModal = ({
                   Geral / Saúde
                 </h4>
 
-                <div className="flex items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-blue-200 transition-all">
+                <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-blue-200 transition-all">
                   <div className="flex-1">
                     <p className="text-sm font-bold text-slate-900 mb-1">Hábitos de Hoje</p>
                     <p className="text-[11px] text-slate-500 font-medium">Abrir lembrete para marcar hábitos cumpridos</p>
@@ -1407,7 +1441,7 @@ const SettingsModal = ({
                   </div>
                 </div>
 
-                <div className="flex flex-col p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-rose-200 transition-all gap-4">
+                <div className="flex flex-col p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-rose-200 transition-all gap-4">
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
                       <p className="text-sm font-bold text-slate-900 mb-1">Lembrete de Pesagem</p>
@@ -1486,7 +1520,7 @@ const SettingsModal = ({
                   Financeiro / Ações
                 </h4>
 
-                <div className="flex items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-emerald-200 transition-all">
+                <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-emerald-200 transition-all">
                   <div className="flex-1">
                     <p className="text-sm font-bold text-slate-900 mb-1">Risco Orçamentário</p>
                     <p className="text-[11px] text-slate-500 font-medium">Avisar se gastos estiverem acima do esperado</p>
@@ -1505,7 +1539,7 @@ const SettingsModal = ({
                   </button>
                 </div>
 
-                <div className="flex items-center justify-between p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-blue-200 transition-all">
+                <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-blue-200 transition-all">
                   <div className="flex-1">
                     <p className="text-sm font-bold text-slate-900 mb-1">Ações Vencidas</p>
                     <p className="text-[11px] text-slate-500 font-medium">Alertar sobre tarefas fora do prazo</p>
@@ -1524,7 +1558,7 @@ const SettingsModal = ({
                   </button>
                 </div>
 
-                <div className="flex flex-col p-6 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-amber-200 transition-all gap-4">
+                <div className="flex flex-col p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-amber-200 transition-all gap-4">
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
                       <p className="text-sm font-bold text-slate-900 mb-1">Audit PGC</p>
@@ -1578,7 +1612,7 @@ const SettingsModal = ({
                 {unidades.map((u) => {
                   const isProtected = ['CLC', 'ASSISTÊNCIA', 'ASSISTÊNCIA ESTUDANTIL'].includes(u.nome.toUpperCase());
                   return (
-                    <div key={u.id} className={`p-6 bg-slate-50 rounded-[2rem] border ${isProtected ? 'border-amber-200 bg-amber-50/30' : 'border-slate-100'} space-y-4 shadow-sm`}>
+                    <div key={u.id} className={`p-6 bg-slate-50 rounded-none md:rounded-[2rem] border ${isProtected ? 'border-amber-200 bg-amber-50/30' : 'border-slate-100'} space-y-4 shadow-sm`}>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <h5 className="text-xs font-black text-slate-900 uppercase tracking-widest">{u.nome}</h5>
@@ -1617,11 +1651,11 @@ const SettingsModal = ({
                           value={newKeywordMap[u.id] || ''}
                           onChange={(e) => setNewKeywordMap({ ...newKeywordMap, [u.id]: e.target.value })}
                           onKeyDown={(e) => e.key === 'Enter' && handleAddKeyword(u.id, u.palavras_chave || [])}
-                          className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2 text-[10px] font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                          className="flex-1 bg-white border border-slate-200 rounded-lg md:rounded-xl px-4 py-2 text-[10px] font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none"
                         />
                         <button
                           onClick={() => handleAddKeyword(u.id, u.palavras_chave || [])}
-                          className="bg-blue-600 text-white px-4 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-md shadow-blue-100"
+                          className="bg-blue-600 text-white px-4 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-md shadow-blue-100"
                         >
                           Add
                         </button>
@@ -1630,7 +1664,7 @@ const SettingsModal = ({
                   );
                 })}
 
-                <div className="p-6 bg-blue-50/50 rounded-[2rem] border-2 border-dashed border-blue-200 flex flex-col gap-4">
+                <div className="p-6 bg-blue-50/50 rounded-none md:rounded-[2rem] border-2 border-dashed border-blue-200 flex flex-col gap-4">
                   <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest text-center">Cadastrar Nova Área de Contexto</p>
                   <div className="flex gap-2">
                     <input
@@ -1638,7 +1672,7 @@ const SettingsModal = ({
                       placeholder="Nome da Unidade (ex: DEV, MARKETING)"
                       value={newUnidadeNome}
                       onChange={(e) => setNewUnidadeNome(e.target.value)}
-                      className="flex-1 bg-white border border-blue-100 rounded-xl px-4 py-3 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"
+                      className="flex-1 bg-white border border-blue-100 rounded-lg md:rounded-xl px-4 py-3 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"
                     />
                     <button
                       onClick={() => {
@@ -1647,7 +1681,7 @@ const SettingsModal = ({
                           setNewUnidadeNome('');
                         }
                       }}
-                      className="bg-blue-600 text-white px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-200"
+                      className="bg-blue-600 text-white px-6 py-3 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-200"
                     >
                       Criar
                     </button>
@@ -1671,10 +1705,10 @@ const SettingsModal = ({
                 <div className="space-y-3">
                   {unidades.filter(u => u.nome.startsWith('SISTEMA:')).length > 0 ? (
                     unidades.filter(u => u.nome.startsWith('SISTEMA:')).map(sistema => (
-                      <div key={sistema.id} className="bg-violet-50 border border-violet-100 rounded-2xl p-6 group hover:border-violet-300 transition-all">
+                      <div key={sistema.id} className="bg-violet-50 border border-violet-100 rounded-none md:rounded-2xl p-6 group hover:border-violet-300 transition-all">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-violet-500 rounded-xl flex items-center justify-center">
+                            <div className="w-10 h-10 bg-violet-500 rounded-lg md:rounded-xl flex items-center justify-center">
                               <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
                               </svg>
@@ -1686,7 +1720,7 @@ const SettingsModal = ({
                           </div>
                           <button
                             onClick={() => onDeleteUnidade(sistema.id)}
-                            className="opacity-0 group-hover:opacity-100 p-2 hover:bg-rose-100 rounded-xl transition-all text-rose-600"
+                            className="opacity-0 group-hover:opacity-100 p-2 hover:bg-rose-100 rounded-lg md:rounded-xl transition-all text-rose-600"
                             title="Remover sistema"
                           >
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1697,7 +1731,7 @@ const SettingsModal = ({
                       </div>
                     ))
                   ) : (
-                    <div className="text-center py-12 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+                    <div className="text-center py-12 bg-slate-50 rounded-none md:rounded-2xl border-2 border-dashed border-slate-200">
                       <div className="w-16 h-16 bg-violet-100 rounded-full flex items-center justify-center mx-auto mb-4">
                         <svg className="w-8 h-8 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
@@ -1710,7 +1744,7 @@ const SettingsModal = ({
                 </div>
 
                 {/* Formulário para adicionar novo sistema */}
-                <div className="bg-gradient-to-br from-violet-50 to-purple-50 border-2 border-violet-200 rounded-2xl p-6">
+                <div className="bg-gradient-to-br from-violet-50 to-purple-50 border-2 border-violet-200 rounded-none md:rounded-2xl p-6">
                   <p className="text-[10px] font-black text-violet-600 uppercase tracking-widest text-center mb-4">Cadastrar Novo Sistema</p>
                   <div className="flex gap-2">
                     <input
@@ -1724,7 +1758,7 @@ const SettingsModal = ({
                           setNewUnidadeNome('');
                         }
                       }}
-                      className="flex-1 bg-white border border-violet-100 rounded-xl px-4 py-3 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-violet-500 outline-none shadow-sm"
+                      className="flex-1 bg-white border border-violet-100 rounded-lg md:rounded-xl px-4 py-3 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-violet-500 outline-none shadow-sm"
                     />
                     <button
                       onClick={() => {
@@ -1733,7 +1767,7 @@ const SettingsModal = ({
                           setNewUnidadeNome('');
                         }
                       }}
-                      className="bg-violet-600 text-white px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-violet-700 transition-all shadow-lg shadow-violet-200"
+                      className="bg-violet-600 text-white px-6 py-3 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-violet-700 transition-all shadow-lg shadow-violet-200"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" />
@@ -1751,7 +1785,7 @@ const SettingsModal = ({
                 Integração Google Drive
               </h4>
 
-              <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100 space-y-4 shadow-sm">
+              <div className="p-6 bg-slate-50 rounded-none md:rounded-[2rem] border border-slate-100 space-y-4 shadow-sm">
                 <p className="text-xs text-slate-500 font-medium">
                   Configure a pasta do Google Drive onde os arquivos do Pool de Dados serão armazenados.
                 </p>
@@ -1763,7 +1797,7 @@ const SettingsModal = ({
                     value={localSettings.googleDriveFolderId || ''}
                     onChange={(e) => setLocalSettings({ ...localSettings, googleDriveFolderId: e.target.value })}
                     placeholder="Ex: 1a2b3c4d5e6f7g8h9i0j..."
-                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-xs font-mono text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="w-full bg-white border border-slate-200 rounded-lg md:rounded-xl px-4 py-3 text-xs font-mono text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none"
                   />
                   <p className="text-[9px] text-slate-400 italic">
                     O ID da pasta é a parte final da URL da pasta no Google Drive.
@@ -1771,7 +1805,7 @@ const SettingsModal = ({
                 </div>
               </div>
 
-              <div className="p-6 bg-amber-50 rounded-[2rem] border border-amber-100">
+              <div className="p-6 bg-amber-50 rounded-none md:rounded-[2rem] border border-amber-100">
                 <div className="flex gap-3">
                   <svg className="w-5 h-5 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
                   <div>
@@ -1787,13 +1821,13 @@ const SettingsModal = ({
         </div>
 
         <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-4 flex-shrink-0">
-          <button onClick={onClose} className="flex-1 px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all">Cancelar</button>
+          <button onClick={onClose} className="flex-1 px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all">Cancelar</button>
           <button
             onClick={() => {
               onSave(localSettings);
               onClose();
             }}
-            className="flex-1 bg-blue-600 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
+            className="flex-1 bg-blue-600 text-white px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
           >
             Salvar Alterações
           </button>
@@ -1859,7 +1893,7 @@ const DailyHabitsModal = ({
               <button
                 key={habit.id}
                 onClick={() => handleHabitToggle(habit.id as keyof DailyHabits)}
-                className={`w-full flex items-center justify-between p-4 rounded-2xl border-2 transition-all duration-300 ${isActive
+                className={`w-full flex items-center justify-between p-4 rounded-none md:rounded-2xl border-2 transition-all duration-300 ${isActive
                   ? `${colors.bg} ${colors.border} shadow-sm`
                   : 'bg-white border-slate-100 hover:border-slate-200'
                   }`}
@@ -1883,7 +1917,7 @@ const DailyHabitsModal = ({
         <div className="p-8 bg-slate-50 border-t border-slate-100">
           <button
             onClick={onClose}
-            className="w-full bg-slate-900 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all"
+            className="w-full bg-slate-900 text-white px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all"
           >
             Concluir Registro
           </button>
@@ -1962,7 +1996,7 @@ const TaskCreateModal = ({ unidades, onSave, onClose }: { unidades: { id: string
                   categoria: autoClassified ? formData.categoria : detectedArea
                 });
               }}
-              className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+              className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
               placeholder="O que precisa ser feito?"
             />
             {formData.categoria !== 'NÃO CLASSIFICADA' && formData.categoria !== 'GERAL' && !autoClassified && (
@@ -1973,7 +2007,7 @@ const TaskCreateModal = ({ unidades, onSave, onClose }: { unidades: { id: string
             )}
           </div>
 
-          <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+          <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-none md:rounded-2xl border border-slate-100">
             <input
               type="checkbox"
               id="single-day"
@@ -1999,7 +2033,7 @@ const TaskCreateModal = ({ unidades, onSave, onClose }: { unidades: { id: string
                   type="date"
                   value={formData.data_inicio}
                   onChange={e => setFormData({ ...formData, data_inicio: e.target.value })}
-                  className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                  className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
                 />
               </div>
             )}
@@ -2016,7 +2050,7 @@ const TaskCreateModal = ({ unidades, onSave, onClose }: { unidades: { id: string
                     data_inicio: prev.is_single_day ? newLimit : prev.data_inicio
                   }));
                 }}
-                className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
               />
             </div>
           </div>
@@ -2027,7 +2061,7 @@ const TaskCreateModal = ({ unidades, onSave, onClose }: { unidades: { id: string
               <select
                 value={formData.status}
                 onChange={e => setFormData({ ...formData, status: e.target.value as Status })}
-                className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+                className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
               >
                 <option value="em andamento">Em Andamento</option>
                 <option value="concluído">Concluído</option>
@@ -2041,7 +2075,7 @@ const TaskCreateModal = ({ unidades, onSave, onClose }: { unidades: { id: string
                   setFormData({ ...formData, categoria: e.target.value as Categoria });
                   setAutoClassified(true); // Marca que o usuário alterou manualmente
                 }}
-                className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[10px] tracking-widest"
+                className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[10px] tracking-widest"
               >
                 <option value="GERAL">Geral</option>
                 <option value="NÃO CLASSIFICADA">Não Classificada</option>
@@ -2060,14 +2094,14 @@ const TaskCreateModal = ({ unidades, onSave, onClose }: { unidades: { id: string
               rows={3}
               value={formData.notas}
               onChange={e => setFormData({ ...formData, notas: e.target.value })}
-              className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-slate-900 transition-all resize-none"
+              className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-slate-900 transition-all resize-none"
               placeholder="Detalhes da ação..."
             />
           </div>
         </div>
 
         <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-4">
-          <button onClick={onClose} className="flex-1 px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all">Cancelar</button>
+          <button onClick={onClose} className="flex-1 px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all">Cancelar</button>
           <button
             onClick={() => {
               if (!formData.titulo || !formData.data_limite) {
@@ -2094,7 +2128,7 @@ const TaskCreateModal = ({ unidades, onSave, onClose }: { unidades: { id: string
               });
               onClose();
             }}
-            className="flex-1 bg-blue-600 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
+            className="flex-1 bg-blue-600 text-white px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
           >
             Criar Ação
           </button>
@@ -2136,11 +2170,11 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
               type="text"
               value={formData.titulo}
               onChange={e => setFormData({ ...formData, titulo: e.target.value })}
-              className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+              className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
             />
           </div>
 
-          <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+          <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-none md:rounded-2xl border border-slate-100">
             <input
               type="checkbox"
               id="edit-single-day"
@@ -2166,7 +2200,7 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
                   type="date"
                   value={formData.data_inicio}
                   onChange={e => setFormData({ ...formData, data_inicio: e.target.value })}
-                  className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                  className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
                 />
               </div>
             )}
@@ -2183,7 +2217,7 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
                     data_inicio: prev.is_single_day ? newLimit : prev.data_inicio
                   }));
                 }}
-                className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
               />
             </div>
           </div>
@@ -2194,7 +2228,7 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
               <select
                 value={formData.categoria}
                 onChange={e => setFormData({ ...formData, categoria: e.target.value as Categoria })}
-                className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[10px] tracking-widest"
+                className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[10px] tracking-widest"
               >
                 <option value="GERAL">Geral</option>
                 <option value="NÃO CLASSIFICADA">Não Classificada</option>
@@ -2213,7 +2247,7 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
                 <select
                   value={formData.entregas_relacionadas[0] || ''}
                   onChange={e => setFormData({ ...formData, entregas_relacionadas: e.target.value ? [e.target.value] : [] })}
-                  className="w-full bg-blue-50 border-blue-100 rounded-2xl px-6 py-4 text-xs font-bold text-blue-900 focus:ring-2 focus:ring-blue-500 transition-all"
+                  className="w-full bg-blue-50 border-blue-100 rounded-none md:rounded-2xl px-6 py-4 text-xs font-bold text-blue-900 focus:ring-2 focus:ring-blue-500 transition-all"
                 >
                   <option value="">Não vinculado ao PGC</option>
                   {pgcEntregas.map(e => (
@@ -2237,7 +2271,7 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
               }
             }}
             onMouseLeave={() => setIsConfirmingDelete(false)}
-            className={`px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border flex items-center gap-2 ${isConfirmingDelete
+            className={`px-6 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border flex items-center gap-2 ${isConfirmingDelete
               ? 'bg-rose-600 text-white border-rose-600 shadow-lg shadow-rose-200 animate-in zoom-in-95'
               : 'text-rose-600 hover:bg-rose-50 border-rose-100'
               }`}
@@ -2254,7 +2288,7 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
           <div className="flex-1"></div>
           <button
             onClick={onClose}
-            className="px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all"
+            className="px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all"
           >
             Cancelar
           </button>
@@ -2274,7 +2308,7 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
               onSave(task.id, formData);
               onClose();
             }}
-            className="flex-1 bg-slate-900 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all"
+            className="flex-1 bg-slate-900 text-white px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all"
           >
             Salvar Alterações
           </button>
@@ -2579,8 +2613,8 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
       }
 
       return (
-         <a href={url} target="_blank" rel="noreferrer" className={`group flex items-center gap-4 p-4 rounded-2xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-blue-50/50 border-blue-100 hover:bg-blue-50'}`}>
-           <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-blue-200 text-blue-600'}`}>
+         <a href={url} target="_blank" rel="noreferrer" className={`group flex items-center gap-4 p-4 rounded-none md:rounded-2xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-blue-50/50 border-blue-100 hover:bg-blue-50'}`}>
+           <div className={`w-10 h-10 rounded-lg md:rounded-xl flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-blue-200 text-blue-600'}`}>
              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
            </div>
            <div className="flex-1 min-w-0">
@@ -2607,8 +2641,8 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
        const waLink = num.length >= 10 ? `https://wa.me/55${num}` : null;
        
        return (
-          <div className={`group flex items-center gap-4 p-4 rounded-2xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-emerald-50/50 border-emerald-100'}`}>
-             <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-emerald-200 text-emerald-600'}`}>
+          <div className={`group flex items-center gap-4 p-4 rounded-none md:rounded-2xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-emerald-50/50 border-emerald-100'}`}>
+             <div className={`w-10 h-10 rounded-lg md:rounded-xl flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-emerald-200 text-emerald-600'}`}>
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.022-.014-.503-.245-.583-.273-.08-.027-.138-.04-.197.048-.058.088-.227.288-.278.346-.05.058-.1.066-.188.022-.088-.044-.372-.137-.708-.437-.26-.231-.437-.515-.487-.603-.05-.088-.005-.135.039-.179.04-.04.088-.103.131-.154.044-.051.059-.088.088-.146.03-.058.015-.11-.008-.154-.022-.044-.197-.474-.27-.65-.072-.172-.143-.149-.197-.151l-.168-.002c-.058 0-.154.022-.234.11-.08.088-.307.3-.307.732 0 .432.315.849.359.907.044.058.62 1.04 1.502 1.42.21.09.372.143.5.184.21.067.4.057.55.035.168-.024.503-.205.574-.403.072-.198.072-.367.051-.403-.021-.037-.08-.058-.168-.102z"/><path d="M12 2C6.477 2 2 6.477 2 12c0 1.891.524 3.66 1.434 5.168L2 22l4.958-1.412A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.96 7.96 0 01-4.07-1.112l-.292-.174-3.024.863.878-2.946-.19-.302A7.957 7.957 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z"/></svg>
              </div>
              <div className="flex-1 min-w-0">
@@ -2629,8 +2663,8 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
        const url = parts[2] || '#';
        
        return (
-          <a href={url} target="_blank" rel="noreferrer" className={`group flex items-center gap-4 p-4 rounded-2xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-amber-50/50 border-amber-100 hover:bg-amber-50'}`}>
-             <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-amber-200 text-amber-600'}`}>
+          <a href={url} target="_blank" rel="noreferrer" className={`group flex items-center gap-4 p-4 rounded-none md:rounded-2xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-amber-50/50 border-amber-100 hover:bg-amber-50'}`}>
+             <div className={`w-10 h-10 rounded-lg md:rounded-xl flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-amber-200 text-amber-600'}`}>
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
              </div>
              <div className="flex-1 min-w-0">
@@ -2663,7 +2697,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
             if (isTimerRunning) handleToggleTimer();
             onClose();
           }}
-          className={`p-3 rounded-2xl transition-all border ${isTimerRunning ? 'bg-white/5 hover:bg-white/10 text-white/40 border-white/5' : 'bg-white hover:bg-slate-50 text-slate-400 border-slate-200'}`}
+          className={`p-3 rounded-none md:rounded-2xl transition-all border ${isTimerRunning ? 'bg-white/5 hover:bg-white/10 text-white/40 border-white/5' : 'bg-white hover:bg-slate-50 text-slate-400 border-slate-200'}`}
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
         </button>
@@ -2681,7 +2715,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
               </h4>
               <button 
                 onClick={() => setShowPool(!showPool)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
                     showPool 
                         ? 'bg-blue-600 text-white' 
                         : isTimerRunning ? 'bg-white/10 text-white/60 hover:bg-white/20' : 'bg-white text-slate-500 hover:bg-slate-50 border border-slate-200'
@@ -2693,7 +2727,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
            </div>
            
            {/* Main Area: Chat or Pool Overlay */}
-           <div className={`flex-1 rounded-[2.5rem] border relative overflow-hidden flex flex-col transition-colors ${isTimerRunning ? 'bg-white/5 border-white/10 backdrop-blur-sm' : 'bg-white border-slate-200 shadow-sm'}`}>
+           <div className={`flex-1 rounded-none md:rounded-[2.5rem] border relative overflow-hidden flex flex-col transition-colors ${isTimerRunning ? 'bg-white/5 border-white/10 backdrop-blur-sm' : 'bg-white border-slate-200 shadow-sm'}`}>
              
              {/* POOL OVERLAY */}
              {showPool && (
@@ -2716,8 +2750,8 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
                   </div>
                   <div className="flex-1 overflow-y-auto custom-scrollbar p-6 grid grid-cols-1 md:grid-cols-2 gap-4 content-start">
                     {(task.pool_dados || []).map((item) => (
-                      <div key={item.id} className={`p-4 rounded-2xl border flex items-center gap-4 transition-all group ${isTimerRunning ? 'bg-white/5 border-white/5 hover:border-white/20' : 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'}`}>
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                      <div key={item.id} className={`p-4 rounded-none md:rounded-2xl border flex items-center gap-4 transition-all group ${isTimerRunning ? 'bg-white/5 border-white/5 hover:border-white/20' : 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'}`}>
+                        <div className={`w-10 h-10 rounded-lg md:rounded-xl flex items-center justify-center shrink-0 ${
                             item.tipo === 'arquivo' ? 'bg-amber-500/20 text-amber-500' :
                             item.tipo === 'telefone' ? 'bg-emerald-500/20 text-emerald-500' :
                             'bg-blue-500/20 text-blue-500'
@@ -2764,7 +2798,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
 
                  {task.acompanhamento && task.acompanhamento.map((entry, idx) => (
                     <div key={idx} className="flex flex-col gap-1 items-start animate-in fade-in slide-in-from-bottom-2 duration-300 w-full">
-                       <div className={`p-4 rounded-2xl rounded-tl-none border max-w-[90%] shadow-lg relative group ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-100 shadow-slate-200'}`}>
+                       <div className={`p-4 rounded-none md:rounded-2xl rounded-tl-none border max-w-[90%] shadow-lg relative group ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-100 shadow-slate-200'}`}>
                           {renderDiaryContent(entry.nota)}
                           <div className="flex items-center justify-between mt-2 gap-4">
                               <span className={`text-[9px] font-black uppercase tracking-wider ${isTimerRunning ? 'text-white/30' : 'text-slate-300'}`}>
@@ -2786,7 +2820,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
 
                  {isUploading && (
                    <div className="flex flex-col gap-1 items-start animate-in fade-in slide-in-from-bottom-2 duration-300 w-full opacity-60">
-                        <div className={`p-4 rounded-2xl rounded-tl-none border max-w-[90%] shadow-lg ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-100 shadow-slate-200'}`}>
+                        <div className={`p-4 rounded-none md:rounded-2xl rounded-tl-none border max-w-[90%] shadow-lg ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-100 shadow-slate-200'}`}>
                            <div className="flex items-center gap-3">
                               <div className="w-4 h-4 rounded-full border-2 border-slate-300 border-t-blue-500 animate-spin"></div>
                               <p className={`text-xs font-bold ${isTimerRunning ? 'text-white/60' : 'text-slate-500'}`}>Enviando arquivos...</p>
@@ -2827,12 +2861,12 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
                          }
                       }
                    }}
-                   className={`relative border rounded-2xl flex items-end gap-2 p-2 transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200 focus-within:bg-white focus-within:border-blue-300'}`}
+                   className={`relative border rounded-none md:rounded-2xl flex items-end gap-2 p-2 transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200 focus-within:bg-white focus-within:border-blue-300'}`}
                >
                    <div className="relative">
                        <button 
                          onClick={() => setShowAttachMenu(!showAttachMenu)}
-                         className={`p-3 rounded-xl transition-colors shrink-0 ${isTimerRunning ? 'text-white/40 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`} 
+                         className={`p-3 rounded-lg md:rounded-xl transition-colors shrink-0 ${isTimerRunning ? 'text-white/40 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}
                          title="Anexar"
                        >
                           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
@@ -2840,7 +2874,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
 
                        {/* Attachment Menu */}
                        {showAttachMenu && (
-                          <div className={`absolute bottom-12 left-0 w-48 rounded-xl border shadow-xl overflow-hidden animate-in zoom-in-95 origin-bottom-left z-[100] ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-200'}`}>
+                          <div className={`absolute bottom-12 left-0 w-48 rounded-lg md:rounded-xl border shadow-xl overflow-hidden animate-in zoom-in-95 origin-bottom-left z-[100] ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-200'}`}>
                              <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleFileUploadInput} />
                              
                              <button onClick={() => fileInputRef.current?.click()} className={`w-full text-left px-4 py-3 text-xs font-bold flex items-center gap-2 ${isTimerRunning ? 'text-white/80 hover:bg-white/10' : 'text-slate-700 hover:bg-slate-50'}`}>
@@ -2887,7 +2921,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
                    <button 
                       onClick={handleAddFollowUp}
                       disabled={!newFollowUp.trim()}
-                      className={`p-3 rounded-xl transition-all shrink-0 ${newFollowUp.trim() ? 'bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-900/40' : (isTimerRunning ? 'bg-white/5 text-white/20 cursor-not-allowed' : 'bg-slate-100 text-slate-300 cursor-not-allowed')}`}
+                      className={`p-3 rounded-lg md:rounded-xl transition-all shrink-0 ${newFollowUp.trim() ? 'bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-900/40' : (isTimerRunning ? 'bg-white/5 text-white/20 cursor-not-allowed' : 'bg-slate-100 text-slate-300 cursor-not-allowed')}`}
                    >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
                    </button>
@@ -2903,11 +2937,11 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
         {/* COLUNA DIREITA: Especialista + Cronômetro (5 colunas) */}
         <div className="lg:col-span-5 flex flex-col gap-8 overflow-hidden">
           {/* Especialista Virtual (Mantém estilo gradiente em ambos os modos, pois é um card destacado) */}
-          <div className="bg-gradient-to-br from-indigo-600 to-blue-700 rounded-[3rem] p-8 text-white shadow-2xl flex-shrink-0 relative overflow-hidden group">
+          <div className="bg-gradient-to-br from-indigo-600 to-blue-700 rounded-none md:rounded-[3rem] p-8 text-white shadow-2xl flex-shrink-0 relative overflow-hidden group">
             <div className="absolute -right-20 -top-20 w-64 h-64 bg-white/5 rounded-full blur-3xl group-hover:bg-white/10 transition-colors"></div>
             <div className="flex items-center justify-between mb-6 relative z-10">
               <div className="flex items-center gap-4">
-                <div className="w-14 h-14 bg-white/10 rounded-[1.25rem] flex items-center justify-center backdrop-blur-xl border border-white/20">
+                <div className="w-14 h-14 bg-white/10 rounded-lg md:rounded-[1.25rem] flex items-center justify-center backdrop-blur-xl border border-white/20">
                   <svg className="w-7 h-7 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L14.85 8.15L21 11L14.85 13.85L12 20L9.15 13.85L3 11L9.15 8.15L12 2Z" /></svg>
                 </div>
                 <div>
@@ -2919,7 +2953,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
                 href={task.chat_gemini_url || (task.categoria === 'CLC' ? "https://gemini.google.com/gem/096c0e51e1b9" : "https://gemini.google.com/")}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="bg-white text-indigo-600 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all flex items-center gap-2 shadow-xl shadow-indigo-900/40"
+                className="bg-white text-indigo-600 px-6 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all flex items-center gap-2 shadow-xl shadow-indigo-900/40"
               >
                 Abrir Chat
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
@@ -2931,12 +2965,12 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
                 placeholder="Cole o link do chat contextual aqui..."
                 value={chatUrl}
                 onChange={e => setChatUrl(e.target.value)}
-                className="w-full bg-black/20 border border-white/10 rounded-2xl px-5 py-4 text-xs font-medium focus:ring-2 focus:ring-white/30 outline-none text-white placeholder:text-white/20 transition-all"
+                className="w-full bg-black/20 border border-white/10 rounded-none md:rounded-2xl px-5 py-4 text-xs font-medium focus:ring-2 focus:ring-white/30 outline-none text-white placeholder:text-white/20 transition-all"
               />
               {chatUrl !== (task.chat_gemini_url || '') && (
                 <button 
                   onClick={handleSaveChatUrl} 
-                  className="absolute right-2 top-2 bg-emerald-500 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-emerald-600 transition-colors animate-in zoom-in-75"
+                  className="absolute right-2 top-2 bg-emerald-500 text-white px-4 py-2 rounded-lg md:rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-emerald-600 transition-colors animate-in zoom-in-75"
                 >
                   Salvar
                 </button>
@@ -2945,7 +2979,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
           </div>
 
           {/* Cronômetro Section */}
-          <div className={`flex-1 rounded-[3rem] border p-10 flex flex-col relative overflow-hidden transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200 shadow-xl shadow-slate-200/50'}`}>
+          <div className={`flex-1 rounded-none md:rounded-[3rem] border p-10 flex flex-col relative overflow-hidden transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200 shadow-xl shadow-slate-200/50'}`}>
             <div className={`absolute inset-0 transition-opacity duration-700 ${isTimerRunning ? 'bg-blue-500/5' : 'bg-transparent'}`}></div>
             
             <div className="relative z-10 text-center flex-1 flex flex-col items-center justify-center space-y-8">
@@ -2965,7 +2999,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
               <div className="flex gap-3 pb-8">
                 <button
                   onClick={handleToggleTimer}
-                  className={`flex items-center gap-3 px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all hover:scale-105 active:scale-95 shadow-2xl ${
+                  className={`flex items-center gap-3 px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all hover:scale-105 active:scale-95 shadow-2xl ${
                     isTimerRunning 
                       ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20 hover:bg-rose-500 hover:text-white' 
                       : 'bg-blue-600 text-white shadow-blue-600/20 hover:bg-blue-500'
@@ -2986,7 +3020,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
 
                 <button
                   onClick={handleResetTimer}
-                  className={`p-4 rounded-2xl transition-all shadow-xl hover:scale-105 active:scale-95 flex items-center justify-center ${
+                  className={`p-4 rounded-none md:rounded-2xl transition-all shadow-xl hover:scale-105 active:scale-95 flex items-center justify-center ${
                     isTimerRunning
                       ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20 hover:bg-rose-500 hover:text-white'
                       : 'bg-white text-slate-400 hover:text-rose-500 border border-slate-200 shadow-sm'
@@ -2998,7 +3032,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
 
                 <button
                   onClick={handleCompleteTaskRequest}
-                  className={`px-6 py-4 rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all shadow-xl ${
+                  className={`px-6 py-4 rounded-none md:rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all shadow-xl ${
                     task.status === 'concluído' 
                       ? 'bg-emerald-500 text-white' 
                       : isTimerRunning
@@ -3053,17 +3087,17 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
               )}
 
               <div className="grid grid-cols-2 gap-3">
-                 <div className={`rounded-xl p-3 border flex flex-col items-center transition-colors ${isTimerRunning ? 'bg-white/5 border-white/5' : 'bg-white border-slate-100 shadow-sm'}`}>
+                 <div className={`rounded-lg md:rounded-xl p-3 border flex flex-col items-center transition-colors ${isTimerRunning ? 'bg-white/5 border-white/5' : 'bg-white border-slate-100 shadow-sm'}`}>
                    <span className={`text-[7px] font-black uppercase tracking-widest mb-1 transition-colors ${isTimerRunning ? 'text-white/20' : 'text-slate-300'}`}>Início</span>
                    <span className={`text-[11px] font-bold transition-colors ${isTimerRunning ? 'text-white/80' : 'text-slate-700'}`}>{task.horario_inicio || '--:--'}</span>
                  </div>
-                 <div className={`rounded-xl p-3 border flex flex-col items-center transition-colors ${isTimerRunning ? 'bg-white/5 border-white/5' : 'bg-white border-slate-100 shadow-sm'}`}>
+                 <div className={`rounded-lg md:rounded-xl p-3 border flex flex-col items-center transition-colors ${isTimerRunning ? 'bg-white/5 border-white/5' : 'bg-white border-slate-100 shadow-sm'}`}>
                    <span className={`text-[7px] font-black uppercase tracking-widest mb-1 transition-colors ${isTimerRunning ? 'text-white/20' : 'text-slate-300'}`}>Término</span>
                    <span className={`text-[11px] font-bold transition-colors ${isTimerRunning ? 'text-white/80' : 'text-slate-700'}`}>{task.horario_fim || '--:--'}</span>
                  </div>
                  
                  {/* Notification Area */}
-                 <div className={`col-span-2 rounded-xl p-3 border flex items-center gap-3 transition-colors ${isTimerRunning ? 'bg-blue-500/5 border-blue-500/10' : 'bg-blue-50 border-blue-100'}`}>
+                 <div className={`col-span-2 rounded-lg md:rounded-xl p-3 border flex items-center gap-3 transition-colors ${isTimerRunning ? 'bg-blue-500/5 border-blue-500/10' : 'bg-blue-50 border-blue-100'}`}>
                     <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.5)]"></div>
                     <div className="flex-1 overflow-hidden">
                       <p className={`text-[8px] font-black uppercase tracking-widest mb-0.5 transition-colors ${isTimerRunning ? 'text-blue-400/60' : 'text-blue-400'}`}>Status da Organização</p>
@@ -3097,7 +3131,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
       {/* Confirmation Modal */}
       {isConfirmModalOpen && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-[#111] border border-white/10 w-full max-w-sm rounded-[2.5rem] p-10 shadow-2xl animate-in zoom-in-95 duration-300 text-center">
+          <div className="bg-[#111] border border-white/10 w-full max-w-sm rounded-none md:rounded-[2.5rem] p-10 shadow-2xl animate-in zoom-in-95 duration-300 text-center">
             <div className="w-20 h-20 bg-emerald-500/10 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6">
               <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
             </div>
@@ -3106,13 +3140,13 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
             <div className="flex gap-4">
               <button 
                 onClick={() => setIsConfirmModalOpen(false)}
-                className="flex-1 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-white/5 transition-all"
+                className="flex-1 px-6 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-white/5 transition-all"
               >
                 Agora não
               </button>
               <button 
                 onClick={confirmCompletion}
-                className="flex-1 bg-emerald-500 text-white px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-xl shadow-emerald-500/20"
+                className="flex-1 bg-emerald-500 text-white px-6 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-xl shadow-emerald-500/20"
               >
                 Sim, concluída
               </button>
@@ -3124,7 +3158,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
       {/* GLOBAL MODAL */}
       {modalConfig.isOpen && (
         <div className="fixed inset-0 z-[300] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-           <div className={`w-full max-w-md p-6 rounded-3xl shadow-2xl scale-100 animate-in zoom-in-95 duration-200 ${isTimerRunning ? 'bg-[#1A1A1A] border border-white/10 text-white' : 'bg-white text-slate-900 border border-slate-200'}`}>
+           <div className={`w-full max-w-md p-6 rounded-none md:rounded-3xl shadow-2xl scale-100 animate-in zoom-in-95 duration-200 ${isTimerRunning ? 'bg-[#1A1A1A] border border-white/10 text-white' : 'bg-white text-slate-900 border border-slate-200'}`}>
               <h3 className="text-lg font-black tracking-tight mb-4">
                  {modalConfig.type === 'link' && 'Inserir Link'}
                  {modalConfig.type === 'contact' && 'Inserir Contato'}
@@ -3141,7 +3175,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
                          type="text" 
                          value={modalInputName}
                          onChange={e => setModalInputName(e.target.value)}
-                         className={`w-full p-3 rounded-xl outline-none text-sm font-medium transition-all ${isTimerRunning ? 'bg-white/5 border border-white/10 focus:border-white/30 text-white' : 'bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800'}`}
+                         className={`w-full p-3 rounded-lg md:rounded-xl outline-none text-sm font-medium transition-all ${isTimerRunning ? 'bg-white/5 border border-white/10 focus:border-white/30 text-white' : 'bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800'}`}
                          placeholder={modalConfig.type === 'link' ? "Ex: Documento Google" : "Ex: João Silva"}
                          autoFocus
                        />
@@ -3154,7 +3188,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
                          type="text" 
                          value={modalInputValue}
                          onChange={e => setModalInputValue(e.target.value)}
-                         className={`w-full p-3 rounded-xl outline-none text-sm font-medium transition-all ${isTimerRunning ? 'bg-white/5 border border-white/10 focus:border-white/30 text-white' : 'bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800'}`}
+                         className={`w-full p-3 rounded-lg md:rounded-xl outline-none text-sm font-medium transition-all ${isTimerRunning ? 'bg-white/5 border border-white/10 focus:border-white/30 text-white' : 'bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800'}`}
                          placeholder={modalConfig.type === 'link' ? 'https://...' : '(11) 9...'}
                          onKeyDown={e => e.key === 'Enter' && handleModalConfirm()}
                        />
@@ -3167,7 +3201,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
                     <textarea 
                        value={modalInputValue}
                        onChange={e => setModalInputValue(e.target.value)}
-                       className={`w-full p-3 rounded-xl outline-none text-sm font-medium transition-all min-h-[120px] resize-none ${isTimerRunning ? 'bg-white/5 border border-white/10 focus:border-white/30 text-white' : 'bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800'}`}
+                       className={`w-full p-3 rounded-lg md:rounded-xl outline-none text-sm font-medium transition-all min-h-[120px] resize-none ${isTimerRunning ? 'bg-white/5 border border-white/10 focus:border-white/30 text-white' : 'bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800'}`}
                        autoFocus
                     />
                  </div>
@@ -3184,13 +3218,13 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
               <div className="flex gap-3 mt-6 justify-end">
                  <button 
                    onClick={() => setModalConfig({ ...modalConfig, isOpen: false })}
-                   className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors ${isTimerRunning ? 'hover:bg-white/10 text-white/60' : 'hover:bg-slate-100 text-slate-500'}`}
+                   className={`px-4 py-2 rounded-lg md:rounded-xl text-xs font-bold uppercase tracking-wider transition-colors ${isTimerRunning ? 'hover:bg-white/10 text-white/60' : 'hover:bg-slate-100 text-slate-500'}`}
                  >
                    Cancelar
                  </button>
                  <button 
                    onClick={handleModalConfirm}
-                   className={`px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-wider text-white shadow-lg transition-all transform active:scale-95 ${
+                   className={`px-6 py-2 rounded-lg md:rounded-xl text-xs font-bold uppercase tracking-wider text-white shadow-lg transition-all transform active:scale-95 ${
                       modalConfig.type === 'confirm_delete' || modalConfig.type === 'reset_timer' 
                       ? 'bg-rose-500 hover:bg-rose-600 shadow-rose-500/20' 
                       : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'
@@ -3252,9 +3286,9 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
       <div className="animate-in grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-8 pb-20 px-4 md:px-0">
         <button
           onClick={() => setActiveTool('brainstorming')}
-          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-200 shadow-xl hover:shadow-2xl transition-all group text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6"
+          className="bg-white p-6 md:p-12 rounded-none md:rounded-none md:rounded-[3rem] border border-slate-200 shadow-xl hover:shadow-2xl transition-all group text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6"
         >
-          <div className="w-12 h-12 md:w-16 md:h-16 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all flex-shrink-0">
+          <div className="w-12 h-12 md:w-16 md:h-16 bg-blue-50 rounded-none md:rounded-2xl flex items-center justify-center text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all flex-shrink-0">
             <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
           </div>
           <div>
@@ -3265,10 +3299,10 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
 
         <button
           disabled
-          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-100 shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden"
+          className="bg-white p-6 md:p-12 rounded-none md:rounded-none md:rounded-[3rem] border border-slate-100 shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden"
         >
           <div className="absolute top-2 right-2 md:top-4 md:right-4 bg-slate-100 text-slate-400 text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Em Breve</div>
-          <div className="w-12 h-12 md:w-16 md:h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 flex-shrink-0">
+          <div className="w-12 h-12 md:w-16 md:h-16 bg-slate-50 rounded-none md:rounded-2xl flex items-center justify-center text-slate-400 flex-shrink-0">
             <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
           </div>
           <div>
@@ -3279,10 +3313,10 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
 
         <button
           disabled
-          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-100 shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden"
+          className="bg-white p-6 md:p-12 rounded-none md:rounded-none md:rounded-[3rem] border border-slate-100 shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden"
         >
           <div className="absolute top-2 right-2 md:top-4 md:right-4 bg-slate-100 text-slate-400 text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Em Breve</div>
-          <div className="w-12 h-12 md:w-16 md:h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 flex-shrink-0">
+          <div className="w-12 h-12 md:w-16 md:h-16 bg-slate-50 rounded-none md:rounded-2xl flex items-center justify-center text-slate-400 flex-shrink-0">
             <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
           </div>
           <div>
@@ -3293,10 +3327,10 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
 
         <button
           disabled
-          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-100 shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden"
+          className="bg-white p-6 md:p-12 rounded-none md:rounded-none md:rounded-[3rem] border border-slate-100 shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden"
         >
           <div className="absolute top-2 right-2 md:top-4 md:right-4 bg-slate-100 text-slate-400 text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Em Breve</div>
-          <div className="w-12 h-12 md:w-16 md:h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 flex-shrink-0">
+          <div className="w-12 h-12 md:w-16 md:h-16 bg-slate-50 rounded-none md:rounded-2xl flex items-center justify-center text-slate-400 flex-shrink-0">
             <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
           </div>
           <div>
@@ -3315,7 +3349,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
           <div className="flex items-center gap-4">
             <button
               onClick={() => setActiveTool(null)}
-              className="p-3 bg-white border border-slate-200 rounded-2xl text-slate-400 hover:text-slate-900 transition-colors"
+              className="p-3 bg-white border border-slate-200 rounded-none md:rounded-2xl text-slate-400 hover:text-slate-900 transition-colors"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
             </button>
@@ -3324,7 +3358,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
         </div>
 
         <div className="flex flex-col md:flex-row gap-4 max-w-4xl mx-auto w-full mb-8 px-2 md:px-0">
-          <div className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-3 flex items-center gap-3 shadow-sm focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+          <div className="flex-1 bg-white border border-slate-200 rounded-lg md:rounded-xl px-4 py-3 flex items-center gap-3 shadow-sm focus-within:ring-2 focus-within:ring-blue-100 transition-all">
             <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
             <input
               type="text"
@@ -3334,7 +3368,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
               onChange={e => setSearchTerm(e.target.value)}
             />
           </div>
-          <div className="flex bg-white border border-slate-200 rounded-xl p-1 shadow-sm w-fit self-end md:self-auto">
+          <div className="flex bg-white border border-slate-200 rounded-lg md:rounded-xl p-1 shadow-sm w-fit self-end md:self-auto">
             <button
               onClick={() => setSortOrder('date-desc')}
               className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${sortOrder === 'date-desc' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-800'}`}
@@ -3352,7 +3386,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
 
         {/* Inserção de Nova Ideia via Digitação */}
         <div className="max-w-4xl mx-auto w-full mb-12 animate-in slide-in-from-top-4 duration-500">
-          <div className="bg-white p-2 rounded-[2rem] border-2 border-slate-100 shadow-xl flex items-center gap-4 focus-within:border-blue-500 transition-all">
+          <div className="bg-white p-2 rounded-none md:rounded-[2rem] border-2 border-slate-100 shadow-xl flex items-center gap-4 focus-within:border-blue-500 transition-all">
             <input
               type="text"
               placeholder="Digite uma nova ideia..."
@@ -3373,7 +3407,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
                   setTextInput('');
                 }
               }}
-              className="bg-blue-600 text-white h-12 px-8 rounded-[1.25rem] text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 active:scale-95"
+              className="bg-blue-600 text-white h-12 px-8 rounded-lg md:rounded-[1.25rem] text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 active:scale-95"
             >
               Salvar Ideia
             </button>
@@ -3394,7 +3428,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
                           setEditingId(null);
                         }
                       }}
-                      className="text-blue-600 hover:bg-blue-50 p-2 rounded-xl transition-colors"
+                      className="text-blue-600 hover:bg-blue-50 p-2 rounded-lg md:rounded-xl transition-colors"
                     >
                       <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                     </button>
@@ -3405,14 +3439,14 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
                           setEditingId(idea.id);
                           setEditText(idea.text);
                         }}
-                        className="text-slate-400 hover:text-blue-600 p-2 rounded-xl transition-colors"
+                        className="text-slate-400 hover:text-blue-600 p-2 rounded-lg md:rounded-xl transition-colors"
                         title="Editar"
                       >
                         <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                       </button>
                       <button
                         onClick={() => onConvertToLog(idea)}
-                        className="text-slate-400 hover:text-violet-600 p-2 rounded-xl transition-colors"
+                        className="text-slate-400 hover:text-violet-600 p-2 rounded-lg md:rounded-xl transition-colors"
                         title="Converter em Log"
                       >
                         <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
@@ -3424,7 +3458,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
                             setTimeout(() => setCopiedId(null), 2000);
                           });
                         }}
-                        className={`p-2 rounded-xl transition-colors ${copiedId === idea.id ? 'text-emerald-500 bg-emerald-50' : 'text-slate-400 hover:text-blue-600'}`}
+                        className={`p-2 rounded-lg md:rounded-xl transition-colors ${copiedId === idea.id ? 'text-emerald-500 bg-emerald-50' : 'text-slate-400 hover:text-blue-600'}`}
                         title="Copiar Texto"
                       >
                         {copiedId === idea.id ? (
@@ -3437,14 +3471,14 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
                   )}
                   <button
                     onClick={() => onArchiveIdea(idea.id)}
-                    className="text-emerald-500 hover:bg-emerald-50 p-2 rounded-xl transition-colors"
+                    className="text-emerald-500 hover:bg-emerald-50 p-2 rounded-lg md:rounded-xl transition-colors"
                     title="Concluir / Arquivar"
                   >
                     <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
                   </button>
                   <button
                     onClick={() => onDeleteIdea(idea.id)}
-                    className="text-slate-300 hover:text-rose-500 p-2 rounded-xl transition-colors"
+                    className="text-slate-300 hover:text-rose-500 p-2 rounded-lg md:rounded-xl transition-colors"
                     title="Excluir Permanentemente"
                   >
                     <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
@@ -3455,7 +3489,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
               {editingId === idea.id ? (
                 <textarea
                   autoFocus
-                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm md:text-lg font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 min-h-[100px] resize-none"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-none md:rounded-2xl p-4 text-sm md:text-lg font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 min-h-[100px] resize-none"
                   value={editText}
                   onChange={e => setEditText(e.target.value)}
                 />
@@ -3494,7 +3528,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
             </div>
           ))}
           {activeIdeas.length === 0 && !isProcessing && (
-            <div className="col-span-full py-20 text-center border-4 border-dashed border-slate-100 rounded-none md:rounded-[3rem]">
+            <div className="col-span-full py-20 text-center border-4 border-dashed border-slate-100 rounded-none md:rounded-none md:rounded-[3rem]">
               <p className="text-slate-300 font-black text-xl uppercase tracking-widest">Nenhuma ideia ativa</p>
               <p className="text-slate-400 text-sm font-medium mt-2">Grave ou digite uma ideia para começar.</p>
             </div>
@@ -3509,7 +3543,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
             type="text"
             autoFocus
             placeholder="Sua ideia aqui..."
-            className="flex-1 bg-white border border-slate-200 rounded-2xl px-6 py-4 text-sm font-medium focus:ring-4 focus:ring-blue-100 outline-none shadow-sm transition-all"
+            className="flex-1 bg-white border border-slate-200 rounded-none md:rounded-2xl px-6 py-4 text-sm font-medium focus:ring-4 focus:ring-blue-100 outline-none shadow-sm transition-all"
             value={textInput}
             onChange={e => setTextInput(e.target.value)}
             onKeyDown={e => {
@@ -3530,7 +3564,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
                 setIsAddingText(false);
               }
             }}
-            className="bg-blue-600 text-white p-4 rounded-2xl hover:bg-blue-700 transition-all shadow-xl shadow-blue-100 flex-shrink-0"
+            className="bg-blue-600 text-white p-4 rounded-none md:rounded-2xl hover:bg-blue-700 transition-all shadow-xl shadow-blue-100 flex-shrink-0"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
           </button>
@@ -4919,7 +4953,7 @@ const App: React.FC = () => {
 
       {/* Pop-up de Notificação */}
       {activePopup && (
-        <div className="fixed bottom-8 left-4 right-4 md:left-8 md:right-auto z-[200] max-w-sm ml-auto mr-auto md:ml-0 md:mr-0 bg-white rounded-[2.5rem] shadow-[0_30px_60px_rgba(0,0,0,0.25)] border border-slate-100 overflow-hidden animate-in slide-in-from-bottom-12 duration-500">
+        <div className="fixed bottom-8 left-4 right-4 md:left-8 md:right-auto z-[200] max-w-sm ml-auto mr-auto md:ml-0 md:mr-0 bg-white rounded-none md:rounded-[2.5rem] shadow-[0_30px_60px_rgba(0,0,0,0.25)] border border-slate-100 overflow-hidden animate-in slide-in-from-bottom-12 duration-500">
           <div className={`h-2 w-full ${activePopup.type === 'success' ? 'bg-emerald-500' :
             activePopup.type === 'warning' ? 'bg-amber-500' :
               activePopup.type === 'error' ? 'bg-rose-500' : 'bg-blue-600'
@@ -4938,7 +4972,7 @@ const App: React.FC = () => {
             <div className="mt-6 flex gap-3">
               <button
                 onClick={() => setActivePopup(null)}
-                className="flex-1 px-5 py-3 bg-slate-900 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all hover:bg-slate-800 shadow-lg shadow-slate-200"
+                className="flex-1 px-5 py-3 bg-slate-900 text-white rounded-lg md:rounded-xl text-[9px] font-black uppercase tracking-widest transition-all hover:bg-slate-800 shadow-lg shadow-slate-200"
               >
                 Entendido
               </button>
@@ -4960,7 +4994,7 @@ const App: React.FC = () => {
                     setViewMode('ferramentas');
                     setActiveFerramenta('brainstorming');
                   }}
-                  className="bg-white border-2 border-slate-100 text-amber-500 p-4 rounded-2xl shadow-xl hover:bg-slate-50 transition-all active:scale-95 group"
+                  className="bg-white border-2 border-slate-100 text-amber-500 p-4 rounded-none md:rounded-2xl shadow-xl hover:bg-slate-50 transition-all active:scale-95 group"
                   aria-label="Ideias Rápidas"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
@@ -4970,7 +5004,7 @@ const App: React.FC = () => {
               <div className="relative">
                 <button
                   onClick={() => setIsSettingsModalOpen(true)}
-                  className="bg-white border-2 border-slate-100 text-slate-700 p-4 rounded-2xl shadow-xl hover:bg-slate-50 transition-all active:scale-95 group"
+                  className="bg-white border-2 border-slate-100 text-slate-700 p-4 rounded-none md:rounded-2xl shadow-xl hover:bg-slate-50 transition-all active:scale-95 group"
                   aria-label="Configurações"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
@@ -4980,7 +5014,7 @@ const App: React.FC = () => {
               <div className="relative">
                 <button
                   onClick={() => setIsNotificationCenterOpen(!isNotificationCenterOpen)}
-                  className="bg-white border-2 border-slate-100 text-slate-700 p-4 rounded-2xl shadow-xl hover:bg-slate-50 transition-all active:scale-95 group relative notification-trigger"
+                  className="bg-white border-2 border-slate-100 text-slate-700 p-4 rounded-none md:rounded-2xl shadow-xl hover:bg-slate-50 transition-all active:scale-95 group relative notification-trigger"
                   aria-label="Notificações"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
@@ -5021,7 +5055,7 @@ const App: React.FC = () => {
               >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                 <div className="relative z-10">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-indigo-600 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300 text-white font-black">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-indigo-600 rounded-lg md:rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300 text-white font-black">
                     <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
@@ -5047,7 +5081,7 @@ const App: React.FC = () => {
               >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                 <div className="relative z-10">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-500 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-500 rounded-lg md:rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
                     <svg className="w-5 h-5 md:w-6 md:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 14l2 2 4-4" />
@@ -5074,7 +5108,7 @@ const App: React.FC = () => {
               >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                 <div className="relative z-10">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-emerald-500 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-emerald-500 rounded-lg md:rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
                     <svg className="w-5 h-5 md:w-6 md:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
@@ -5100,7 +5134,7 @@ const App: React.FC = () => {
               >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                 <div className="relative z-10">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-rose-500 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-rose-500 rounded-lg md:rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
                     <svg className="w-5 h-5 md:w-6 md:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                     </svg>
@@ -5127,7 +5161,7 @@ const App: React.FC = () => {
               >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                 <div className="relative z-10">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-amber-500 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-amber-500 rounded-lg md:rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
                     <svg className="w-5 h-5 md:w-6 md:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -5154,7 +5188,7 @@ const App: React.FC = () => {
               >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                 <div className="relative z-10">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-violet-500 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-violet-500 rounded-lg md:rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
                     <svg className="w-5 h-5 md:w-6 md:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
                     </svg>
@@ -5185,7 +5219,7 @@ const App: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setActiveModule('home')}
-                    className="p-1.5 md:p-2 rounded-xl hover:bg-slate-100 transition-colors"
+                    className="p-1.5 md:p-2 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors"
                     aria-label="Voltar ao Menu"
                   >
                     <svg className="w-5 h-5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -5203,7 +5237,7 @@ const App: React.FC = () => {
                         setViewMode('ferramentas');
                         setActiveFerramenta('brainstorming');
                       }}
-                       className="p-1.5 rounded-xl hover:bg-slate-100 transition-colors text-amber-500"
+                       className="p-1.5 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors text-amber-500"
                       aria-label="Ideias Rápidas"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
@@ -5212,7 +5246,7 @@ const App: React.FC = () => {
                   <div className="relative">
                     <button
                       onClick={() => setIsSettingsModalOpen(true)}
-                      className="p-1.5 rounded-xl hover:bg-slate-100 transition-colors"
+                      className="p-1.5 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors"
                       aria-label="Configurações"
                     >
                       <svg className="w-5 h-5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
@@ -5221,7 +5255,7 @@ const App: React.FC = () => {
                   <div className="relative">
                     <button
                       onClick={() => setIsNotificationCenterOpen(!isNotificationCenterOpen)}
-                      className="p-1.5 rounded-xl hover:bg-slate-100 transition-colors relative notification-trigger"
+                      className="p-1.5 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors relative notification-trigger"
                       aria-label="Notificações"
                     >
                       <svg className="w-5 h-5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
@@ -5241,7 +5275,7 @@ const App: React.FC = () => {
                   {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && (
                     <button
                       onClick={() => setIsCreateModalOpen(true)}
-                      className="bg-slate-900 text-white p-1.5 rounded-xl shadow-lg hover:bg-slate-800 transition-all active:scale-95"
+                      className="bg-slate-900 text-white p-1.5 rounded-lg md:rounded-xl shadow-lg hover:bg-slate-800 transition-all active:scale-95"
                       aria-label="Criar Ação"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
@@ -5249,7 +5283,7 @@ const App: React.FC = () => {
                   )}
                   <button
                     onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                    className="p-1.5 rounded-xl hover:bg-slate-100 transition-colors"
+                    className="p-1.5 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors"
                     aria-label="Menu"
                   >
                     <svg className="w-5 h-5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -5269,7 +5303,7 @@ const App: React.FC = () => {
                   <div className="flex items-center gap-3">
                     <button
                       onClick={() => setActiveModule('home')}
-                      className="p-2 rounded-xl hover:bg-slate-100 transition-colors"
+                      className="p-2 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors"
                       aria-label="Voltar ao Menu"
                     >
                       <svg className="w-5 h-5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -5280,7 +5314,7 @@ const App: React.FC = () => {
                     <h1 className="text-xl font-black tracking-tighter text-slate-900">HERMES</h1>
                   </div>
                   {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
-                    <nav className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+                    <nav className="flex bg-slate-100 p-1 rounded-lg md:rounded-xl border border-slate-200">
                       <button
                         onClick={() => {
                           setViewMode('gallery');
@@ -5304,7 +5338,7 @@ const App: React.FC = () => {
                            setViewMode('ferramentas');
                            setActiveFerramenta('brainstorming');
                         }}
-                         className="bg-white border border-slate-200 text-amber-500 p-2 rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
+                         className="bg-white border border-slate-200 text-amber-500 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
                         aria-label="Ideias Rápidas"
                       >
                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
@@ -5313,7 +5347,7 @@ const App: React.FC = () => {
                     <div className="relative">
                       <button
                         onClick={() => setIsNotificationCenterOpen(!isNotificationCenterOpen)}
-                        className="bg-white border border-slate-200 text-slate-700 p-2 rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative notification-trigger"
+                        className="bg-white border border-slate-200 text-slate-700 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative notification-trigger"
                         aria-label="Notificações"
                       >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
@@ -5330,14 +5364,14 @@ const App: React.FC = () => {
                       />
                     </div>
                     {activeModule !== 'dashboard' && (
-                      <div className="hidden lg:flex items-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 w-64 group focus-within:ring-2 focus-within:ring-blue-500 focus-within:bg-white transition-all">
+                      <div className="hidden lg:flex items-center bg-slate-50 border border-slate-200 rounded-lg md:rounded-xl px-4 py-2 w-64 group focus-within:ring-2 focus-within:ring-blue-500 focus-within:bg-white transition-all">
                         <svg className="w-4 h-4 text-slate-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                         <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none outline-none text-xs font-bold text-slate-900 w-full" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                       </div>
                     )}
                     <button
                       onClick={handleSync}
-                      className={`bg-white border border-slate-200 text-slate-700 px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-3 shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative`}
+                      className={`bg-white border border-slate-200 text-slate-700 px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-3 shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative`}
                     >
                       <svg className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                       {isSyncing ? 'Monitorar Sync' : 'Sync Google'}
@@ -5345,7 +5379,7 @@ const App: React.FC = () => {
                     </button>
                     <button
                       onClick={() => setIsCreateModalOpen(true)}
-                      className="bg-slate-900 text-white px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg hover:bg-slate-800 transition-all active:scale-95"
+                      className="bg-slate-900 text-white px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg hover:bg-slate-800 transition-all active:scale-95"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
                       Criar Ação
@@ -5367,7 +5401,7 @@ const App: React.FC = () => {
                           setSearchTerm('');
                           setIsMobileMenuOpen(false);
                         }}
-                        className={`px-4 py-3 rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'gallery' && !searchTerm ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
+                        className={`px-4 py-3 rounded-lg md:rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'gallery' && !searchTerm ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
                       >
                         📊 Ações
                       </button>
@@ -5376,7 +5410,7 @@ const App: React.FC = () => {
                           setViewMode('pgc');
                           setIsMobileMenuOpen(false);
                         }}
-                        className={`px-4 py-3 rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'pgc' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
+                        className={`px-4 py-3 rounded-lg md:rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'pgc' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
                       >
                         📈 PGC
                       </button>
@@ -5389,7 +5423,7 @@ const App: React.FC = () => {
                         handleSync();
                         setIsMobileMenuOpen(false);
                       }}
-                      className={`w-full px-4 py-3 rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left bg-blue-50 text-blue-700 hover:bg-blue-100 relative`}
+                      className={`w-full px-4 py-3 rounded-lg md:rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left bg-blue-50 text-blue-700 hover:bg-blue-100 relative`}
                     >
                       🔄 {isSyncing ? 'Monitorar Sincronização...' : 'Sync Google'}
                       {isSyncing && <span className="absolute top-4 right-4 w-2 h-2 bg-blue-500 rounded-full animate-ping"></span>}
@@ -5426,7 +5460,7 @@ const App: React.FC = () => {
                         <select
                           value={areaFilter}
                           onChange={(e) => setAreaFilter(e.target.value)}
-                          className="appearance-none bg-white pl-4 pr-10 py-2 rounded-xl border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-700 outline-none focus:ring-2 focus:ring-slate-900 shadow-sm hover:border-slate-300 transition-all cursor-pointer"
+                          className="appearance-none bg-white pl-4 pr-10 py-2 rounded-lg md:rounded-xl border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-700 outline-none focus:ring-2 focus:ring-slate-900 shadow-sm hover:border-slate-300 transition-all cursor-pointer"
                         >
                           <option value="TODAS">Todas as Áreas</option>
                           <option value="CLC">CLC</option>
@@ -5444,7 +5478,7 @@ const App: React.FC = () => {
 
 
                       {searchTerm !== 'filter:unclassified' && (
-                        <div className="bg-white p-0.5 md:p-1 rounded-xl border border-slate-200 inline-flex shadow-sm">
+                        <div className="bg-white p-0.5 md:p-1 rounded-lg md:rounded-xl border border-slate-200 inline-flex shadow-sm">
                           <button
                             onClick={() => setDashboardViewMode('list')}
                             className={`px-3 md:px-4 py-2 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-wide md:tracking-widest transition-all flex items-center gap-1.5 md:gap-2 ${dashboardViewMode === 'list' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
@@ -5468,7 +5502,7 @@ const App: React.FC = () => {
                           setCalendarViewMode('day');
                           setCalendarDate(new Date());
                         }}
-                        className="bg-white hover:bg-blue-50 border border-slate-200 text-slate-700 hover:text-blue-700 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm hover:shadow transition-all flex items-center gap-2 group"
+                        className="bg-white hover:bg-blue-50 border border-slate-200 text-slate-700 hover:text-blue-700 px-4 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm hover:shadow transition-all flex items-center gap-2 group"
                       >
                         <svg className="w-4 h-4 text-slate-400 group-hover:text-blue-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                         Organizar o Dia
@@ -5499,17 +5533,18 @@ const App: React.FC = () => {
                             </h3>
 
                             {selectedTaskIds.length > 0 && (
-                              <div className="flex items-center gap-2 bg-slate-900 p-2 rounded-2xl animate-in slide-in-from-top-4">
+                              <div className="flex items-center gap-2 bg-slate-900 p-2 rounded-none md:rounded-2xl animate-in slide-in-from-top-4">
                                 <span className="text-[9px] font-black text-white uppercase tracking-widest px-4">Classificar ({selectedTaskIds.length}):</span>
-                                <button onClick={() => handleBatchTag('CLC')} className="bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-black uppercase px-4 py-1.5 rounded-xl transition-all">CLC</button>
-                                <button onClick={() => handleBatchTag('ASSISTÊNCIA')} className="bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-black uppercase px-4 py-1.5 rounded-xl transition-all">Assistência</button>
-                                <button onClick={() => handleBatchTag('GERAL')} className="bg-slate-500 hover:bg-slate-600 text-white text-[9px] font-black uppercase px-4 py-1.5 rounded-xl transition-all">Geral</button>
+                                <button onClick={() => handleBatchTag('CLC')} className="bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-black uppercase px-4 py-1.5 rounded-lg md:rounded-xl transition-all">CLC</button>
+                                <button onClick={() => handleBatchTag('ASSISTÊNCIA')} className="bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-black uppercase px-4 py-1.5 rounded-lg md:rounded-xl transition-all">Assistência</button>
+                                <button onClick={() => handleBatchTag('GERAL')} className="bg-slate-500 hover:bg-slate-600 text-white text-[9px] font-black uppercase px-4 py-1.5 rounded-lg md:rounded-xl transition-all">Geral</button>
                               </div>
                             )}
                           </div>
 
                           <div className="overflow-x-auto">
-                            <table className="w-full text-left">
+                            {/* Desktop Table */}
+                            <table className="w-full text-left hidden md:table">
                               <thead className="bg-slate-50 border-b border-slate-200">
                                 <tr>
                                   <th className="px-8 py-4 w-12 text-center text-[10px] font-black text-slate-400 uppercase tracking-widest italic">#</th>
@@ -5557,13 +5592,57 @@ const App: React.FC = () => {
                                     </td>
                                   </tr>
                                 ))}
-                                {filteredAndSortedTarefas.length === 0 && (
-                                  <tr>
-                                    <td colSpan={3} className="py-20 text-center text-slate-300 font-black uppercase tracking-widest italic">Tudo classificado! Bom trabalho.</td>
-                                  </tr>
-                                )}
                               </tbody>
                             </table>
+
+                            {/* Mobile Card View */}
+                            <div className="md:hidden divide-y divide-slate-50">
+                              {filteredAndSortedTarefas.map((task) => (
+                                <div
+                                  key={task.id}
+                                  onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
+                                  className={`p-6 space-y-4 hover:bg-slate-50 transition-colors cursor-pointer ${selectedTaskIds.includes(task.id) ? 'bg-blue-50/30' : ''}`}
+                                >
+                                  <div className="flex items-start gap-4">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedTaskIds.includes(task.id)}
+                                      onChange={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedTaskIds(prev => prev.includes(task.id) ? prev.filter(id => id !== task.id) : [...prev, task.id]);
+                                      }}
+                                      className="w-6 h-6 rounded-lg border-slate-300 text-slate-900 focus:ring-slate-900 cursor-pointer shrink-0 mt-1"
+                                    />
+                                    <div className="flex-1 space-y-2">
+                                      <div className="text-sm font-bold text-slate-800 leading-snug">
+                                        {task.titulo}
+                                      </div>
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest bg-slate-100 px-2 py-0.5 rounded">
+                                          {formatDate(task.data_limite)}
+                                        </div>
+                                        {task.sync_status === 'new' && (
+                                          <span className="text-[7px] font-black px-1.5 py-0.5 rounded uppercase bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-sm animate-pulse">
+                                            Novo
+                                          </span>
+                                        )}
+                                        {task.sync_status === 'updated' && (
+                                          <span className="text-[7px] font-black px-1.5 py-0.5 rounded uppercase bg-gradient-to-r from-amber-400 to-orange-500 text-white shadow-sm">
+                                            Atualizada
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+
+                            {filteredAndSortedTarefas.length === 0 && (
+                              <div className="py-20 text-center text-slate-300 font-black uppercase tracking-widest italic border-t border-slate-50">
+                                Tudo classificado! Bom trabalho.
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -5712,7 +5791,7 @@ const App: React.FC = () => {
                         </div>
                         <div className="p-6 space-y-4 flex-1 bg-slate-50/50">
                           {tarefas.filter(t => t.categoria === 'SISTEMAS' && (t.sistema || 'OUTROS') === sistema).map(t => (
-                            <div key={t.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-amber-400 transition-all cursor-pointer" onClick={() => setSelectedTask(t)}>
+                            <div key={t.id} className="bg-white p-4 rounded-lg md:rounded-xl border border-slate-200 shadow-sm hover:border-amber-400 transition-all cursor-pointer" onClick={() => setSelectedTask(t)}>
                               <div className={`text-[8px] font-black mb-1.5 uppercase ${STATUS_COLORS[normalizeStatus(t.status)] || ''} border-none p-0 bg-transparent`}>
                                 {t.status}
                               </div>
@@ -5832,7 +5911,7 @@ const App: React.FC = () => {
                           <p className="text-slate-500 font-bold mt-1">Gestão do Ciclo de Vida de Software</p>
                         </div>
                         <div className="flex items-center gap-4">
-                          <div className="bg-violet-100 text-violet-700 px-4 py-2 rounded-xl text-sm font-black uppercase tracking-widest">
+                          <div className="bg-violet-100 text-violet-700 px-4 py-2 rounded-lg md:rounded-xl text-sm font-black uppercase tracking-widest">
                             {unidades.filter(u => u.nome.startsWith('SISTEMA:')).length} Sistemas
                           </div>
                           <button
@@ -5840,7 +5919,7 @@ const App: React.FC = () => {
                               setSettingsTab('sistemas');
                               setIsSettingsModalOpen(true);
                             }}
-                            className="bg-slate-900 text-white px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center gap-3"
+                            className="bg-slate-900 text-white px-6 py-3 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center gap-3"
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
                             Novo Sistema
@@ -5869,7 +5948,7 @@ const App: React.FC = () => {
                               <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                               <div className="relative z-10 space-y-6">
                                 <div className="flex justify-between items-start">
-                                  <div className="w-14 h-14 bg-violet-100 text-violet-600 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                                  <div className="w-14 h-14 bg-violet-100 text-violet-600 rounded-none md:rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
                                     <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
                                   </div>
                                   <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${
@@ -5901,9 +5980,9 @@ const App: React.FC = () => {
                         })}
 
                         {unidades.filter(u => u.nome.startsWith('SISTEMA:')).length === 0 && (
-                          <div className="col-span-full text-center py-20 bg-slate-50 rounded-[2.5rem] border-2 border-dashed border-slate-200">
+                          <div className="col-span-full text-center py-20 bg-slate-50 rounded-none md:rounded-[2.5rem] border-2 border-dashed border-slate-200">
                             <p className="text-slate-400 font-bold text-lg mb-2">Nenhum sistema cadastrado</p>
-                            <button onClick={() => { setIsSettingsModalOpen(true); }} className="bg-slate-900 text-white px-6 py-3 rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-slate-800 transition-all mt-4">
+                            <button onClick={() => { setIsSettingsModalOpen(true); }} className="bg-slate-900 text-white px-6 py-3 rounded-lg md:rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-slate-800 transition-all mt-4">
                               Ir para Configurações
                             </button>
                           </div>
@@ -5967,7 +6046,7 @@ const App: React.FC = () => {
 
                             {/* Status Stepper */}
                             <div className="bg-slate-50 border-b border-slate-100 p-4 flex items-center justify-center overflow-x-auto">
-                              <div className="flex items-center bg-slate-200/50 p-1.5 rounded-2xl gap-1 min-w-max">
+                              <div className="flex items-center bg-slate-200/50 p-1.5 rounded-none md:rounded-2xl gap-1 min-w-max">
                                 {steps.map((step, idx) => {
                                   const isActive = sysDetails.status === step;
                                   const stepLabels: Record<string, string> = {
@@ -5981,7 +6060,7 @@ const App: React.FC = () => {
                                     <React.Fragment key={step}>
                                       <button
                                         onClick={() => handleUpdateSistema(unit.id, { status: step })}
-                                        className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${
+                                        className={`px-4 py-2 rounded-lg md:rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${
                                           isActive 
                                             ? 'bg-violet-600 text-white shadow-lg' 
                                             : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'
@@ -6013,7 +6092,7 @@ const App: React.FC = () => {
 
 
                                     {/* Repositório Principal */}
-                                    <div className="group bg-slate-900 p-4 rounded-2xl border border-slate-800 hover:border-slate-600 hover:shadow-md transition-all">
+                                    <div className="group bg-slate-900 p-4 rounded-none md:rounded-2xl border border-slate-800 hover:border-slate-600 hover:shadow-md transition-all">
                                       <div className="flex items-center justify-between mb-2">
                                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide flex items-center gap-2">
                                           <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" /></svg>
@@ -6027,7 +6106,7 @@ const App: React.FC = () => {
                                           value={sysDetails.repositorio_principal || ''}
                                           onChange={(e) => handleUpdateSistema(unit.id, { repositorio_principal: e.target.value })}
                                           placeholder="github.com/usuario/projeto"
-                                          className="w-full bg-slate-800 border-none rounded-xl px-0 py-1 text-sm font-bold text-white outline-none placeholder:text-slate-600 focus:ring-0"
+                                          className="w-full bg-slate-800 border-none rounded-lg md:rounded-xl px-0 py-1 text-sm font-bold text-white outline-none placeholder:text-slate-600 focus:ring-0"
                                         />
                                         {sysDetails.repositorio_principal && (
                                           <a href={sysDetails.repositorio_principal} target="_blank" rel="noreferrer" className="shrink-0 p-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors">
@@ -6038,7 +6117,7 @@ const App: React.FC = () => {
                                     </div>
 
                                     {/* Documentação */}
-                                    <div className="group bg-slate-50 p-4 rounded-2xl border border-slate-100 hover:border-violet-200 hover:shadow-md transition-all">
+                                    <div className="group bg-slate-50 p-4 rounded-none md:rounded-2xl border border-slate-100 hover:border-violet-200 hover:shadow-md transition-all">
                                       <div className="flex items-center justify-between mb-2">
                                         <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-2">
                                           <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
@@ -6052,7 +6131,7 @@ const App: React.FC = () => {
                                           value={sysDetails.link_documentacao || ''}
                                           onChange={(e) => handleUpdateSistema(unit.id, { link_documentacao: e.target.value })}
                                           placeholder="https://notion.so/..."
-                                          className="w-full bg-white border-none rounded-xl px-0 py-1 text-sm font-bold text-slate-700 outline-none placeholder:text-slate-300 focus:ring-0"
+                                          className="w-full bg-white border-none rounded-lg md:rounded-xl px-0 py-1 text-sm font-bold text-slate-700 outline-none placeholder:text-slate-300 focus:ring-0"
                                         />
                                         {sysDetails.link_documentacao && (
                                           <a href={sysDetails.link_documentacao} target="_blank" rel="noreferrer" className="shrink-0 p-2 bg-violet-100 text-violet-600 rounded-lg hover:bg-violet-200 transition-colors">
@@ -6064,7 +6143,7 @@ const App: React.FC = () => {
 
                                     {/* AI Studio */}
                                     {(['prototipacao', 'desenvolvimento', 'testes', 'producao'].includes(sysDetails.status) || sysDetails.link_google_ai_studio) && (
-                                      <div className="group bg-slate-50 p-4 rounded-2xl border border-slate-100 hover:border-blue-200 hover:shadow-md transition-all animate-in slide-in-from-left-4">
+                                      <div className="group bg-slate-50 p-4 rounded-none md:rounded-2xl border border-slate-100 hover:border-blue-200 hover:shadow-md transition-all animate-in slide-in-from-left-4">
                                         <div className="flex items-center justify-between mb-2">
                                           <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-2">
                                             <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
@@ -6078,7 +6157,7 @@ const App: React.FC = () => {
                                             value={sysDetails.link_google_ai_studio || ''}
                                             onChange={(e) => handleUpdateSistema(unit.id, { link_google_ai_studio: e.target.value })}
                                             placeholder="Link do Prompt..."
-                                            className="w-full bg-white border-none rounded-xl px-0 py-1 text-sm font-bold text-slate-700 outline-none placeholder:text-slate-300 focus:ring-0"
+                                            className="w-full bg-white border-none rounded-lg md:rounded-xl px-0 py-1 text-sm font-bold text-slate-700 outline-none placeholder:text-slate-300 focus:ring-0"
                                           />
                                           {sysDetails.link_google_ai_studio && (
                                             <a href={sysDetails.link_google_ai_studio} target="_blank" rel="noreferrer" className="shrink-0 p-2 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors">
@@ -6093,7 +6172,7 @@ const App: React.FC = () => {
 
                                     {/* Produção */}
                                     {(['desenvolvimento', 'testes', 'producao'].includes(sysDetails.status) || sysDetails.link_hospedado) && (
-                                      <div className="group bg-emerald-50 p-4 rounded-2xl border border-emerald-100 hover:border-emerald-300 hover:shadow-md transition-all animate-in slide-in-from-left-4 delay-100">
+                                      <div className="group bg-emerald-50 p-4 rounded-none md:rounded-2xl border border-emerald-100 hover:border-emerald-300 hover:shadow-md transition-all animate-in slide-in-from-left-4 delay-100">
                                         <div className="flex items-center justify-between mb-2">
                                           <label className="text-[10px] font-bold text-emerald-600 uppercase tracking-wide flex items-center gap-2">
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
@@ -6107,7 +6186,7 @@ const App: React.FC = () => {
                                             value={sysDetails.link_hospedado || ''}
                                             onChange={(e) => handleUpdateSistema(unit.id, { link_hospedado: e.target.value })}
                                             placeholder="https://..."
-                                            className="w-full bg-white border-none rounded-xl px-0 py-1 text-sm font-bold text-emerald-800 outline-none placeholder:text-emerald-200 focus:ring-0"
+                                            className="w-full bg-white border-none rounded-lg md:rounded-xl px-0 py-1 text-sm font-bold text-emerald-800 outline-none placeholder:text-emerald-200 focus:ring-0"
                                           />
                                           {sysDetails.link_hospedado && (
                                             <a href={sysDetails.link_hospedado} target="_blank" rel="noreferrer" className="shrink-0 p-2 bg-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-300 transition-colors">
@@ -6117,7 +6196,7 @@ const App: React.FC = () => {
                                         </div>
                                         
                                         {sysDetails.link_hospedado && sysDetails.link_hospedado.startsWith('http') && (
-                                          <div className="mt-4 rounded-xl overflow-hidden border border-emerald-100 shadow-sm group/preview relative aspect-video bg-white">
+                                          <div className="mt-4 rounded-lg md:rounded-xl overflow-hidden border border-emerald-100 shadow-sm group/preview relative aspect-video bg-white">
                                             <img 
                                               src={`https://api.microlink.io?url=${encodeURIComponent(sysDetails.link_hospedado)}&screenshot=true&waitFor=5000&embed=screenshot.url`}
                                               alt="Preview do sistema"
@@ -6135,18 +6214,18 @@ const App: React.FC = () => {
 
                               {/* Coluna 2 e 3: Logs de Trabalho */}
                               <div className="lg:col-span-2 space-y-6">
-                                <div className="bg-white border border-slate-200 rounded-[2.5rem] overflow-hidden flex flex-col min-h-[600px] shadow-sm">
+                                <div className="bg-white border border-slate-200 rounded-none md:rounded-[2.5rem] overflow-hidden flex flex-col min-h-[600px] shadow-sm">
                                   {/* Novo Log Input */}
                                   <div className="p-8 border-b border-slate-100 bg-slate-50">
                                     <div className="flex flex-col gap-4">
                                       <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-3">
-                                          <div className="p-2 bg-violet-600 text-white rounded-xl">
+                                          <div className="p-2 bg-violet-600 text-white rounded-lg md:rounded-xl">
                                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                                           </div>
                                           <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Registrar Desenvolvimento / Ajuste</h4>
                                         </div>
-                                        <div className="flex bg-white p-1 rounded-xl border border-slate-200">
+                                        <div className="flex bg-white p-1 rounded-lg md:rounded-xl border border-slate-200">
                                           <button
                                             onClick={() => setNewLogTipo('desenvolvimento')}
                                             className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${newLogTipo === 'desenvolvimento' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
@@ -6167,7 +6246,7 @@ const App: React.FC = () => {
                                           onChange={(e) => setNewLogText(e.target.value)}
                                           placeholder="O que foi feito ou o que precisa ser ajustado?"
                                           rows={2}
-                                          className="flex-1 bg-white border border-slate-200 rounded-2xl px-6 py-4 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-violet-500 outline-none transition-all resize-none"
+                                          className="flex-1 bg-white border border-slate-200 rounded-none md:rounded-2xl px-6 py-4 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-violet-500 outline-none transition-all resize-none"
                                         />
                                         <button
                                           onClick={() => {
@@ -6175,7 +6254,7 @@ const App: React.FC = () => {
                                             setNewLogText('');
                                           }}
                                           disabled={!newLogText.trim()}
-                                          className="bg-slate-900 text-white px-8 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 disabled:grayscale"
+                                          className="bg-slate-900 text-white px-8 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 disabled:grayscale"
                                         >
                                           Registrar
                                         </button>
@@ -6189,7 +6268,7 @@ const App: React.FC = () => {
                                     <div className="space-y-4">
                                       <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-violet-500 pl-3">Logs Ativos</h5>
                                       {systemWorkItems.filter(w => !w.concluido).sort((a,b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime()).map(log => (
-                                        <div key={log.id} className="group bg-slate-50 border border-slate-100 rounded-3xl p-6 hover:border-violet-200 hover:bg-white transition-all">
+                                        <div key={log.id} className="group bg-slate-50 border border-slate-100 rounded-none md:rounded-3xl p-6 hover:border-violet-200 hover:bg-white transition-all">
                                           <div className="flex items-start justify-between gap-6">
                                             <div className="flex-1 space-y-2">
                                               <div className="flex items-center gap-3">
@@ -6210,7 +6289,7 @@ const App: React.FC = () => {
                                         </div>
                                       ))}
                                       {systemWorkItems.filter(w => !w.concluido).length === 0 && (
-                                        <div className="text-center py-12 bg-slate-50/50 rounded-3xl border-2 border-dashed border-slate-100">
+                                        <div className="text-center py-12 bg-slate-50/50 rounded-none md:rounded-3xl border-2 border-dashed border-slate-100">
                                           <p className="text-slate-300 font-black text-[10px] uppercase tracking-widest italic">Nenhum log ativo</p>
                                         </div>
                                       )}
@@ -6222,7 +6301,7 @@ const App: React.FC = () => {
                                         <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-emerald-500 pl-3">Concluídos</h5>
                                         <div className="space-y-3 opacity-60">
                                           {systemWorkItems.filter(w => w.concluido).sort((a,b) => new Date(b.data_conclusao!).getTime() - new Date(a.data_conclusao!).getTime()).map(log => (
-                                            <div key={log.id} className="bg-white border border-slate-100 rounded-2xl p-4 flex items-center justify-between gap-4">
+                                            <div key={log.id} className="bg-white border border-slate-100 rounded-none md:rounded-2xl p-4 flex items-center justify-between gap-4">
                                               <div className="flex-1 flex items-center gap-4">
                                                 <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
                                                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
@@ -6255,7 +6334,7 @@ const App: React.FC = () => {
 
               ) : (
                 <div className="space-y-10">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white p-8 rounded-[2rem] border border-slate-200 shadow-xl">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white p-8 rounded-none md:rounded-[2rem] border border-slate-200 shadow-xl">
                     <div>
                       <h3 className="text-4xl font-black text-slate-900 tracking-tighter">Gestão PGC</h3>
                       <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(new Date(currentYear, currentMonth))}</p>
@@ -6264,7 +6343,7 @@ const App: React.FC = () => {
                       {pgcSubView === 'plano' && (
                         <button
                           onClick={() => setIsImportPlanOpen(true)}
-                          className="bg-slate-900 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center gap-3"
+                          className="bg-slate-900 text-white px-6 py-3 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center gap-3"
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
                           Importar Planilha
@@ -6274,7 +6353,7 @@ const App: React.FC = () => {
                       <select
                         value={currentMonth}
                         onChange={(e) => setCurrentMonth(Number(e.target.value))}
-                        className="text-[10px] font-black uppercase bg-slate-100 px-4 py-2 rounded-xl border-none outline-none focus:ring-2 focus:ring-slate-900"
+                        className="text-[10px] font-black uppercase bg-slate-100 px-4 py-2 rounded-lg md:rounded-xl border-none outline-none focus:ring-2 focus:ring-slate-900"
                       >
                         {['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'].map((m, i) => (
                           <option key={i} value={i}>{m}</option>
@@ -6300,7 +6379,7 @@ const App: React.FC = () => {
 
                   {pgcSubView === 'audit' && (
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-220px)] pb-4">
-                      <div className="lg:col-span-3 bg-white rounded-[2rem] border border-slate-200 shadow-xl flex flex-col overflow-hidden h-full">
+                      <div className="lg:col-span-3 bg-white rounded-none md:rounded-[2rem] border border-slate-200 shadow-xl flex flex-col overflow-hidden h-full">
                         <div className="p-6 border-b border-slate-100 flex-shrink-0 bg-slate-50/50">
                           <div className="flex items-center justify-between">
                             <h4 className="text-sm font-black text-slate-900 tracking-tight">Pendentes</h4>
@@ -6321,7 +6400,7 @@ const App: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="lg:col-span-9 bg-white rounded-[2rem] border border-slate-200 overflow-hidden shadow-xl flex flex-col h-full">
+                      <div className="lg:col-span-9 bg-white rounded-none md:rounded-[2rem] border border-slate-200 overflow-hidden shadow-xl flex flex-col h-full">
                         <div className="flex-1 overflow-y-auto divide-y divide-slate-100 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
                           {(() => {
                             const currentPlan = planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`);
@@ -6364,8 +6443,9 @@ const App: React.FC = () => {
 
                   {pgcSubView === 'plano' && (
                   <div className="animate-in space-y-8">
-                    <div className="bg-white border border-slate-200 rounded-[2rem] overflow-hidden shadow-2xl overflow-x-auto">
-                      <table className="w-full text-left min-w-[800px]">
+                    <div className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl">
+                      {/* Desktop Table */}
+                      <table className="w-full text-left min-w-[800px] hidden md:table">
                         <thead className="bg-slate-50 border-b border-slate-200">
                           <tr>
                             <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Origem / Unidade</th>
@@ -6393,15 +6473,33 @@ const App: React.FC = () => {
                               </td>
                             </tr>
                           ))}
-                          {(!planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)) && (
-                            <tr>
-                              <td colSpan={4} className="px-8 py-20 text-center">
-                                <p className="text-slate-300 font-black text-sm uppercase tracking-widest italic">Nenhum plano de trabalho configurado para este período.</p>
-                              </td>
-                            </tr>
-                          )}
                         </tbody>
                       </table>
+
+                      {/* Mobile Card View */}
+                      <div className="md:hidden divide-y divide-slate-100">
+                        {planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)?.itens.map((item, i) => (
+                          <div key={i} className="p-6 space-y-4">
+                            <div className="flex justify-between items-start gap-4">
+                              <div className="flex-1">
+                                <div className="text-[8px] font-black text-slate-400 uppercase mb-1">{item.origem} • {item.unidade}</div>
+                                <div className="text-sm font-black text-slate-900 leading-tight">{item.entrega}</div>
+                              </div>
+                              <div className="bg-indigo-50 text-indigo-600 px-2 py-1 rounded text-[10px] font-black">{item.percentual}%</div>
+                            </div>
+                            <p className="text-xs text-slate-500 leading-relaxed">{item.descricao}</p>
+                            <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                              <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${item.percentual}%` }}></div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {(!planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)) && (
+                        <div className="px-8 py-20 text-center">
+                          <p className="text-slate-300 font-black text-sm uppercase tracking-widest italic">Nenhum plano de trabalho configurado para este período.</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                   )}
@@ -6452,7 +6550,7 @@ const App: React.FC = () => {
       {
         isTerminalOpen && (
           <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-300">
-            <div className="bg-[#0C0C0C] w-full max-w-2xl rounded-[2rem] shadow-[0_0_100px_rgba(37,99,235,0.2)] border border-white/10 overflow-hidden flex flex-col h-[500px] animate-in zoom-in-95">
+            <div className="bg-[#0C0C0C] w-full max-w-2xl rounded-none md:rounded-[2rem] shadow-[0_0_100px_rgba(37,99,235,0.2)] border border-white/10 overflow-hidden flex flex-col h-[500px] animate-in zoom-in-95">
               <div className="p-6 bg-white/5 border-b border-white/5 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="flex gap-1.5">
@@ -6554,7 +6652,7 @@ const App: React.FC = () => {
       {
         isImportPlanOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-            <div className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+            <div className="bg-white w-full max-w-2xl rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
               <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
                 <div>
                   <h3 className="text-2xl font-black text-slate-900 tracking-tight">Importar Plano Mensal</h3>
@@ -6569,11 +6667,11 @@ const App: React.FC = () => {
                 <div className="grid grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Ano</label>
-                    <input type="number" id="import-year" defaultValue={currentYear} className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900" />
+                    <input type="number" id="import-year" defaultValue={currentYear} className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900" />
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Mês</label>
-                    <select id="import-month" defaultValue={currentMonth + 1} className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900">
+                    <select id="import-month" defaultValue={currentMonth + 1} className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900">
                       {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => <option key={m} value={m}>{m}</option>)}
                     </select>
                   </div>
@@ -6584,7 +6682,7 @@ const App: React.FC = () => {
                   <textarea
                     id="import-json"
                     rows={10}
-                    className="w-full bg-slate-900 text-blue-400 border-none rounded-2xl px-6 py-4 text-[10px] font-mono focus:ring-2 focus:ring-blue-500 transition-all resize-none"
+                    className="w-full bg-slate-900 text-blue-400 border-none rounded-none md:rounded-2xl px-6 py-4 text-[10px] font-mono focus:ring-2 focus:ring-blue-500 transition-all resize-none"
                     placeholder='[ { "entrega": "Exemplo", "percentual": 50 }, ... ]'
                   />
                 </div>
@@ -6593,7 +6691,7 @@ const App: React.FC = () => {
               <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-4">
                 <button
                   onClick={() => setIsImportPlanOpen(false)}
-                  className="flex-1 px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all"
+                  className="flex-1 px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all"
                 >
                   Cancelar
                 </button>
@@ -6643,7 +6741,7 @@ const App: React.FC = () => {
                       alert("Erro ao processar dados: " + err.message);
                     }
                   }}
-                  className="flex-1 bg-blue-600 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
+                  className="flex-1 bg-blue-600 text-white px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
                 >
                   Processar e Gravar
                 </button>
@@ -6655,7 +6753,7 @@ const App: React.FC = () => {
 
       {isSystemSelectorOpen && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95">
+          <div className="bg-white w-full max-w-md rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95">
             <div className="p-8 border-b border-slate-100 flex items-center justify-between">
               <h3 className="text-xl font-black text-slate-900">Selecionar Sistema</h3>
               <button onClick={() => setIsSystemSelectorOpen(false)} className="p-2 hover:bg-slate-100 rounded-full">
@@ -6667,9 +6765,9 @@ const App: React.FC = () => {
                 <button
                   key={sistema.id}
                   onClick={() => handleFinalizeIdeaConversion(sistema.id)}
-                  className="w-full text-left p-4 rounded-2xl border-2 border-slate-100 hover:border-violet-500 hover:bg-violet-50 transition-all flex items-center gap-3 group"
+                  className="w-full text-left p-4 rounded-none md:rounded-2xl border-2 border-slate-100 hover:border-violet-500 hover:bg-violet-50 transition-all flex items-center gap-3 group"
                 >
-                  <div className="w-10 h-10 bg-slate-100 group-hover:bg-violet-500 group-hover:text-white rounded-xl flex items-center justify-center transition-colors">
+                  <div className="w-10 h-10 bg-slate-100 group-hover:bg-violet-500 group-hover:text-white rounded-lg md:rounded-xl flex items-center justify-center transition-colors">
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
                   </div>
                   <span className="font-bold text-slate-700 group-hover:text-violet-700">{sistema.nome.replace('SISTEMA:', '').trim()}</span>

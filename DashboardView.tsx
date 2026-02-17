@@ -15,6 +15,32 @@ interface DashboardViewProps {
   currentYear: number;
 }
 
+const DashboardSection = ({ title, iconColor, children }: { title: string, iconColor: string, children: React.ReactNode }) => {
+    const [isExpanded, setIsExpanded] = useState(true);
+
+    return (
+        <div className="bg-white p-6 md:p-8 rounded-none md:rounded-[2.5rem] border border-slate-200 shadow-lg h-full">
+            <button
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="w-full text-xl font-black text-slate-900 mb-6 flex items-center justify-between group"
+            >
+                <div className="flex items-center gap-3">
+                    <span className={`w-2 h-8 ${iconColor} rounded-full`}></span>
+                    {title}
+                </div>
+                <svg className={`w-5 h-5 text-slate-300 group-hover:text-slate-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+            {isExpanded && (
+                <div className="animate-in slide-in-from-top-2 duration-300">
+                    {children}
+                </div>
+            )}
+        </div>
+    );
+};
+
 const DashboardView: React.FC<DashboardViewProps> = ({
   tarefas,
   financeTransactions,
@@ -346,7 +372,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                         </div>
                     </div>
                 </div>
-            </div>
+                </div>
+            </DashboardSection>
         </div>
 
         {/* LADO DIREITO: Tendências e Eficácia */}
@@ -404,7 +431,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                         {systemStats.filter(s => s.status === 'producao').length} de {systemStats.length} em produção
                     </div>
                 </div>
-            </div>
+            </DashboardSection>
         </div>
       </div>
     </div>
