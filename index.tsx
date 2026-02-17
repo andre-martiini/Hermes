@@ -1,7 +1,16 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Tarefa, Status, EntregaInstitucional, Prioridade, AtividadeRealizada, Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento, BrainstormIdea, FinanceTransaction, FinanceGoal, FinanceSettings, FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight, DailyHabits, HealthSettings, Notification, AppSettings, formatDate, Sistema, SistemaStatus, WorkItem, WorkItemPhase, WorkItemPriority, QualityLog, WorkItemAudit } from './types';
+import * as AllTypes from './types';
+const {
+  Tarefa, Status, EntregaInstitucional, Prioridade, AtividadeRealizada,
+  Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento,
+  BrainstormIdea, FinanceTransaction, FinanceGoal, FinanceSettings,
+  FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight,
+  DailyHabits, HealthSettings, HermesNotification, AppSettings,
+  formatDate, Sistema, SistemaStatus, WorkItem, WorkItemPhase,
+  WorkItemPriority, QualityLog, WorkItemAudit, GoogleCalendarEvent
+} = AllTypes as any;
 import HealthView from './HealthView';
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
 import { db } from './firebase';
@@ -274,11 +283,13 @@ const PgcAuditRow = ({
 
 const DayView = ({
   tasks,
+  googleEvents = [],
   currentDate,
   onTaskClick,
   onTaskUpdate
 }: {
   tasks: Tarefa[],
+  googleEvents?: GoogleCalendarEvent[],
   currentDate: Date,
   onTaskClick: (t: Tarefa) => void,
   onTaskUpdate: (id: string, updates: Partial<Tarefa>) => void
@@ -287,6 +298,11 @@ const DayView = ({
   const [dragging, setDragging] = useState<{ id: string, startY: number, startMin: number } | null>(null);
 
   const dayStr = currentDate.toISOString().split('T')[0];
+  const dayGoogleEvents = useMemo(() => googleEvents.filter(e => {
+    const start = e.data_inicio.split('T')[0];
+    return start === dayStr;
+  }), [googleEvents, dayStr]);
+
   const dayTasks = useMemo(() => tasks.filter(t => {
     if (t.status === 'excluído' as any) return false;
     const start = t.data_inicio || t.data_criacao?.split('T')[0] || t.data_limite;
@@ -391,6 +407,33 @@ const DayView = ({
             });
           }
         }}>
+          {dayGoogleEvents.map(event => {
+            const startStr = event.data_inicio.includes('T') ? event.data_inicio.split('T')[1].substring(0, 5) : '00:00';
+            const endStr = event.data_fim.includes('T') ? event.data_fim.split('T')[1].substring(0, 5) : '23:59';
+
+            const startMin = timeToMinutes(startStr);
+            const endMin = timeToMinutes(endStr);
+            const top = (startMin / 60) * hourHeight;
+            const height = ((endMin - startMin) / 60) * hourHeight;
+
+            return (
+              <div
+                key={event.id}
+                className="absolute left-4 right-4 rounded-xl border-2 p-3 shadow-md bg-white border-amber-200 text-slate-800 opacity-90"
+                style={{ top, height: Math.max(30, height), zIndex: 5 }}
+              >
+                <div className="flex justify-between items-start gap-2">
+                  <div className="text-[11px] font-black leading-tight line-clamp-2 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
+                    {event.titulo}
+                  </div>
+                  <span className="text-[8px] font-black px-1.5 py-0.5 rounded uppercase bg-amber-100 text-amber-700">Google</span>
+                </div>
+                <div className="text-[9px] font-black mt-1 opacity-40 uppercase tracking-widest">{startStr} - {endStr}</div>
+              </div>
+            );
+          })}
+
           {dayTasks.filter(t => t.horario_inicio).map(task => {
             const startMin = timeToMinutes(task.horario_inicio!);
             const endMin = timeToMinutes(task.horario_fim || minutesToTime(startMin + 60));
@@ -471,6 +514,7 @@ const DayView = ({
 
 const CalendarView = ({
   tasks,
+  googleEvents = [],
   viewMode,
   currentDate,
   onDateChange,
@@ -479,6 +523,7 @@ const CalendarView = ({
   onTaskUpdate
 }: {
   tasks: Tarefa[],
+  googleEvents?: GoogleCalendarEvent[],
   viewMode: 'month' | 'week' | 'day',
   currentDate: Date,
   onDateChange: (d: Date) => void,
@@ -517,6 +562,30 @@ const CalendarView = ({
     }
     setDays(newDays);
   }, [currentDate, viewMode]);
+
+  const googleEventsByDay = useMemo(() => {
+    const map: Record<string, GoogleCalendarEvent[]> = {};
+    googleEvents.forEach(e => {
+      const startStr = e.data_inicio.split('T')[0];
+      const endStr = e.data_fim.split('T')[0];
+
+      let current = new Date(startStr + 'T12:00:00Z');
+      const end = new Date(endStr + 'T12:00:00Z');
+
+      let iterations = 0;
+      while (current <= end) {
+        if (iterations > 62) break;
+        iterations++;
+        const dateStr = current.toISOString().split('T')[0];
+        if (!map[dateStr]) map[dateStr] = [];
+        if (!map[dateStr].find(x => x.id === e.id)) {
+          map[dateStr].push(e);
+        }
+        current.setDate(current.getDate() + 1);
+      }
+    });
+    return map;
+  }, [googleEvents]);
 
   const tasksByDay = useMemo(() => {
     const map: Record<string, Tarefa[]> = {};
@@ -616,6 +685,7 @@ const CalendarView = ({
       {viewMode === 'day' ? (
         <DayView
           tasks={tasks}
+          googleEvents={googleEvents}
           currentDate={currentDate}
           onTaskClick={onTaskClick}
           onTaskUpdate={onTaskUpdate}
@@ -634,6 +704,7 @@ const CalendarView = ({
               const isToday = new Date().toISOString().split('T')[0] === dayStr;
               const isCurrentMonth = day.getMonth() === currentDate.getMonth();
               const dayTasks = tasksByDay[dayStr] || [];
+              const dayGoogleEvents = googleEventsByDay[dayStr] || [];
 
               return (
                 <div
@@ -650,6 +721,16 @@ const CalendarView = ({
                   </div>
 
                   <div className="flex-1 flex flex-col gap-1 mt-1 overflow-y-auto max-h-[100px] scrollbar-hide">
+                    {dayGoogleEvents.map(e => (
+                      <div
+                        key={e.id}
+                        className="px-2 py-0.5 rounded-md bg-amber-50 border border-amber-100 text-amber-700 text-[8px] font-black truncate flex items-center gap-1"
+                        title={e.titulo}
+                      >
+                        <div className="w-1.5 h-1.5 bg-amber-500 rounded-full"></div>
+                        {e.titulo}
+                      </div>
+                    ))}
                     {dayTasks.map(t => {
                       // Show full card ONLY on start date and end date
                       // Show slim bar on all intermediate days
@@ -989,7 +1070,7 @@ const NotificationCenter = ({
   onClose,
   onUpdateOverdue
 }: {
-  notifications: Notification[],
+  notifications: HermesNotification[],
   onMarkAsRead: (id: string) => void,
   onDismiss: (id: string) => void,
   isOpen: boolean,
@@ -3288,6 +3369,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
 
 const App: React.FC = () => {
   const [tarefas, setTarefas] = useState<Tarefa[]>([]);
+  const [googleCalendarEvents, setGoogleCalendarEvents] = useState<GoogleCalendarEvent[]>([]);
   const [entregas, setEntregas] = useState<EntregaInstitucional[]>([]);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -3325,6 +3407,10 @@ const App: React.FC = () => {
   useEffect(() => {
     const unsubSistemas = onSnapshot(collection(db, 'sistemas_detalhes'), (snapshot) => {
       setSistemasDetalhes(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Sistema)));
+    });
+
+    const unsubGoogleCalendar = onSnapshot(collection(db, 'google_calendar_events'), (snapshot) => {
+      setGoogleCalendarEvents(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as GoogleCalendarEvent)));
     });
 
     const unsubWorkItems = onSnapshot(collection(db, 'sistemas_work_items'), (snapshot) => {
@@ -3564,17 +3650,17 @@ const App: React.FC = () => {
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<HermesNotification[]>([]);
   const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [syncData, setSyncData] = useState<any>(null);
-  const [activePopup, setActivePopup] = useState<Notification | null>(null);
+  const [activePopup, setActivePopup] = useState<HermesNotification | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [isHabitsReminderOpen, setIsHabitsReminderOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'notifications' | 'context' | 'sistemas'>('notifications');
 
-  // --- Notification System & App Settings ---
+  // --- HermesNotification System & App Settings ---
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'configuracoes', 'geral'), (snap) => {
@@ -3620,12 +3706,12 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
+    if ("HermesNotification" in window && HermesNotification.permission === "default") {
+      HermesNotification.requestPermission();
     }
   }, []);
 
-  // Notification System Triggers (Time-based: Habits, Weigh-in)
+  // HermesNotification System Triggers (Time-based: Habits, Weigh-in)
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
@@ -3645,7 +3731,7 @@ const App: React.FC = () => {
         }
       }
 
-      // 2. Weigh-in Reminder (Bell Notification)
+      // 2. Weigh-in Reminder (Bell HermesNotification)
       if (appSettings.notifications.weighInReminder.enabled && current_time === appSettings.notifications.weighInReminder.time) {
         const lastWeighInRemind = localStorage.getItem('lastWeighInRemindDate');
         if (lastWeighInRemind !== todayStr) {
@@ -3662,7 +3748,7 @@ const App: React.FC = () => {
           }
 
           if (shouldRemind) {
-            const newNotif: Notification = {
+            const newNotif: HermesNotification = {
               id: Math.random().toString(36).substring(2, 9),
               title: "Lembrete de Pesagem",
               message: "Hora de registrar seu peso para acompanhar sua evolução no módulo Saúde!",
@@ -3690,8 +3776,8 @@ const App: React.FC = () => {
           if (diff === 15 && lastReminded !== todayStr) {
             const msg = `Sua tarefa "${t.titulo}" inicia em 15 minutos!`;
             showToast(msg, "info");
-            if ("Notification" in window && Notification.permission === "granted") {
-              new Notification("Hermes: Próxima Tarefa", { body: msg });
+            if ("HermesNotification" in window && HermesNotification.permission === "granted") {
+              new HermesNotification("Hermes: Próxima Tarefa", { body: msg });
             }
             localStorage.setItem(`lastStartRemind_${t.id}`, todayStr);
           }
@@ -3705,8 +3791,8 @@ const App: React.FC = () => {
           if (diff === 15 && lastReminded !== todayStr) {
             const msg = `Sua tarefa "${t.titulo}" encerra em 15 minutos!`;
             showToast(msg, "warning");
-            if ("Notification" in window && Notification.permission === "granted") {
-              new Notification("Hermes: Encerramento de Tarefa", { body: msg });
+            if ("HermesNotification" in window && HermesNotification.permission === "granted") {
+              new HermesNotification("Hermes: Encerramento de Tarefa", { body: msg });
             }
             localStorage.setItem(`lastEndRemind_${t.id}`, todayStr);
           }
@@ -3719,7 +3805,7 @@ const App: React.FC = () => {
   // Data-driven Notifications (Budget, Overdue, PGC)
   useEffect(() => {
     const todayStr = new Date().toISOString().split('T')[0];
-    const newNotifications: Notification[] = [];
+    const newNotifications: HermesNotification[] = [];
 
     // 1. Overdue Tasks (Once a day check)
     if (appSettings.notifications.overdueTasks.enabled && localStorage.getItem('lastOverdueCheckDate') !== todayStr) {
@@ -3799,11 +3885,11 @@ const App: React.FC = () => {
     }
   }, [tarefas, financeTransactions, financeSettings, planosTrabalho, appSettings.notifications]);
 
-  // Welcome Notification
+  // Welcome HermesNotification
   useEffect(() => {
     const hasSeenWelcome = localStorage.getItem('hasSeenWelcome');
     if (!hasSeenWelcome && notifications.length === 0) {
-      const welcomeNote: Notification = {
+      const welcomeNote: HermesNotification = {
         id: 'welcome',
         title: 'Bem-vindo ao Hermes',
         message: 'Sistema de notificações ativo. Configure suas preferências no ícone de engrenagem.',
@@ -5114,6 +5200,7 @@ const App: React.FC = () => {
                   {dashboardViewMode === 'calendar' ? (
                     <CalendarView
                       tasks={filteredAndSortedTarefas}
+                      googleEvents={googleCalendarEvents}
                       viewMode={calendarViewMode}
                       currentDate={calendarDate}
                       onDateChange={setCalendarDate}

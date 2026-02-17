@@ -21,7 +21,8 @@ from googleapiclient.errors import HttpError
 # Escopos para Google APIs (Tasks e Gmail Readonly)
 SCOPES = [
     'https://www.googleapis.com/auth/tasks',
-    'https://www.googleapis.com/auth/gmail.readonly'
+    'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/calendar.readonly'
 ]
 
 DEBUG_MODE = True # Ativa log detalhado de cada tarefa no terminal do sistema
@@ -87,6 +88,9 @@ def get_tasks_service():
 
 def get_gmail_service():
     return build('gmail', 'v1', credentials=get_google_creds())
+
+def get_calendar_service():
+    return build('calendar', 'v3', credentials=get_google_creds())
 
 def cleanup_old_sync_badges(db, log_func=None):
     def log(msg):
@@ -195,6 +199,52 @@ def sync_google_tasks(db, log_list=None, sync_ref=None):
         log("PULL CONCLUÍDO.", force_ui=True)
     except Exception as e:
         log(f"ERRO PULL: {e}", force_ui=True)
+
+def sync_google_calendar(db, log_list=None, sync_ref=None):
+    last_ui_update = [0]
+    def log(msg, force_ui=False):
+        print(msg)
+        if log_list is not None:
+            log_list.append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+            now_ts = time.time()
+            if sync_ref and (force_ui or now_ts - last_ui_update[0] > 1.2):
+                try: sync_ref.update({'logs': log_list}); last_ui_update[0] = now_ts
+                except: pass
+    try:
+        service = get_calendar_service()
+        log("Sincronizando Google Calendar...")
+
+        # Busca eventos dos próximos 30 dias e dos últimos 7 dias
+        time_min = (datetime.utcnow() - timedelta(days=7)).isoformat() + 'Z'
+        time_max = (datetime.utcnow() + timedelta(days=30)).isoformat() + 'Z'
+
+        events_result = service.events().list(
+            calendarId='primary', timeMin=time_min, timeMax=time_max,
+            singleEvents=True, orderBy='startTime'
+        ).execute()
+        events = events_result.get('items', [])
+
+        log(f"Encontrados {len(events)} eventos no Calendar. Sincronizando...")
+
+        count = 0
+        for event in events:
+            event_id = event['id']
+            summary = event.get('summary', '(Sem título)')
+            start = event['start'].get('dateTime', event['start'].get('date'))
+            end = event['end'].get('dateTime', event['end'].get('date'))
+
+            db.collection('google_calendar_events').document(event_id).set({
+                'google_id': event_id,
+                'titulo': summary,
+                'data_inicio': start,
+                'data_fim': end,
+                'last_sync': datetime.now().isoformat()
+            }, merge=True)
+            count += 1
+
+        log(f"[CAL] {count} eventos sincronizados.", force_ui=True)
+    except Exception as e:
+        log(f"ERRO CALENDAR: {e}", force_ui=True)
 
 def push_google_tasks(db, log_list=None, sync_ref=None):
     last_ui_update = [0]
@@ -381,6 +431,7 @@ def watch_commands(db):
             try:
                 push_google_tasks(db, log_entries, sync_doc_ref)
                 sync_google_tasks(db, log_entries, sync_doc_ref)
+                sync_google_calendar(db, log_entries, sync_doc_ref)
                 sync_pix_emails(db, log_entries, sync_doc_ref)
                 sync_doc_ref.update({'status': 'completed', 'last_success': datetime.now().isoformat(), 'logs': log_entries})
                 print("Sincronização concluída.")
@@ -396,11 +447,13 @@ def main():
     subparsers.add_parser('sync-tasks')
     subparsers.add_parser('watch')
     subparsers.add_parser('sync-pix')
+    subparsers.add_parser('sync-cal')
     args = parser.parse_args()
     if not args.command: parser.print_help(); return
     db = init_db()
     if args.command == 'sync-tasks': sync_google_tasks(db)
     elif args.command == 'watch': watch_commands(db)
     elif args.command == 'sync-pix': sync_pix_emails(db)
+    elif args.command == 'sync-cal': sync_google_calendar(db)
 
 if __name__ == '__main__': main()
