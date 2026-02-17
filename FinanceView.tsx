@@ -39,6 +39,29 @@ interface FinanceViewProps {
     onDeleteTransaction: (id: string) => Promise<void>;
 }
 
+const FinanceSection = ({ title, children, defaultExpanded = true }: { title: string, children: React.ReactNode, defaultExpanded?: boolean }) => {
+    const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+
+    return (
+        <div className="bg-white p-6 md:p-8 rounded-none md:rounded-lg border border-slate-200 shadow-lg">
+            <button
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="w-full flex items-center justify-between group"
+            >
+                <h4 className="text-sm md:text-base font-black text-slate-900 uppercase tracking-widest">{title}</h4>
+                <svg className={`w-5 h-5 text-slate-300 group-hover:text-slate-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+            {isExpanded && (
+                <div className="mt-6 animate-in slide-in-from-top-2 duration-300">
+                    {children}
+                </div>
+            )}
+        </div>
+    );
+};
+
 const FinanceView = ({
     transactions,
     goals,
@@ -244,7 +267,7 @@ const FinanceView = ({
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-3 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
+                    <div className="flex items-center gap-3 bg-white p-2 rounded-lg md:rounded-2xl border border-slate-200 shadow-sm">
                         <button
                             onClick={() => {
                                 const newMonth = currentMonth === 0 ? 11 : currentMonth - 1;
@@ -513,22 +536,19 @@ const FinanceView = ({
                                 )}
                             </div>
 
-                            <div className="flex items-center justify-between">
-                                <h4 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2">
-                                    <svg className="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                                    Metas em Cascata
-                                </h4>
-                                <button
-                                    onClick={() => {
-                                        setNewGoalName('');
-                                        setNewGoalTarget('');
-                                        setEditingGoal(null);
-                                    }}
-                                    className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:underline"
-                                >
-                                    + Nova Meta
-                                </button>
-                            </div>
+                            <FinanceSection title="Metas em Cascata">
+                                <div className="flex justify-end mb-4">
+                                    <button
+                                        onClick={() => {
+                                            setNewGoalName('');
+                                            setNewGoalTarget('');
+                                            setEditingGoal(null);
+                                        }}
+                                        className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:underline"
+                                    >
+                                        + Nova Meta
+                                    </button>
+                                </div>
 
                             {sortedGoals.length > 0 ? (
                                 <div className="space-y-4">
@@ -637,26 +657,26 @@ const FinanceView = ({
                                     </button>
                                 </div>
                             </div>
+                        </FinanceSection>
                         </div>
 
                         {/* Transactions/Activity Feed */}
-                        <div className="bg-white p-6 rounded-none md:rounded-[2rem] border border-slate-200 shadow-lg h-fit">
-                            <div className="flex justify-between items-center mb-4">
-                                <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Lançamentos de {new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}</h4>
-                                <button 
-                                    onClick={() => {
-                                        setNewTransaction({ date: new Date().toISOString(), sprint: 1, category: 'Alimentação' });
-                                        setIsAddingTransaction(true);
-                                    }} 
-                                    className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:underline"
-                                >
-                                    + Novo
-                                </button>
-                            </div>
+                            <FinanceSection title={`Lançamentos de ${new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}`}>
+                                <div className="flex justify-end mb-4">
+                                    <button
+                                        onClick={() => {
+                                            setNewTransaction({ date: new Date().toISOString(), sprint: 1, category: 'Alimentação' });
+                                            setIsAddingTransaction(true);
+                                        }}
+                                        className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:underline"
+                                    >
+                                        + Novo
+                                    </button>
+                                </div>
 
                             {/* Form para Adicionar/Editar Transação */}
                             {(isAddingTransaction || editingTransaction) && (
-                                <div className="mb-6 p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-3">
+                                <div className="mb-6 p-4 bg-slate-50 rounded-lg md:rounded-2xl border border-slate-100 space-y-3">
                                     <h5 className="text-[10px] font-black uppercase text-slate-400">{editingTransaction ? 'Editar Lançamento' : 'Novo Lançamento'}</h5>
                                     <input 
                                         type="text" 
@@ -755,7 +775,7 @@ const FinanceView = ({
                                     </div>
                                 )}
                             </div>
-                        </div>
+                        </FinanceSection>
                     </div>
                 </>
             )}
@@ -829,23 +849,20 @@ const FinanceView = ({
                     <div className="h-px bg-slate-100 w-full opacity-50" />
 
                     {/* SEÇÃO DE RENDAS / GANHOS */}
-                    <div className="space-y-6">
-                        <div className="flex justify-between items-center">
-                            <div>
-                                <h4 className="text-xl font-black text-slate-800 tracking-tight">Rendas e Rendimentos</h4>
-                                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Fontes de entrada recorrentes e avulsas</p>
-                            </div>
-                            <div className="flex gap-3">
+                    <FinanceSection title="Rendas e Rendimentos">
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+                            <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Fontes de entrada recorrentes e avulsas</p>
+                            <div className="flex gap-3 w-full md:w-auto">
                                 <button
                                     onClick={() => setIsManagingIncomeRubrics(!isManagingIncomeRubrics)}
-                                    className={`px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border ${isManagingIncomeRubrics ? 'bg-emerald-900 text-white border-emerald-900' : 'bg-white text-emerald-700 border-emerald-100 hover:bg-emerald-50'}`}
+                                    className={`flex-1 md:flex-none px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border ${isManagingIncomeRubrics ? 'bg-emerald-900 text-white border-emerald-900' : 'bg-white text-emerald-700 border-emerald-100 hover:bg-emerald-50'}`}
                                 >
                                     {isManagingIncomeRubrics ? 'Fechar Rubricas' : 'Minhas Fontes'}
                                 </button>
                                 <button onClick={() => {
                                     setNewIncome({ category: settings.incomeCategories?.[0] || 'Renda Principal' });
                                     setIsAddingIncome(true);
-                                }} className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg hover:shadow-emerald-500/20">
+                                }} className="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg hover:shadow-emerald-500/20">
                                     + Registrar Ganho
                                 </button>
                             </div>
@@ -863,7 +880,7 @@ const FinanceView = ({
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
                                     {incomeRubrics.map(rubric => (
-                                        <div key={rubric.id} className="bg-white/5 border border-white/10 p-4 rounded-2xl flex justify-between items-center group">
+                                        <div key={rubric.id} className="bg-white/5 border border-white/10 p-4 rounded-lg md:rounded-2xl flex justify-between items-center group">
                                             <div>
                                                 <div className="text-[9px] font-black text-emerald-200/50 uppercase tracking-widest mb-1">{rubric.category}</div>
                                                 <div className="text-sm font-bold">{rubric.description}</div>
@@ -890,7 +907,7 @@ const FinanceView = ({
                                     ))}
                                 </div>
 
-                                <div className="bg-white/5 p-6 rounded-3xl border border-white/10">
+                                <div className="bg-white/5 p-6 rounded-none md:rounded-3xl border border-white/10">
                                     <h6 className="text-[10px] font-black text-emerald-300/40 uppercase tracking-widest mb-4">
                                         {editingIncomeRubric ? 'Editar Fonte de Renda' : 'Configurar Nova Fonte'}
                                     </h6>
@@ -961,7 +978,7 @@ const FinanceView = ({
 
                         {/* Formulário de Registro de Recebimento */}
                         {isAddingIncome && (
-                            <div className="bg-white p-6 rounded-[2rem] border border-emerald-200 shadow-xl space-y-4 animate-in slide-in-from-top-4">
+                            <div className="bg-white p-6 rounded-none md:rounded-[2rem] border border-emerald-200 shadow-xl space-y-4 animate-in slide-in-from-top-4">
                                 <h5 className="text-sm font-black text-emerald-900 uppercase tracking-widest">Efetivar Recebimento</h5>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                     <input type="text" placeholder="Origem" className="px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium" value={newIncome.description || ''} onChange={(e) => setNewIncome({ ...newIncome, description: e.target.value })} />
@@ -1003,7 +1020,7 @@ const FinanceView = ({
                                     entry.year === currentYear
                                 ))
                                 .map(rubric => (
-                                    <div key={rubric.id} className="bg-emerald-50/30 p-6 rounded-[2rem] border-2 border-dashed border-emerald-100 opacity-60 hover:opacity-100 transition-all group">
+                                    <div key={rubric.id} className="bg-emerald-50/30 p-6 rounded-none md:rounded-[2rem] border-2 border-dashed border-emerald-100 opacity-60 hover:opacity-100 transition-all group">
                                         <div className="text-[10px] font-black uppercase tracking-widest mb-2 px-3 py-1 rounded-full w-fit bg-emerald-100 text-emerald-700">{rubric.category}</div>
                                         <h5 className="text-lg font-black text-emerald-900/40 leading-tight">{rubric.description}</h5>
                                         <div className="mt-4 text-[10px] font-black text-emerald-700/40 uppercase tracking-widest italic mb-4">Aguardando recebimento</div>
@@ -1039,7 +1056,7 @@ const FinanceView = ({
                                     const diff = prevEntry ? entry.amount - prevEntry.amount : 0;
 
                                     return (
-                                        <div key={entry.id} className="bg-white p-4 rounded-2xl border border-emerald-50 shadow-sm flex items-center justify-between group">
+                                        <div key={entry.id} className="bg-white p-4 rounded-lg md:rounded-2xl border border-emerald-50 shadow-sm flex items-center justify-between group">
                                             <div className="flex items-center gap-4">
                                                 <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600">
                                                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
@@ -1068,28 +1085,25 @@ const FinanceView = ({
                                 })
                             }
                         </div>
-                    </div>
+                    </FinanceSection>
 
                     <div className="h-px bg-slate-100 w-full opacity-50" />
 
                     {/* SEÇÃO DE CONTAS / OBRIGAÇÕES */}
-                    <div className="space-y-6">
-                        <div className="flex justify-between items-center">
-                            <div>
-                                <h4 className="text-xl font-black text-slate-800 tracking-tight">Obrigações e Despesas</h4>
-                                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Gerenciamento de pagamentos e compromissos</p>
-                            </div>
-                            <div className="flex gap-3">
+                    <FinanceSection title="Obrigações e Despesas">
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+                            <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Gerenciamento de pagamentos e compromissos</p>
+                            <div className="flex gap-3 w-full md:w-auto">
                                 <button
                                     onClick={() => setIsManagingRubrics(!isManagingRubrics)}
-                                    className={`px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border ${isManagingRubrics ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                                    className={`flex-1 md:flex-none px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border ${isManagingRubrics ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
                                 >
                                     {isManagingRubrics ? 'Fechar Rubricas' : 'Gerenciar Rubricas'}
                                 </button>
                                 <button onClick={() => {
                                     setNewBill({ category: settings.billCategories?.[0] || 'Conta Fixa' });
                                     setIsAddingBill(true);
-                                }} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg hover:shadow-blue-500/20">
+                                }} className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg hover:shadow-blue-500/20">
                                     + Registrar Conta
                                 </button>
                             </div>
@@ -1107,7 +1121,7 @@ const FinanceView = ({
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
                                     {billRubrics.map(rubric => (
-                                        <div key={rubric.id} className="bg-white/5 border border-white/10 p-4 rounded-2xl flex justify-between items-center group">
+                                        <div key={rubric.id} className="bg-white/5 border border-white/10 p-4 rounded-lg md:rounded-2xl flex justify-between items-center group">
                                             <div>
                                                 <div className="text-[9px] font-black text-white/30 uppercase tracking-widest mb-1">{rubric.category}</div>
                                                 <div className="text-sm font-bold">{rubric.description}</div>
@@ -1134,7 +1148,7 @@ const FinanceView = ({
                                     ))}
                                 </div>
 
-                                <div className="bg-white/5 p-6 rounded-3xl border border-white/10">
+                                <div className="bg-white/5 p-6 rounded-none md:rounded-3xl border border-white/10">
                                     <h6 className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-4">
                                         {editingRubric ? 'Editar Rubrica' : 'Cadastrar Nova Rubrica'}
                                     </h6>
@@ -1208,7 +1222,7 @@ const FinanceView = ({
 
                         {/* Form de Adição */}
                         {isAddingBill && (
-                            <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-xl space-y-4">
+                            <div className="bg-white p-6 rounded-none md:rounded-[2rem] border border-slate-200 shadow-xl space-y-4">
                                 <h5 className="text-sm font-black text-slate-900 uppercase tracking-widest">Adicionar Nova Conta/Aporte</h5>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <input type="text" placeholder="Descrição (ex: Aluguel, Poupança)" className="px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium" value={newBill.description || ''} onChange={(e) => setNewBill({ ...newBill, description: e.target.value })} />
@@ -1267,7 +1281,7 @@ const FinanceView = ({
                                     bill.year === currentYear
                                 ))
                                 .map(rubric => (
-                                    <div key={rubric.id} className="bg-slate-50 p-6 rounded-[2rem] border-2 border-dashed border-slate-200 opacity-60 hover:opacity-100 transition-all group">
+                                    <div key={rubric.id} className="bg-slate-50 p-6 rounded-none md:rounded-[2rem] border-2 border-dashed border-slate-200 opacity-60 hover:opacity-100 transition-all group">
                                         <div className="text-[10px] font-black uppercase tracking-widest mb-2 px-3 py-1 rounded-full w-fit bg-slate-200 text-slate-500">{rubric.category}</div>
                                         <h5 className="text-lg font-black text-slate-400 leading-tight">{rubric.description}</h5>
                                         <div className="mt-4 text-[10px] font-black text-slate-400 uppercase tracking-widest italic mb-4">Aguardando lançamento de {new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}</div>
@@ -1303,7 +1317,7 @@ const FinanceView = ({
                                     const diff = prevBill ? bill.amount - prevBill.amount : 0;
 
                                     return (
-                                        <div key={bill.id} className={`bg-white p-4 rounded-2xl border transition-all flex items-center justify-between group ${bill.isPaid ? 'border-emerald-100 bg-emerald-50/10' : 'border-slate-100 hover:shadow-md'}`}>
+                                        <div key={bill.id} className={`bg-white p-4 rounded-lg md:rounded-2xl border transition-all flex items-center justify-between group ${bill.isPaid ? 'border-emerald-100 bg-emerald-50/10' : 'border-slate-100 hover:shadow-md'}`}>
                                             <div className="flex items-center gap-4">
                                                 <div className="checkbox-wrapper">
                                                     <input type="checkbox" checked={bill.isPaid} onChange={() => onUpdateBill({ ...bill, isPaid: !bill.isPaid })} className="w-5 h-5 rounded-lg border-slate-300 text-emerald-500 focus:ring-emerald-500 cursor-pointer" />
@@ -1344,12 +1358,12 @@ const FinanceView = ({
                                 })
                             }
                             {fixedBills.filter(b => b.month === currentMonth && b.year === currentYear).length === 0 && billRubrics.length === 0 && (
-                                <div className="col-span-full py-12 text-center border border-dashed border-slate-200 rounded-[2rem]">
+                                <div className="col-span-full py-12 text-center border border-dashed border-slate-200 rounded-none md:rounded-[2rem]">
                                     <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">Nenhuma obrigação registrada</p>
                                 </div>
                             )}
                         </div>
-                    </div>
+                    </FinanceSection>
                 </div>
             )}
         </div>

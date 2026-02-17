@@ -1,5 +1,5 @@
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry, HealthWeight, Sistema, SistemaStatus, formatDate, Categoria } from './types';
 
 interface DashboardViewProps {
@@ -14,6 +14,32 @@ interface DashboardViewProps {
   currentMonth: number;
   currentYear: number;
 }
+
+const DashboardSection = ({ title, iconColor, children }: { title: string, iconColor: string, children: React.ReactNode }) => {
+    const [isExpanded, setIsExpanded] = useState(true);
+
+    return (
+        <div className="bg-white p-6 md:p-8 rounded-none md:rounded-[2.5rem] border border-slate-200 shadow-lg h-full">
+            <button
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="w-full text-xl font-black text-slate-900 mb-6 flex items-center justify-between group"
+            >
+                <div className="flex items-center gap-3">
+                    <span className={`w-2 h-8 ${iconColor} rounded-full`}></span>
+                    {title}
+                </div>
+                <svg className={`w-5 h-5 text-slate-300 group-hover:text-slate-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+            {isExpanded && (
+                <div className="animate-in slide-in-from-top-2 duration-300">
+                    {children}
+                </div>
+            )}
+        </div>
+    );
+};
 
 const DashboardView: React.FC<DashboardViewProps> = ({
   tarefas,
@@ -110,7 +136,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   return (
     <div className="animate-in fade-in duration-700 space-y-8 pb-12">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-xl">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-8 rounded-none md:rounded-[2.5rem] border border-slate-200 shadow-xl">
         <div>
           <h2 className="text-3xl font-black text-slate-900 tracking-tighter">Dashboard Geral</h2>
           <p className="text-slate-500 font-bold mt-1 uppercase tracking-widest text-[10px]">
@@ -118,13 +144,13 @@ const DashboardView: React.FC<DashboardViewProps> = ({
           </p>
         </div>
         <div className="flex gap-4">
-            <div className="bg-slate-50 px-6 py-3 rounded-2xl border border-slate-100 flex flex-col items-center">
+            <div className="bg-slate-50 px-6 py-3 rounded-lg md:rounded-2xl border border-slate-100 flex flex-col items-center">
                 <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Ações Vencidas</span>
                 <span className={`text-xl font-black ${overdueActionsCount > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
                     {overdueActionsCount}
                 </span>
             </div>
-            <div className="bg-slate-50 px-6 py-3 rounded-2xl border border-slate-100 flex flex-col items-center">
+            <div className="bg-slate-50 px-6 py-3 rounded-lg md:rounded-2xl border border-slate-100 flex flex-col items-center">
                 <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Saldo Atual</span>
                 <span className={`text-xl font-black ${currentBudget - currentMonthTotalSpent >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
                     R$ {(currentBudget - currentMonthTotalSpent).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -137,12 +163,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
         {/* Coluna 1: Ações */}
         <div className="lg:col-span-4 space-y-8">
-            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-lg h-full">
-                <h3 className="text-xl font-black text-slate-900 mb-6 flex items-center gap-3">
-                    <span className="w-2 h-8 bg-blue-600 rounded-full"></span>
-                    Ações por Área
-                </h3>
-
+            <DashboardSection
+                title="Ações por Área"
+                iconColor="bg-blue-600"
+            >
                 <div className="space-y-6">
                     {/* Donut Chart (Simples com SVG) */}
                     <div className="relative flex justify-center py-4">
@@ -192,7 +216,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                         {actionsByArea.map((area, idx) => {
                             const colors = ['bg-blue-600', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-violet-500', 'bg-pink-500'];
                             return (
-                                <div key={area[0]} className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                                <div key={area[0]} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg md:rounded-2xl border border-slate-100">
                                     <div className="flex items-center gap-3">
                                         <div className={`w-3 h-3 rounded-full ${colors[idx % colors.length]}`}></div>
                                         <span className="text-xs font-black text-slate-700 uppercase tracking-wider">{area[0]}</span>
@@ -203,16 +227,16 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                         })}
                     </div>
                 </div>
-            </div>
+            </DashboardSection>
         </div>
 
         {/* Coluna 2: Financeiro */}
         <div className="lg:col-span-5 space-y-8">
-            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-lg space-y-8">
-                <h3 className="text-xl font-black text-slate-900 flex items-center gap-3">
-                    <span className="w-2 h-8 bg-emerald-500 rounded-full"></span>
-                    Saúde Financeira
-                </h3>
+            <DashboardSection
+                title="Saúde Financeira"
+                iconColor="bg-emerald-500"
+            >
+                <div className="space-y-8">
 
                 {/* Gasto Acumulado vs Disponível */}
                 <div className="space-y-4">
@@ -248,7 +272,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                 R$ {emergencyReserveCurrent.toLocaleString('pt-BR')} de R$ {emergencyReserveTarget.toLocaleString('pt-BR')}
                             </p>
                         </div>
-                        <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600">
+                        <div className="w-12 h-12 bg-emerald-50 rounded-lg md:rounded-2xl flex items-center justify-center text-emerald-600">
                             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
                         </div>
                     </div>
@@ -295,13 +319,14 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                         })()}
                     </div>
                 </div>
-            </div>
+                </div>
+            </DashboardSection>
         </div>
 
         {/* Coluna 3: Saúde e Sistemas */}
         <div className="lg:col-span-3 space-y-8">
             {/* Saúde */}
-            <div className="bg-gradient-to-br from-rose-500 to-rose-600 p-8 rounded-[2.5rem] shadow-lg text-white relative overflow-hidden">
+            <div className="bg-gradient-to-br from-rose-500 to-rose-600 p-8 rounded-none md:rounded-[2.5rem] shadow-lg text-white relative overflow-hidden">
                 <div className="absolute top-0 right-0 p-4 opacity-20">
                     <svg className="w-20 h-20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg>
                 </div>
@@ -315,7 +340,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                 <span className="text-lg font-bold text-rose-200">kg</span>
                             </div>
                         </div>
-                        <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10">
+                        <div className="bg-white/10 backdrop-blur-md rounded-lg md:rounded-2xl p-4 border border-white/10">
                             <p className="text-rose-100 text-[9px] font-black uppercase tracking-widest mb-1">Total Eliminado</p>
                             <div className="flex items-baseline gap-2">
                                 <span className="text-2xl font-black text-emerald-300">-{totalWeightLost.toFixed(1)}</span>
@@ -327,11 +352,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
 
             {/* Sistemas */}
-            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-lg">
-                <h3 className="text-xl font-black text-slate-900 mb-6 flex items-center gap-3">
-                    <span className="w-2 h-8 bg-violet-600 rounded-full"></span>
-                    Sistemas
-                </h3>
+            <DashboardSection
+                title="Sistemas"
+                iconColor="bg-violet-600"
+            >
                 <div className="space-y-4">
                     <div className="flex items-center justify-between mb-2">
                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Status dos Projetos</span>
@@ -339,7 +363,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                     </div>
                     <div className="space-y-2">
                         {systemStats.map(sys => (
-                            <div key={sys.name} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between group hover:border-violet-300 transition-all">
+                            <div key={sys.name} className="p-4 bg-slate-50 rounded-lg md:rounded-2xl border border-slate-100 flex items-center justify-between group hover:border-violet-300 transition-all">
                                 <span className="text-xs font-bold text-slate-700">{sys.name}</span>
                                 <span className={`text-[8px] font-black uppercase px-2 py-1 rounded-lg ${
                                     sys.status === 'producao' ? 'bg-emerald-100 text-emerald-700' :
@@ -353,7 +377,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                         ))}
                     </div>
                 </div>
-            </div>
+            </DashboardSection>
         </div>
 
       </div>

@@ -11,19 +11,44 @@ interface HealthViewProps {
     onUpdateHabits: (date: string, habits: Partial<DailyHabits>) => void;
 }
 
+const HealthSection = ({ title, children, iconColor, defaultExpanded = true }: { title: string, children: React.ReactNode, iconColor: string, defaultExpanded?: boolean }) => {
+    const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+
+    return (
+        <div className="bg-white p-6 md:p-8 rounded-none md:rounded-lg border border-slate-200 shadow-lg">
+            <button
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="w-full flex items-center justify-between group"
+            >
+                <div className="flex items-center gap-3">
+                    <span className={`w-2 h-8 ${iconColor} rounded-full`}></span>
+                    <h3 className="text-xl font-black text-slate-900 tracking-tight capitalize text-left">{title}</h3>
+                </div>
+                <svg className={`w-5 h-5 text-slate-300 group-hover:text-slate-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+            {isExpanded && (
+                <div className="mt-6 animate-in slide-in-from-top-2 duration-300">
+                    {children}
+                </div>
+            )}
+        </div>
+    );
+};
+
 const HabitHeatmap = ({ habits }: { habits: DailyHabits[] }) => {
     const today = new Date();
     const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
     const monthName = new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(today);
     
     return (
-        <div className="bg-white p-8 rounded-none md:rounded-[2.5rem] border border-slate-200 shadow-2xl">
+        <HealthSection title={`Mapa de Consistência - ${monthName}`} iconColor="bg-blue-500">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
                 <div>
-                    <h3 className="text-2xl font-black text-slate-900 tracking-tight capitalize">Mapa de Consistência - {monthName}</h3>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Volume de hábitos cumpridos por dia</p>
                 </div>
-                <div className="flex items-center gap-4 bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                <div className="flex items-center gap-4 bg-slate-50 p-3 rounded-lg md:rounded-2xl border border-slate-100">
                     <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Legenda:</span>
                     <div className="flex gap-1.5">
                         {[0, 1, 2, 3, 4, 5, 6].map(c => (
@@ -33,7 +58,7 @@ const HabitHeatmap = ({ habits }: { habits: DailyHabits[] }) => {
                 </div>
             </div>
             
-            <div className="grid grid-cols-7 sm:grid-cols-10 md:grid-cols-15 lg:grid-cols-[repeat(31,minmax(0,1fr))] gap-2 sm:gap-3">
+            <div className="grid grid-cols-7 sm:grid-cols-10 md:grid-cols-15 lg:grid-cols-[repeat(31,minmax(0,1fr))] gap-2 sm:gap-3 overflow-x-auto pb-4">
                 {Array.from({ length: daysInMonth }).map((_, i) => {
                     const day = i + 1;
                     const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -76,7 +101,7 @@ const HabitHeatmap = ({ habits }: { habits: DailyHabits[] }) => {
                     );
                 })}
             </div>
-        </div>
+        </HealthSection>
     );
 };
 
@@ -229,15 +254,10 @@ const HealthView: React.FC<HealthViewProps> = ({
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                 {/* Daily Habits */}
-                <div className="lg:col-span-4 bg-white rounded-none md:rounded-[2.5rem] border border-slate-200 shadow-2xl overflow-hidden flex flex-col">
-                    <div className="p-8 border-b border-slate-100 bg-slate-50/50">
-                        <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3">
-                            <span className="w-2 h-8 bg-amber-500 rounded-full"></span>
-                            Hábitos de Hoje
-                        </h3>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Consistência é o segredo</p>
-                    </div>
-                    <div className="p-8 space-y-4">
+                <div className="lg:col-span-4 flex flex-col">
+                    <HealthSection title="Hábitos de Hoje" iconColor="bg-amber-500">
+                    <div className="space-y-4">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1 mb-4">Consistência é o segredo</p>
                         {[
                             { id: 'noSugar', label: 'Sem Açúcar', color: 'rose' },
                             { id: 'noAlcohol', label: 'Sem Álcool', color: 'purple' },
@@ -261,7 +281,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                 <button
                                     key={habit.id}
                                     onClick={() => handleHabitToggle(habit.id as keyof DailyHabits)}
-                                    className={`w-full flex items-center justify-between p-4 rounded-2xl border-2 transition-all duration-300 ${isActive
+                                    className={`w-full flex items-center justify-between p-4 rounded-lg md:rounded-2xl border-2 transition-all duration-300 ${isActive
                                         ? `${colors.bg} ${colors.border} shadow-sm`
                                         : 'bg-white border-slate-100 hover:border-slate-200'
                                         }`}
@@ -281,25 +301,25 @@ const HealthView: React.FC<HealthViewProps> = ({
                             );
                         })}
                     </div>
+                    </HealthSection>
                 </div>
 
                 {/* Weight Tracking */}
-                <div className="lg:col-span-8 space-y-8">
+                <div className="lg:col-span-8 flex flex-col gap-8">
                     {/* Weight Registry */}
-                    <div className="bg-white p-8 rounded-none md:rounded-[2.5rem] border border-slate-200 shadow-2xl">
+                    <HealthSection title="Registro de Peso" iconColor="bg-rose-500">
                         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
                             <div>
-                                <h3 className="text-xl font-black text-slate-900 tracking-tight">Registro de Peso</h3>
                                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Geralmente aos sábados</p>
                             </div>
-                            <div className="flex gap-3">
+                            <div className="flex flex-wrap gap-3">
                                 <input
                                     type="number"
                                     step="0.1"
                                     placeholder="Peso (Kg)"
                                     value={newWeight}
                                     onChange={(e) => setNewWeight(e.target.value)}
-                                    className="bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 w-32 focus:ring-2 focus:ring-rose-500 transition-all"
+                                    className="bg-slate-100 border-none rounded-lg md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 w-32 focus:ring-2 focus:ring-rose-500 transition-all"
                                 />
                                 <button
                                     onClick={() => {
@@ -308,7 +328,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                             setNewWeight('');
                                         }
                                     }}
-                                    className="bg-rose-500 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-rose-600 transition-all active:scale-95 flex items-center gap-3"
+                                    className="flex-1 bg-rose-500 text-white px-8 py-4 rounded-lg md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-rose-600 transition-all active:scale-95 flex items-center justify-center gap-3"
                                 >
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
                                     Registrar
@@ -317,7 +337,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                         </div>
 
                         {/* Evolution Chart (SVG) */}
-                        <div className="bg-slate-50 rounded-3xl p-6 border border-slate-100 mb-8 overflow-hidden">
+                        <div className="bg-slate-50 rounded-none md:rounded-3xl p-6 border border-slate-100 mb-8 overflow-hidden">
                             <div className="flex justify-between items-center mb-4">
                                 <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Evolução de Peso</span>
                                 <div className="flex gap-4">
@@ -373,8 +393,9 @@ const HealthView: React.FC<HealthViewProps> = ({
                         </div>
 
                         {/* Weights History */}
-                        <div className="overflow-hidden border border-slate-100 rounded-3xl">
-                            <table className="w-full text-left">
+                        <div className="overflow-hidden border border-slate-100 rounded-none md:rounded-3xl">
+                            {/* Desktop Table */}
+                            <table className="w-full text-left hidden md:table">
                                 <thead className="bg-slate-50 border-b border-slate-200">
                                     <tr>
                                         <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Data</th>
@@ -390,7 +411,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                                             <td className="px-6 py-4 text-right">
                                                 <button 
                                                     onClick={() => onDeleteWeight(w.id)}
-                                                    className="p-2 text-rose-300 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all opacity-0 group-hover/row:opacity-100"
+                                                    className="p-2 text-rose-300 hover:text-rose-600 hover:bg-rose-50 rounded-lg md:rounded-xl transition-all opacity-0 group-hover/row:opacity-100"
                                                     title="Excluir Registro"
                                                 >
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
@@ -398,15 +419,34 @@ const HealthView: React.FC<HealthViewProps> = ({
                                             </td>
                                         </tr>
                                     ))}
-                                    {sortedWeights.length === 0 && (
-                                        <tr>
-                                            <td colSpan={3} className="py-12 text-center text-slate-300 font-black uppercase tracking-widest italic text-[10px]">Tudo pronto para começar!</td>
-                                        </tr>
-                                    )}
                                 </tbody>
                             </table>
+
+                            {/* Mobile Card View */}
+                            <div className="md:hidden divide-y divide-slate-50">
+                                {sortedWeights.map((w) => (
+                                    <div key={w.id} className="p-4 flex justify-between items-center bg-white">
+                                        <div>
+                                            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{formatDate(w.date)}</div>
+                                            <div className="text-lg font-black text-slate-900">{w.weight.toFixed(1)} kg</div>
+                                        </div>
+                                        <button
+                                            onClick={() => onDeleteWeight(w.id)}
+                                            className="p-3 text-rose-500 bg-rose-50 rounded-lg md:rounded-xl active:bg-rose-100 transition-all"
+                                        >
+                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {sortedWeights.length === 0 && (
+                                <div className="py-12 text-center text-slate-300 font-black uppercase tracking-widest italic text-[10px] border-t border-slate-50">
+                                    Tudo pronto para começar!
+                                </div>
+                            )}
                         </div>
-                    </div>
+                    </HealthSection>
                 </div>
             </div>
         </div>
