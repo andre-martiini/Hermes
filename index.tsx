@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Tarefa, Status, EntregaInstitucional, Prioridade, AtividadeRealizada, Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento, BrainstormIdea, FinanceTransaction, FinanceGoal, FinanceSettings, FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight, DailyHabits, HealthSettings, Notification, AppSettings, formatDate, Sistema, SistemaStatus, WorkItem, WorkItemPhase, WorkItemPriority, QualityLog, WorkItemAudit } from './types';
+import { Tarefa, Status, EntregaInstitucional, Prioridade, AtividadeRealizada, Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento, BrainstormIdea, FinanceTransaction, FinanceGoal, FinanceSettings, FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight, DailyHabits, HealthSettings, Notification as AppNotification, AppSettings, formatDate, Sistema, SistemaStatus, WorkItem, WorkItemPhase, WorkItemPriority, QualityLog, WorkItemAudit } from './types';
 import HealthView from './HealthView';
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
 import { db } from './firebase';
@@ -276,15 +276,33 @@ const DayView = ({
   tasks,
   currentDate,
   onTaskClick,
-  onTaskUpdate
+  onTaskUpdate,
+  onExecuteTask
 }: {
   tasks: Tarefa[],
   currentDate: Date,
   onTaskClick: (t: Tarefa) => void,
-  onTaskUpdate: (id: string, updates: Partial<Tarefa>) => void
+  onTaskUpdate: (id: string, updates: Partial<Tarefa>, suppressToast?: boolean) => void,
+  onExecuteTask: (t: Tarefa) => void
 }) => {
   const [resizing, setResizing] = useState<{ id: string, type: 'top' | 'bottom', startY: number, startMin: number } | null>(null);
   const [dragging, setDragging] = useState<{ id: string, startY: number, startMin: number } | null>(null);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const sidebarRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 60000);
+    // Initial update
+    setCurrentTime(new Date());
+    return () => clearInterval(timer);
+  }, []);
+
+  // Calculate current time position
+  const currentMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
+  const hourHeight = 60;
+  const currentTimeTop = (currentMinutes / 60) * hourHeight;
+  // Make sure we only show line if current day is today
+  const isToday = currentDate.toISOString().split('T')[0] === new Date().toISOString().split('T')[0];
 
   const dayStr = currentDate.toISOString().split('T')[0];
   const dayTasks = useMemo(() => tasks.filter(t => {
@@ -293,8 +311,6 @@ const DayView = ({
     const end = t.data_limite;
     return dayStr >= start && dayStr <= end;
   }), [tasks, dayStr]);
-
-  const hourHeight = 60;
 
   const timeToMinutes = (time: string) => {
     if (!time) return 0;
@@ -318,11 +334,11 @@ const DayView = ({
 
       if (resizing.type === 'bottom') {
         const newEndMin = Math.max(timeToMinutes(task.horario_inicio || '00:00') + 15, resizing.startMin + deltaMin);
-        onTaskUpdate(resizing.id, { horario_fim: minutesToTime(newEndMin) });
+        onTaskUpdate(resizing.id, { horario_fim: minutesToTime(newEndMin) }, true);
       } else {
         const duration = timeToMinutes(task.horario_fim || '01:00') - timeToMinutes(task.horario_inicio || '00:00');
         const newStartMin = Math.min(timeToMinutes(task.horario_fim || '01:00') - 15, resizing.startMin + deltaMin);
-        onTaskUpdate(resizing.id, { horario_inicio: minutesToTime(newStartMin) });
+        onTaskUpdate(resizing.id, { horario_inicio: minutesToTime(newStartMin) }, true);
       }
     } else if (dragging) {
       const deltaY = e.clientY - dragging.startY;
@@ -336,11 +352,26 @@ const DayView = ({
       onTaskUpdate(dragging.id, {
         horario_inicio: minutesToTime(newStartMin),
         horario_fim: minutesToTime(newStartMin + duration)
-      });
+      }, true);
     }
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = (e: MouseEvent) => {
+    // Check if dropped on sidebar
+    if (dragging && sidebarRef.current) {
+      const sidebarRect = sidebarRef.current.getBoundingClientRect();
+      if (
+        e.clientX >= sidebarRect.left &&
+        e.clientX <= sidebarRect.right &&
+        e.clientY >= sidebarRect.top &&
+        e.clientY <= sidebarRect.bottom
+      ) {
+         // Return to backlog
+         onTaskUpdate(dragging.id, { horario_inicio: null, horario_fim: null }, false);
+         // You might see the gray area here because the container has bg-slate-50, but the calendar grid has bg-white. 
+         // When content doesn't fill height, the gray background shows.
+      }
+    }
     setResizing(null);
     setDragging(null);
   };
@@ -358,91 +389,178 @@ const DayView = ({
 
   return (
     <div className="flex h-[600px] overflow-hidden bg-slate-50 border-t border-slate-100">
-      {/* Hour Column */}
-      <div className="w-16 flex-shrink-0 bg-white border-r border-slate-100 overflow-y-auto scrollbar-hide select-none">
-        <div className="relative" style={{ height: 24 * hourHeight }}>
-          {Array.from({ length: 24 }).map((_, h) => (
-            <div key={h} className="h-[60px] border-b border-slate-50 flex items-start justify-center pt-1">
-              <span className="text-[10px] font-black text-slate-300 uppercase">{h.toString().padStart(2, '0')}:00</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Main Grid Area */}
-      <div className="flex-1 overflow-y-auto relative bg-white custom-scrollbar" onDragOver={e => e.preventDefault()}>
-        <div className="absolute inset-0 z-0 pointer-events-none">
-          {Array.from({ length: 24 }).map((_, h) => (
-            <div key={h} className="h-[60px] border-b border-slate-100 w-full"></div>
-          ))}
-        </div>
-
-        <div className="relative w-full" style={{ height: 24 * hourHeight }} onDrop={(e) => {
-          const taskId = e.dataTransfer.getData('task-id');
-          const rect = e.currentTarget.getBoundingClientRect();
-          const scrollContainer = e.currentTarget.parentElement;
-          const scrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
-          const y = e.clientY - rect.top;
-          const hour = Math.floor(y / hourHeight);
-          if (taskId) {
-            onTaskUpdate(taskId, {
-              horario_inicio: `${hour.toString().padStart(2, '0')}:00`,
-              horario_fim: `${(hour + 1).toString().padStart(2, '0')}:00`
-            });
-          }
-        }}>
-          {dayTasks.filter(t => t.horario_inicio).map(task => {
-            const startMin = timeToMinutes(task.horario_inicio!);
-            const endMin = timeToMinutes(task.horario_fim || minutesToTime(startMin + 60));
-            const top = (startMin / 60) * hourHeight;
-            const height = ((endMin - startMin) / 60) * hourHeight;
-
-            return (
-              <div
-                key={task.id}
-                className={`absolute left-4 right-4 rounded-xl border-2 p-3 shadow-md group transition-all cursor-grab active:cursor-grabbing overflow-hidden
-                  ${task.categoria === 'CLC' ? 'bg-blue-50 border-blue-200 text-blue-800' :
-                    task.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
-                      'bg-white border-slate-200 text-slate-800'}
-                `}
-                style={{ top, height: Math.max(30, height), minHeight: 30, zIndex: 10 }}
-                onMouseDown={(e) => {
-                  const target = e.target as HTMLElement;
-                  if (target.classList.contains('resize-handle')) return;
-                  setDragging({ id: task.id, startY: e.clientY, startMin });
-                }}
-              >
-                <div className="flex justify-between items-start gap-2">
-                  <div className="text-[11px] font-black leading-tight line-clamp-2">{task.titulo}</div>
-                  <button onClick={(e) => { e.stopPropagation(); onTaskClick(task); }} className="shrink-0 p-1 hover:bg-black/5 rounded">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                  </button>
-                </div>
-                <div className="text-[9px] font-black mt-1 opacity-40 uppercase tracking-widest">{task.horario_inicio} - {task.horario_fim}</div>
-
-                {/* Handles */}
-                <div
-                  className="resize-handle absolute top-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black/10 transition-colors"
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    setResizing({ id: task.id, type: 'top', startY: e.clientY, startMin });
-                  }}
-                />
-                <div
-                  className="resize-handle absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black/10 transition-colors"
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    setResizing({ id: task.id, type: 'bottom', startY: e.clientY, startMin: endMin });
-                  }}
-                />
+      {/* Scrollable Container for Hours + Grid */}
+      <div className="flex-1 flex overflow-y-auto custom-scrollbar relative">
+        {/* Hour Column */}
+        <div className="w-16 flex-shrink-0 bg-white border-r border-slate-100 select-none">
+          <div className="relative" style={{ height: 24 * hourHeight }}>
+            {Array.from({ length: 24 }).map((_, h) => (
+              <div key={h} className="h-[60px] border-b border-slate-50 flex items-start justify-center pt-1">
+                <span className="text-[10px] font-black text-slate-300 uppercase">{h.toString().padStart(2, '0')}:00</span>
               </div>
-            );
-          })}
+            ))}
+          </div>
+        </div>
+
+        {/* Main Grid Area */}
+        <div className="flex-1 relative bg-white" onDragOver={e => e.preventDefault()}>
+          <div className="absolute inset-0 z-0 pointer-events-none">
+            {Array.from({ length: 24 }).map((_, h) => (
+              <div key={h} className="h-[60px] border-b border-slate-100 w-full"></div>
+            ))}
+            
+            {/* Current Time Line */}
+            {isToday && (
+               <div 
+                 className="absolute left-0 right-0 border-t-2 border-red-500 z-20 pointer-events-none flex items-center"
+                 style={{ top: currentTimeTop, opacity: 0.7 }}
+               >
+                 <div className="absolute -left-1 w-2 h-2 bg-red-500 rounded-full"></div>
+               </div>
+            )}
+          </div>
+
+          <div className="relative w-full" style={{ height: 24 * hourHeight }} onDrop={(e) => {
+            const taskId = e.dataTransfer.getData('task-id');
+            const rect = e.currentTarget.getBoundingClientRect();
+            const scrollContainer = e.currentTarget.closest('.custom-scrollbar');
+            const scrollTop = scrollContainer ? (scrollContainer as HTMLElement).scrollTop : 0;
+            
+            // Adjust Y calculation to be relative to the grid container
+            // The rect.top already accounts for scroll if the container moves? 
+            // actually, rect includes viewport position.
+            // e.clientY is viewport Y.
+            // y = e.clientY - rect.top gives position relative to the VISIBLE top of the element.
+            // If the element is scrolled, its content is shifted.
+            // But here the element is "relative w-full" inside the scroll view.
+            // The "relative w-full" div has height 24 * hourHeight (1440px).
+            // It is inside "flex-1 relative bg-white" which is inside "flex-1 flex overflow-y-auto" (the scroller).
+            
+            // Wait, the Drop target is the inner div `style={{ height: 24 * hourHeight }}`.
+            // This div is TALL. It is NOT scrolling itself. It is inside a scrolling parent.
+            // So resizing/positioning logic relies on `top` CSS property relative to this tall div.
+            
+            // When we calculate `y`:
+            // e.clientY is mouse Y.
+            // rect.top is the top of the tall div relative to viewport.
+            // So (e.clientY - rect.top) IS the Y coordinate inside the tall div.
+            // We do NOT need to add scrollTop if we are measuring relative to the target element's bounding rect, 
+            // BECAUSE the target element moves UP when we scroll down.
+            // Example:
+            // Scrolled 0px. Top of div is at 100px. Mouse at 150px. Y = 150 - 100 = 50. Correct.
+            // Scrolled 1000px. Top of div is at -900px. Mouse at 150px. Y = 150 - (-900) = 1050. Correct.
+            
+            // So the original logic `const y = e.clientY - rect.top;` is implicitly correct if `e.currentTarget` is the tall div.
+            // In the original code: `onDrop` was on `style={{ height: 24 * hourHeight }}`, which IS the tall div.
+            // So `y` calculation remains valid without manual scrollTop adjustment.
+            
+            // However, the original code had:
+            // const scrollContainer = e.currentTarget.parentElement;
+            // const scrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
+            // But it didn't USE `scrollTop` in the `y` calculation in the snippet I saw!
+            // Snippet:
+            // const y = e.clientY - rect.top;
+            // const hour = Math.floor(y / hourHeight);
+            
+            // It seems `scrollTop` variable was defined but unused or I missed its usage?
+            // Let's re-read the specific block in the previous `view_file`.
+            
+            // Line 384: `const scrollTop = scrollContainer ? scrollContainer.scrollTop : 0;`
+            // Line 385: `const y = e.clientY - rect.top;`
+            
+            // The `scrollTop` was indeed unused in the calculation provided in the snippet.
+            // So I can safely ignore it or remove it.
+            // But to be safe and clean, I will just proceed with the same logic.
+            
+            const y = e.clientY - rect.top;
+            const hour = Math.floor(y / hourHeight);
+            if (taskId) {
+              onTaskUpdate(taskId, {
+                horario_inicio: `${hour.toString().padStart(2, '0')}:00`,
+                horario_fim: `${(hour + 1).toString().padStart(2, '0')}:00`
+              }, true);
+            }
+          }}>
+            {dayTasks.filter(t => t.horario_inicio).map(task => {
+              const startMin = timeToMinutes(task.horario_inicio!);
+              const endMin = timeToMinutes(task.horario_fim || minutesToTime(startMin + 60));
+              const top = (startMin / 60) * hourHeight;
+              const height = ((endMin - startMin) / 60) * hourHeight;
+  
+              return (
+                <div
+                  key={task.id}
+                  className={`absolute left-4 right-4 rounded-xl border-2 p-3 shadow-md group transition-all cursor-grab active:cursor-grabbing overflow-hidden
+                    ${task.categoria === 'CLC' ? 'bg-blue-50 border-blue-200 text-blue-800' :
+                      task.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
+                        'bg-white border-slate-200 text-slate-800'}
+                  `}
+                  style={{ top, height: Math.max(30, height), minHeight: 30, zIndex: 10 }}
+                  onMouseDown={(e) => {
+                    const target = e.target as HTMLElement;
+                    if (target.classList.contains('resize-handle')) return;
+                    setDragging({ id: task.id, startY: e.clientY, startMin });
+                  }}
+                >
+                  <div className="flex justify-between items-start gap-2">
+                    <div className="text-[11px] font-black leading-tight line-clamp-2">{task.titulo}</div>
+                    <div className="flex gap-1 shrink-0">
+                      <button 
+                        onClick={(e) => { 
+                          e.stopPropagation(); 
+                          if(window.confirm(task.status === 'concluído' ? "Reabrir tarefa?" : "Concluir tarefa?")) {
+                            onTaskUpdate(task.id, { status: task.status === 'concluído' ? 'em andamento' : 'concluído' });
+                          }
+                        }} 
+                        className={`p-1 hover:bg-black/5 rounded ${task.status === 'concluído' ? 'text-emerald-600 bg-emerald-100' : 'text-slate-400 hover:text-emerald-600'}`} 
+                        title={task.status === 'concluído' ? 'Reabrir' : 'Concluir'}
+                      >
+                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); onExecuteTask(task); }} className="p-1 hover:bg-black/5 rounded text-indigo-600" title="Executar">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); onTaskClick(task); }} className="p-1 hover:bg-black/5 rounded" title="Editar">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div className="text-[9px] font-black mt-1 opacity-40 uppercase tracking-widest">{task.horario_inicio} - {task.horario_fim}</div>
+  
+                  {/* Handles */}
+                  <div
+                    className="resize-handle absolute top-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black/10 transition-colors"
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      setResizing({ id: task.id, type: 'top', startY: e.clientY, startMin });
+                    }}
+                  />
+                  <div
+                    className="resize-handle absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black/10 transition-colors"
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      setResizing({ id: task.id, type: 'bottom', startY: e.clientY, startMin: endMin });
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 
       {/* Side Backlog for current day */}
-      <div className="hidden md:block w-64 bg-slate-50 border-l border-slate-200 p-6 overflow-y-auto custom-scrollbar">
+      <div 
+        ref={sidebarRef}
+        className="hidden md:block w-64 bg-slate-50 border-l border-slate-200 p-6 overflow-y-auto custom-scrollbar"
+        onDragOver={e => e.preventDefault()}
+        onDrop={(e) => {
+           const taskId = e.dataTransfer.getData('task-id');
+           if (taskId) {
+             onTaskUpdate(taskId, { horario_inicio: null, horario_fim: null });
+           }
+        }}
+      >
         <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6">Aguardando Alocação</h4>
         <div className="space-y-3">
           {dayTasks.filter(t => !t.horario_inicio).map(task => (
@@ -476,7 +594,8 @@ const CalendarView = ({
   onDateChange,
   onTaskClick,
   onViewModeChange,
-  onTaskUpdate
+  onTaskUpdate,
+  onExecuteTask
 }: {
   tasks: Tarefa[],
   viewMode: 'month' | 'week' | 'day',
@@ -484,7 +603,8 @@ const CalendarView = ({
   onDateChange: (d: Date) => void,
   onTaskClick: (t: Tarefa) => void,
   onViewModeChange: (m: 'month' | 'week' | 'day') => void,
-  onTaskUpdate: (id: string, updates: Partial<Tarefa>) => void
+  onTaskUpdate: (id: string, updates: Partial<Tarefa>, suppressToast?: boolean) => void,
+  onExecuteTask: (t: Tarefa) => void
 }) => {
   const [days, setDays] = React.useState<Date[]>([]);
 
@@ -619,6 +739,7 @@ const CalendarView = ({
           currentDate={currentDate}
           onTaskClick={onTaskClick}
           onTaskUpdate={onTaskUpdate}
+          onExecuteTask={onExecuteTask}
         />
       ) : (
         <>
@@ -989,7 +1110,7 @@ const NotificationCenter = ({
   onClose,
   onUpdateOverdue
 }: {
-  notifications: Notification[],
+  notifications: AppNotification[],
   onMarkAsRead: (id: string) => void,
   onDismiss: (id: string) => void,
   isOpen: boolean,
@@ -2743,6 +2864,16 @@ const TaskExecutionView = ({ task, tarefas, onSave, onClose }: { task: Tarefa, t
     onSave(task.id, { chat_gemini_url: chatUrl });
   };
 
+  const handleCompleteTask = () => {
+    if (isTimerRunning) {
+      handleToggleTimer(); // Stop timer and save time
+    }
+    if (window.confirm("Deseja realmente concluir esta tarefa?")) {
+      onSave(task.id, { status: 'concluído' });
+      onClose();
+    }
+  };
+
   return (
     <div className={`fixed inset-0 z-[200] flex flex-col transition-all duration-700 ease-in-out ${isTimerRunning ? 'bg-[#050505] text-white' : 'bg-[#050505] text-white'} overflow-hidden`}>
       {/* Botão de Fechar Geral */}
@@ -2793,6 +2924,21 @@ const TaskExecutionView = ({ task, tarefas, onSave, onClose }: { task: Tarefa, t
               >
                 <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
                 Finalizar Sessão de Foco
+              </button>
+
+              <button
+                onClick={() => {
+                  onSave(task.id, { status: task.status === 'concluído' ? 'em andamento' : 'concluído' });
+                  if (task.status !== 'concluído') {
+                    // Se não estava concluída e agora vai ficar, paramos o timer
+                    handleToggleTimer();
+                    onClose();
+                  }
+                }}
+                className={`mt-6 flex items-center gap-2 px-8 py-3 rounded-full border text-xs font-black uppercase tracking-widest transition-all ${task.status === 'concluído' ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500 hover:text-white'}`}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                {task.status === 'concluído' ? 'Tarefa Concluída' : 'Concluir Tarefa'}
               </button>
             </div>
 
@@ -2865,7 +3011,7 @@ const TaskExecutionView = ({ task, tarefas, onSave, onClose }: { task: Tarefa, t
               {/* Status da Demanda no Canto */}
               <div className="absolute bottom-10 left-10 flex items-center gap-3">
                 <button
-                  onClick={() => onSave(task.id, { status: task.status === 'concluído' ? 'em andamento' : 'concluído' })}
+                  onClick={handleCompleteTask}
                   className={`px-6 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${task.status === 'concluído' ? 'bg-emerald-500 text-white' : 'bg-white/10 text-slate-400 hover:bg-white/20'
                     }`}
                 >
@@ -2964,6 +3110,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
   isAddingText: boolean,
   setIsAddingText: (val: boolean) => void
 }) => {
+  const isProcessing = false;
   const [textInput, setTextInput] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
@@ -3564,11 +3711,11 @@ const App: React.FC = () => {
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [syncData, setSyncData] = useState<any>(null);
-  const [activePopup, setActivePopup] = useState<Notification | null>(null);
+  const [activePopup, setActivePopup] = useState<AppNotification | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [isHabitsReminderOpen, setIsHabitsReminderOpen] = useState(false);
@@ -3662,7 +3809,7 @@ const App: React.FC = () => {
           }
 
           if (shouldRemind) {
-            const newNotif: Notification = {
+            const newNotif: AppNotification = {
               id: Math.random().toString(36).substring(2, 9),
               title: "Lembrete de Pesagem",
               message: "Hora de registrar seu peso para acompanhar sua evolução no módulo Saúde!",
@@ -3704,7 +3851,7 @@ const App: React.FC = () => {
           const lastReminded = localStorage.getItem(`lastEndRemind_${t.id}`);
           if (diff === 15 && lastReminded !== todayStr) {
             const msg = `Sua tarefa "${t.titulo}" encerra em 15 minutos!`;
-            showToast(msg, "warning");
+            showToast(msg, "info");
             if ("Notification" in window && Notification.permission === "granted") {
               new Notification("Hermes: Encerramento de Tarefa", { body: msg });
             }
@@ -3719,7 +3866,7 @@ const App: React.FC = () => {
   // Data-driven Notifications (Budget, Overdue, PGC)
   useEffect(() => {
     const todayStr = new Date().toISOString().split('T')[0];
-    const newNotifications: Notification[] = [];
+    const newNotifications: AppNotification[] = [];
 
     // 1. Overdue Tasks (Once a day check)
     if (appSettings.notifications.overdueTasks.enabled && localStorage.getItem('lastOverdueCheckDate') !== todayStr) {
@@ -3803,7 +3950,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const hasSeenWelcome = localStorage.getItem('hasSeenWelcome');
     if (!hasSeenWelcome && notifications.length === 0) {
-      const welcomeNote: Notification = {
+      const welcomeNote: AppNotification = {
         id: 'welcome',
         title: 'Bem-vindo ao Hermes',
         message: 'Sistema de notificações ativo. Configure suas preferências no ícone de engrenagem.',
@@ -3870,14 +4017,14 @@ const App: React.FC = () => {
   const [convertingIdea, setConvertingIdea] = useState<BrainstormIdea | null>(null);
   const [isSystemSelectorOpen, setIsSystemSelectorOpen] = useState(false);
 
-  const handleUpdateTarefa = async (id: string, updates: Partial<Tarefa>) => {
+  const handleUpdateTarefa = async (id: string, updates: Partial<Tarefa>, suppressToast = false) => {
     try {
       const docRef = doc(db, 'tarefas', id);
       await updateDoc(docRef, {
         ...updates,
         data_atualizacao: new Date().toISOString()
       });
-      showToast("Tarefa atualizada!", 'success');
+      if (!suppressToast) showToast("Tarefa atualizada!", 'success');
     } catch (err) {
       console.error("Erro ao atualizar tarefa:", err);
       showToast("Erro ao salvar alterações.", 'error');
@@ -5094,20 +5241,17 @@ const App: React.FC = () => {
                         </div>
                       )}
 
-                      <div className="bg-white p-0.5 md:p-1 rounded-xl border border-slate-200 inline-flex shadow-sm">
-                        <button
-                          onClick={() => setSortOption('date-asc')}
-                          className={`px-3 md:px-4 py-2 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-wide md:tracking-widest transition-all ${sortOption === 'date-asc' ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
-                        >
-                          Antigas
-                        </button>
-                        <button
-                          onClick={() => setSortOption('date-desc')}
-                          className={`px-3 md:px-4 py-2 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-wide md:tracking-widest transition-all ${sortOption === 'date-desc' ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
-                        >
-                          Recentes
-                        </button>
-                      </div>
+                      <button
+                        onClick={() => {
+                          setDashboardViewMode('calendar');
+                          setCalendarViewMode('day');
+                          setCalendarDate(new Date());
+                        }}
+                        className="bg-white hover:bg-blue-50 border border-slate-200 text-slate-700 hover:text-blue-700 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm hover:shadow transition-all flex items-center gap-2 group"
+                      >
+                        <svg className="w-4 h-4 text-slate-400 group-hover:text-blue-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        Organizar o Dia
+                      </button>
                     </div>
                   </div>
 
@@ -5120,6 +5264,7 @@ const App: React.FC = () => {
                       onTaskClick={setSelectedTask}
                       onViewModeChange={setCalendarViewMode}
                       onTaskUpdate={handleUpdateTarefa}
+                      onExecuteTask={(t) => { setSelectedTask(t); setTaskModalMode('execute'); }}
                     />
                   ) : (
                     <>
@@ -6008,23 +6153,24 @@ const App: React.FC = () => {
                               const tarefasRelacionadas: Tarefa[] = entregaId ? pgcTasks.filter(t => t.entregas_relacionadas?.includes(entregaId)) : [];
 
                               return (
-                                <PgcAuditRow
-                                  key={index}
-                                  item={item}
-                                  entregaEntity={entregaEntity}
-                                  atividadesRelacionadas={atividadesRelacionadas}
-                                  tarefasRelacionadas={tarefasRelacionadas}
-                                  onDrop={async (tarefaId) => {
-                                    let targetId = entregaId;
-                                    if (!targetId) {
-                                      const newId = await handleCreateEntregaFromPlan(item);
-                                      if (newId) targetId = newId;
-                                    }
-                                    if (targetId) handleLinkTarefa(tarefaId, targetId);
-                                  }}
-                                  onUnlinkTarefa={handleUnlinkTarefa}
-                                  onSelectTask={setSelectedTask}
-                                />
+                                <React.Fragment key={String(index)}>
+                                  <PgcAuditRow
+                                    item={item}
+                                    entregaEntity={entregaEntity}
+                                    atividadesRelacionadas={atividadesRelacionadas}
+                                    tarefasRelacionadas={tarefasRelacionadas}
+                                    onDrop={async (tarefaId) => {
+                                      let targetId = entregaId;
+                                      if (!targetId) {
+                                        const newId = await handleCreateEntregaFromPlan(item);
+                                        if (newId) targetId = newId;
+                                      }
+                                      if (targetId) handleLinkTarefa(tarefaId, targetId);
+                                    }}
+                                    onUnlinkTarefa={handleUnlinkTarefa}
+                                    onSelectTask={setSelectedTask}
+                                  />
+                                </React.Fragment>
                               );
                             });
                           })()}
