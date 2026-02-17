@@ -13,8 +13,9 @@ import {
 } from './types';
 import HealthView from './HealthView';
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
-import { db, functions } from './firebase';
+import { db, functions, messaging } from './firebase';
 import { collection, onSnapshot, query, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { getToken, onMessage } from 'firebase/messaging';
 import { httpsCallable } from 'firebase/functions';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import FinanceView from './FinanceView';
@@ -3923,6 +3924,87 @@ const App: React.FC = () => {
 
   // --- HermesNotification System & App Settings ---
 
+  // --- Firebase Cloud Messaging (FCM) & Push Notifications ---
+  useEffect(() => {
+    const setupFCM = async () => {
+      if (!messaging) return;
+      try {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          // Nota: A VAPID Key deve ser obtida no Firebase Console (Configurações do Projeto > Cloud Messaging)
+          // Se não configurada, o push via web pode não funcionar em alguns navegadores.
+          const token = await getToken(messaging, {
+            vapidKey: 'BD_5Jt_m5zO-X5Cq5B_Q9E5G-z6l-8K-X-X_X-X_X-X'
+          }).catch(err => {
+            console.warn("VAPID Key inválida ou não configurada. Push background pode falhar.", err);
+            return null;
+          });
+
+          if (token) {
+            console.log('FCM Token:', token);
+            await setDoc(doc(db, 'fcm_tokens', token), {
+              token,
+              last_updated: new Date().toISOString(),
+              platform: 'web_pwa'
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Erro ao configurar FCM:', error);
+      }
+    };
+
+    setupFCM();
+
+    const unsubscribe = onMessage(messaging!, (payload) => {
+      console.log('Mensagem PUSH recebida em primeiro plano:', payload);
+      if (payload.notification) {
+        const newNotif: HermesNotification = {
+          id: Math.random().toString(36).substr(2, 9),
+          title: payload.notification.title || 'Hermes',
+          message: payload.notification.body || '',
+          type: 'info',
+          timestamp: new Date().toISOString(),
+          isRead: false
+        };
+        setNotifications(prev => [newNotif, ...prev]);
+        setActivePopup(newNotif);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const emitNotification = async (title: string, message: string, type: 'info' | 'warning' | 'success' | 'error' = 'info', link?: string, id?: string) => {
+    const newNotif: HermesNotification = {
+      id: id || Math.random().toString(36).substr(2, 9),
+      title,
+      message,
+      type,
+      timestamp: new Date().toISOString(),
+      isRead: false,
+      link
+    };
+
+    // 1. Atualiza estado local para feedback imediato (evita duplicados por ID)
+    setNotifications(prev => {
+      if (prev.some(n => n.id === newNotif.id)) return prev;
+      return [newNotif, ...prev];
+    });
+    setActivePopup(newNotif);
+
+    // 2. Persiste no Firestore para disparar Push Notification via Cloud Function
+    try {
+      // Usa setDoc com ID específico para evitar duplicados no Firestore
+      await setDoc(doc(db, 'notificacoes', newNotif.id), {
+        ...newNotif,
+        sent_to_push: false
+      });
+    } catch (err) {
+      console.error("Erro ao persistir notificação:", err);
+    }
+  };
+
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'configuracoes', 'geral'), (snap) => {
       if (snap.exists()) {
@@ -4009,17 +4091,12 @@ const App: React.FC = () => {
           }
 
           if (shouldRemind) {
-            const newNotif: HermesNotification = {
-              id: Math.random().toString(36).substring(2, 9),
-              title: "Lembrete de Pesagem",
-              message: "Hora de registrar seu peso para acompanhar sua evolução no módulo Saúde!",
-              type: 'info',
-              timestamp: new Date().toISOString(),
-              isRead: false,
-              link: 'saude'
-            };
-            setNotifications(prev => [newNotif, ...prev]);
-            setActivePopup(newNotif);
+            emitNotification(
+              "Lembrete de Pesagem",
+              "Hora de registrar seu peso para acompanhar sua evolução no módulo Saúde!",
+              'info',
+              'saude'
+            );
             localStorage.setItem('lastWeighInRemindDate', todayStr);
           }
         }
@@ -4036,10 +4113,7 @@ const App: React.FC = () => {
           const lastReminded = localStorage.getItem(`lastStartRemind_${t.id}`);
           if (diff === 15 && lastReminded !== todayStr) {
             const msg = `Sua tarefa "${t.titulo}" inicia em 15 minutos!`;
-            showToast(msg, "info");
-            if ("Notification" in window && Notification.permission === "granted") {
-              new Notification("Hermes: Próxima Tarefa", { body: msg });
-            }
+            emitNotification("Hermes: Próxima Tarefa", msg, 'info');
             localStorage.setItem(`lastStartRemind_${t.id}`, todayStr);
           }
         }
@@ -4051,10 +4125,7 @@ const App: React.FC = () => {
           const lastReminded = localStorage.getItem(`lastEndRemind_${t.id}`);
           if (diff === 15 && lastReminded !== todayStr) {
             const msg = `Sua tarefa "${t.titulo}" encerra em 15 minutos!`;
-            showToast(msg, "info");
-            if ("Notification" in window && Notification.permission === "granted") {
-              new Notification("Hermes: Encerramento de Tarefa", { body: msg });
-            }
+            emitNotification("Hermes: Encerramento de Tarefa", msg, 'info');
             localStorage.setItem(`lastEndRemind_${t.id}`, todayStr);
           }
         }
@@ -4066,7 +4137,6 @@ const App: React.FC = () => {
   // Data-driven Notifications (Budget, Overdue, PGC)
   useEffect(() => {
     const todayStr = new Date().toISOString().split('T')[0];
-    const newNotifications: HermesNotification[] = [];
 
     // 1. Overdue Tasks (Once a day check)
     if (appSettings.notifications.overdueTasks.enabled && localStorage.getItem('lastOverdueCheckDate') !== todayStr) {
@@ -4078,15 +4148,13 @@ const App: React.FC = () => {
       ).length;
 
       if (overdueCount > 0) {
-        newNotifications.push({
-          id: `overdue-${todayStr}`,
-          title: "Ações Vencidas",
-          message: `Você tem ${overdueCount} ações fora do prazo. Que tal atualizá-las para hoje?`,
-          type: 'warning',
-          timestamp: new Date().toISOString(),
-          isRead: false,
-          link: 'acoes'
-        });
+        emitNotification(
+          "Ações Vencidas",
+          `Você tem ${overdueCount} ações fora do prazo. Que tal atualizá-las para hoje?`,
+          'warning',
+          'acoes',
+          `overdue-${todayStr}`
+        );
         localStorage.setItem('lastOverdueCheckDate', todayStr);
       }
     }
@@ -4105,15 +4173,13 @@ const App: React.FC = () => {
         const timeRatio = currentDay / daysInMonth;
 
         if (budgetRatio > timeRatio * 1.15 && budgetRatio > 0.1) {
-          newNotifications.push({
-            id: `budget-${todayStr}`,
-            title: "Alerta de Orçamento",
-            message: `Atenção: Gastos elevados! Você já utilizou ${(budgetRatio * 100).toFixed(0)}% do orçamento em ${(timeRatio * 100).toFixed(0)}% do mês.`,
-            type: 'warning',
-            timestamp: new Date().toISOString(),
-            isRead: false,
-            link: 'financeiro'
-          });
+          emitNotification(
+            "Alerta de Orçamento",
+            `Atenção: Gastos elevados! Você já utilizou ${(budgetRatio * 100).toFixed(0)}% do orçamento em ${(timeRatio * 100).toFixed(0)}% do mês.`,
+            'warning',
+            'financeiro',
+            `budget-${todayStr}`
+          );
           localStorage.setItem('lastBudgetRiskNotifyDate', todayStr);
         }
       }
@@ -4124,25 +4190,15 @@ const App: React.FC = () => {
       const now = new Date();
       const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
       if ((daysInMonth - now.getDate()) <= appSettings.notifications.pgcAudit.daysBeforeEnd) {
-        newNotifications.push({
-          id: `pgc-${todayStr}`,
-          title: "Auditoria PGC",
-          message: "O mês está acabando. Verifique no módulo PGC se todas as entregas possuem ações vinculadas.",
-          type: 'info',
-          timestamp: new Date().toISOString(),
-          isRead: false,
-          link: 'pgc'
-        });
+        emitNotification(
+          "Auditoria PGC",
+          "O mês está acabando. Verifique no módulo PGC se todas as entregas possuem ações vinculadas.",
+          'info',
+          'pgc',
+          `pgc-${todayStr}`
+        );
         localStorage.setItem('lastPgcNotifyDate', todayStr);
       }
-    }
-
-    if (newNotifications.length > 0) {
-      setNotifications(prev => {
-        const existingIds = new Set(prev.map(n => n.id));
-        const filteredNew = newNotifications.filter(n => !existingIds.has(n.id));
-        return [...filteredNew, ...prev];
-      });
     }
   }, [tarefas, financeTransactions, financeSettings, planosTrabalho, appSettings.notifications]);
 
@@ -4150,16 +4206,13 @@ const App: React.FC = () => {
   useEffect(() => {
     const hasSeenWelcome = localStorage.getItem('hasSeenWelcome');
     if (!hasSeenWelcome && notifications.length === 0) {
-      const welcomeNote: HermesNotification = {
-        id: 'welcome',
-        title: 'Bem-vindo ao Hermes',
-        message: 'Sistema de notificações ativo. Configure suas preferências no ícone de engrenagem.',
-        type: 'info',
-        timestamp: new Date().toISOString(),
-        isRead: false
-      };
-      setNotifications([welcomeNote]);
-      setTimeout(() => setActivePopup(welcomeNote), 2000);
+      emitNotification(
+        'Bem-vindo ao Hermes',
+        'Sistema de notificações ativo. Configure suas preferências no ícone de engrenagem.',
+        'info',
+        undefined,
+        'welcome'
+      );
       localStorage.setItem('hasSeenWelcome', 'true');
     }
   }, []);
