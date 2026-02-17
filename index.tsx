@@ -333,8 +333,15 @@ const DayView = ({
 
   const dayTasks = useMemo(() => tasks.filter(t => {
     if (t.status === 'excluído' as any) return false;
+    // Se a tarefa já tem horário e data definida, mostramos apenas naquele dia
+    if (t.data_inicio && t.data_inicio !== dayStr) return false;
+    
     const start = t.data_inicio || t.data_criacao?.split('T')[0] || t.data_limite;
     const end = t.data_limite;
+    
+    // Se não tem prazo, aparece sempre no sidebar para alocação
+    if (!end) return true;
+    
     return dayStr >= start && dayStr <= end;
   }), [tasks, dayStr]);
 
@@ -443,18 +450,21 @@ const DayView = ({
             </div>
           </div>
 
-          <div className="relative w-full" style={{ height: 24 * hourHeight }} onDrop={(e) => {
-            const taskId = e.dataTransfer.getData('task-id');
-            const rect = e.currentTarget.getBoundingClientRect();
-            const y = e.clientY - rect.top;
-            const hour = Math.floor(y / hourHeight);
-            if (taskId) {
-              onTaskUpdate(taskId, {
-                horario_inicio: `${hour.toString().padStart(2, '0')}:00`,
-                horario_fim: `${(hour + 1).toString().padStart(2, '0')}:00`
-              }, true);
-            }
-          }}>
+          <div className="relative w-full" style={{ height: 24 * hourHeight }} 
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              const taskId = e.dataTransfer.getData('task-id') || e.dataTransfer.getData('tarefaId');
+              const rect = e.currentTarget.getBoundingClientRect();
+              const y = e.clientY - rect.top;
+              const hour = Math.floor(y / hourHeight);
+              if (taskId) {
+                onTaskUpdate(taskId, {
+                  horario_inicio: `${hour.toString().padStart(2, '0')}:00`,
+                  horario_fim: `${(hour + 1).toString().padStart(2, '0')}:00`,
+                  data_inicio: dayStr // Garante que a tarefa fique vinculada a este dia ao ser alocada
+                }, true);
+              }
+            }}>
             {timedEvents.map(event => {
               const startStr = event.data_inicio.includes('T') ? event.data_inicio.split('T')[1].substring(0, 5) : '00:00';
               const endStr = event.data_fim.includes('T') ? event.data_fim.split('T')[1].substring(0, 5) : '23:59';
@@ -925,6 +935,11 @@ const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, onExecu
     <div
       onClick={onClick}
       onMouseLeave={() => setIsConfirmingDelete(false)}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData('task-id', task.id);
+        e.dataTransfer.effectAllowed = 'move';
+      }}
       title={task.data_criacao ? `Criada em: ${formatDate(task.data_criacao.split('T')[0])}` : ''}
       className={`group bg-white w-full px-6 py-3 border-b border-slate-100 hover:bg-slate-50/80 transition-all flex items-center gap-6 animate-in cursor-pointer relative ${isCompleted ? 'opacity-60 grayscale-[0.5]' : ''}`}
     >
@@ -2049,29 +2064,11 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
     status: task.status,
     categoria: task.categoria || 'NÃO CLASSIFICADA',
     notas: task.notas || '',
-    acompanhamento: task.acompanhamento || [],
     is_single_day: !!task.is_single_day,
     entregas_relacionadas: task.entregas_relacionadas || []
   });
 
-  const [newFollowUp, setNewFollowUp] = useState('');
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
-
-  // Helper to add follow-up locally before saving
-  const handleAddFollowUp = () => {
-    if (!newFollowUp.trim()) return;
-
-    const newEntry: Acompanhamento = {
-      data: new Date().toISOString(),
-      nota: newFollowUp
-    };
-
-    setFormData(prev => ({
-      ...prev,
-      acompanhamento: [...prev.acompanhamento, newEntry]
-    }));
-    setNewFollowUp('');
-  };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-0 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
@@ -2178,54 +2175,6 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
               </div>
             )}
           </div>
-
-          {/* New Acompanhamento Section */}
-          <div className="space-y-3 pt-4 border-t border-slate-100">
-            <label className="text-[10px] font-black text-blue-600 uppercase tracking-widest pl-1 flex items-center gap-2">
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              Acompanhamento / Diário
-            </label>
-
-            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 space-y-4 max-h-[200px] overflow-y-auto">
-              {formData.acompanhamento.length === 0 ? (
-                <p className="text-[10px] text-slate-400 font-medium italic text-center p-4">Nenhum registro de atividade.</p>
-              ) : (
-                <div className="space-y-3">
-                  {formData.acompanhamento.map((entry, idx) => (
-                    <div key={idx} className="flex gap-3 text-xs">
-                      <div className="flex-shrink-0 w-24 text-[9px] font-black text-slate-400 uppercase pt-0.5 text-right">
-                        {new Date(entry.data).toLocaleDateString('pt-BR')} <br />
-                        {new Date(entry.data).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                      </div>
-                      <div className="flex-1 bg-white p-2 rounded-lg border border-slate-100 text-slate-600 font-medium shadow-sm">
-                        {entry.nota}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={newFollowUp}
-                onChange={(e) => setNewFollowUp(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleAddFollowUp();
-                }}
-                placeholder="O que foi feito hoje?"
-                className="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-3 text-xs font-medium focus:ring-2 focus:ring-blue-500"
-              />
-              <button
-                onClick={handleAddFollowUp}
-                disabled={!newFollowUp.trim()}
-                className="bg-blue-100 text-blue-700 px-4 rounded-xl text-[10px] font-black uppercase hover:bg-blue-200 disabled:opacity-50 transition-all"
-              >
-                Adicionar
-              </button>
-            </div>
-          </div>
         </div>
 
         <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-4 flex-shrink-0">
@@ -2273,19 +2222,7 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
                 return;
               }
 
-              // Verifica se tem algo no input de follow-up não adicionado
-              let finalAcompanhamento = [...formData.acompanhamento];
-              if (newFollowUp.trim()) {
-                finalAcompanhamento.push({
-                  data: new Date().toISOString(),
-                  nota: newFollowUp
-                });
-              }
-
-              onSave(task.id, {
-                ...formData,
-                acompanhamento: finalAcompanhamento
-              });
+              onSave(task.id, formData);
               onClose();
             }}
             className="flex-1 bg-slate-900 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all"
@@ -2300,10 +2237,17 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
 
 const TaskExecutionView = ({ task, tarefas, onSave, onClose }: { task: Tarefa, tarefas: Tarefa[], onSave: (id: string, updates: Partial<Tarefa>) => void, onClose: () => void }) => {
   const [newFollowUp, setNewFollowUp] = useState('');
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editingText, setEditingText] = useState('');
   const [chatUrl, setChatUrl] = useState(task.chat_gemini_url || '');
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [sessionTotalSeconds, setSessionTotalSeconds] = useState(task.tempo_total_segundos || 0);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const sidebarRef = useRef<HTMLDivElement>(null);
+
+  // Garantir que estamos usando a versão mais recente da tarefa vinda do Firestore
+  const currentTaskData = useMemo(() => tarefas.find(t => t.id === task.id) || task, [tarefas, task.id, task]);
 
   const nextTask = useMemo(() => {
     const now = new Date();
@@ -2323,6 +2267,13 @@ const TaskExecutionView = ({ task, tarefas, onSave, onClose }: { task: Tarefa, t
       return (h * 60 + m) > currentTimeInMinutes;
     });
   }, [tarefas, task.id]);
+
+  useEffect(() => {
+    const timeInterval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 30000); // 30s is enough for minute-based progress
+    return () => clearInterval(timeInterval);
+  }, []);
 
   useEffect(() => {
     let interval: number | null = null;
@@ -2360,9 +2311,27 @@ const TaskExecutionView = ({ task, tarefas, onSave, onClose }: { task: Tarefa, t
       data: new Date().toISOString(),
       nota: newFollowUp
     };
-    const updatedAcompanhamento = [...(task.acompanhamento || []), newEntry];
+    // Usar os acompanhamentos mais recentes para evitar sobrescrever dados
+    const updatedAcompanhamento = [...(currentTaskData.acompanhamento || []), newEntry];
     onSave(task.id, { acompanhamento: updatedAcompanhamento });
     setNewFollowUp('');
+  };
+
+  const handleUpdateFollowUp = (index: number) => {
+    if (!editingText.trim()) return;
+    const updated = [...(currentTaskData.acompanhamento || [])];
+    updated[index] = { ...updated[index], nota: editingText };
+    onSave(task.id, { acompanhamento: updated });
+    setEditingIndex(null);
+    setEditingText('');
+  };
+
+  const [isDeletingIndex, setIsDeletingIndex] = useState<number | null>(null);
+
+  const handleDeleteFollowUp = (index: number) => {
+    const updated = [...(currentTaskData.acompanhamento || [])];
+    updated.splice(index, 1);
+    onSave(task.id, { acompanhamento: updated });
   };
 
   const handleSaveChatUrl = () => {
@@ -2384,245 +2353,329 @@ const TaskExecutionView = ({ task, tarefas, onSave, onClose }: { task: Tarefa, t
   };
 
   return (
-    <div className={`fixed inset-0 z-[200] flex flex-col transition-all duration-700 ease-in-out ${isTimerRunning ? 'bg-[#050505] text-white' : 'bg-[#050505] text-white'} overflow-hidden`}>
-      {/* Botão de Fechar Geral */}
-      <button
-        onClick={() => {
-          if (isTimerRunning) handleToggleTimer();
-          onClose();
-        }}
-        className={`fixed top-8 right-8 z-[210] p-3 rounded-2xl transition-all ${isTimerRunning ? 'bg-white/5 hover:bg-white/10 text-white/20' : 'bg-white shadow-lg text-slate-400 hover:text-slate-900 border border-slate-100'}`}
-      >
-        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-      </button>
+    <div className="fixed inset-0 z-[200] flex flex-col bg-[#050505] text-white overflow-hidden">
+      {/* Header: Title and Close */}
+      <div className="p-10 pb-4 flex items-center justify-between">
+        <div className="flex flex-col">
+          <span className="text-blue-500 text-[10px] font-black uppercase tracking-[0.3em] mb-2 block">Central de Execução</span>
+          <h1 className="text-4xl font-black text-white tracking-tighter leading-none">{task.titulo}</h1>
+        </div>
+        <button
+          onClick={() => {
+            if (isTimerRunning) handleToggleTimer();
+            onClose();
+          }}
+          className="p-3 bg-white/5 hover:bg-white/10 text-white/40 rounded-2xl transition-all border border-white/5"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
 
-      {isTimerRunning ? (
-        /* --- MODO FOCO ATIVO --- */
-        <div className="flex-1 flex flex-col items-center justify-center p-12 relative animate-in fade-in zoom-in-95 duration-1000 gap-16">
-          {nextTask && (
-            <div className="fixed top-12 left-1/2 -translate-x-1/2 z-[210] animate-in slide-in-from-top-8 duration-1000">
-               <div className="bg-white/5 backdrop-blur-xl border border-white/10 px-8 py-4 rounded-full flex items-center gap-4 shadow-2xl">
-                 <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></div>
-                 <div className="flex flex-col">
-                   <span className="text-[8px] font-black text-white/40 uppercase tracking-[0.2em]">Próxima Tarefa às {nextTask.horario_inicio}</span>
-                   <span className="text-xs font-bold text-white/90">{nextTask.titulo}</span>
-                 </div>
-               </div>
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 p-10 pt-4 overflow-hidden">
+        {/* COLUNA ESQUERDA: Registro / Diário (7 colunas) */}
+        <div className="lg:col-span-7 bg-white/5 rounded-[3rem] border border-white/10 shadow-2xl flex flex-col overflow-hidden relative">
+          <div className="p-8 pb-4 flex-shrink-0">
+            <div className="flex items-center justify-between mb-6">
+              <h4 className="text-[10px] font-black text-white/40 uppercase tracking-widest">Diário de Execução</h4>
+              <div className="flex gap-2 flex-1 max-w-xl self-end">
+                <input
+                  type="text"
+                  value={newFollowUp}
+                  onChange={e => setNewFollowUp(e.target.value)}
+                  placeholder="Registre o que foi feito..."
+                  className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500/50 flex-1 text-white placeholder:text-slate-500 min-w-0"
+                  onKeyDown={e => e.key === 'Enter' && handleAddFollowUp()}
+                />
+                <button 
+                  onClick={handleAddFollowUp} 
+                  className="bg-blue-600 hover:bg-blue-500 text-white w-14 h-11 rounded-xl transition-all flex items-center justify-center flex-shrink-0 shadow-lg shadow-blue-600/20"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+                </button>
+              </div>
             </div>
-          )}
-
-          <div className="text-center px-12 z-10">
-            <span className="text-blue-400 text-[10px] font-black uppercase tracking-[0.4em] mb-6 block animate-pulse">Sessão em Execução</span>
-            <h1 className="text-3xl md:text-5xl lg:text-6xl font-black tracking-tighter text-white/90 max-w-5xl mx-auto leading-tight">
-              {task.titulo}
-            </h1>
           </div>
 
-          <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-            <div className="flex flex-col items-center justify-center">
-              <div className="text-[10rem] md:text-[14rem] lg:text-[16rem] font-black tracking-tighter tabular-nums text-white leading-none drop-shadow-[0_0_50px_rgba(37,99,235,0.3)] relative">
-                {formatTime(seconds).split(':').slice(1).join(':')}
-                <span className="text-3xl md:text-4xl text-blue-500/50 absolute -right-16 bottom-8 uppercase tracking-widest leading-none">
-                  {formatTime(seconds).split(':')[0]}h
-                </span>
-              </div>
+          <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 px-8 pb-8">
+            {currentTaskData.acompanhamento && currentTaskData.acompanhamento.length > 0 ? (
+              currentTaskData.acompanhamento.slice().reverse().map((entry, idx) => {
+                const originalIndex = currentTaskData.acompanhamento!.length - 1 - idx;
+                const isEditing = editingIndex === originalIndex;
+                const isDeleting = isDeletingIndex === originalIndex;
 
-              <button
-                onClick={handleToggleTimer}
-                className="flex items-center gap-4 px-12 py-6 mt-8 rounded-full bg-rose-500 text-white text-sm font-black uppercase tracking-widest shadow-[0_0_40px_rgba(244,63,94,0.4)] hover:bg-rose-600 transition-all hover:scale-105 active:scale-95"
-              >
-                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
-                Finalizar Sessão de Foco
-              </button>
-
-              <button
-                onClick={() => {
-                  onSave(task.id, { status: task.status === 'concluído' ? 'em andamento' : 'concluído' });
-                  if (task.status !== 'concluído') {
-                    // Se não estava concluída e agora vai ficar, paramos o timer
-                    handleToggleTimer();
-                    onClose();
-                  }
-                }}
-                className={`mt-6 flex items-center gap-2 px-8 py-3 rounded-full border text-xs font-black uppercase tracking-widest transition-all ${task.status === 'concluído' ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500 hover:text-white'}`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                {task.status === 'concluído' ? 'Tarefa Concluída' : 'Concluir Tarefa'}
-              </button>
-            </div>
-
-            {/* Diário de Execução no Modo Foco */}
-            <div className="w-full h-[400px] bg-white/5 rounded-[2.5rem] border border-white/10 p-8 flex flex-col backdrop-blur-sm">
-              <div className="flex items-center justify-between mb-6 flex-shrink-0">
-                <h4 className="text-[10px] font-black text-white/40 uppercase tracking-widest">Diário de Execução</h4>
-                <div className="flex gap-2 w-full max-w-xs">
-                  <input
-                    type="text"
-                    value={newFollowUp}
-                    onChange={e => setNewFollowUp(e.target.value)}
-                    placeholder="Registre o que você está fazendo..."
-                    className="bg-white/10 border border-white/10 rounded-lg px-4 py-2 text-[11px] font-medium outline-none focus:ring-1 focus:ring-blue-500 text-white placeholder:text-white/20 w-full"
-                    onKeyDown={e => e.key === 'Enter' && handleAddFollowUp()}
-                  />
-                  <button onClick={handleAddFollowUp} className="bg-blue-600 text-white px-4 rounded-lg text-[9px] font-black uppercase transition-all hover:bg-blue-500">Enviar</button>
-                </div>
-              </div>
-
-              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
-                {task.acompanhamento && task.acompanhamento.length > 0 ? (
-                  task.acompanhamento.slice().reverse().map((entry, idx) => (
-                    <div key={idx} className="bg-white/5 p-4 rounded-2xl border border-white/5 flex gap-4 hover:bg-white/10 transition-colors">
-                      <div className="flex-shrink-0 text-[8px] font-black text-white/30 uppercase leading-none min-w-[50px] pt-1">
+                return (
+                  <div key={originalIndex} 
+                       className="group/item bg-white/[0.03] p-6 rounded-[2rem] border border-white/5 flex gap-6 hover:border-white/10 hover:bg-white/[0.05] transition-all relative"
+                       onMouseLeave={() => setIsDeletingIndex(null)}
+                  >
+                    <div className="flex-shrink-0 text-[10px] font-black text-white/20 uppercase leading-none min-w-[60px] pt-1">
+                      {new Date(entry.data).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                      <div className="mt-1 opacity-60 text-[9px]">
                         {new Date(entry.data).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                       </div>
-                      <p className="text-[11px] font-medium text-white/80 leading-snug">{entry.nota}</p>
                     </div>
-                  ))
-                ) : (
-                  <div className="h-full flex items-center justify-center text-white/20 text-[10px] font-black uppercase tracking-widest italic">Nenhum registro nesta sessão</div>
-                )}
+                    
+                    <div className="flex-1 pr-16 text-sm text-white/90 leading-relaxed font-medium">
+                      {isEditing ? (
+                        <div className="flex flex-col gap-3">
+                          <textarea
+                            value={editingText}
+                            onChange={e => setEditingText(e.target.value)}
+                            className="w-full bg-black/40 border border-white/20 rounded-2xl p-4 text-xs text-white outline-none focus:ring-1 focus:ring-blue-500 min-h-[100px]"
+                            autoFocus
+                          />
+                          <div className="flex gap-2">
+                            <button onClick={() => handleUpdateFollowUp(originalIndex)} className="px-4 py-2 bg-blue-600 text-[10px] font-black uppercase rounded-xl hover:bg-blue-500 transition-all">Salvar</button>
+                            <button onClick={() => setEditingIndex(null)} className="px-4 py-2 bg-white/10 text-[10px] font-black uppercase rounded-xl hover:bg-white/20 transition-all">Cancelar</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="break-words">{entry.nota}</p>
+                      )}
+                    </div>
+
+                    {!isEditing && (
+                      <div className="absolute top-6 right-6 flex gap-2 opacity-0 group-hover/item:opacity-100 transition-all duration-300 transform translate-x-2 group-hover/item:translate-x-0">
+                        <button 
+                          onClick={() => { setEditingIndex(originalIndex); setEditingText(entry.nota); }} 
+                          className="p-2 text-white/20 hover:text-blue-400 hover:bg-blue-400/10 rounded-xl transition-all"
+                          title="Editar"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                        </button>
+                        <button 
+                          onClick={() => { 
+                            if (isDeleting) {
+                              handleDeleteFollowUp(originalIndex);
+                              setIsDeletingIndex(null);
+                            } else {
+                              setIsDeletingIndex(originalIndex);
+                            }
+                          }} 
+                          className={`p-2 transition-all rounded-xl ${isDeleting ? 'bg-amber-500/20 text-amber-500' : 'text-white/20 hover:text-rose-500 hover:bg-rose-500/10'}`}
+                          title={isDeleting ? "Clique para confirmar" : "Excluir"}
+                        >
+                          {isDeleting ? (
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                          ) : (
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            ) : (
+              <div className="h-full flex items-center justify-center text-white/10 text-xs font-black uppercase tracking-[0.3em] italic">Nenhum registro de atividade</div>
+            )}
+          </div>
+        </div>
+
+        {/* COLUNA DIREITA: Especialista + Cronômetro (5 colunas) */}
+        <div className="lg:col-span-5 flex flex-col gap-8 overflow-hidden">
+          {/* Especialista Virtual */}
+          <div className="bg-gradient-to-br from-indigo-600 to-blue-700 rounded-[3rem] p-8 text-white shadow-2xl flex-shrink-0 relative overflow-hidden group">
+            <div className="absolute -right-20 -top-20 w-64 h-64 bg-white/5 rounded-full blur-3xl group-hover:bg-white/10 transition-colors"></div>
+            <div className="flex items-center justify-between mb-6 relative z-10">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 bg-white/10 rounded-[1.25rem] flex items-center justify-center backdrop-blur-xl border border-white/20">
+                  <svg className="w-7 h-7 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L14.85 8.15L21 11L14.85 13.85L12 20L9.15 13.85L3 11L9.15 8.15L12 2Z" /></svg>
+                </div>
+                <div>
+                  <h4 className="text-sm font-black uppercase tracking-widest leading-none mb-1">Especialista Virtual</h4>
+                  <p className="text-[10px] text-white/50 uppercase font-bold tracking-widest">Chat Contextual Gemini</p>
+                </div>
               </div>
+              <a
+                href={task.chat_gemini_url || (task.categoria === 'CLC' ? "https://gemini.google.com/gem/096c0e51e1b9" : "https://gemini.google.com/")}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-white text-indigo-600 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all flex items-center gap-2 shadow-xl shadow-indigo-900/40"
+              >
+                Abrir Chat
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+              </a>
+            </div>
+            <div className="relative z-10">
+              <input
+                type="text"
+                placeholder="Cole o link do chat contextual aqui..."
+                value={chatUrl}
+                onChange={e => setChatUrl(e.target.value)}
+                className="w-full bg-black/20 border border-white/10 rounded-2xl px-5 py-4 text-xs font-medium focus:ring-2 focus:ring-white/30 outline-none text-white placeholder:text-white/20 transition-all"
+              />
+              {chatUrl !== (task.chat_gemini_url || '') && (
+                <button 
+                  onClick={handleSaveChatUrl} 
+                  className="absolute right-2 top-2 bg-emerald-500 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-emerald-600 transition-colors animate-in zoom-in-75"
+                >
+                  Salvar
+                </button>
+              )}
             </div>
           </div>
 
-          {/* Overlay de Vinheta para Foco Distante */}
-          <div className="fixed inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_20%,rgba(0,0,0,0.9)_100%)] z-[-1]"></div>
-        </div>
-      ) : (
-        /* --- MODO PREPARAÇÃO --- */
-        <div className="flex-1 flex flex-col overflow-hidden animate-in fade-in duration-500 text-slate-300">
-          <div className="p-10 pb-4">
-            <span className="text-blue-600 text-[10px] font-black uppercase tracking-[0.3em] mb-2 block">Central de Execução</span>
-            <h1 className="text-4xl font-black text-white tracking-tighter leading-none">{task.titulo}</h1>
-          </div>
+          {/* Cronômetro Section */}
+          <div className="flex-1 bg-white/5 rounded-[3rem] border border-white/10 p-10 flex flex-col relative overflow-hidden">
+            <div className="absolute inset-0 bg-blue-500/5 transition-opacity duration-700"></div>
+            
+            <div className="relative z-10 text-center flex-1 flex flex-col items-center justify-center space-y-8">
+              <div className="text-[10px] font-black text-white/20 uppercase tracking-[0.5em]">
+                {isTimerRunning ? 'Sessão Ativa' : 'Foco em Pausa'}
+              </div>
+              
+              <div className="flex flex-col items-center">
+                <div className="text-[5rem] md:text-[6rem] lg:text-[7.5rem] font-black tracking-tighter tabular-nums leading-none text-white drop-shadow-[0_10px_40px_rgba(255,255,255,0.05)]">
+                  {formatTime(isTimerRunning ? seconds : sessionTotalSeconds).split(':').slice(1).join(':')}
+                </div>
+                <div className="text-lg font-bold text-blue-500 uppercase tracking-[0.3em] mt-1">
+                  {formatTime(isTimerRunning ? seconds : sessionTotalSeconds).split(':')[0]}h
+                </div>
+              </div>
 
-          <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-8 p-10 pt-4 overflow-hidden">
-            {/* Esquerda: Botão de Play Gigante */}
-            <div className="flex flex-col items-center justify-center bg-white/5 rounded-[3rem] border border-white/10 shadow-2xl relative group overflow-hidden">
-              <div className="absolute inset-0 bg-blue-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
-
-              <div className="relative text-center space-y-8 z-10">
-                <div className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em]">Pronto para Começar?</div>
+              <div className="flex gap-3 pb-8">
                 <button
                   onClick={handleToggleTimer}
-                  className="w-48 h-48 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-[0_20px_60px_rgba(37,99,235,0.4)] hover:scale-110 active:scale-95 transition-all duration-500 group/play"
+                  className={`flex items-center gap-3 px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all hover:scale-105 active:scale-95 shadow-2xl ${
+                    isTimerRunning 
+                      ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20 hover:bg-rose-500 hover:text-white' 
+                      : 'bg-blue-600 text-white shadow-blue-600/20 hover:bg-blue-500'
+                  }`}
                 >
-                  <svg className="w-20 h-20 ml-3 group-hover/play:scale-110 transition-transform" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                  {isTimerRunning ? (
+                    <>
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+                      Pausar
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                      {sessionTotalSeconds > 0 ? 'Retomar' : 'Iniciar'}
+                    </>
+                  )}
                 </button>
-                <div className="space-y-1">
-                  <div className="text-4xl font-black text-white tabular-nums">
-                    {formatTime(sessionTotalSeconds)}
-                  </div>
-                  <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Tempo Total Acumulado</div>
-                </div>
-              </div>
 
-              {/* Status da Demanda no Canto */}
-              <div className="absolute bottom-10 left-10 flex items-center gap-3">
                 <button
                   onClick={handleCompleteTaskRequest}
-                  className={`px-6 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${task.status === 'concluído' ? 'bg-emerald-500 text-white' : 'bg-white/10 text-slate-400 hover:bg-white/20'
-                    }`}
+                  className={`px-6 py-4 rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all shadow-xl ${
+                    task.status === 'concluído' 
+                      ? 'bg-emerald-500 text-white' 
+                      : 'bg-white/5 text-white/40 border border-white/10 hover:bg-white/10 hover:text-white'
+                  }`}
                 >
-                  {task.status === 'concluído' ? 'Concluída' : 'Marcar Concluída'}
+                  {task.status === 'concluído' ? 'Concluída' : 'Finalizar'}
                 </button>
               </div>
             </div>
 
-            {/* Custom Modal for Task Completion */}
-            {isConfirmModalOpen && (
-              <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-                <div className="bg-[#111] border border-white/10 w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in zoom-in-95 duration-200">
-                  <h3 className="text-white font-black text-lg mb-2">Concluir Tarefa?</h3>
-                  <p className="text-slate-400 text-xs mb-6">Confirma a conclusão da tarefa <strong>{task.titulo}</strong>?</p>
-                  <div className="flex gap-3">
-                    <button 
-                      onClick={() => setIsConfirmModalOpen(false)}
-                      className="flex-1 px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-white/5 transition-colors"
-                    >
-                      Cancelar
-                    </button>
-                    <button 
-                      onClick={confirmCompletion}
-                      className="flex-1 bg-emerald-500 text-white px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-colors shadow-lg shadow-emerald-500/20"
-                    >
-                      Confirmar
-                    </button>
+            {/* Schedule & Progress Section */}
+            <div className="relative z-10 w-full mt-auto space-y-6">
+              {/* Timeline Progress Bar */}
+              {task.horario_inicio && task.horario_fim && (
+                <div className="space-y-2">
+                  <div className="flex justify-between items-end">
+                    <span className="text-[8px] font-black text-white/20 uppercase tracking-[0.2em]">Progresso do Horário</span>
+                    <span className="text-[9px] font-bold text-blue-400">
+                      {(() => {
+                        const now = currentTime;
+                        const [sh, sm] = task.horario_inicio!.split(':').map(Number);
+                        const [eh, em] = task.horario_fim!.split(':').map(Number);
+                        const sMin = sh * 60 + sm;
+                        const eMin = eh * 60 + em;
+                        const cMin = now.getHours() * 60 + now.getMinutes();
+                        if (cMin < sMin) return 'Aguardando Início';
+                        if (cMin > eMin) return 'Tempo Esgotado';
+                        const p = Math.round(((cMin - sMin) / (eMin - sMin)) * 100);
+                        return `${p}% do tempo planejado`;
+                      })()}
+                    </span>
                   </div>
-                </div>
-              </div>
-            )}
-
-            {/* Direita: Especialista e Histórico */}
-            <div className="flex flex-col gap-6 overflow-hidden">
-              {/* Especialista */}
-              <div className="bg-gradient-to-br from-indigo-600 to-blue-700 rounded-[2.5rem] p-6 text-white shadow-xl flex-shrink-0">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-md">
-                      <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L14.85 8.15L21 11L14.85 13.85L12 20L9.15 13.85L3 11L9.15 8.15L12 2Z" /></svg>
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-black uppercase tracking-widest">Especialista Virtual</h4>
-                      <p className="text-[8px] text-white/50 uppercase font-bold tracking-widest">Chat Contextual</p>
-                    </div>
-                  </div>
-                  <a
-                    href={task.chat_gemini_url || (task.categoria === 'CLC' ? "https://gemini.google.com/gem/096c0e51e1b9" : "https://gemini.google.com/")}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="bg-white text-indigo-600 px-6 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all flex items-center gap-2"
-                  >
-                    Abrir Chat
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                  </a>
-                </div>
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="Cole o link do chat aqui para salvar..."
-                    value={chatUrl}
-                    onChange={e => setChatUrl(e.target.value)}
-                    className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-[11px] font-medium focus:ring-1 focus:ring-white/30 outline-none text-white placeholder:text-white/30"
-                  />
-                  {chatUrl !== (task.chat_gemini_url || '') && (
-                    <button onClick={handleSaveChatUrl} className="absolute right-2 top-2 bg-white text-blue-600 px-3 py-1.5 rounded-lg text-[8px] font-black uppercase shadow-lg">Salvar</button>
-                  )}
-                </div>
-              </div>
-
-              {/* Log de Atividade */}
-              <div className="flex-1 bg-white/5 rounded-[2.5rem] border border-white/10 shadow-xl p-8 flex flex-col overflow-hidden">
-                <div className="flex items-center justify-between mb-4 flex-shrink-0">
-                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Diário de Execução</h4>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={newFollowUp}
-                      onChange={e => setNewFollowUp(e.target.value)}
-                      placeholder="Registre o que foi feito..."
-                      className="bg-black/20 border border-white/10 rounded-lg px-4 py-2 text-[11px] font-medium outline-none focus:ring-1 focus:ring-blue-500 w-48 text-slate-300 placeholder:text-slate-600"
-                      onKeyDown={e => e.key === 'Enter' && handleAddFollowUp()}
+                  <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
+                    <div 
+                      className="h-full bg-gradient-to-r from-blue-600 to-indigo-500 transition-all duration-1000 ease-out"
+                      style={{ 
+                        width: (() => {
+                          const now = currentTime;
+                          const [sh, sm] = task.horario_inicio!.split(':').map(Number);
+                          const [eh, em] = task.horario_fim!.split(':').map(Number);
+                          const sMin = sh * 60 + sm;
+                          const eMin = eh * 60 + em;
+                          const cMin = now.getHours() * 60 + now.getMinutes();
+                          if (cMin < sMin) return '0%';
+                          if (cMin > eMin) return '100%';
+                          return `${((cMin - sMin) / (eMin - sMin)) * 100}%`;
+                        })()
+                      }}
                     />
-                    <button onClick={handleAddFollowUp} className="bg-white/10 text-slate-300 hover:text-white px-4 rounded-lg text-[9px] font-black uppercase transition-all">Add</button>
                   </div>
                 </div>
+              )}
 
-                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
-                  {task.acompanhamento && task.acompanhamento.length > 0 ? (
-                    task.acompanhamento.slice().reverse().map((entry, idx) => (
-                      <div key={idx} className="bg-black/20 p-4 rounded-2xl border border-white/5 flex gap-4 hover:border-white/20 transition-colors">
-                        <div className="flex-shrink-0 text-[8px] font-black text-slate-400 uppercase leading-none min-w-[50px] pt-1">
-                          {new Date(entry.data).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
-                        </div>
-                        <p className="text-[11px] font-medium text-slate-700 leading-snug">{entry.nota}</p>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="h-full flex items-center justify-center text-slate-300 text-[10px] font-black uppercase tracking-widest italic opacity-50">Nenhum registro</div>
-                  )}
-                </div>
+              <div className="grid grid-cols-2 gap-3">
+                 <div className="bg-white/5 rounded-xl p-3 border border-white/5 flex flex-col items-center">
+                   <span className="text-[7px] font-black text-white/20 uppercase tracking-widest mb-1">Início</span>
+                   <span className="text-[11px] font-bold text-white/80">{task.horario_inicio || '--:--'}</span>
+                 </div>
+                 <div className="bg-white/5 rounded-xl p-3 border border-white/5 flex flex-col items-center">
+                   <span className="text-[7px] font-black text-white/20 uppercase tracking-widest mb-1">Término</span>
+                   <span className="text-[11px] font-bold text-white/80">{task.horario_fim || '--:--'}</span>
+                 </div>
+                 
+                 {/* Notification Area */}
+                 <div className="col-span-2 bg-blue-500/5 rounded-xl p-3 border border-blue-500/10 flex items-center gap-3">
+                    <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.5)]"></div>
+                    <div className="flex-1 overflow-hidden">
+                      <p className="text-[8px] font-black text-blue-400/60 uppercase tracking-widest mb-0.5">Status da Organização</p>
+                      <p className="text-[10px] font-bold text-blue-200 truncate">
+                        {(() => {
+                           const now = currentTime;
+                           if (nextTask) {
+                             const [nh, nm] = nextTask.horario_inicio!.split(':').map(Number);
+                             const diff = (nh * 60 + nm) - (now.getHours() * 60 + now.getMinutes());
+                             if (diff > 0 && diff <= 15) return `Próxima tarefa em ${diff} min: ${nextTask.titulo}`;
+                           }
+                           
+                           if (task.horario_fim) {
+                             const [eh, em] = task.horario_fim!.split(':').map(Number);
+                             const diffEnd = (eh * 60 + em) - (now.getHours() * 60 + now.getMinutes());
+                             if (diffEnd > 0 && diffEnd <= 10) return `Atenção: Término previsto em ${diffEnd} minutos!`;
+                             if (diffEnd < 0) return `Execução ultrapassou o horário em ${Math.abs(diffEnd)} min.`;
+                           }
+
+                           return nextTask ? `Próxima às ${nextTask.horario_inicio}: ${nextTask.titulo}` : "Sem tarefas pendentes hoje";
+                        })()}
+                      </p>
+                    </div>
+                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Confirmation Modal */}
+      {isConfirmModalOpen && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-[#111] border border-white/10 w-full max-w-sm rounded-[2.5rem] p-10 shadow-2xl animate-in zoom-in-95 duration-300 text-center">
+            <div className="w-20 h-20 bg-emerald-500/10 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6">
+              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+            </div>
+            <h3 className="text-white font-black text-2xl mb-2 tracking-tight">Concluir Tarefa?</h3>
+            <p className="text-slate-400 text-sm mb-8 leading-relaxed">Você confirma a conclusão da ação <strong>{task.titulo}</strong>?</p>
+            <div className="flex gap-4">
+              <button 
+                onClick={() => setIsConfirmModalOpen(false)}
+                className="flex-1 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-white/5 transition-all"
+              >
+                Agora não
+              </button>
+              <button 
+                onClick={confirmCompletion}
+                className="flex-1 bg-emerald-500 text-white px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-xl shadow-emerald-500/20"
+              >
+                Sim, concluída
+              </button>
             </div>
           </div>
         </div>
@@ -3269,6 +3322,16 @@ const App: React.FC = () => {
       setTaskModalMode('default');
     }
   }, [selectedTask]);
+
+  // Sync selectedTask with updated data from Firestore to ensure components have latest data
+  useEffect(() => {
+    if (selectedTask) {
+      const updated = tarefas.find(t => t.id === selectedTask.id);
+      if (updated && JSON.stringify(updated) !== JSON.stringify(selectedTask)) {
+        setSelectedTask(updated);
+      }
+    }
+  }, [tarefas, selectedTask]);
   const [planosTrabalho, setPlanosTrabalho] = useState<PlanoTrabalho[]>([]);
   const [statusFilter, setStatusFilter] = useState<Status[]>(['em andamento']);
   const [areaFilter, setAreaFilter] = useState<string>('TODAS');
