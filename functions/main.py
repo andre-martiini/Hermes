@@ -1,28 +1,28 @@
 
-import re
-from datetime import datetime
-from firebase_functions import firestore_fn
+from firebase_functions import firestore_fn, scheduler_fn, options
 from firebase_admin import initialize_app, firestore
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
 
-# Inicializa o Firebase Admin
+# Inicializa o Firebase Admin apenas uma vez no escopo global
 initialize_app()
-db = firestore.client()
 
-# Escopos para Google APIs
-SCOPES = [
-    'https://www.googleapis.com/auth/tasks',
-    'https://www.googleapis.com/auth/gmail.readonly'
-]
+def get_db():
+    """Retorna a instância do Firestore de forma lazy"""
+    return firestore.client()
 
 def get_google_creds():
     """Busca as credenciais OAuth2 do Firestore"""
+    from google.oauth2.credentials import Credentials
+
+    db = get_db()
     creds_doc = db.collection('system').document('google_credentials').get()
     if not creds_doc.exists:
         raise Exception("Credenciais não encontradas no Firestore.")
     
     creds_data = creds_doc.to_dict()
+    SCOPES = [
+        'https://www.googleapis.com/auth/tasks',
+        'https://www.googleapis.com/auth/gmail.readonly'
+    ]
     return Credentials(
         token=creds_data.get('token'),
         refresh_token=creds_data.get('refresh_token'),
@@ -33,12 +33,15 @@ def get_google_creds():
     )
 
 def get_tasks_service():
+    from googleapiclient.discovery import build
     return build('tasks', 'v1', credentials=get_google_creds())
 
 def get_gmail_service():
+    from googleapiclient.discovery import build
     return build('gmail', 'v1', credentials=get_google_creds())
 
 def log_to_firestore(sync_ref, logs, message, force_update=False):
+    from datetime import datetime
     timestamp = datetime.now().strftime('%H:%M:%S')
     log_entry = f"[{timestamp}] {message}"
     logs.append(log_entry)
@@ -47,6 +50,7 @@ def log_to_firestore(sync_ref, logs, message, force_update=False):
         sync_ref.update({'logs': logs})
 
 def classify_task(title, notes):
+    import re
     text = f"{title} {notes}".upper()
     categoria, contabilizar_meta = 'NÃO CLASSIFICADA', False
     tags = re.findall(r'\[(.*?)\]|TAG:\s*([\w\-]+)', text)
@@ -61,6 +65,8 @@ def classify_task(title, notes):
     return categoria, None, contabilizar_meta
 
 def sync_google_tasks_pull(service, sync_ref, logs):
+    from datetime import datetime
+    db = get_db()
     try:
         results = service.tasklists().list().execute()
         tasklist_id = next((item['id'] for item in results.get('items', []) if 'tarefa' in item['title'].lower()), None)
@@ -101,6 +107,7 @@ def sync_google_tasks_pull(service, sync_ref, logs):
         log_to_firestore(sync_ref, logs, f"ERRO PULL: {e}")
 
 def sync_google_tasks_push(service, sync_ref, logs):
+    db = get_db()
     try:
         results = service.tasklists().list().execute()
         tasklist_id = next((item['id'] for item in results.get('items', []) if 'tarefa' in item['title'].lower()), None)
@@ -129,6 +136,9 @@ def sync_google_tasks_push(service, sync_ref, logs):
         log_to_firestore(sync_ref, logs, f"ERRO PUSH: {e}")
 
 def sync_pix_emails(service, sync_ref, logs):
+    from datetime import datetime
+    import re
+    db = get_db()
     try:
         log_to_firestore(sync_ref, logs, "Buscando Pix (desde 01/02/2026)...", True)
         query = 'after:2026/02/01 subject:(Pix recebido OR Pix realizado OR "Pix enviado" OR "transferência Pix")'
@@ -198,22 +208,44 @@ def sync_pix_emails(service, sync_ref, logs):
     except Exception as e:
         log_to_firestore(sync_ref, logs, f"ERRO PIX: {e}")
 
-@firestore_fn.on_document_updated(document="system/sync")
-def on_sync_request(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot]]):
-    """Trigger disparado quando system/sync é atualizado"""
-    if not event.data.after.exists: return
-    data = event.data.after.to_dict()
-    if data.get('status') != 'requested': return
-    
+def run_full_sync():
+    """Executa o processo completo de sincronização"""
+    from datetime import datetime
+    db = get_db()
     sync_ref = db.collection('system').document('sync')
-    logs = ["Iniciando via Firebase Function Gen 2..."]
+    logs = [f"Iniciando sincronização ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})..."]
     try:
-        sync_ref.update({'status': 'processing', 'logs': logs})
         ts, gs = get_tasks_service(), get_gmail_service()
         sync_google_tasks_push(ts, sync_ref, logs)
         sync_google_tasks_pull(ts, sync_ref, logs)
         sync_pix_emails(gs, sync_ref, logs)
-        sync_ref.update({'status': 'completed', 'last_success': datetime.now().isoformat(), 'logs': logs})
+        sync_ref.update({
+            'status': 'completed',
+            'last_success': datetime.now().isoformat(),
+            'logs': logs
+        })
+        print("Sincronização concluída com sucesso.")
     except Exception as e:
-        logs.append(f"ERRO: {str(e)}")
-        sync_ref.update({'status': 'error', 'error_message': str(e), 'logs': logs})
+        error_msg = f"ERRO na sincronização: {str(e)}"
+        print(error_msg)
+        sync_ref.update({
+            'status': 'error',
+            'error_message': error_msg,
+            'logs': logs + [error_msg]
+        })
+
+@firestore_fn.on_document_updated(document="system/sync")
+def on_sync_request(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot]]):
+    """Trigger disparado quando system/sync é atualizado manualmente"""
+    if not event.data.after.exists: return
+    data = event.data.after.to_dict()
+    if data.get('status') != 'requested': return
+
+    db = get_db()
+    db.collection('system').document('sync').update({'status': 'processing'})
+    run_full_sync()
+
+@scheduler_fn.on_schedule(schedule="every 30 minutes")
+def scheduled_sync(event: scheduler_fn.ScheduledEvent) -> None:
+    """Trigger agendado para rodar a cada 30 minutos"""
+    run_full_sync()
