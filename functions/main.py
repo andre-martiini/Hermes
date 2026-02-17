@@ -87,20 +87,25 @@ def sync_google_tasks_pull(service, sync_ref, logs):
             g_updated = gt.get('updated', '')
             status = 'concluído' if gt.get('status') == 'completed' else 'em andamento'
             
+            g_due = gt.get('due', '').split('T')[0] if gt.get('due') else None
+
             if g_id in local_tasks:
                 doc_id, t_old = local_tasks[g_id]
                 if t_old.get('data_atualizacao', '') < g_updated:
-                    db.collection('tarefas').document(doc_id).update({
+                    update_data = {
                         'titulo': title, 'status': status, 'data_atualizacao': g_updated,
                         'data_conclusao': gt.get('completed'), 'notas': gt.get('notes', '')
-                    })
+                    }
+                    if g_due: update_data['data_limite'] = g_due
+                    db.collection('tarefas').document(doc_id).update(update_data)
                     log_to_firestore(sync_ref, logs, f"[-] ATUALIZADA: {title}")
             else:
                 cat, sys, meta = classify_task(title, gt.get('notes', ''))
                 db.collection('tarefas').add({
                     'titulo': title, 'projeto': 'GOOGLE', 'google_id': g_id, 'status': status,
                     'data_criacao': datetime.now().isoformat(), 'data_atualizacao': g_updated,
-                    'categoria': cat, 'contabilizar_meta': meta, 'notas': gt.get('notes', '')
+                    'categoria': cat, 'contabilizar_meta': meta, 'notas': gt.get('notes', ''),
+                    'data_limite': g_due if g_due else '-'
                 })
                 log_to_firestore(sync_ref, logs, f"[+] IMPORTADA: {title}")
     except Exception as e:
@@ -118,6 +123,11 @@ def sync_google_tasks_push(service, sync_ref, logs):
         
         for doc in db.collection('tarefas').stream():
             t = doc.to_dict()
+            cat = t.get('categoria', '')
+            # Pula logs de sistemas
+            if cat.startswith('SISTEMA:') or cat == 'SISTEMAS':
+                continue
+
             g_id, title = t.get('google_id'), t.get('titulo')
             if t.get('status') == 'excluído':
                 if g_id: service.tasks().delete(tasklist=tasklist_id, task=g_id).execute()
@@ -125,12 +135,18 @@ def sync_google_tasks_push(service, sync_ref, logs):
                 continue
             
             g_status = 'completed' if t.get('status') == 'concluído' else 'needsAction'
+            g_due = f"{t.get('data_limite')}T00:00:00Z" if t.get('data_limite') and t.get('data_limite') != '-' else None
+
             if not g_id:
-                new_task = service.tasks().insert(tasklist=tasklist_id, body={'title': title, 'notes': t.get('notas', ''), 'status': g_status}).execute()
+                body = {'title': title, 'notes': t.get('notas', ''), 'status': g_status}
+                if g_due: body['due'] = g_due
+                new_task = service.tasks().insert(tasklist=tasklist_id, body=body).execute()
                 doc.reference.update({'google_id': new_task['id'], 'data_atualizacao': new_task.get('updated')})
                 log_to_firestore(sync_ref, logs, f"[+] ENVIADA: {title}")
             elif g_id in g_tasks_map and t.get('data_atualizacao', '') > g_tasks_map[g_id].get('updated', ''):
-                service.tasks().update(tasklist=tasklist_id, task=g_id, body={'id': g_id, 'title': title, 'notes': t.get('notas', ''), 'status': g_status}).execute()
+                body = {'id': g_id, 'title': title, 'notes': t.get('notas', ''), 'status': g_status}
+                if g_due: body['due'] = g_due
+                service.tasks().update(tasklist=tasklist_id, task=g_id, body=body).execute()
                 log_to_firestore(sync_ref, logs, f"[^] ATUALIZADA NO GOOGLE: {title}")
     except Exception as e:
         log_to_firestore(sync_ref, logs, f"ERRO PUSH: {e}")

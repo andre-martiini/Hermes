@@ -272,20 +272,219 @@ const PgcAuditRow = ({
 
 // --- Components ---
 
+const DayView = ({
+  tasks,
+  currentDate,
+  onTaskClick,
+  onTaskUpdate
+}: {
+  tasks: Tarefa[],
+  currentDate: Date,
+  onTaskClick: (t: Tarefa) => void,
+  onTaskUpdate: (id: string, updates: Partial<Tarefa>) => void
+}) => {
+  const [resizing, setResizing] = useState<{ id: string, type: 'top' | 'bottom', startY: number, startMin: number } | null>(null);
+  const [dragging, setDragging] = useState<{ id: string, startY: number, startMin: number } | null>(null);
+
+  const dayStr = currentDate.toISOString().split('T')[0];
+  const dayTasks = useMemo(() => tasks.filter(t => {
+    if (t.status === 'excluído' as any) return false;
+    const start = t.data_inicio || t.data_criacao?.split('T')[0] || t.data_limite;
+    const end = t.data_limite;
+    return dayStr >= start && dayStr <= end;
+  }), [tasks, dayStr]);
+
+  const hourHeight = 60;
+
+  const timeToMinutes = (time: string) => {
+    if (!time) return 0;
+    const [h, m] = time.split(':').map(Number);
+    return h * 60 + m;
+  };
+
+  const minutesToTime = (minutes: number) => {
+    const h = Math.max(0, Math.min(23, Math.floor(minutes / 60)));
+    const m = Math.max(0, Math.min(59, Math.floor(minutes % 60)));
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+  };
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (resizing) {
+      const deltaY = e.clientY - resizing.startY;
+      const deltaMin = Math.round((deltaY / hourHeight) * 60 / 15) * 15;
+
+      const task = tasks.find(t => t.id === resizing.id);
+      if (!task) return;
+
+      if (resizing.type === 'bottom') {
+        const newEndMin = Math.max(timeToMinutes(task.horario_inicio || '00:00') + 15, resizing.startMin + deltaMin);
+        onTaskUpdate(resizing.id, { horario_fim: minutesToTime(newEndMin) });
+      } else {
+        const duration = timeToMinutes(task.horario_fim || '01:00') - timeToMinutes(task.horario_inicio || '00:00');
+        const newStartMin = Math.min(timeToMinutes(task.horario_fim || '01:00') - 15, resizing.startMin + deltaMin);
+        onTaskUpdate(resizing.id, { horario_inicio: minutesToTime(newStartMin) });
+      }
+    } else if (dragging) {
+      const deltaY = e.clientY - dragging.startY;
+      const deltaMin = Math.round((deltaY / hourHeight) * 60 / 15) * 15;
+
+      const task = tasks.find(t => t.id === dragging.id);
+      if (!task) return;
+
+      const duration = timeToMinutes(task.horario_fim || '01:00') - timeToMinutes(task.horario_inicio || '00:00');
+      const newStartMin = Math.max(0, Math.min(24 * 60 - duration, dragging.startMin + deltaMin));
+      onTaskUpdate(dragging.id, {
+        horario_inicio: minutesToTime(newStartMin),
+        horario_fim: minutesToTime(newStartMin + duration)
+      });
+    }
+  };
+
+  const handleMouseUp = () => {
+    setResizing(null);
+    setDragging(null);
+  };
+
+  useEffect(() => {
+    if (resizing || dragging) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [resizing, dragging]);
+
+  return (
+    <div className="flex h-[600px] overflow-hidden bg-slate-50 border-t border-slate-100">
+      {/* Hour Column */}
+      <div className="w-16 flex-shrink-0 bg-white border-r border-slate-100 overflow-y-auto scrollbar-hide select-none">
+        <div className="relative" style={{ height: 24 * hourHeight }}>
+          {Array.from({ length: 24 }).map((_, h) => (
+            <div key={h} className="h-[60px] border-b border-slate-50 flex items-start justify-center pt-1">
+              <span className="text-[10px] font-black text-slate-300 uppercase">{h.toString().padStart(2, '0')}:00</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Main Grid Area */}
+      <div className="flex-1 overflow-y-auto relative bg-white custom-scrollbar" onDragOver={e => e.preventDefault()}>
+        <div className="absolute inset-0 z-0 pointer-events-none">
+          {Array.from({ length: 24 }).map((_, h) => (
+            <div key={h} className="h-[60px] border-b border-slate-100 w-full"></div>
+          ))}
+        </div>
+
+        <div className="relative w-full" style={{ height: 24 * hourHeight }} onDrop={(e) => {
+          const taskId = e.dataTransfer.getData('task-id');
+          const rect = e.currentTarget.getBoundingClientRect();
+          const scrollContainer = e.currentTarget.parentElement;
+          const scrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
+          const y = e.clientY - rect.top;
+          const hour = Math.floor(y / hourHeight);
+          if (taskId) {
+            onTaskUpdate(taskId, {
+              horario_inicio: `${hour.toString().padStart(2, '0')}:00`,
+              horario_fim: `${(hour + 1).toString().padStart(2, '0')}:00`
+            });
+          }
+        }}>
+          {dayTasks.filter(t => t.horario_inicio).map(task => {
+            const startMin = timeToMinutes(task.horario_inicio!);
+            const endMin = timeToMinutes(task.horario_fim || minutesToTime(startMin + 60));
+            const top = (startMin / 60) * hourHeight;
+            const height = ((endMin - startMin) / 60) * hourHeight;
+
+            return (
+              <div
+                key={task.id}
+                className={`absolute left-4 right-4 rounded-xl border-2 p-3 shadow-md group transition-all cursor-grab active:cursor-grabbing overflow-hidden
+                  ${task.categoria === 'CLC' ? 'bg-blue-50 border-blue-200 text-blue-800' :
+                    task.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
+                      'bg-white border-slate-200 text-slate-800'}
+                `}
+                style={{ top, height: Math.max(30, height), minHeight: 30, zIndex: 10 }}
+                onMouseDown={(e) => {
+                  const target = e.target as HTMLElement;
+                  if (target.classList.contains('resize-handle')) return;
+                  setDragging({ id: task.id, startY: e.clientY, startMin });
+                }}
+              >
+                <div className="flex justify-between items-start gap-2">
+                  <div className="text-[11px] font-black leading-tight line-clamp-2">{task.titulo}</div>
+                  <button onClick={(e) => { e.stopPropagation(); onTaskClick(task); }} className="shrink-0 p-1 hover:bg-black/5 rounded">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                  </button>
+                </div>
+                <div className="text-[9px] font-black mt-1 opacity-40 uppercase tracking-widest">{task.horario_inicio} - {task.horario_fim}</div>
+
+                {/* Handles */}
+                <div
+                  className="resize-handle absolute top-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black/10 transition-colors"
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    setResizing({ id: task.id, type: 'top', startY: e.clientY, startMin });
+                  }}
+                />
+                <div
+                  className="resize-handle absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black/10 transition-colors"
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    setResizing({ id: task.id, type: 'bottom', startY: e.clientY, startMin: endMin });
+                  }}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Side Backlog for current day */}
+      <div className="hidden md:block w-64 bg-slate-50 border-l border-slate-200 p-6 overflow-y-auto custom-scrollbar">
+        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6">Aguardando Alocação</h4>
+        <div className="space-y-3">
+          {dayTasks.filter(t => !t.horario_inicio).map(task => (
+            <div
+              key={task.id}
+              draggable
+              onDragStart={(e) => e.dataTransfer.setData('task-id', task.id)}
+              className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-400 hover:shadow-md transition-all cursor-grab active:cursor-grabbing"
+            >
+              <div className="text-[10px] font-bold text-slate-700 leading-tight mb-2">{task.titulo}</div>
+              <div className="flex items-center gap-2">
+                <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${PROJECT_COLORS[task.projeto] || 'bg-slate-100 text-slate-600'}`}>{task.projeto}</span>
+              </div>
+            </div>
+          ))}
+          {dayTasks.filter(t => !t.horario_inicio).length === 0 && (
+            <div className="py-12 text-center border-2 border-dashed border-slate-200 rounded-[2rem]">
+              <p className="text-slate-300 text-[10px] font-black uppercase italic">Tudo alocado</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const CalendarView = ({
   tasks,
   viewMode,
   currentDate,
   onDateChange,
   onTaskClick,
-  onViewModeChange
+  onViewModeChange,
+  onTaskUpdate
 }: {
   tasks: Tarefa[],
-  viewMode: 'month' | 'week',
+  viewMode: 'month' | 'week' | 'day',
   currentDate: Date,
   onDateChange: (d: Date) => void,
   onTaskClick: (t: Tarefa) => void,
-  onViewModeChange: (m: 'month' | 'week') => void
+  onViewModeChange: (m: 'month' | 'week' | 'day') => void,
+  onTaskUpdate: (id: string, updates: Partial<Tarefa>) => void
 }) => {
   const [days, setDays] = React.useState<Date[]>([]);
 
@@ -293,7 +492,9 @@ const CalendarView = ({
     const d = new Date(currentDate);
     const newDays = [];
 
-    if (viewMode === 'month') {
+    if (viewMode === 'day') {
+      newDays.push(new Date(currentDate));
+    } else if (viewMode === 'month') {
       // First day of month
       d.setDate(1);
       // Backtrack to Sunday (or start of week)
@@ -358,18 +559,22 @@ const CalendarView = ({
   const nextPeriod = () => {
     const d = new Date(currentDate);
     if (viewMode === 'month') d.setMonth(d.getMonth() + 1);
-    else d.setDate(d.getDate() + 7);
+    else if (viewMode === 'week') d.setDate(d.getDate() + 7);
+    else d.setDate(d.getDate() + 1);
     onDateChange(d);
   };
 
   const prevPeriod = () => {
     const d = new Date(currentDate);
     if (viewMode === 'month') d.setMonth(d.getMonth() - 1);
-    else d.setDate(d.getDate() - 7);
+    else if (viewMode === 'week') d.setDate(d.getDate() - 7);
+    else d.setDate(d.getDate() - 1);
     onDateChange(d);
   };
 
-  const monthName = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(currentDate);
+  const monthName = viewMode === 'day'
+    ? new Intl.DateTimeFormat('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' }).format(currentDate)
+    : new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(currentDate);
 
   return (
     <div className="bg-white rounded-[2rem] border border-slate-200 overflow-hidden shadow-sm animate-in fade-in">
@@ -389,6 +594,12 @@ const CalendarView = ({
             >
               Semana
             </button>
+            <button
+              onClick={() => onViewModeChange('day')}
+              className={`px-3 py-1 text-[10px] uppercase font-black rounded-md transition-all ${viewMode === 'day' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              Dia
+            </button>
           </div>
         </div>
         <div className="flex gap-2">
@@ -402,82 +613,93 @@ const CalendarView = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50">
-        {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(d => (
-          <div key={d} className="py-3 text-center text-[10px] font-black text-slate-400 uppercase">{d}</div>
-        ))}
-      </div>
+      {viewMode === 'day' ? (
+        <DayView
+          tasks={tasks}
+          currentDate={currentDate}
+          onTaskClick={onTaskClick}
+          onTaskUpdate={onTaskUpdate}
+        />
+      ) : (
+        <>
+          <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50">
+            {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(d => (
+              <div key={d} className="py-3 text-center text-[10px] font-black text-slate-400 uppercase">{d}</div>
+            ))}
+          </div>
 
-      <div className="grid grid-cols-7 auto-rows-fr bg-slate-200 gap-px border-b border-slate-200">
-        {days.map((day, i) => {
-          const dayStr = day.toISOString().split('T')[0];
-          const isToday = new Date().toISOString().split('T')[0] === dayStr;
-          const isCurrentMonth = day.getMonth() === currentDate.getMonth();
-          const dayTasks = tasksByDay[dayStr] || [];
+          <div className="grid grid-cols-7 auto-rows-fr bg-slate-200 gap-px border-b border-slate-200">
+            {days.map((day, i) => {
+              const dayStr = day.toISOString().split('T')[0];
+              const isToday = new Date().toISOString().split('T')[0] === dayStr;
+              const isCurrentMonth = day.getMonth() === currentDate.getMonth();
+              const dayTasks = tasksByDay[dayStr] || [];
 
-          return (
-            <div
-              key={i}
-              className={`bg-white min-h-[120px] p-2 flex flex-col gap-1 transition-colors hover:bg-slate-50
-                ${!isCurrentMonth ? 'bg-slate-50/50' : ''}
-              `}
-            >
-              <div className="flex justify-between items-start">
-                <span className={`text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full ${isToday ? 'bg-rose-500 text-white' : !isCurrentMonth ? 'text-slate-300' : 'text-slate-700'}`}>
-                  {day.getDate()}
-                </span>
-                {dayTasks.length > 0 && <span className="text-[9px] font-black text-slate-300">{dayTasks.length}</span>}
-              </div>
+              return (
+                <div
+                  key={i}
+                  className={`bg-white min-h-[120px] p-2 flex flex-col gap-1 transition-colors hover:bg-slate-50
+                    ${!isCurrentMonth ? 'bg-slate-50/50' : ''}
+                  `}
+                >
+                  <div className="flex justify-between items-start">
+                    <span className={`text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full ${isToday ? 'bg-rose-500 text-white' : !isCurrentMonth ? 'text-slate-300' : 'text-slate-700'}`}>
+                      {day.getDate()}
+                    </span>
+                    {dayTasks.length > 0 && <span className="text-[9px] font-black text-slate-300">{dayTasks.length}</span>}
+                  </div>
 
-              <div className="flex-1 flex flex-col gap-1 mt-1 overflow-y-auto max-h-[100px] scrollbar-hide">
-                {dayTasks.map(t => {
-                  // Show full card ONLY on start date and end date
-                  // Show slim bar on all intermediate days
-                  const startStr = t.is_single_day ? (t.data_limite || '') : (t.data_inicio || t.data_criacao?.split('T')[0] || t.data_limite || '');
-                  const endStr = t.data_limite || '';
+                  <div className="flex-1 flex flex-col gap-1 mt-1 overflow-y-auto max-h-[100px] scrollbar-hide">
+                    {dayTasks.map(t => {
+                      // Show full card ONLY on start date and end date
+                      // Show slim bar on all intermediate days
+                      const startStr = t.is_single_day ? (t.data_limite || '') : (t.data_inicio || t.data_criacao?.split('T')[0] || t.data_limite || '');
+                      const endStr = t.data_limite || '';
 
-                  const isStart = startStr === dayStr;
-                  const isEnd = endStr === dayStr;
+                      const isStart = startStr === dayStr;
+                      const isEnd = endStr === dayStr;
 
-                  const showTitle = isStart || isEnd;
+                      const showTitle = isStart || isEnd;
 
-                  if (showTitle) {
-                    return (
-                      <div
-                        key={`${t.id}-${dayStr}`}
-                        onClick={() => onTaskClick(t)}
-                        className={`px-2 py-1.5 rounded-md border text-[9px] font-bold cursor-pointer transition-all active:scale-95 group relative z-10
-                          ${t.categoria === 'CLC' ? 'bg-blue-50 border-blue-100 text-blue-700 hover:border-blue-300' :
-                            t.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-100 text-emerald-700 hover:border-emerald-300' :
-                              'bg-slate-50 border-slate-100 text-slate-600 hover:border-slate-300'}
-                        `}
-                      >
-                        <div className="line-clamp-2 leading-tight">{t.titulo}</div>
-                        {isStart && endStr && startStr !== endStr && (
-                          <div className="text-[7px] text-slate-400 mt-0.5">→ {formatDate(endStr).split(' ')[0]}</div>
-                        )}
-                      </div>
-                    );
-                  } else {
-                    return (
-                      <div
-                        key={`${t.id}-${dayStr}`}
-                        onClick={() => onTaskClick(t)}
-                        title={t.titulo}
-                        className={`h-1.5 rounded-full cursor-pointer transition-all hover:h-3 w-full my-0.5 relative z-0
-                          ${t.categoria === 'CLC' ? 'bg-blue-300/60 hover:bg-blue-400' :
-                            t.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-300/60 hover:bg-emerald-400' :
-                              'bg-slate-300/60 hover:bg-slate-400'}
-                        `}
-                      />
-                    );
-                  }
-                })}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+                      if (showTitle) {
+                        return (
+                          <div
+                            key={`${t.id}-${dayStr}`}
+                            onClick={() => onTaskClick(t)}
+                            className={`px-2 py-1.5 rounded-md border text-[9px] font-bold cursor-pointer transition-all active:scale-95 group relative z-10
+                              ${t.categoria === 'CLC' ? 'bg-blue-50 border-blue-100 text-blue-700 hover:border-blue-300' :
+                                t.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-100 text-emerald-700 hover:border-emerald-300' :
+                                  'bg-slate-50 border-slate-100 text-slate-600 hover:border-slate-300'}
+                            `}
+                          >
+                            <div className="line-clamp-2 leading-tight">{t.titulo}</div>
+                            {isStart && endStr && startStr !== endStr && (
+                              <div className="text-[7px] text-slate-400 mt-0.5">→ {formatDate(endStr).split(' ')[0]}</div>
+                            )}
+                          </div>
+                        );
+                      } else {
+                        return (
+                          <div
+                            key={`${t.id}-${dayStr}`}
+                            onClick={() => onTaskClick(t)}
+                            title={t.titulo}
+                            className={`h-1.5 rounded-full cursor-pointer transition-all hover:h-3 w-full my-0.5 relative z-0
+                              ${t.categoria === 'CLC' ? 'bg-blue-300/60 hover:bg-blue-400' :
+                                t.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-300/60 hover:bg-emerald-400' :
+                                  'bg-slate-300/60 hover:bg-slate-400'}
+                            `}
+                          />
+                        );
+                      }
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 };
@@ -1907,12 +2129,31 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
   );
 };
 
-const TaskExecutionView = ({ task, onSave, onClose }: { task: Tarefa, onSave: (id: string, updates: Partial<Tarefa>) => void, onClose: () => void }) => {
+const TaskExecutionView = ({ task, tarefas, onSave, onClose }: { task: Tarefa, tarefas: Tarefa[], onSave: (id: string, updates: Partial<Tarefa>) => void, onClose: () => void }) => {
   const [newFollowUp, setNewFollowUp] = useState('');
   const [chatUrl, setChatUrl] = useState(task.chat_gemini_url || '');
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [sessionTotalSeconds, setSessionTotalSeconds] = useState(task.tempo_total_segundos || 0);
+
+  const nextTask = useMemo(() => {
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+
+    const todayTasks = tarefas
+      .filter(t => t.data_limite === todayStr && normalizeStatus(t.status) !== 'concluido' && t.horario_inicio && t.id !== task.id)
+      .sort((a, b) => {
+        const [ha, ma] = a.horario_inicio!.split(':').map(Number);
+        const [hb, mb] = b.horario_inicio!.split(':').map(Number);
+        return (ha * 60 + ma) - (hb * 60 + mb);
+      });
+
+    return todayTasks.find(t => {
+      const [h, m] = t.horario_inicio!.split(':').map(Number);
+      return (h * 60 + m) > currentTimeInMinutes;
+    });
+  }, [tarefas, task.id]);
 
   useEffect(() => {
     let interval: number | null = null;
@@ -1975,6 +2216,18 @@ const TaskExecutionView = ({ task, onSave, onClose }: { task: Tarefa, onSave: (i
       {isTimerRunning ? (
         /* --- MODO FOCO ATIVO --- */
         <div className="flex-1 flex flex-col items-center justify-center p-12 relative animate-in fade-in zoom-in-95 duration-1000 gap-16">
+          {nextTask && (
+            <div className="fixed top-12 left-1/2 -translate-x-1/2 z-[210] animate-in slide-in-from-top-8 duration-1000">
+               <div className="bg-white/5 backdrop-blur-xl border border-white/10 px-8 py-4 rounded-full flex items-center gap-4 shadow-2xl">
+                 <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></div>
+                 <div className="flex flex-col">
+                   <span className="text-[8px] font-black text-white/40 uppercase tracking-[0.2em]">Próxima Tarefa às {nextTask.horario_inicio}</span>
+                   <span className="text-xs font-bold text-white/90">{nextTask.titulo}</span>
+                 </div>
+               </div>
+            </div>
+          )}
+
           <div className="text-center px-12 z-10">
             <span className="text-blue-400 text-[10px] font-black uppercase tracking-[0.4em] mb-6 block animate-pulse">Sessão em Execução</span>
             <h1 className="text-3xl md:text-5xl lg:text-6xl font-black tracking-tighter text-white/90 max-w-5xl mx-auto leading-tight">
@@ -2156,125 +2409,13 @@ const TaskExecutionView = ({ task, onSave, onClose }: { task: Tarefa, onSave: (i
   );
 };
 
-const AudioRecorder = React.memo(({ onAudioReady, disabled, compact }: { onAudioReady: (blob: Blob, base64: string, url: string) => void, disabled: boolean, compact?: boolean }) => {
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingTime, setRecordingTime] = useState(0);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const timerRef = useRef<number | null>(null);
-
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      chunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        const reader = new FileReader();
-        reader.readAsDataURL(audioBlob);
-        reader.onloadend = () => {
-          const base64String = (reader.result as string).split(',')[1];
-          onAudioReady(audioBlob, base64String, audioUrl);
-        };
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      mediaRecorder.start();
-      setIsRecording(true);
-      setRecordingTime(0);
-      timerRef.current = window.setInterval(() => setRecordingTime(prev => prev + 1), 1000);
-    } catch (err) {
-      console.error(err);
-      alert("Erro ao acessar microfone.");
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      if (timerRef.current) {
-        window.clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-    }
-  };
-
-  const formatTime = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${m}:${sec.toString().padStart(2, '0')}`;
-  };
-
-  if (compact) {
-    return (
-      <div className="flex items-center">
-        {isRecording ? (
-          <button
-            onClick={stopRecording}
-            className="h-10 px-3 bg-rose-600 text-white rounded-xl flex items-center justify-center shadow-lg animate-pulse gap-2"
-          >
-            <div className="w-2 h-2 bg-white rounded-full animate-bounce"></div>
-            <span className="text-[10px] font-black tabular-nums">{formatTime(recordingTime)}</span>
-          </button>
-        ) : (
-          <button
-            onClick={startRecording}
-            disabled={disabled}
-            className="w-10 h-10 bg-blue-600 text-white rounded-xl flex items-center justify-center shadow-lg active:scale-90 transition-transform disabled:opacity-50"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-          </button>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col items-center gap-4">
-      {isRecording ? (
-        <div className="flex items-center gap-6 bg-rose-50 px-8 py-4 rounded-none md:rounded-[2rem] border border-rose-100 shadow-xl animate-pulse">
-          <div className="flex items-center gap-3">
-            <div className="w-3 h-3 bg-rose-600 rounded-full"></div>
-            <span className="text-rose-600 font-black tabular-nums text-lg">{formatTime(recordingTime)}</span>
-          </div>
-          <button
-            onClick={stopRecording}
-            className="bg-rose-600 text-white p-4 rounded-full shadow-lg hover:bg-rose-700 transition-all active:scale-95"
-          >
-            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
-          </button>
-        </div>
-      ) : (
-        <button
-          onClick={startRecording}
-          disabled={disabled}
-          className="bg-blue-600 text-white p-4 md:p-8 rounded-full shadow-2xl hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-50 group relative"
-        >
-          <div className="absolute inset-0 bg-blue-400 rounded-full animate-ping opacity-20 group-hover:block hidden"></div>
-          <svg className="w-6 h-6 md:w-10 md:h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-        </button>
-      )}
-      <p className="hidden md:block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{isRecording ? 'Gravando sua ideia...' : 'Clique para começar a gravar'}</p>
-    </div>
-  );
-});
-
-const FerramentasView = ({ ideas, onAudioReady, onDeleteIdea, onArchiveIdea, onAddTextIdea, onUpdateIdea, isProcessing, activeTool, setActiveTool, isAddingText, setIsAddingText }: {
+const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, onUpdateIdea, onConvertToLog, activeTool, setActiveTool, isAddingText, setIsAddingText }: {
   ideas: BrainstormIdea[],
-  onAudioReady: (blob: Blob, base64: string, url: string) => void,
   onDeleteIdea: (id: string) => void,
   onArchiveIdea: (id: string) => void,
   onAddTextIdea: (text: string) => void,
   onUpdateIdea: (id: string, text: string) => void,
-  isProcessing: boolean,
+  onConvertToLog: (idea: BrainstormIdea) => void,
   activeTool: 'brainstorming' | null,
   setActiveTool: (tool: 'brainstorming' | null) => void,
   isAddingText: boolean,
@@ -2316,11 +2457,11 @@ const FerramentasView = ({ ideas, onAudioReady, onDeleteIdea, onArchiveIdea, onA
           className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-200 shadow-xl hover:shadow-2xl transition-all group text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6"
         >
           <div className="w-12 h-12 md:w-16 md:h-16 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all flex-shrink-0">
-            <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+            <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
           </div>
           <div>
             <h3 className="text-lg md:text-2xl font-black text-slate-900 tracking-tighter mb-1 md:mb-2">Brainstorming</h3>
-            <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Grave ideias rápidas e transcreva com IA.</p>
+            <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Registre ideias rápidas para organizar depois.</p>
           </div>
         </button>
 
@@ -2411,6 +2552,36 @@ const FerramentasView = ({ ideas, onAudioReady, onDeleteIdea, onArchiveIdea, onA
           </div>
         </div>
 
+        {/* Inserção de Nova Ideia via Digitação */}
+        <div className="max-w-4xl mx-auto w-full mb-12 animate-in slide-in-from-top-4 duration-500">
+          <div className="bg-white p-2 rounded-[2rem] border-2 border-slate-100 shadow-xl flex items-center gap-4 focus-within:border-blue-500 transition-all">
+            <input
+              type="text"
+              placeholder="Digite uma nova ideia..."
+              className="flex-1 bg-transparent border-none outline-none px-6 py-4 text-sm font-bold text-slate-800 placeholder:text-slate-300"
+              value={textInput}
+              onChange={e => setTextInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && textInput.trim()) {
+                  onAddTextIdea(textInput);
+                  setTextInput('');
+                }
+              }}
+            />
+            <button
+              onClick={() => {
+                if (textInput.trim()) {
+                  onAddTextIdea(textInput);
+                  setTextInput('');
+                }
+              }}
+              className="bg-blue-600 text-white h-12 px-8 rounded-[1.25rem] text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 active:scale-95"
+            >
+              Salvar Ideia
+            </button>
+          </div>
+        </div>
+
         <div className="flex flex-col md:grid md:grid-cols-2 lg:grid-cols-3 gap-2 md:gap-8 mb-32 md:mb-0">
           {activeIdeas.map(idea => (
             <div key={idea.id} className="bg-white p-5 md:p-8 rounded-none md:rounded-[2.5rem] border border-slate-100 md:border-slate-200 shadow-sm md:shadow-lg hover:shadow-md md:hover:shadow-2xl transition-all group flex flex-col relative overflow-hidden">
@@ -2440,6 +2611,13 @@ const FerramentasView = ({ ideas, onAudioReady, onDeleteIdea, onArchiveIdea, onA
                         title="Editar"
                       >
                         <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                      </button>
+                      <button
+                        onClick={() => onConvertToLog(idea)}
+                        className="text-slate-400 hover:text-violet-600 p-2 rounded-xl transition-colors"
+                        title="Converter em Log"
+                      >
+                        <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
                       </button>
                       <button
                         onClick={() => {
@@ -2561,29 +2739,6 @@ const FerramentasView = ({ ideas, onAudioReady, onDeleteIdea, onArchiveIdea, onA
         </div>
       )}
 
-      {/* Barra Inferior Fixa para Brainstorming */}
-      {!isAddingText && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-md border-t border-slate-200 supports-[backdrop-filter]:bg-white/60 px-6 py-4 z-[100] flex justify-between items-center shadow-[0_-10px_40px_rgba(0,0,0,0.1)]">
-          <div className="font-black text-[10px] text-slate-400 uppercase tracking-widest pl-1">Ações Rápidas</div>
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => setIsAddingText(true)}
-              className="h-11 w-11 bg-slate-900 text-white rounded-xl flex items-center justify-center shadow-lg active:scale-90 transition-transform hover:bg-slate-800"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-            </button>
-            <div className="h-8 w-px bg-slate-200"></div>
-            <AudioRecorder onAudioReady={onAudioReady} disabled={isProcessing} compact />
-          </div>
-        </div>
-      )}
-
-      {isProcessing && (
-        <div className="fixed top-20 right-4 z-[120] flex items-center gap-3 text-blue-600 font-black uppercase text-[10px] tracking-widest animate-pulse bg-white/90 px-4 py-2 rounded-full border border-blue-100 shadow-lg md:relative md:top-auto md:right-auto md:bg-transparent md:border-none md:shadow-none">
-          <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-          <span>Processando...</span>
-        </div>
-      )}
     </>
   );
 };
@@ -2913,6 +3068,12 @@ const App: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, []);
+
   // Notification System Triggers (Time-based: Habits, Weigh-in)
   useEffect(() => {
     const interval = setInterval(() => {
@@ -2965,9 +3126,44 @@ const App: React.FC = () => {
           }
         }
       }
+      // 3. Daily Task Notifications
+      const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+      tarefas.forEach(t => {
+        if (t.status === 'concluído' || t.data_limite !== todayStr) return;
+
+        if (t.horario_inicio) {
+          const [h, m] = t.horario_inicio.split(':').map(Number);
+          const startMin = h * 60 + m;
+          const diff = startMin - currentTimeInMinutes;
+          const lastReminded = localStorage.getItem(`lastStartRemind_${t.id}`);
+          if (diff === 15 && lastReminded !== todayStr) {
+            const msg = `Sua tarefa "${t.titulo}" inicia em 15 minutos!`;
+            showToast(msg, "info");
+            if ("Notification" in window && Notification.permission === "granted") {
+              new Notification("Hermes: Próxima Tarefa", { body: msg });
+            }
+            localStorage.setItem(`lastStartRemind_${t.id}`, todayStr);
+          }
+        }
+
+        if (t.horario_fim) {
+          const [h, m] = t.horario_fim.split(':').map(Number);
+          const endMin = h * 60 + m;
+          const diff = endMin - currentTimeInMinutes;
+          const lastReminded = localStorage.getItem(`lastEndRemind_${t.id}`);
+          if (diff === 15 && lastReminded !== todayStr) {
+            const msg = `Sua tarefa "${t.titulo}" encerra em 15 minutos!`;
+            showToast(msg, "warning");
+            if ("Notification" in window && Notification.permission === "granted") {
+              new Notification("Hermes: Encerramento de Tarefa", { body: msg });
+            }
+            localStorage.setItem(`lastEndRemind_${t.id}`, todayStr);
+          }
+        }
+      });
     }, 10000); // Check every 10 seconds to ensure we don't miss the minute
     return () => clearInterval(interval);
-  }, [appSettings.notifications]);
+  }, [appSettings.notifications, tarefas]);
 
   // Data-driven Notifications (Budget, Overdue, PGC)
   useEffect(() => {
@@ -3118,9 +3314,10 @@ const App: React.FC = () => {
   const [isImportPlanOpen, setIsImportPlanOpen] = useState(false);
   const [isCompletedTasksOpen, setIsCompletedTasksOpen] = useState(false);
   const [brainstormIdeas, setBrainstormIdeas] = useState<BrainstormIdea[]>([]);
-  const [isProcessingIdea, setIsProcessingIdea] = useState(false);
   const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | null>(null);
   const [isBrainstormingAddingText, setIsBrainstormingAddingText] = useState(false);
+  const [convertingIdea, setConvertingIdea] = useState<BrainstormIdea | null>(null);
+  const [isSystemSelectorOpen, setIsSystemSelectorOpen] = useState(false);
 
   const handleUpdateTarefa = async (id: string, updates: Partial<Tarefa>) => {
     try {
@@ -3172,50 +3369,6 @@ const App: React.FC = () => {
     }
   };
 
-  const handleAudioReady = async (blob: Blob, base64: string, url: string) => {
-    if (isProcessingIdea) return;
-    setIsProcessingIdea(true);
-    showToast("Transcrevendo áudio...", "info");
-
-    try {
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      if (!apiKey || apiKey === 'PLACEHOLDER_API_KEY') {
-        showToast("Erro: Configure a VITE_GEMINI_API_KEY no arquivo .env.local", "error");
-        setIsProcessingIdea(false);
-        return;
-      }
-
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-
-      const result = await model.generateContent([
-        {
-          inlineData: {
-            mimeType: blob.type,
-            data: base64
-          }
-        },
-        { text: "Transcreva o áudio acima exatamente como falado, fazendo apenas as correções ortográficas e de pontuação necessárias. Não resuma, não interprete e não adicione nenhum texto além da transcrição." },
-      ]);
-
-      const response = await result.response;
-      const text = response.text();
-
-      await addDoc(collection(db, 'brainstorm_ideas'), {
-        text: text || "Transcrição vazia",
-        audioUrl: url,
-        timestamp: new Date().toISOString(),
-        status: 'active'
-      });
-
-      showToast("Ideia processada e salva!", "success");
-    } catch (err) {
-      console.error("Erro no processamento Gemini:", err);
-      showToast("Erro ao transcrever áudio.", "error");
-    } finally {
-      setIsProcessingIdea(false);
-    }
-  };
 
   const handleUpdateIdea = async (id: string, text: string) => {
     try {
@@ -3225,6 +3378,24 @@ const App: React.FC = () => {
       console.error(err);
       showToast("Erro ao atualizar ideia.", "error");
     }
+  };
+
+  const handleFinalizeIdeaConversion = async (sistemaId: string) => {
+    if (!convertingIdea) return;
+    const unit = unidades.find(u => u.id === sistemaId);
+    if (!unit) return;
+
+    await handleCreateTarefa({
+      titulo: convertingIdea.text,
+      categoria: unit.nome,
+      data_limite: new Date().toISOString().split('T')[0],
+      status: 'em andamento'
+    });
+
+    await handleDeleteIdea(convertingIdea.id);
+    setIsSystemSelectorOpen(false);
+    setConvertingIdea(null);
+    showToast("Ideia convertida em Log com sucesso!", "success");
   };
 
   const handleUpdateSistema = async (id: string, updates: Partial<Sistema>) => {
@@ -3800,8 +3971,8 @@ const App: React.FC = () => {
 
       {/* Menu Inicial (Home) */}
       {activeModule === 'home' && (
-        <div className="min-h-screen flex flex-col items-center justify-center p-4 md:p-8">
-          <div className="max-w-6xl w-full">
+        <div className="min-h-screen flex flex-col items-center justify-center p-0 md:p-8">
+          <div className="max-w-6xl w-full px-0 md:px-4">
             {/* Logo e Título */}
             <div className="flex justify-end p-4 md:absolute md:top-12 md:right-12 gap-3">
               <div className="relative">
@@ -3860,7 +4031,7 @@ const App: React.FC = () => {
 
             {/* Cards dos Módulos */}
             {/* Cards dos Módulos */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 md:gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-0 md:gap-6">
 
               {/* Card Dashboard */}
               <button
@@ -3868,7 +4039,7 @@ const App: React.FC = () => {
                   setActiveModule('dashboard');
                   setViewMode('dashboard');
                 }}
-                className="group bg-white border-2 border-slate-200 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-indigo-500 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden"
+                className="group bg-white border border-slate-200 md:border-2 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-indigo-500 hover:z-10 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden -ml-px -mt-px md:m-0"
               >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                 <div className="relative z-10">
@@ -3894,7 +4065,7 @@ const App: React.FC = () => {
                   setActiveModule('acoes');
                   setViewMode('gallery');
                 }}
-                className="group bg-white border-2 border-slate-200 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-blue-500 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden"
+                className="group bg-white border border-slate-200 md:border-2 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-blue-500 hover:z-10 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden -ml-px -mt-px md:m-0"
               >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                 <div className="relative z-10">
@@ -3921,7 +4092,7 @@ const App: React.FC = () => {
                   setActiveModule('financeiro');
                   setViewMode('finance');
                 }}
-                className="group bg-white border-2 border-slate-200 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-emerald-500 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden"
+                className="group bg-white border border-slate-200 md:border-2 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-emerald-500 hover:z-10 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden -ml-px -mt-px md:m-0"
               >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                 <div className="relative z-10">
@@ -3947,7 +4118,7 @@ const App: React.FC = () => {
                   setActiveModule('saude');
                   setViewMode('saude');
                 }}
-                className="group bg-white border-2 border-slate-200 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-rose-500 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden"
+                className="group bg-white border border-slate-200 md:border-2 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-rose-500 hover:z-10 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden -ml-px -mt-px md:m-0"
               >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                 <div className="relative z-10">
@@ -3974,7 +4145,7 @@ const App: React.FC = () => {
                   setViewMode('ferramentas');
                   setActiveFerramenta(null);
                 }}
-                className="group bg-white border-2 border-slate-200 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-amber-500 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden"
+                className="group bg-white border border-slate-200 md:border-2 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-amber-500 hover:z-10 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden -ml-px -mt-px md:m-0"
               >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                 <div className="relative z-10">
@@ -4001,7 +4172,7 @@ const App: React.FC = () => {
                   setActiveModule('acoes');
                   setViewMode('sistemas-dev');
                 }}
-                className="group bg-white border-2 border-slate-200 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-violet-500 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden"
+                className="group bg-white border border-slate-200 md:border-2 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-violet-500 hover:z-10 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden -ml-px -mt-px md:m-0"
               >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                 <div className="relative z-10">
@@ -4338,6 +4509,7 @@ const App: React.FC = () => {
                       onDateChange={setCalendarDate}
                       onTaskClick={setSelectedTask}
                       onViewModeChange={setCalendarViewMode}
+                      onTaskUpdate={handleUpdateTarefa}
                     />
                   ) : (
                     <>
@@ -4560,12 +4732,14 @@ const App: React.FC = () => {
               ) : viewMode === 'ferramentas' ? (
                 <FerramentasView
                   ideas={brainstormIdeas}
-                  onAudioReady={handleAudioReady}
                   onDeleteIdea={handleDeleteIdea}
                   onArchiveIdea={handleArchiveIdea}
                   onAddTextIdea={handleAddTextIdea}
                   onUpdateIdea={handleUpdateIdea}
-                  isProcessing={isProcessingIdea}
+                  onConvertToLog={(idea) => {
+                    setConvertingIdea(idea);
+                    setIsSystemSelectorOpen(true);
+                  }}
                   activeTool={activeFerramenta}
                   setActiveTool={setActiveFerramenta}
                   isAddingText={isBrainstormingAddingText}
@@ -5201,6 +5375,7 @@ const App: React.FC = () => {
           (taskModalMode === 'execute' || (taskModalMode === 'default' && selectedTask.categoria === 'CLC')) ? (
             <TaskExecutionView
               task={selectedTask}
+              tarefas={tarefas}
               onSave={handleUpdateTarefa}
               onClose={() => setSelectedTask(null)}
             />
@@ -5420,6 +5595,36 @@ const App: React.FC = () => {
           </div>
         )
       }
+
+      {isSystemSelectorOpen && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95">
+            <div className="p-8 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="text-xl font-black text-slate-900">Selecionar Sistema</h3>
+              <button onClick={() => setIsSystemSelectorOpen(false)} className="p-2 hover:bg-slate-100 rounded-full">
+                <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="p-8 space-y-3 max-h-[400px] overflow-y-auto custom-scrollbar">
+              {unidades.filter(u => u.nome.startsWith('SISTEMA:')).map(sistema => (
+                <button
+                  key={sistema.id}
+                  onClick={() => handleFinalizeIdeaConversion(sistema.id)}
+                  className="w-full text-left p-4 rounded-2xl border-2 border-slate-100 hover:border-violet-500 hover:bg-violet-50 transition-all flex items-center gap-3 group"
+                >
+                  <div className="w-10 h-10 bg-slate-100 group-hover:bg-violet-500 group-hover:text-white rounded-xl flex items-center justify-center transition-colors">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+                  </div>
+                  <span className="font-bold text-slate-700 group-hover:text-violet-700">{sistema.nome.replace('SISTEMA:', '').trim()}</span>
+                </button>
+              ))}
+              {unidades.filter(u => u.nome.startsWith('SISTEMA:')).length === 0 && (
+                <p className="text-center text-slate-400 py-8 italic text-sm">Nenhum sistema cadastrado.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
