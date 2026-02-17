@@ -126,8 +126,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
             <div className="bg-slate-50 px-6 py-3 rounded-2xl border border-slate-100 flex flex-col items-center">
                 <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Saldo Atual</span>
-                <span className={`text-xl font-black ${currentMonthIncome - currentMonthObligations >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
-                    R$ {(currentMonthIncome - currentMonthObligations).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                <span className={`text-xl font-black ${currentBudget - currentMonthTotalSpent >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
+                    R$ {(currentBudget - currentMonthTotalSpent).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                 </span>
             </div>
         </div>

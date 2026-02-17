@@ -1,14 +1,13 @@
-/**
- * Script para armazenar credenciais OAuth do Google Tasks no Firestore
- * Execute UMA VEZ antes de fazer deploy das Cloud Functions
- */
+import admin from 'firebase-admin';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const admin = require('firebase-admin');
-const fs = require('fs');
-const path = require('path');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Inicializa Firebase Admin
-const serviceAccount = require('../firebase_service_account_key.json');
+const serviceAccount = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'firebase_service_account_key.json'), 'utf8'));
 
 admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)

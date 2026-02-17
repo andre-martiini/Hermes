@@ -162,24 +162,19 @@ def sync_google_tasks_push(service, sync_ref, logs):
         log_to_firestore(sync_ref, logs, f"ERRO PUSH: {e}")
 
 def sync_google_calendar(service, sync_ref, logs):
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     db = get_db()
     try:
         log_to_firestore(sync_ref, logs, "Sincronizando Google Calendar...", True)
-        now = datetime.utcnow().isoformat() + 'Z'
         # Busca eventos dos próximos 30 dias e dos últimos 7 dias
-        time_min = (datetime.utcnow() - timedelta(days=7)).isoformat() + 'Z'
-        time_max = (datetime.utcnow() + timedelta(days=30)).isoformat() + 'Z'
+        time_min = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat().replace('+00:00', 'Z')
+        time_max = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat().replace('+00:00', 'Z')
 
         events_result = service.events().list(
             calendarId='primary', timeMin=time_min, timeMax=time_max,
             singleEvents=True, orderBy='startTime'
         ).execute()
         events = events_result.get('items', [])
-
-        # Limpa eventos antigos no Firestore para manter sincronizado
-        # (Opcional: deletar todos e reinserir ou fazer merge inteligente)
-        # Vamos fazer um merge por ID
 
         count = 0
         for event in events:
