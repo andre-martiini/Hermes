@@ -150,6 +150,125 @@ const PgcMiniTaskCard = React.memo(({ task, onClick }: { task: Tarefa, onClick?:
   );
 });
 
+const PgcAuditRow = ({
+  item,
+  entregaEntity,
+  atividadesRelacionadas,
+  tarefasRelacionadas,
+  onDrop,
+  onUnlinkTarefa,
+  onSelectTask
+}: {
+  item: PlanoTrabalhoItem,
+  entregaEntity?: EntregaInstitucional,
+  atividadesRelacionadas: AtividadeRealizada[],
+  tarefasRelacionadas: Tarefa[],
+  onDrop: (tarefaId: string) => void,
+  onUnlinkTarefa: (tarefaId: string, entregaId: string) => void,
+  onSelectTask: (t: Tarefa) => void
+}) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const entregaId = entregaEntity?.id;
+
+  return (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        e.currentTarget.classList.add('bg-blue-50');
+      }}
+      onDragLeave={(e) => {
+        e.currentTarget.classList.remove('bg-blue-50');
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.currentTarget.classList.remove('bg-blue-50');
+        const tarefaId = e.dataTransfer.getData('tarefaId');
+        if (tarefaId) onDrop(tarefaId);
+      }}
+      className="group border-b border-slate-100 hover:bg-slate-50 transition-all p-8 flex flex-col gap-4"
+    >
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-3 mb-1">
+          <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">{item.unidade}</span>
+          {entregaEntity?.processo_sei && (
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest font-mono border border-slate-200 px-1.5 rounded">
+              SEI: {entregaEntity.processo_sei}
+            </span>
+          )}
+        </div>
+        <h4 className="text-xl font-black text-slate-900 tracking-tight leading-snug">
+          {item.entrega}
+        </h4>
+        <p className="text-xs font-medium text-slate-500 leading-relaxed mt-1">
+          {item.descricao}
+        </p>
+      </div>
+
+      <div className="flex items-center justify-between mt-2">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase">
+            <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
+            {atividadesRelacionadas.length + tarefasRelacionadas.length} Ações vinculadas
+          </div>
+        </div>
+
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-[9px] font-black uppercase tracking-wider hover:bg-slate-50 transition-colors flex items-center gap-2 shadow-sm"
+        >
+          {isExpanded ? 'Ocultar Ações' : 'Ações Relacionadas'}
+          <svg className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+      </div>
+
+      {isExpanded && (
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 animate-in slide-in-from-top-2 duration-300">
+          {atividadesRelacionadas.map(at => (
+            <div key={at.id} className="p-4 rounded-2xl bg-white border border-slate-200 shadow-sm hover:border-slate-300 transition-all">
+              <p className="text-[8px] font-black text-slate-400 uppercase mb-1">{formatDate(at.data_inicio)}</p>
+              <p className="text-[11px] font-bold text-slate-700 leading-tight">{at.descricao_atividade}</p>
+              <div className="mt-2 text-[8px] font-black text-blue-500 uppercase tracking-widest">Atividade PGD</div>
+            </div>
+          ))}
+          {tarefasRelacionadas.map(t => (
+            <div
+              key={t.id}
+              onClick={() => onSelectTask(t)}
+              className="p-4 rounded-2xl bg-blue-50/30 border border-blue-100 shadow-sm hover:border-blue-300 hover:bg-blue-50/50 transition-all cursor-pointer group/task relative pr-10"
+            >
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (entregaId) onUnlinkTarefa(t.id, entregaId);
+                }}
+                className="absolute top-3 right-3 p-1.5 text-slate-300 hover:text-rose-500 hover:bg-white rounded-lg opacity-0 group-hover/task:opacity-100 transition-all shadow-sm"
+                title="Desvincular"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[8px] font-black text-blue-500 uppercase tracking-widest">Tarefa Geral</p>
+                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">{formatDate(t.data_limite)}</p>
+              </div>
+              <p className="text-xs font-bold text-slate-800 leading-snug group-hover/task:text-blue-700 transition-colors">{t.titulo}</p>
+            </div>
+          ))}
+          {atividadesRelacionadas.length === 0 && tarefasRelacionadas.length === 0 && (
+            <div className="col-span-full py-8 text-center bg-slate-50/50 rounded-2xl border-2 border-dashed border-slate-100">
+              <p className="text-slate-300 text-[10px] font-black uppercase tracking-widest italic">Nenhuma ação vinculada a esta entrega</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // --- Components ---
 
 const CalendarView = ({
@@ -1529,7 +1648,7 @@ const TaskCreateModal = ({ unidades, onSave, onClose }: { unidades: { id: string
   );
 };
 
-const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose }: { unidades: { id: string, nome: string }[], task: Tarefa, onSave: (id: string, updates: Partial<Tarefa>) => void, onDelete: (id: string) => void, onClose: () => void }) => {
+const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas = [] }: { unidades: { id: string, nome: string }[], task: Tarefa, onSave: (id: string, updates: Partial<Tarefa>) => void, onDelete: (id: string) => void, onClose: () => void, pgcEntregas?: EntregaInstitucional[] }) => {
   const [formData, setFormData] = useState({
     titulo: task.titulo,
     data_inicio: task.data_inicio || (task.data_criacao ? task.data_criacao.split('T')[0] : ''),
@@ -1539,7 +1658,8 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose }: { unidades
     categoria: task.categoria || 'NÃO CLASSIFICADA',
     notas: task.notas || '',
     acompanhamento: task.acompanhamento || [],
-    is_single_day: !!task.is_single_day
+    is_single_day: !!task.is_single_day,
+    entregas_relacionadas: task.entregas_relacionadas || []
   });
 
   const [newFollowUp, setNewFollowUp] = useState('');
@@ -1647,6 +1767,24 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose }: { unidades
                 ))}
               </select>
             </div>
+
+            {/* Opção de Vínculo com PGC */}
+            {(formData.categoria === 'CLC' || formData.categoria === 'ASSISTÊNCIA' || formData.categoria === 'ASSISTÊNCIA ESTUDANTIL') && (
+              <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                <label className="text-[10px] font-black text-blue-600 uppercase tracking-widest pl-1">Vincular ação ao PGC</label>
+                <select
+                  value={formData.entregas_relacionadas[0] || ''}
+                  onChange={e => setFormData({ ...formData, entregas_relacionadas: e.target.value ? [e.target.value] : [] })}
+                  className="w-full bg-blue-50 border-blue-100 rounded-2xl px-6 py-4 text-xs font-bold text-blue-900 focus:ring-2 focus:ring-blue-500 transition-all"
+                >
+                  <option value="">Não vinculado ao PGC</option>
+                  {pgcEntregas.map(e => (
+                    <option key={e.id} value={e.id}>{e.entrega}</option>
+                  ))}
+                </select>
+                <p className="text-[9px] font-medium text-blue-400 pl-1 uppercase tracking-wider">Selecione a entrega institucional correspondente</p>
+              </div>
+            )}
           </div>
 
           {/* New Acompanhamento Section */}
@@ -4929,91 +5067,23 @@ const App: React.FC = () => {
                               const tarefasRelacionadas: Tarefa[] = entregaId ? pgcTasks.filter(t => t.entregas_relacionadas?.includes(entregaId)) : [];
 
                               return (
-                                <div
+                                <PgcAuditRow
                                   key={index}
-                                  onDragOver={(e) => {
-                                    e.preventDefault();
-                                    e.dataTransfer.dropEffect = 'copy';
-                                    e.currentTarget.classList.add('bg-blue-50');
-                                  }}
-                                  onDragLeave={(e) => {
-                                    e.currentTarget.classList.remove('bg-blue-50');
-                                  }}
-                                  onDrop={async (e) => {
-                                    e.preventDefault();
-                                    e.currentTarget.classList.remove('bg-blue-50');
-                                    const tarefaId = e.dataTransfer.getData('tarefaId');
-                                    if (tarefaId) {
-                                      let targetId = entregaId;
-                                      if (!targetId) {
-                                        const newId = await handleCreateEntregaFromPlan(item);
-                                        if (newId) targetId = newId;
-                                      }
-                                      if (targetId) handleLinkTarefa(tarefaId, targetId);
+                                  item={item}
+                                  entregaEntity={entregaEntity}
+                                  atividadesRelacionadas={atividadesRelacionadas}
+                                  tarefasRelacionadas={tarefasRelacionadas}
+                                  onDrop={async (tarefaId) => {
+                                    let targetId = entregaId;
+                                    if (!targetId) {
+                                      const newId = await handleCreateEntregaFromPlan(item);
+                                      if (newId) targetId = newId;
                                     }
+                                    if (targetId) handleLinkTarefa(tarefaId, targetId);
                                   }}
-                                  className={`group flex flex-col md:flex-row hover:bg-slate-50 transition-all border-l-4 border-transparent hover:border-blue-500`}
-                                >
-                                  <div className="md:w-1/2 p-6 border-b md:border-b-0 md:border-r border-slate-100 bg-slate-50/30">
-                                    <div className="flex flex-col gap-1 mb-3">
-                                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{item.origem}</span>
-                                      <div className="flex items-center gap-3">
-                                        <span className="text-xs font-black text-blue-600 uppercase tracking-tight">{item.unidade}</span>
-                                        {entregaEntity?.processo_sei && <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest font-mono border border-slate-200 px-1.5 rounded">SEI: {entregaEntity.processo_sei}</span>}
-                                      </div>
-                                    </div>
-
-                                    <h4 className="text-sm font-black text-slate-900 tracking-tight leading-snug group-hover:text-blue-700 transition-all">{item.entrega}</h4>
-
-                                    {item.descricao && (
-                                      <p className="mt-2 text-[10px] font-medium text-slate-500 italic leading-relaxed line-clamp-3 bg-white p-2 rounded-lg border border-slate-100 shadow-sm">
-                                        {item.descricao}
-                                      </p>
-                                    )}
-
-                                    <div className="flex items-center gap-2 mt-4 text-[10px] font-black text-slate-500">
-                                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
-                                      {atividadesRelacionadas.length + tarefasRelacionadas.length} Registros
-                                    </div>
-                                  </div>
-                                  <div className="flex-1 p-6">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                      {atividadesRelacionadas.map(at => (
-                                        <div key={at.id} className="p-3 rounded-xl bg-slate-50 border border-slate-100 hover:border-slate-200 transition-all">
-                                          <p className="text-[8px] font-black text-slate-400 uppercase mb-1">{formatDate(at.data_inicio)}</p>
-                                          <p className="text-[11px] font-bold text-slate-700 leading-tight">{at.descricao_atividade}</p>
-                                        </div>
-                                      ))}
-                                      {tarefasRelacionadas.map(t => (
-                                        <div
-                                          key={t.id}
-                                          className="p-3 rounded-xl bg-blue-50/20 border border-blue-100 hover:border-blue-300 hover:bg-blue-50/40 transition-all cursor-default group/task relative pr-8"
-                                        >
-                                          <button
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              if (entregaId) handleUnlinkTarefa(t.id, entregaId);
-                                            }}
-                                            className="absolute top-2 right-2 p-1 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-full opacity-0 group-hover/task:opacity-100 transition-all"
-                                            title="Desvincular"
-                                          >
-                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-                                          </button>
-                                          <div className="flex items-center justify-between mb-1">
-                                            <p className="text-[8px] font-black text-blue-400 uppercase">Tarefa Geral</p>
-                                            <p className="text-[8px] font-black text-slate-400 uppercase">{formatDate(t.data_limite)}</p>
-                                          </div>
-                                          <p className="text-[11px] font-bold text-slate-700 leading-tight group-hover/task:text-blue-700">{t.titulo}</p>
-                                        </div>
-                                      ))}
-                                      {atividadesRelacionadas.length === 0 && tarefasRelacionadas.length === 0 && (
-                                        <div className="col-span-full py-4">
-                                          <p className="text-slate-300 text-[8px] font-black uppercase tracking-widest italic">Aguardando registros...</p>
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
+                                  onUnlinkTarefa={handleUnlinkTarefa}
+                                  onSelectTask={setSelectedTask}
+                                />
                               );
                             });
                           })()}
@@ -5099,6 +5169,7 @@ const App: React.FC = () => {
               onSave={handleUpdateTarefa}
               onDelete={handleDeleteTarefa}
               onClose={() => setSelectedTask(null)}
+              pgcEntregas={pgcEntregas}
             />
           )
         )
