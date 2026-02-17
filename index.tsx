@@ -8,6 +8,7 @@ import { db } from './firebase';
 import { collection, onSnapshot, query, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import FinanceView from './FinanceView';
+import DashboardView from './DashboardView';
 
 
 type SortOption = 'date-asc' | 'date-desc' | 'priority-high' | 'priority-low';
@@ -2699,8 +2700,8 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeModule, setActiveModule] = useState<'home' | 'acoes' | 'financeiro' | 'ferramentas' | 'saude'>('home');
-  const [viewMode, setViewMode] = useState<'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'plano-trabalho' | 'ferramentas' | 'finance' | 'saude'>('gallery');
+  const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude'>('home');
+  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'finance' | 'saude' | 'ferramentas' | 'sistemas-dev'>('gallery');
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
 
   // Modal Mode State
@@ -3721,7 +3722,33 @@ const App: React.FC = () => {
 
             {/* Cards dos Módulos */}
             {/* Cards dos Módulos */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 md:gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 md:gap-6">
+
+              {/* Card Dashboard */}
+              <button
+                onClick={() => {
+                  setActiveModule('dashboard');
+                  setViewMode('dashboard');
+                }}
+                className="group bg-white border-2 border-slate-200 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-indigo-500 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
+                <div className="relative z-10">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-indigo-600 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300 text-white font-black">
+                    <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                  <h2 className="text-lg md:text-xl font-black text-slate-900 mb-2 group-hover:text-indigo-600 transition-colors">Dashboard</h2>
+                  <p className="text-slate-500 text-xs font-medium leading-relaxed">Visão geral de todos os módulos</p>
+                  <div className="mt-6 flex items-center gap-2 text-indigo-600 font-black text-xs uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span>Acessar</span>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
+                </div>
+              </button>
 
               {/* Card Ações */}
               <button
@@ -3965,7 +3992,7 @@ const App: React.FC = () => {
                     <img src="/logo.png" alt="Hermes" className="w-9 h-9 object-contain" />
                     <h1 className="text-xl font-black tracking-tighter text-slate-900">HERMES</h1>
                   </div>
-                  {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && activeModule !== 'financeiro' && activeModule !== 'saude' && (
+                  {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
                     <nav className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
                       <button
                         onClick={() => {
@@ -4015,10 +4042,12 @@ const App: React.FC = () => {
                         onClose={() => setIsNotificationCenterOpen(false)}
                       />
                     </div>
-                    <div className="hidden lg:flex items-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 w-64 group focus-within:ring-2 focus-within:ring-blue-500 focus-within:bg-white transition-all">
-                      <svg className="w-4 h-4 text-slate-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                      <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none outline-none text-xs font-bold text-slate-900 w-full" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-                    </div>
+                    {activeModule !== 'dashboard' && (
+                      <div className="hidden lg:flex items-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 w-64 group focus-within:ring-2 focus-within:ring-blue-500 focus-within:bg-white transition-all">
+                        <svg className="w-4 h-4 text-slate-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                        <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none outline-none text-xs font-bold text-slate-900 w-full" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                      </div>
+                    )}
                     <button
                       onClick={handleSync}
                       className={`bg-white border border-slate-200 text-slate-700 px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-3 shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative`}
@@ -4043,7 +4072,7 @@ const App: React.FC = () => {
             {isMobileMenuOpen && (
               <div className="md:hidden border-t border-slate-200 bg-white">
                 <nav className="flex flex-col p-4 space-y-2">
-                  {viewMode !== 'ferramentas' && (
+                  {viewMode !== 'ferramentas' && activeModule !== 'dashboard' && (
                     <>
                       <button
                         onClick={() => {
@@ -4087,7 +4116,20 @@ const App: React.FC = () => {
           <div className="max-w-[1400px] mx-auto w-full px-0 md:px-8 py-6">
             {/* Painel de Estatísticas e Filtros - APENAS NA VISÃO GERAL */}
             <main className="mb-20">
-              {viewMode === 'gallery' ? (
+              {viewMode === 'dashboard' ? (
+                <DashboardView
+                  tarefas={tarefas}
+                  financeTransactions={financeTransactions}
+                  financeSettings={financeSettings}
+                  fixedBills={fixedBills}
+                  incomeEntries={incomeEntries}
+                  healthWeights={healthWeights}
+                  unidades={unidades}
+                  sistemasDetalhes={sistemasDetalhes}
+                  currentMonth={currentMonth}
+                  currentYear={currentYear}
+                />
+              ) : viewMode === 'gallery' ? (
                 <>
                   <div className="flex flex-col md:flex-row items-center justify-between mb-8 gap-4 px-4 md:px-0">
                     {/* Layout & Sort Controls */}
