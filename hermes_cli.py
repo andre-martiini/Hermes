@@ -5,7 +5,7 @@ import re
 import os
 import sys
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import firebase_admin
 from firebase_admin import credentials, firestore
 import time
@@ -176,16 +176,26 @@ def sync_google_tasks(db, log_list=None, sync_ref=None):
                     db.collection('tarefas').document(doc_id).update({'google_id': g_id, 'data_atualizacao': g_updated, 'notas': gt.get('notes', '')})
                     log(f"[*] VINCULADA: {title}")
                     continue
+                
                 h_updated = t_old.get('data_atualizacao', '')
-                if h_updated and g_updated and h_updated >= g_updated: continue
-                has_changed = (t_old.get('status') != h_status or t_old.get('titulo') != title or t_old.get('data_limite') != deadline)
+                
+                # O prazo final deve sempre refletir o do Google (Fonte da Verdade)
+                deadline_changed = t_old.get('data_limite') != deadline
+                
+                # Se o prazo mudou, ignoramos o shortcut do timestamp para garantir a sincronia
+                if h_updated and g_updated and h_updated >= g_updated and not deadline_changed: continue
+                
+                has_changed = (t_old.get('status') != h_status or t_old.get('titulo') != title or deadline_changed)
                 if has_changed:
                     db.collection('tarefas').document(doc_id).update({
                         'titulo': title, 'data_limite': deadline, 'status': h_status,
                         'data_conclusao': gt.get('completed'), 'data_atualizacao': g_updated,
                         'notas': gt.get('notes', ''), 'sync_status': 'updated', 'last_sync_date': datetime.now().isoformat()
                     })
-                    log(f"[-] ATUALIZADA: {title}")
+                    if deadline_changed:
+                        log(f"[#] PRAZO SINCRONIZADO: {title} ({deadline})")
+                    else:
+                        log(f"[-] ATUALIZADA: {title}")
             else:
                 db.collection('tarefas').add({
                     'titulo': title, 'projeto': 'GOOGLE', 'data_limite': deadline,
@@ -214,9 +224,8 @@ def sync_google_calendar(db, log_list=None, sync_ref=None):
         service = get_calendar_service()
         log("Sincronizando Google Calendar...")
 
-        # Busca eventos dos próximos 30 dias e dos últimos 7 dias
-        time_min = (datetime.utcnow() - timedelta(days=7)).isoformat() + 'Z'
-        time_max = (datetime.utcnow() + timedelta(days=30)).isoformat() + 'Z'
+        time_min = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat().replace('+00:00', 'Z')
+        time_max = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat().replace('+00:00', 'Z')
 
         events_result = service.events().list(
             calendarId='primary', timeMin=time_min, timeMax=time_max,
