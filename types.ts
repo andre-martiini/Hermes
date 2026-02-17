@@ -233,11 +233,75 @@ export type SistemaStatus = 'ideia' | 'prototipacao' | 'desenvolvimento' | 'test
 export interface Sistema {
     id: string;
     nome: string;
+    tecnologia_base?: string;
+    repositorio_principal?: string;
+    objetivo_negocio?: string;
     status: SistemaStatus;
     link_documentacao?: string;
     link_google_ai_studio?: string;
     link_github?: string;
     link_hospedado?: string;
+    data_criacao: string;
+    data_atualizacao: string;
+}
+
+export type WorkItemPhase = 'planejamento' | 'prototipagem' | 'desenvolvimento' | 'testes' | 'producao';
+export type WorkItemPriority = 'Baixa' | 'Média' | 'Alta' | 'Crítica';
+export type WorkItemOccurrenceType = 'Bug' | 'Melhoria';
+export type WorkItemOccurrenceStatus = 'Pendente' | 'Corrigido' | 'Ignorado';
+export type WorkItemEnvironment = 'Local' | 'Staging';
+
+export interface QualityLog {
+    id: string;
+    tipo: WorkItemOccurrenceType;
+    descricao: string;
+    evidencia?: string;
+    status: WorkItemOccurrenceStatus;
+    ambiente: WorkItemEnvironment;
+    data_criacao: string;
+}
+
+export interface WorkItemAudit {
+    id: string;
+    timestamp: string;
+    usuario: string;
+    fase_anterior: WorkItemPhase | 'novo';
+    fase_nova: WorkItemPhase;
+}
+
+export interface WorkItem {
+    id: string;
+    sistema_id: string;
+    fase: WorkItemPhase;
+
+    // 1. Planejamento
+    titulo: string;
+    descricao: string;
+    origem_demanda: string;
+    prioridade: WorkItemPriority;
+    link_referencia?: string;
+
+    // 2. Prototipagem
+    link_ai_studio?: string;
+    definicoes_arquitetura?: string;
+    validado: boolean;
+
+    // 3. Desenvolvimento
+    branch_versao?: string;
+    divida_tecnica: boolean;
+    divida_tecnica_descricao?: string;
+    dependencias?: string;
+
+    // 4. Testes
+    log_qualidade: QualityLog[];
+
+    // 5. Produção
+    versao_release?: string;
+    data_publicacao?: string;
+    changelog?: string;
+
+    // Transversal
+    historico: WorkItemAudit[];
     data_criacao: string;
     data_atualizacao: string;
 }

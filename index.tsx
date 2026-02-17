@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Tarefa, Status, EntregaInstitucional, Prioridade, AtividadeRealizada, Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento, BrainstormIdea, FinanceTransaction, FinanceGoal, FinanceSettings, FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight, DailyHabits, HealthSettings, Notification, AppSettings, formatDate, Sistema, SistemaStatus } from './types';
+import { Tarefa, Status, EntregaInstitucional, Prioridade, AtividadeRealizada, Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento, BrainstormIdea, FinanceTransaction, FinanceGoal, FinanceSettings, FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight, DailyHabits, HealthSettings, Notification, AppSettings, formatDate, Sistema, SistemaStatus, WorkItem, WorkItemPhase, WorkItemPriority, QualityLog, WorkItemAudit } from './types';
 import HealthView from './HealthView';
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
 import { db } from './firebase';
@@ -1464,6 +1464,549 @@ const detectAreaFromTitle = (titulo: string): Categoria => {
   return 'GERAL';
 };
 
+const WORK_ITEM_PHASES: { id: WorkItemPhase, label: string, icon: string }[] = [
+  { id: 'planejamento', label: '1. Ideia', icon: '💡' },
+  { id: 'prototipagem', label: '2. Protótipo', icon: '🎨' },
+  { id: 'desenvolvimento', label: '3. Código', icon: '💻' },
+  { id: 'testes', label: '4. Testes', icon: '🧪' },
+  { id: 'producao', label: '5. Entrega', icon: '🚀' }
+];
+
+const WorkItemModal = ({
+  workItem,
+  onSave,
+  onDelete,
+  onClose
+}: {
+  workItem: WorkItem,
+  onSave: (id: string, updates: Partial<WorkItem>) => void,
+  onDelete: (id: string) => void,
+  onClose: () => void
+}) => {
+  const [formData, setFormData] = useState<WorkItem>(workItem);
+  const [activePhaseTab, setActivePhaseTab] = useState<WorkItemPhase>(workItem.fase);
+  const isFrozen = workItem.fase === 'producao';
+
+  const handlePhaseChange = (newPhase: WorkItemPhase) => {
+    if (isFrozen && newPhase !== 'producao') {
+      // Allow viewing other tabs even if frozen, but they remain read-only
+      setActivePhaseTab(newPhase);
+      return;
+    }
+    setFormData(prev => ({ ...prev, fase: newPhase }));
+    setActivePhaseTab(newPhase);
+  };
+
+  const handleAddQualityLog = () => {
+    const newLog: QualityLog = {
+      id: Math.random().toString(36).substr(2, 9),
+      tipo: 'Bug',
+      descricao: '',
+      status: 'Pendente',
+      ambiente: 'Local',
+      data_criacao: new Date().toISOString()
+    };
+    setFormData(prev => ({ ...prev, log_qualidade: [...prev.log_qualidade, newLog] }));
+  };
+
+  const updateQualityLog = (logId: string, updates: Partial<QualityLog>) => {
+    setFormData(prev => ({
+      ...prev,
+      log_qualidade: prev.log_qualidade.map(log => log.id === logId ? { ...log, ...updates } : log)
+    }));
+  };
+
+  const removeQualityLog = (logId: string) => {
+    setFormData(prev => ({
+      ...prev,
+      log_qualidade: prev.log_qualidade.filter(log => log.id !== logId)
+    }));
+  };
+
+  return (
+    <div className="fixed inset-0 z-[160] flex items-center justify-center p-0 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="bg-white w-full h-full md:h-auto md:max-w-4xl md:max-h-[90vh] flex flex-col rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+        {/* Header */}
+        <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex flex-col gap-6 flex-shrink-0">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-3 mb-1">
+                <span className="bg-violet-100 text-violet-700 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest">Item de Trabalho</span>
+                {isFrozen && <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest">Congelado (Produção)</span>}
+              </div>
+              <h3 className="text-2xl font-black text-slate-900 tracking-tight">{workItem.titulo || 'Novo Item'}</h3>
+            </div>
+            <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+              <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+
+          {/* Phase Stepper Tabs */}
+          <div className="flex bg-slate-200/50 p-1 rounded-2xl overflow-x-auto scrollbar-hide">
+            {WORK_ITEM_PHASES.map((phase) => {
+              const isActive = activePhaseTab === phase.id;
+              const isCurrentPhase = formData.fase === phase.id;
+              return (
+                <button
+                  key={phase.id}
+                  onClick={() => handlePhaseChange(phase.id)}
+                  className={`flex-1 min-w-[120px] py-3 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${isActive ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  <span className={isActive ? 'opacity-100' : 'opacity-40'}>{phase.icon}</span>
+                  {phase.label}
+                  {isCurrentPhase && <div className="w-1.5 h-1.5 bg-violet-500 rounded-full"></div>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar bg-white">
+          {activePhaseTab === 'planejamento' && (
+            <div className="space-y-6 animate-in slide-in-from-right-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Título</label>
+                  <input
+                    type="text"
+                    disabled={isFrozen}
+                    value={formData.titulo}
+                    onChange={(e) => setFormData({ ...formData, titulo: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-violet-500 outline-none transition-all disabled:opacity-60"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Origem da Demanda</label>
+                  <input
+                    type="text"
+                    disabled={isFrozen}
+                    value={formData.origem_demanda}
+                    onChange={(e) => setFormData({ ...formData, origem_demanda: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-violet-500 outline-none transition-all disabled:opacity-60"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Prioridade</label>
+                  <select
+                    disabled={isFrozen}
+                    value={formData.prioridade}
+                    onChange={(e) => setFormData({ ...formData, prioridade: e.target.value as WorkItemPriority })}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-violet-500 outline-none transition-all disabled:opacity-60"
+                  >
+                    <option value="Baixa">Baixa</option>
+                    <option value="Média">Média</option>
+                    <option value="Alta">Alta</option>
+                    <option value="Crítica">Crítica</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Link de Referência (Docs/Drive)</label>
+                  <input
+                    type="text"
+                    disabled={isFrozen}
+                    value={formData.link_referencia || ''}
+                    onChange={(e) => setFormData({ ...formData, link_referencia: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-violet-500 outline-none transition-all disabled:opacity-60"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Descrição do Problema / Funcionalidade</label>
+                <textarea
+                  rows={4}
+                  disabled={isFrozen}
+                  value={formData.descricao}
+                  onChange={(e) => setFormData({ ...formData, descricao: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-violet-500 outline-none transition-all resize-none disabled:opacity-60"
+                />
+              </div>
+            </div>
+          )}
+
+          {activePhaseTab === 'prototipagem' && (
+            <div className="space-y-6 animate-in slide-in-from-right-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Link AI Studio / Prompt</label>
+                  <input
+                    type="text"
+                    disabled={isFrozen}
+                    value={formData.link_ai_studio || ''}
+                    onChange={(e) => setFormData({ ...formData, link_ai_studio: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-violet-500 outline-none transition-all disabled:opacity-60"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Status de Validação</label>
+                  <div className="flex items-center gap-4 h-[56px]">
+                    <button
+                      disabled={isFrozen}
+                      onClick={() => setFormData({ ...formData, validado: !formData.validado })}
+                      className={`flex-1 h-full rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${formData.validado ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-400'}`}
+                    >
+                      {formData.validado ? '✓ Estrutura Validada' : 'Pendente de Validação'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Definições de Arquitetura (BD, Libs, etc)</label>
+                <textarea
+                  rows={6}
+                  disabled={isFrozen}
+                  value={formData.definicoes_arquitetura || ''}
+                  onChange={(e) => setFormData({ ...formData, definicoes_arquitetura: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-mono text-slate-700 focus:ring-2 focus:ring-violet-500 outline-none transition-all resize-none disabled:opacity-60"
+                  placeholder="Ex: Utilizar Firestore para persistência e React Hook Form para validação..."
+                />
+              </div>
+            </div>
+          )}
+
+          {activePhaseTab === 'desenvolvimento' && (
+            <div className="space-y-6 animate-in slide-in-from-right-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Branch / Versão Dev</label>
+                  <input
+                    type="text"
+                    disabled={isFrozen}
+                    value={formData.branch_versao || ''}
+                    onChange={(e) => setFormData({ ...formData, branch_versao: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-mono text-slate-900 focus:ring-2 focus:ring-violet-500 outline-none transition-all disabled:opacity-60"
+                    placeholder="feat/nova-funcionalidade"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Dívida Técnica</label>
+                  <button
+                    disabled={isFrozen}
+                    onClick={() => setFormData({ ...formData, divida_tecnica: !formData.divida_tecnica })}
+                    className={`w-full h-[56px] rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${formData.divida_tecnica ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-400'}`}
+                  >
+                    {formData.divida_tecnica ? '⚠ Possui Dívida Técnica' : 'Sem Dívida Técnica'}
+                  </button>
+                </div>
+              </div>
+              {formData.divida_tecnica && (
+                <div className="space-y-2 animate-in zoom-in-95">
+                  <label className="text-[10px] font-black text-amber-600 uppercase tracking-widest pl-1">Descrição da Dívida Técnica</label>
+                  <textarea
+                    rows={3}
+                    disabled={isFrozen}
+                    value={formData.divida_tecnica_descricao || ''}
+                    onChange={(e) => setFormData({ ...formData, divida_tecnica_descricao: e.target.value })}
+                    className="w-full bg-amber-50 border border-amber-100 rounded-2xl px-6 py-4 text-sm font-medium text-amber-900 focus:ring-2 focus:ring-amber-500 outline-none transition-all resize-none disabled:opacity-60"
+                    placeholder="O que precisará ser revisto futuramente?"
+                  />
+                </div>
+              )}
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Dependências / Impactos</label>
+                <textarea
+                  rows={3}
+                  disabled={isFrozen}
+                  value={formData.dependencias || ''}
+                  onChange={(e) => setFormData({ ...formData, dependencias: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-violet-500 outline-none transition-all resize-none disabled:opacity-60"
+                  placeholder="Quais outros módulos podem ser impactados?"
+                />
+              </div>
+            </div>
+          )}
+
+          {activePhaseTab === 'testes' && (
+            <div className="space-y-6 animate-in slide-in-from-right-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
+                  <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
+                  Log de Qualidade
+                </h4>
+                {!isFrozen && (
+                  <button
+                    onClick={handleAddQualityLog}
+                    className="bg-violet-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-violet-700 transition-all shadow-md shadow-violet-100"
+                  >
+                    + Registrar Ocorrência
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                {formData.log_qualidade.map((log) => (
+                  <div key={log.id} className="bg-slate-50 rounded-[2rem] border border-slate-100 overflow-hidden">
+                    <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <div className="space-y-2">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Tipo</label>
+                        <select
+                          disabled={isFrozen}
+                          value={log.tipo}
+                          onChange={(e) => updateQualityLog(log.id, { tipo: e.target.value as any })}
+                          className="w-full bg-white border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-violet-500"
+                        >
+                          <option value="Bug">Bug (Erro)</option>
+                          <option value="Melhoria">Melhoria (Ajuste)</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Ambiente</label>
+                        <select
+                          disabled={isFrozen}
+                          value={log.ambiente}
+                          onChange={(e) => updateQualityLog(log.id, { ambiente: e.target.value as any })}
+                          className="w-full bg-white border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-violet-500"
+                        >
+                          <option value="Local">Ambiente Local</option>
+                          <option value="Staging">Staging / Homologação</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Status</label>
+                        <select
+                          disabled={isFrozen}
+                          value={log.status}
+                          onChange={(e) => updateQualityLog(log.id, { status: e.target.value as any })}
+                          className={`w-full bg-white border-none rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest ${log.status === 'Corrigido' ? 'text-emerald-600' : log.status === 'Pendente' ? 'text-rose-500' : 'text-slate-400'}`}
+                        >
+                          <option value="Pendente">Pendente</option>
+                          <option value="Corrigido">Corrigido</option>
+                          <option value="Ignorado">Ignorado</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="px-6 pb-6 space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">O que aconteceu vs O que deveria acontecer</label>
+                        <textarea
+                          disabled={isFrozen}
+                          value={log.descricao}
+                          onChange={(e) => updateQualityLog(log.id, { descricao: e.target.value })}
+                          className="w-full bg-white border-none rounded-xl px-4 py-3 text-xs font-medium text-slate-700 focus:ring-2 focus:ring-violet-500 resize-none"
+                          rows={2}
+                        />
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <div className="flex-1 space-y-2">
+                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Evidência (Logs / Links)</label>
+                          <input
+                            type="text"
+                            disabled={isFrozen}
+                            value={log.evidencia || ''}
+                            onChange={(e) => updateQualityLog(log.id, { evidencia: e.target.value })}
+                            className="w-full bg-white border-none rounded-xl px-4 py-2 text-xs font-mono text-slate-600"
+                            placeholder="URL do print ou log de erro..."
+                          />
+                        </div>
+                        {!isFrozen && (
+                          <button
+                            onClick={() => removeQualityLog(log.id)}
+                            className="mt-6 p-2 text-rose-300 hover:text-rose-600 hover:bg-white rounded-xl transition-all"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {formData.log_qualidade.length === 0 && (
+                  <div className="py-12 text-center bg-slate-50 rounded-[2rem] border-2 border-dashed border-slate-100">
+                    <p className="text-slate-300 font-black text-[10px] uppercase tracking-[0.2em] italic">Nenhuma ocorrência registrada</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activePhaseTab === 'producao' && (
+            <div className="space-y-6 animate-in slide-in-from-right-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Versão da Release</label>
+                  <input
+                    type="text"
+                    value={formData.versao_release || ''}
+                    onChange={(e) => setFormData({ ...formData, versao_release: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black text-slate-900 focus:ring-2 focus:ring-violet-500 outline-none"
+                    placeholder="ex: v1.0.2"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Data de Publicação</label>
+                  <input
+                    type="date"
+                    value={formData.data_publicacao || ''}
+                    onChange={(e) => setFormData({ ...formData, data_publicacao: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-violet-500 outline-none"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Notas da Versão (Changelog Público)</label>
+                <textarea
+                  rows={8}
+                  value={formData.changelog || ''}
+                  onChange={(e) => setFormData({ ...formData, changelog: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-violet-500 outline-none resize-none"
+                  placeholder="Consolide o que foi entregue nesta versão..."
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Audit Log / History (Always visible at the bottom) */}
+          <div className="mt-12 pt-8 border-t border-slate-100">
+            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Histórico de Alterações</h4>
+            <div className="space-y-3">
+              {(formData.historico || []).slice().reverse().map((audit) => (
+                <div key={audit.id} className="flex items-center gap-3 text-[10px] font-medium text-slate-500">
+                  <span className="font-mono text-slate-300 shrink-0">{new Date(audit.timestamp).toLocaleString('pt-BR')}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-black text-slate-700 uppercase">{audit.usuario}</span>
+                    <span className="text-slate-300">moveu de</span>
+                    <span className="bg-slate-100 px-2 py-0.5 rounded uppercase font-bold">{audit.fase_anterior}</span>
+                    <span className="text-slate-300">para</span>
+                    <span className="bg-violet-100 text-violet-700 px-2 py-0.5 rounded uppercase font-bold">{audit.fase_nova}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-4 flex-shrink-0">
+          <button
+            onClick={() => {
+              if (window.confirm("Deseja realmente excluir este item?")) {
+                onDelete(workItem.id);
+                onClose();
+              }
+            }}
+            className="px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-rose-600 hover:bg-rose-50 transition-all border border-rose-100"
+          >
+            Excluir
+          </button>
+          <div className="flex-1"></div>
+          <button
+            onClick={onClose}
+            className="px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={() => {
+              if (!formData.titulo) {
+                alert("O título é obrigatório.");
+                return;
+              }
+              onSave(workItem.id, formData);
+              onClose();
+            }}
+            className="flex-1 bg-slate-900 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all"
+          >
+            Salvar Alterações
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const WorkItemCreateModal = ({ sistemaId, onSave, onClose }: { sistemaId: string, onSave: (data: Partial<WorkItem>) => void, onClose: () => void }) => {
+  const [formData, setFormData] = useState({
+    titulo: '',
+    descricao: '',
+    origem_demanda: '',
+    prioridade: 'Média' as WorkItemPriority,
+    sistema_id: sistemaId
+  });
+
+  return (
+    <div className="fixed inset-0 z-[160] flex items-center justify-center p-0 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="bg-white w-full h-full md:h-auto md:max-w-xl rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+        <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+          <h3 className="text-2xl font-black text-slate-900 tracking-tight">Novo Item de Trabalho</h3>
+          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+            <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div className="p-8 space-y-6">
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Título da Funcionalidade</label>
+            <input
+              type="text"
+              autoFocus
+              value={formData.titulo}
+              onChange={e => setFormData({ ...formData, titulo: e.target.value })}
+              className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-violet-500 transition-all"
+              placeholder="O que será desenvolvido?"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Origem da Demanda</label>
+              <input
+                type="text"
+                value={formData.origem_demanda}
+                onChange={e => setFormData({ ...formData, origem_demanda: e.target.value })}
+                className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-violet-500"
+                placeholder="Quem solicitou?"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Prioridade</label>
+              <select
+                value={formData.prioridade}
+                onChange={e => setFormData({ ...formData, prioridade: e.target.value as WorkItemPriority })}
+                className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-violet-500"
+              >
+                <option value="Baixa">Baixa</option>
+                <option value="Média">Média</option>
+                <option value="Alta">Alta</option>
+                <option value="Crítica">Crítica</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Descrição</label>
+            <textarea
+              rows={3}
+              value={formData.descricao}
+              onChange={e => setFormData({ ...formData, descricao: e.target.value })}
+              className="w-full bg-slate-100 border-none rounded-2xl px-6 py-4 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-violet-500 transition-all resize-none"
+              placeholder="Detalhes da demanda..."
+            />
+          </div>
+        </div>
+
+        <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-4">
+          <button onClick={onClose} className="flex-1 px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all">Cancelar</button>
+          <button
+            onClick={() => {
+              if (!formData.titulo) {
+                alert("Preencha o título.");
+                return;
+              }
+              onSave(formData);
+              onClose();
+            }}
+            className="flex-1 bg-violet-600 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-violet-700 transition-all"
+          >
+            Criar Item
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const TaskCreateModal = ({ unidades, onSave, onClose }: { unidades: { id: string, nome: string }[], onSave: (data: Partial<Tarefa>) => void, onClose: () => void }) => {
   const [formData, setFormData] = useState({
     titulo: '',
@@ -2615,7 +3158,11 @@ const App: React.FC = () => {
 
   // Systems State
   const [sistemasDetalhes, setSistemasDetalhes] = useState<Sistema[]>([]);
+  const [workItems, setWorkItems] = useState<WorkItem[]>([]);
   const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
+  const [selectedWorkItem, setSelectedWorkItem] = useState<WorkItem | null>(null);
+  const [isWorkItemCreateModalOpen, setIsWorkItemCreateModalOpen] = useState(false);
+  const [workItemViewMode, setWorkItemViewMode] = useState<'list' | 'kanban'>('kanban');
 
 
 
@@ -2623,6 +3170,10 @@ const App: React.FC = () => {
   useEffect(() => {
     const unsubSistemas = onSnapshot(collection(db, 'sistemas_detalhes'), (snapshot) => {
       setSistemasDetalhes(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Sistema)));
+    });
+
+    const unsubWorkItems = onSnapshot(collection(db, 'sistemas_work_items'), (snapshot) => {
+      setWorkItems(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as WorkItem)));
     });
 
     const unsubTransactions = onSnapshot(collection(db, 'finance_transactions'), (snapshot) => {
@@ -3238,6 +3789,65 @@ const App: React.FC = () => {
     } catch (err) {
       console.error(err);
       showToast("Erro ao atualizar sistema.", "error");
+    }
+  };
+
+  const handleCreateWorkItem = async (workItem: Partial<WorkItem>) => {
+    try {
+      await addDoc(collection(db, 'sistemas_work_items'), {
+        ...workItem,
+        fase: 'planejamento',
+        data_criacao: new Date().toISOString(),
+        data_atualizacao: new Date().toISOString(),
+        historico: [{
+          id: Math.random().toString(36).substr(2, 9),
+          timestamp: new Date().toISOString(),
+          usuario: 'Usuário',
+          fase_anterior: 'novo',
+          fase_nova: 'planejamento'
+        }],
+        log_qualidade: []
+      } as any);
+      showToast("Item de trabalho criado!", "success");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao criar item.", "error");
+    }
+  };
+
+  const handleUpdateWorkItem = async (id: string, updates: Partial<WorkItem>) => {
+    try {
+      // If phase changed, add to history
+      const currentItem = workItems.find(w => w.id === id);
+      if (updates.fase && currentItem && updates.fase !== currentItem.fase) {
+        const audit: WorkItemAudit = {
+          id: Math.random().toString(36).substr(2, 9),
+          timestamp: new Date().toISOString(),
+          usuario: 'Usuário',
+          fase_anterior: currentItem.fase,
+          fase_nova: updates.fase as WorkItemPhase
+        };
+        updates.historico = [...(currentItem.historico || []), audit];
+      }
+
+      await updateDoc(doc(db, 'sistemas_work_items', id), {
+        ...updates,
+        data_atualizacao: new Date().toISOString()
+      } as any);
+      showToast("Item de trabalho atualizado!", "success");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao atualizar item.", "error");
+    }
+  };
+
+  const handleDeleteWorkItem = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'sistemas_work_items', id));
+      showToast("Item de trabalho removido.", "info");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao remover item.", "error");
     }
   };
 
@@ -4676,12 +5286,7 @@ const App: React.FC = () => {
                             data_atualizacao: new Date().toISOString()
                           };
                           const systemName = unit.nome.replace('SISTEMA:', '').trim();
-                          const ajustesPendentes = tarefas.filter(t =>
-                            t.status !== 'excluído' &&
-                            t.status !== 'concluído' &&
-                            (t.titulo.toLowerCase().includes(systemName.toLowerCase()) ||
-                              (t.projeto && t.projeto.toLowerCase().includes(systemName.toLowerCase())))
-                          ).length;
+                          const ajustesPendentes = workItems.filter(w => w.sistema_id === unit.id && w.fase !== 'producao').length;
 
                           return (
                             <button
@@ -4741,12 +5346,8 @@ const App: React.FC = () => {
                       };
 
                       const systemName = unit.nome.replace('SISTEMA:', '').trim();
-                      const ajustes = tarefas.filter(t =>
-                        t.status !== 'excluído' &&
-                        t.status !== 'concluído' &&
-                        (t.titulo.toLowerCase().includes(systemName.toLowerCase()) ||
-                          (t.projeto && t.projeto.toLowerCase().includes(systemName.toLowerCase())))
-                      );
+                      const systemWorkItems = workItems.filter(w => w.sistema_id === unit.id);
+                      const ajustesPendentesCount = systemWorkItems.filter(w => w.fase !== 'producao').length;
 
                       const steps: SistemaStatus[] = ['ideia', 'prototipacao', 'desenvolvimento', 'testes', 'producao'];
                       const currentStepIndex = steps.indexOf(sysDetails.status);
@@ -4773,12 +5374,16 @@ const App: React.FC = () => {
                                     <span className="text-[10px] font-black uppercase tracking-widest">{sysDetails.status}</span>
                                   </div>
                                   <h2 className="text-4xl md:text-5xl font-black tracking-tight">{systemName}</h2>
-                                  <p className="text-slate-400 text-sm font-bold max-w-lg">
-                                    Gerencie o ciclo de vida deste sistema, desde a concepção até a produção.
-                                  </p>
+                                  <textarea
+                                    value={sysDetails.objetivo_negocio || ''}
+                                    onChange={(e) => handleUpdateSistema(unit.id, { objetivo_negocio: e.target.value })}
+                                    placeholder="Descrição do objetivo do negócio (ex: Otimizar processos de...)"
+                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm font-medium text-slate-300 outline-none placeholder:text-slate-600 focus:ring-1 focus:ring-violet-500 mt-4 resize-none transition-all"
+                                    rows={2}
+                                  />
                                 </div>
                                 <div className="text-right">
-                                  <div className="text-3xl font-black text-violet-400">{ajustes.length}</div>
+                                  <div className="text-3xl font-black text-violet-400">{ajustesPendentesCount}</div>
                                   <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Ajustes Pendentes</div>
                                 </div>
                               </div>
@@ -4832,6 +5437,46 @@ const App: React.FC = () => {
                                   </h4>
 
                                   <div className="space-y-6">
+                                    {/* Tecnologia Base */}
+                                    <div className="group bg-slate-50 p-4 rounded-2xl border border-slate-100 hover:border-violet-200 hover:shadow-md transition-all">
+                                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-2 mb-2">
+                                        <svg className="w-4 h-4 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+                                        Tecnologia Base
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={sysDetails.tecnologia_base || ''}
+                                        onChange={(e) => handleUpdateSistema(unit.id, { tecnologia_base: e.target.value })}
+                                        placeholder="Ex: React, Python, Flutter..."
+                                        className="w-full bg-white border-none rounded-xl px-0 py-1 text-sm font-bold text-slate-700 outline-none placeholder:text-slate-300 focus:ring-0"
+                                      />
+                                    </div>
+
+                                    {/* Repositório Principal */}
+                                    <div className="group bg-slate-900 p-4 rounded-2xl border border-slate-800 hover:border-slate-600 hover:shadow-md transition-all">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide flex items-center gap-2">
+                                          <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" /></svg>
+                                          Repositório
+                                        </label>
+                                        {sysDetails.repositorio_principal && <span className="w-2 h-2 rounded-full bg-emerald-400"></span>}
+                                      </div>
+                                      <div className="flex gap-2">
+                                        <input
+                                          type="text"
+                                          value={sysDetails.repositorio_principal || ''}
+                                          onChange={(e) => handleUpdateSistema(unit.id, { repositorio_principal: e.target.value })}
+                                          placeholder="github.com/usuario/projeto"
+                                          className="w-full bg-slate-800 border-none rounded-xl px-0 py-1 text-sm font-bold text-white outline-none placeholder:text-slate-600 focus:ring-0"
+                                        />
+                                        {sysDetails.repositorio_principal && (
+                                          <a href={sysDetails.repositorio_principal} target="_blank" rel="noreferrer" className="shrink-0 p-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors">
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                          </a>
+                                        )}
+                                      </div>
+                                    </div>
+
                                     {/* Documentação */}
                                     <div className="group bg-slate-50 p-4 rounded-2xl border border-slate-100 hover:border-violet-200 hover:shadow-md transition-all">
                                       <div className="flex items-center justify-between mb-2">
@@ -4941,79 +5586,159 @@ const App: React.FC = () => {
                                 </div>
                               </div>
 
-                              {/* Coluna 2 e 3: Backlog de Ajustes */}
-                              <div className="lg:col-span-2">
-                                <div className="bg-white border border-slate-200 rounded-[2rem] overflow-hidden flex flex-col h-full shadow-sm hover:shadow-md transition-shadow">
-                                  <div className="p-6 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                      <div className="p-2 bg-amber-100 text-amber-600 rounded-lg">
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
+                              {/* Coluna 2 e 3: Itens de Trabalho */}
+                              <div className="lg:col-span-2 space-y-6">
+                                <div className="bg-white border border-slate-200 rounded-[2.5rem] overflow-hidden flex flex-col min-h-[600px] shadow-sm">
+                                  {/* Header da Seção de Itens */}
+                                  <div className="p-8 border-b border-slate-100 bg-slate-50 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                                    <div className="flex items-center gap-4">
+                                      <div className="p-3 bg-violet-600 text-white rounded-2xl shadow-lg shadow-violet-100">
+                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
                                       </div>
                                       <div>
-                                        <h4 className="text-sm font-black text-slate-900">Backlog de Ajustes</h4>
-                                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
-                                          Sincronizado via Google Tasks
-                                        </p>
+                                        <h4 className="text-xl font-black text-slate-900 tracking-tight">Itens de Trabalho</h4>
+                                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em]">Fluxo de Desenvolvimento</p>
                                       </div>
                                     </div>
-                                    <div className="flex gap-2">
-                                      <span className="bg-amber-100 text-amber-700 text-[10px] font-black uppercase px-3 py-1.5 rounded-lg border border-amber-200">
-                                        {ajustes.filter(t => t.prioridade === 'alta').length} Prioritários
-                                      </span>
-                                      <span className="bg-slate-200 text-slate-600 text-[10px] font-black uppercase px-3 py-1.5 rounded-lg">
-                                        Total: {ajustes.length}
-                                      </span>
+
+                                    <div className="flex items-center gap-4">
+                                      <div className="bg-white p-1 rounded-xl border border-slate-200 flex shadow-sm">
+                                        <button
+                                          onClick={() => setWorkItemViewMode('kanban')}
+                                          className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${workItemViewMode === 'kanban' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
+                                        >
+                                          Quadro
+                                        </button>
+                                        <button
+                                          onClick={() => setWorkItemViewMode('list')}
+                                          className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${workItemViewMode === 'list' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
+                                        >
+                                          Lista
+                                        </button>
+                                      </div>
+                                      <button
+                                        onClick={() => setIsWorkItemCreateModalOpen(true)}
+                                        className="bg-violet-600 text-white px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-violet-700 transition-all active:scale-95"
+                                      >
+                                        + Novo Item
+                                      </button>
                                     </div>
                                   </div>
 
-                                  <div className="flex-1 overflow-y-auto p-2 bg-slate-50/50 min-h-[400px] max-h-[600px] custom-scrollbar">
-                                    {ajustes.length > 0 ? (
-                                      <div className="space-y-2">
-                                        {ajustes.map(task => (
-                                          <div key={task.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-violet-300 transition-all group relative overflow-hidden flex items-start gap-4">
-                                            <div className={`w-1 h-full absolute left-0 top-0 bottom-0 ${task.prioridade === 'alta' ? 'bg-rose-500' : task.prioridade === 'média' ? 'bg-amber-500' : 'bg-green-500'}`}></div>
-                                            
-                                            <button 
-                                              onClick={() => setSelectedTask(task)}
-                                              className="flex-1 text-left"
-                                            >
-                                              <div className="flex justify-between items-start mb-1">
-                                                <h5 className="text-sm font-bold text-slate-800 leading-tight group-hover:text-violet-700 transition-colors line-clamp-2">{task.titulo}</h5>
-                                                {task.sync_status === 'new' && (
-                                                  <span className="text-[8px] font-black uppercase bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded ml-2 shrink-0">Novo</span>
+                                  {/* Visualização Kanban */}
+                                  {workItemViewMode === 'kanban' ? (
+                                    <div className="flex-1 overflow-x-auto p-8 bg-slate-50/50">
+                                      <div className="flex gap-6 h-full min-h-[500px]">
+                                        {WORK_ITEM_PHASES.map(phase => {
+                                          const phaseItems = workItems.filter(w => w.sistema_id === unit.id && w.fase === phase.id);
+                                          return (
+                                            <div key={phase.id} className="flex-shrink-0 w-80 flex flex-col gap-4">
+                                              <div className="flex items-center justify-between px-2">
+                                                <div className="flex items-center gap-2">
+                                                  <span className="text-lg">{phase.icon}</span>
+                                                  <h5 className="text-[11px] font-black text-slate-900 uppercase tracking-widest">{phase.label.split('. ')[1]}</h5>
+                                                </div>
+                                                <span className="bg-white border border-slate-200 text-slate-400 px-2 py-0.5 rounded-full text-[10px] font-black">{phaseItems.length}</span>
+                                              </div>
+
+                                              <div className="flex-1 space-y-3">
+                                                {phaseItems.map(item => (
+                                                  <div
+                                                    key={item.id}
+                                                    onClick={() => setSelectedWorkItem(item)}
+                                                    className="bg-white p-5 rounded-[1.5rem] border border-slate-200 shadow-sm hover:shadow-md hover:border-violet-400 transition-all cursor-pointer group animate-in fade-in slide-in-from-bottom-2"
+                                                  >
+                                                    <div className="flex justify-between items-start mb-3">
+                                                      <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-wider ${
+                                                        item.prioridade === 'Crítica' ? 'bg-rose-100 text-rose-600' :
+                                                        item.prioridade === 'Alta' ? 'bg-orange-100 text-orange-600' :
+                                                        item.prioridade === 'Média' ? 'bg-blue-100 text-blue-600' :
+                                                        'bg-slate-100 text-slate-500'
+                                                      }`}>
+                                                        {item.prioridade}
+                                                      </span>
+                                                      <span className="text-[8px] font-black text-slate-300 uppercase">{formatDate(item.data_atualizacao.split('T')[0])}</span>
+                                                    </div>
+                                                    <h6 className="text-sm font-bold text-slate-800 leading-tight group-hover:text-violet-600 transition-colors line-clamp-2">{item.titulo}</h6>
+                                                    <p className="text-[11px] text-slate-400 mt-2 line-clamp-2 leading-relaxed">{item.descricao}</p>
+
+                                                    {item.log_qualidade?.length > 0 && (
+                                                      <div className="mt-4 pt-4 border-t border-slate-50 flex items-center gap-3">
+                                                        <span className="text-[9px] font-black text-rose-500 uppercase flex items-center gap-1">
+                                                          <div className="w-1.5 h-1.5 bg-rose-500 rounded-full"></div>
+                                                          {item.log_qualidade.filter(l => l.tipo === 'Bug' && l.status === 'Pendente').length} Bugs
+                                                        </span>
+                                                        <span className="text-[9px] font-black text-blue-500 uppercase flex items-center gap-1">
+                                                          <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
+                                                          {item.log_qualidade.filter(l => l.tipo === 'Melhoria' && l.status === 'Pendente').length} Melhorias
+                                                        </span>
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                ))}
+                                                {phaseItems.length === 0 && (
+                                                  <div className="h-24 border-2 border-dashed border-slate-200 rounded-[1.5rem] flex items-center justify-center">
+                                                    <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest italic">Vazio</p>
+                                                  </div>
                                                 )}
                                               </div>
-                                              <div className="flex items-center gap-4 mt-2">
-                                                <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1 bg-slate-50 px-2 py-1 rounded-lg border border-slate-100">
-                                                  📅 {formatDate(task.data_limite)}
-                                                </span>
-                                                <span className={`text-[10px] font-bold uppercase tracking-wider ${task.status === 'em andamento' ? 'text-blue-500' : 'text-slate-400'}`}>
-                                                  {task.status}
-                                                </span>
-                                              </div>
-                                            </button>
-
-                                            <button 
-                                              onClick={() => setSelectedTask(task)}
-                                              className="p-2 bg-slate-50 text-slate-400 rounded-lg hover:bg-violet-100 hover:text-violet-600 transition-colors"
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    /* Visualização Lista */
+                                    <div className="flex-1 overflow-y-auto">
+                                      <table className="w-full text-left">
+                                        <thead className="bg-slate-50 border-b border-slate-100">
+                                          <tr>
+                                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Funcionalidade</th>
+                                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Fase Atual</th>
+                                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Prioridade</th>
+                                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Última Alt.</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-50">
+                                          {workItems.filter(w => w.sistema_id === unit.id).map(item => (
+                                            <tr
+                                              key={item.id}
+                                              onClick={() => setSelectedWorkItem(item)}
+                                              className="hover:bg-slate-50 transition-colors cursor-pointer group"
                                             >
-                                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                            </button>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <div className="h-full flex flex-col items-center justify-center text-slate-400 py-20">
-                                        <div className="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-                                          <svg className="w-10 h-10 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                        </div>
-                                        <p className="text-xs font-black uppercase tracking-widest text-slate-300">Nenhum ajuste pendente</p>
-                                        <p className="text-[10px] text-slate-400 mt-2 max-w-[200px] text-center">
-                                          Tarefas no Google Tasks com "{systemName}" no título aparecerão aqui.
-                                        </p>
-                                      </div>
-                                    )}
-                                  </div>
+                                              <td className="px-8 py-6">
+                                                <div className="text-sm font-bold text-slate-800 group-hover:text-violet-600 transition-colors">{item.titulo}</div>
+                                                <div className="text-[11px] text-slate-400 mt-1 line-clamp-1">{item.descricao}</div>
+                                              </td>
+                                              <td className="px-8 py-6">
+                                                <span className="bg-violet-50 text-violet-700 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border border-violet-100">
+                                                  {item.fase}
+                                                </span>
+                                              </td>
+                                              <td className="px-8 py-6">
+                                                <span className={`text-[10px] font-black uppercase tracking-widest ${
+                                                  item.prioridade === 'Crítica' ? 'text-rose-600' :
+                                                  item.prioridade === 'Alta' ? 'text-orange-600' :
+                                                  item.prioridade === 'Média' ? 'text-blue-600' :
+                                                  'text-slate-400'
+                                                }`}>
+                                                  {item.prioridade}
+                                                </span>
+                                              </td>
+                                              <td className="px-8 py-6 text-xs font-medium text-slate-400 tabular-nums">
+                                                {formatDate(item.data_atualizacao.split('T')[0])}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                          {workItems.filter(w => w.sistema_id === unit.id).length === 0 && (
+                                            <tr>
+                                              <td colSpan={4} className="py-20 text-center text-slate-300 font-black uppercase tracking-widest italic">Nenhum item registrado</td>
+                                            </tr>
+                                          )}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -5192,6 +5917,27 @@ const App: React.FC = () => {
             unidades={unidades}
             onSave={handleCreateTarefa}
             onClose={() => setIsCreateModalOpen(false)}
+          />
+        )
+      }
+
+      {
+        isWorkItemCreateModalOpen && selectedSystemId && (
+          <WorkItemCreateModal
+            sistemaId={selectedSystemId}
+            onSave={handleCreateWorkItem}
+            onClose={() => setIsWorkItemCreateModalOpen(false)}
+          />
+        )
+      }
+
+      {
+        selectedWorkItem && (
+          <WorkItemModal
+            workItem={selectedWorkItem}
+            onSave={handleUpdateWorkItem}
+            onDelete={handleDeleteWorkItem}
+            onClose={() => setSelectedWorkItem(null)}
           />
         )
       }
