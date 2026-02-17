@@ -290,6 +290,15 @@ const DayView = ({
   const [currentTime, setCurrentTime] = useState(new Date());
   const sidebarRef = useRef<HTMLDivElement>(null);
 
+  const [confirmAction, setConfirmAction] = useState<{ taskId: string, newStatus: 'em andamento' | 'concluído' } | null>(null);
+
+  const confirmTaskCompletion = () => {
+    if (confirmAction) {
+      onTaskUpdate(confirmAction.taskId, { status: confirmAction.newStatus });
+      setConfirmAction(null);
+    }
+  };
+
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 60000);
     // Initial update
@@ -508,9 +517,10 @@ const DayView = ({
                       <button 
                         onClick={(e) => { 
                           e.stopPropagation(); 
-                          if(window.confirm(task.status === 'concluído' ? "Reabrir tarefa?" : "Concluir tarefa?")) {
-                            onTaskUpdate(task.id, { status: task.status === 'concluído' ? 'em andamento' : 'concluído' });
-                          }
+                          setConfirmAction({ 
+                            taskId: task.id, 
+                            newStatus: task.status === 'concluído' ? 'em andamento' : 'concluído' 
+                          });
                         }} 
                         className={`p-1 hover:bg-black/5 rounded ${task.status === 'concluído' ? 'text-emerald-600 bg-emerald-100' : 'text-slate-400 hover:text-emerald-600'}`} 
                         title={task.status === 'concluído' ? 'Reabrir' : 'Concluir'}
@@ -637,6 +647,15 @@ const CalendarView = ({
     }
     setDays(newDays);
   }, [currentDate, viewMode]);
+
+  const [confirmAction, setConfirmAction] = useState<{ taskId: string, newStatus: 'em andamento' | 'concluído' } | null>(null);
+
+  const confirmTaskCompletion = () => {
+    if (confirmAction) {
+      onTaskUpdate(confirmAction.taskId, { status: confirmAction.newStatus });
+      setConfirmAction(null);
+    }
+  };
 
   const tasksByDay = useMemo(() => {
     const map: Record<string, Tarefa[]> = {};
@@ -2864,14 +2883,18 @@ const TaskExecutionView = ({ task, tarefas, onSave, onClose }: { task: Tarefa, t
     onSave(task.id, { chat_gemini_url: chatUrl });
   };
 
-  const handleCompleteTask = () => {
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+
+  const handleCompleteTaskRequest = () => {
     if (isTimerRunning) {
       handleToggleTimer(); // Stop timer and save time
     }
-    if (window.confirm("Deseja realmente concluir esta tarefa?")) {
-      onSave(task.id, { status: 'concluído' });
-      onClose();
-    }
+    setIsConfirmModalOpen(true);
+  };
+
+  const confirmCompletion = () => {
+    onSave(task.id, { status: 'concluído' });
+    onClose();
   };
 
   return (
@@ -3011,7 +3034,7 @@ const TaskExecutionView = ({ task, tarefas, onSave, onClose }: { task: Tarefa, t
               {/* Status da Demanda no Canto */}
               <div className="absolute bottom-10 left-10 flex items-center gap-3">
                 <button
-                  onClick={handleCompleteTask}
+                  onClick={handleCompleteTaskRequest}
                   className={`px-6 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${task.status === 'concluído' ? 'bg-emerald-500 text-white' : 'bg-white/10 text-slate-400 hover:bg-white/20'
                     }`}
                 >
@@ -3019,6 +3042,30 @@ const TaskExecutionView = ({ task, tarefas, onSave, onClose }: { task: Tarefa, t
                 </button>
               </div>
             </div>
+
+            {/* Custom Modal for Task Completion */}
+            {isConfirmModalOpen && (
+              <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+                <div className="bg-[#111] border border-white/10 w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+                  <h3 className="text-white font-black text-lg mb-2">Concluir Tarefa?</h3>
+                  <p className="text-slate-400 text-xs mb-6">Confirma a conclusão da tarefa <strong>{task.titulo}</strong>?</p>
+                  <div className="flex gap-3">
+                    <button 
+                      onClick={() => setIsConfirmModalOpen(false)}
+                      className="flex-1 px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-white/5 transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                    <button 
+                      onClick={confirmCompletion}
+                      className="flex-1 bg-emerald-500 text-white px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-colors shadow-lg shadow-emerald-500/20"
+                    >
+                      Confirmar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Direita: Especialista e Histórico */}
             <div className="flex flex-col gap-6 overflow-hidden">
