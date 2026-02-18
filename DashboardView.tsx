@@ -19,10 +19,10 @@ const DashboardSection = ({ title, iconColor, children }: { title: string, iconC
     const [isExpanded, setIsExpanded] = useState(true);
 
     return (
-        <div className="bg-white p-6 md:p-8 rounded-none md:rounded-[2.5rem] border border-slate-200 shadow-lg h-full">
+        <div className="bg-white p-4 md:p-8 !rounded-none md:rounded-[2.5rem] border-b border-slate-100 md:border md:border-slate-200 shadow-none md:shadow-lg h-full transition-all">
             <button
                 onClick={() => setIsExpanded(!isExpanded)}
-                className="w-full text-xl font-black text-slate-900 mb-6 flex items-center justify-between group"
+                className="w-full text-sm md:text-xl font-black text-slate-900 mb-2 md:mb-6 flex items-center justify-between group"
             >
                 <div className="flex items-center gap-3">
                     <span className={`w-2 h-8 ${iconColor} rounded-full`}></span>
@@ -238,10 +238,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     }
 
     const CompositeCard = ({ title, value, delta, sparkData, isAlert }: CompositeCardProps) => (
-        <div className={`bg-white p-6 rounded-[2rem] border ${isAlert ? 'border-rose-200 bg-rose-50/30' : 'border-slate-200 shadow-sm'} flex flex-col justify-between h-full transition-all hover:shadow-md`}>
+        <div className={`bg-white p-4 md:p-6 !rounded-none md:rounded-[2rem] border-b ${isAlert ? 'border-rose-100 bg-rose-50/30' : 'border-slate-100 md:border-slate-200 shadow-none md:shadow-sm'} flex flex-col justify-between h-full transition-all`}>
             <div>
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{title}</p>
-                <div className={`text-2xl font-black ${isAlert ? 'text-rose-600' : 'text-slate-900'}`}>
+                <div className={`text-lg md:text-2xl font-black ${isAlert ? 'text-rose-600' : 'text-slate-900'}`}>
                     {value}
                 </div>
             </div>
@@ -255,13 +255,13 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     );
 
     return (
-        <div className="animate-in fade-in duration-700 space-y-8 pb-12">
+        <div className="animate-in fade-in duration-700 space-y-0 md:space-y-8 pb-12">
             {/* Header: SITUAÇÃO SITUACIONAL */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
-                <div className="lg:col-span-8 bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-0">
+                <div className="lg:col-span-8 bg-white p-6 md:p-8 !rounded-none md:rounded-[2.5rem] border-b border-slate-100 md:border md:border-slate-200 shadow-none md:shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                     <div className="space-y-1">
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Saldo Disponível do Mês</p>
-                        <div className={`text-[3.5rem] leading-none font-black tracking-tighter ${availableBalance < 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+                        <div className={`text-2xl md:text-[3.5rem] leading-none font-black tracking-tighter ${availableBalance < 0 ? 'text-rose-600' : 'text-slate-900'}`}>
                             R$ {availableBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </div>
                         <div className="flex items-center gap-2 mt-2">
@@ -274,11 +274,11 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                         </div>
                     </div>
 
-                    <div className="flex gap-4">
-                        <div className={`px-6 py-4 rounded-3xl border ${overdueActionsCount > 0 ? 'bg-rose-50 border-rose-100' : 'bg-slate-50 border-slate-100'} flex flex-col`}>
+                    <div className="flex gap-4 w-full md:w-auto">
+                        <div className={`flex-1 md:flex-none px-4 md:px-6 py-3 md:py-4 !rounded-none md:rounded-3xl border ${overdueActionsCount > 0 ? 'bg-rose-50 border-rose-100' : 'bg-slate-50 border-slate-100'} flex flex-col`}>
                             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Ações Imediatas</span>
                             <div className="flex items-baseline gap-2">
-                                <span className={`text-3xl font-black ${overdueActionsCount > 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+                                <span className={`text-xl md:text-3xl font-black ${overdueActionsCount > 0 ? 'text-rose-600' : 'text-slate-900'}`}>
                                     {overdueActionsCount + todayActionsCount}
                                 </span>
                                 {overdueActionsCount > 0 && (
@@ -289,17 +289,17 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                     </div>
                 </div>
 
-                <div className="lg:col-span-4 grid grid-cols-1 gap-4">
-                    <div className="bg-slate-900 p-6 rounded-[2.5rem] shadow-xl text-white flex flex-col justify-center">
+                <div className="lg:col-span-4 grid grid-cols-1 gap-0 md:gap-4">
+                    <div className="bg-slate-900 p-6 !rounded-none md:rounded-[2.5rem] shadow-none md:shadow-xl text-white flex flex-col justify-center border-b border-slate-800 md:border-none">
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Eficácia: Orçamento</p>
-                        <div className={`text-3xl font-black ${budgetPercent <= 100 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        <div className={`text-2xl md:text-3xl font-black ${budgetPercent <= 100 ? 'text-emerald-400' : 'text-rose-400'}`}>
                             {Math.max(0, 100 - budgetPercent).toFixed(1)}%
                         </div>
                         <p className="text-[9px] font-medium text-slate-500 uppercase">Economia Potencial</p>
                     </div>
-                    <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-xl flex flex-col justify-center">
+                    <div className="bg-white p-6 !rounded-none md:rounded-[2.5rem] border-b border-slate-100 md:border md:border-slate-200 shadow-none md:shadow-xl flex flex-col justify-center">
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Qualidade das Ações</p>
-                        <div className={`text-3xl font-black ${productivityEfficacy > 70 ? 'text-emerald-600' : productivityEfficacy > 40 ? 'text-amber-500' : 'text-rose-500'}`}>
+                        <div className={`text-xl md:text-3xl font-black ${productivityEfficacy > 70 ? 'text-emerald-600' : productivityEfficacy > 40 ? 'text-amber-500' : 'text-rose-500'}`}>
                             {productivityEfficacy.toFixed(0)}%
                         </div>
                         <p className="text-[9px] font-medium text-slate-400 uppercase">Impacto Real vs Volume</p>
@@ -307,32 +307,32 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-0">
                 {/* LADO ESQUERDO: Ação Imediata */}
-                <div className="lg:col-span-4 space-y-8">
+                <div className="lg:col-span-4 space-y-0">
                     <DashboardSection title="O que exige atenção agora" iconColor="bg-rose-500">
                         <div className="space-y-4">
                             {overdueActionsCount > 0 && (
-                                <div className="p-4 bg-rose-50 rounded-2xl border border-rose-100 flex items-center justify-between">
+                                <div className="p-4 bg-rose-50 !rounded-none md:rounded-2xl border-b md:border border-rose-100 flex items-center justify-between">
                                     <span className="text-sm font-bold text-rose-700">Ações Vencidas</span>
                                     <span className="bg-rose-600 text-white px-3 py-1 rounded-full text-xs font-black">{overdueActionsCount}</span>
                                 </div>
                             )}
                             {todayActionsCount > 0 && (
-                                <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 flex items-center justify-between">
+                                <div className="p-4 bg-amber-50 !rounded-none md:rounded-2xl border-b md:border border-amber-100 flex items-center justify-between">
                                     <span className="text-sm font-bold text-amber-700">Ações para Hoje</span>
                                     <span className="bg-amber-500 text-white px-3 py-1 rounded-full text-xs font-black">{todayActionsCount}</span>
                                 </div>
                             )}
                             {budgetPercent > 90 && (
-                                <div className="p-4 bg-rose-50 rounded-2xl border border-rose-100 flex items-center justify-between">
+                                <div className="p-4 bg-rose-50 !rounded-none md:rounded-2xl border-b md:border border-rose-100 flex items-center justify-between">
                                     <span className="text-sm font-bold text-rose-700">Risco de Orçamento</span>
                                     <span className="text-[10px] font-black text-rose-600 uppercase">Crítico</span>
                                 </div>
                             )}
                             {overdueActionsCount === 0 && todayActionsCount === 0 && budgetPercent <= 90 && (
                                 <div className="py-12 flex flex-col items-center text-center">
-                                    <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-4">
+                                    <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-none md:rounded-full flex items-center justify-center mb-4">
                                         <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                                     </div>
                                     <p className="text-sm font-bold text-slate-500">Tudo sob controle!</p>
@@ -349,17 +349,17 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                             <span className="text-slate-600 uppercase">{cat.name}</span>
                                             <span className="text-slate-900">{cat.percent.toFixed(1)}%</span>
                                         </div>
-                                        <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                        <div className="h-1.5 bg-slate-100 rounded-none md:rounded-full overflow-hidden">
                                             <div className="h-full bg-slate-400" style={{ width: `${cat.percent}%` }} />
                                         </div>
                                     </div>
                                 ))}
                             </div>
 
-                            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                            <div className="p-4 bg-slate-50 rounded-none md:rounded-2xl border-b md:border border-slate-100">
                                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Volatilidade de Gastos (7d)</p>
                                 <div className="flex items-center justify-between">
-                                    <span className={`text-lg font-black ${spendingVolatility > 50 ? 'text-rose-500' : 'text-slate-700'}`}>
+                                    <span className={`text-base md:text-lg font-black ${spendingVolatility > 50 ? 'text-rose-500' : 'text-slate-700'}`}>
                                         {spendingVolatility.toFixed(0)}%
                                     </span>
                                     <span className="text-[9px] font-bold text-slate-400 uppercase">
@@ -372,8 +372,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
 
                 {/* LADO DIREITO: Tendências e Eficácia */}
-                <div className="lg:col-span-8 space-y-8">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="lg:col-span-8 space-y-0">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-0 md:gap-6">
                         <CompositeCard
                             title="Fluxo de Caixa (Hoje)"
                             value={`R$ ${spentToday.toLocaleString('pt-BR')}`}
@@ -390,7 +390,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                         />
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-0 md:gap-8">
                         {/* Reserva de Emergência */}
                         <DashboardSection title="Reserva de Emergência" iconColor="bg-emerald-500">
                             <div className="flex items-center gap-6">
@@ -414,7 +414,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                         <DashboardSection title="Status de Sistemas" iconColor="bg-blue-500">
                             <div className="flex flex-wrap gap-2">
                                 {systemStats.map(sys => (
-                                    <div key={sys.name} className="px-3 py-1 bg-slate-50 border border-slate-100 rounded-lg flex items-center gap-2">
+                                    <div key={sys.name} className="px-3 py-1 bg-slate-50 border border-slate-100 !rounded-none md:rounded-lg flex items-center gap-2">
                                         <span className="text-[10px] font-bold text-slate-600">{sys.name}</span>
                                         <div className={`w-1.5 h-1.5 rounded-full ${sys.status === 'producao' ? 'bg-emerald-500' : 'bg-blue-500'}`} />
                                     </div>

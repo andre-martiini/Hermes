@@ -63,6 +63,7 @@ const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[], removeToast:
 // --- Utilitários ---
 const DEFAULT_APP_SETTINGS: AppSettings = {
   notifications: {
+    enablePush: true,
     habitsReminder: {
       enabled: true,
       time: "20:00"
@@ -1325,6 +1326,7 @@ const SettingsModal = ({
   onAddUnidade,
   onDeleteUnidade,
   onUpdateUnidade,
+  onEmitNotification,
   initialTab
 }: {
   settings: AppSettings,
@@ -1334,6 +1336,7 @@ const SettingsModal = ({
   onAddUnidade: (nome: string) => void,
   onDeleteUnidade: (id: string) => void,
   onUpdateUnidade: (id: string, updates: any) => void,
+  onEmitNotification: (title: string, message: string, type: 'info' | 'warning' | 'success' | 'error') => void,
   initialTab?: 'notifications' | 'context' | 'sistemas' | 'google'
 }) => {
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
@@ -1600,6 +1603,34 @@ const SettingsModal = ({
                   )}
                 </div>
               </div>
+
+              {/* Canal de Teste Section */}
+              <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500 delay-200">
+                <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
+                  <span className="w-2 h-2 bg-indigo-500 rounded-full"></span>
+                  Conectividade
+                </h4>
+
+                <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-indigo-200 transition-all">
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-slate-900 mb-1">Notificações Push</p>
+                    <p className="text-[11px] text-slate-500 font-medium">Receber alertas no celular (mesmo com app fechado)</p>
+                  </div>
+                  <button
+                    onClick={() => setLocalSettings({
+                      ...localSettings,
+                      notifications: {
+                        ...localSettings.notifications,
+                        enablePush: !localSettings.notifications.enablePush
+                      }
+                    })}
+                    className={`w-12 h-6 rounded-full transition-all relative ${localSettings.notifications.enablePush !== false ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                  >
+                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.notifications.enablePush !== false ? 'left-7' : 'left-1'}`} />
+                  </button>
+                </div>
+              </div>
+
             </>
           ) : activeTab === 'context' ? (
             /* Unidades / áreas e Palavras-Chave TAB */
@@ -1834,7 +1865,7 @@ const SettingsModal = ({
           </button>
         </div>
       </div>
-    </div>
+    </div >
   );
 };
 
@@ -2167,11 +2198,11 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
         <div className="p-8 space-y-6 overflow-y-auto custom-scrollbar flex-1">
           <div className="space-y-2">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Título da Tarefa</label>
-            <input
-              type="text"
+            <textarea
               value={formData.titulo}
               onChange={e => setFormData({ ...formData, titulo: e.target.value })}
-              className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+              className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all resize-none min-h-[100px]"
+              rows={3}
             />
           </div>
 
@@ -2261,57 +2292,58 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
           </div>
         </div>
 
-        <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-4 flex-shrink-0">
-          <button
-            onClick={() => {
-              if (!isConfirmingDelete) {
-                setIsConfirmingDelete(true);
-              } else {
-                onDelete(task.id);
-                onClose();
-              }
-            }}
-            onMouseLeave={() => setIsConfirmingDelete(false)}
-            className={`px-6 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border flex items-center gap-2 ${isConfirmingDelete
-              ? 'bg-rose-600 text-white border-rose-600 shadow-lg shadow-rose-200 animate-in zoom-in-95'
-              : 'text-rose-600 hover:bg-rose-50 border-rose-100'
-              }`}
-          >
-            {isConfirmingDelete ? (
-              <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-                Confirmar?
-              </>
-            ) : (
-              'Excluir'
-            )}
-          </button>
-          <div className="flex-1"></div>
-          <button
-            onClick={onClose}
-            className="px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all"
-          >
-            Cancelar
-          </button>
+        <div className="p-6 md:p-8 bg-slate-50 border-t border-slate-100 flex flex-col md:flex-row gap-3 md:gap-4 flex-shrink-0">
           <button
             onClick={() => {
               if (!formData.titulo || !formData.data_limite) {
                 alert("Preencha o título e o prazo final.");
                 return;
               }
-
-              // Validation
               if (!formData.is_single_day && formData.data_inicio > formData.data_limite) {
                 alert("A data de início deve ser anterior ou igual ao prazo final.");
                 return;
               }
-
               onSave(task.id, formData);
               onClose();
             }}
-            className="flex-1 bg-slate-900 text-white px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all"
+            className="w-full md:flex-1 bg-slate-900 text-white px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all order-1 md:order-3"
           >
             Salvar Alterações
+          </button>
+
+          <div className="flex gap-3 order-2 w-full md:w-auto">
+            <button
+              onClick={() => {
+                if (!isConfirmingDelete) {
+                  setIsConfirmingDelete(true);
+                } else {
+                  onDelete(task.id);
+                  onClose();
+                }
+              }}
+              onMouseLeave={() => setIsConfirmingDelete(false)}
+              className={`flex-1 md:flex-none px-6 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border flex items-center justify-center gap-2 ${isConfirmingDelete
+                ? 'bg-rose-600 text-white border-rose-600 shadow-lg shadow-rose-200 animate-in zoom-in-95'
+                : 'text-rose-600 hover:bg-rose-50 border-rose-100'
+                }`}
+            >
+              {isConfirmingDelete ? 'Confirmar?' : 'Excluir'}
+            </button>
+            <button
+              onClick={onClose}
+              className="flex-1 md:hidden px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all border border-slate-200"
+            >
+              Cancelar
+            </button>
+          </div>
+
+          <div className="hidden md:block md:flex-1 order-2"></div>
+
+          <button
+            onClick={onClose}
+            className="hidden md:block px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all order-2"
+          >
+            Cancelar
           </button>
         </div>
       </div>
@@ -2338,6 +2370,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
   const [modalInputName, setModalInputName] = useState('');
   const [sessionTotalSeconds, setSessionTotalSeconds] = useState(task.tempo_total_segundos || 0);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [showDiaryMobileModal, setShowDiaryMobileModal] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
 
   // Garantir que estamos usando a versão mais recente da tarefa vinda do Firestore
@@ -2677,16 +2710,16 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
       );
     }
 
-    return <p className={`text-sm leading-relaxed whitespace-pre-wrap ${isTimerRunning ? 'text-white/90' : 'text-slate-700'}`}>{text}</p>;
+    return <p className={`text-xs md:text-sm leading-relaxed whitespace-pre-wrap ${isTimerRunning ? 'text-white/90' : 'text-slate-700'}`}>{text}</p>;
   };
 
   return (
     <div className={`fixed inset-0 z-[200] flex flex-col overflow-hidden transition-colors duration-500 ${isTimerRunning ? 'bg-[#050505] text-white' : 'bg-[#F2F4F7] text-slate-900'}`}>
       {/* Header: Title and Close */}
-      <div className="p-10 pb-4 flex items-center justify-between shrink-0">
+      <div className="p-6 md:p-10 pb-4 flex items-center justify-between shrink-0">
         <div className="flex flex-col">
-          <span className="text-blue-500 text-[10px] font-black uppercase tracking-[0.3em] mb-2 block">Central de Execução</span>
-          <h1 className={`text-4xl font-black tracking-tighter leading-none transition-colors ${isTimerRunning ? 'text-white' : 'text-slate-900'}`}>{task.titulo}</h1>
+          <span className="text-blue-500 text-[8px] md:text-[10px] font-black uppercase tracking-[0.3em] mb-1 md:mb-2 block">Central de Execução</span>
+          <h1 className={`text-xl md:text-2xl lg:text-4xl font-black tracking-tighter leading-tight transition-colors ${isTimerRunning ? 'text-white' : 'text-slate-900'}`}>{task.titulo}</h1>
           {task.descricao && (
             <p className={`mt-4 text-sm font-medium max-w-2xl leading-relaxed whitespace-pre-wrap transition-colors ${isTimerRunning ? 'text-white/60' : 'text-slate-500'}`}>
               {task.descricao}
@@ -2704,21 +2737,215 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
         </button>
       </div>
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 p-10 pt-4 overflow-hidden">
-        {/* Pool e Diário no Modo Foco (Left Column) */}
-        <div className="lg:col-span-7 flex flex-col relative h-full overflow-hidden">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-0 md:gap-8 p-0 md:p-10 pt-4 overflow-y-auto">
+        {/* COLUNA DIREITA (AGORA NO TOPO NO MOBILE): Especialista + Cronômetro (5 colunas) */}
+        <div className="lg:col-span-5 flex flex-col gap-0 md:gap-8 overflow-hidden px-0 md:px-0 order-1 lg:order-2">
+          {/* Especialista Virtual (Mantém estilo gradiente em ambos os modos, pois é um card destacado) */}
+          <div className="bg-gradient-to-br from-indigo-600 to-blue-700 !rounded-none md:rounded-[3rem] p-4 md:p-6 text-white shadow-2xl flex-shrink-0 relative overflow-hidden group">
+            <div className="absolute -right-20 -top-20 w-64 h-64 bg-white/5 rounded-full blur-3xl group-hover:bg-white/10 transition-colors"></div>
 
-          {/* Header Controls for Chat */}
-          <div className="flex items-center justify-between mb-4 shrink-0">
-            <h4 className={`text-sm font-black uppercase tracking-widest flex items-center gap-2 ${isTimerRunning ? 'text-white/40' : 'text-slate-400'}`}>
+            <div className="relative z-10 flex flex-col gap-2">
+              <h4 className="text-[10px] md:text-xs font-black uppercase tracking-widest leading-none opacity-70">Especialista</h4>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type="text"
+                    placeholder="Link do chat contextual..."
+                    value={chatUrl}
+                    onChange={e => setChatUrl(e.target.value)}
+                    className="w-full bg-black/20 border border-white/10 rounded-none md:rounded-2xl px-4 py-3 text-xs font-medium focus:ring-2 focus:ring-white/30 outline-none text-white placeholder:text-white/20 transition-all"
+                  />
+                  {chatUrl !== (task.chat_gemini_url || '') && (
+                    <button
+                      onClick={handleSaveChatUrl}
+                      className="absolute right-1 top-1 bottom-1 bg-emerald-500 text-white px-3 rounded-lg md:rounded-xl text-[8px] font-black uppercase shadow-lg hover:bg-emerald-600 transition-colors"
+                    >
+                      Salvar
+                    </button>
+                  )}
+                </div>
+                <a
+                  href={task.chat_gemini_url || (task.categoria === 'CLC' ? "https://gemini.google.com/gem/096c0e51e1b9" : "https://gemini.google.com/")}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-white text-indigo-600 w-10 h-10 md:w-11 md:h-11 flex items-center justify-center !rounded-none md:rounded-2xl hover:bg-slate-100 transition-all shadow-xl flex-shrink-0"
+                  title="Abrir Chat"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                </a>
+              </div>
+            </div>
+          </div>
+
+          {/* Cronômetro Section */}
+          <div className={`flex-1 !rounded-none md:rounded-[3rem] border p-6 md:p-10 flex flex-col relative overflow-hidden transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200 shadow-xl shadow-slate-200/50'}`}>
+            <div className={`absolute inset-0 transition-opacity duration-700 ${isTimerRunning ? 'bg-blue-500/5' : 'bg-transparent'}`}></div>
+
+            <div className="relative z-10 text-center flex-1 flex flex-col items-center justify-center space-y-4 md:space-y-8">
+              <div className={`text-[10px] font-black uppercase tracking-[0.5em] transition-colors ${isTimerRunning ? 'text-white/20' : 'text-slate-300'}`}>
+                {isTimerRunning ? 'Sessão Ativa' : 'Foco em Pausa'}
+              </div>
+
+              <div className="flex flex-col items-center">
+                <div className={`text-[3.5rem] md:text-[6rem] lg:text-[7.5rem] font-black tracking-tighter tabular-nums leading-none transition-colors drop-shadow-[0_10px_40px_rgba(255,255,255,0.05)] ${isTimerRunning ? 'text-white' : 'text-slate-900'}`}>
+                  {formatTime(isTimerRunning ? seconds : sessionTotalSeconds).split(':').slice(1).join(':')}
+                </div>
+                <div className="text-[10px] md:text-lg font-bold text-blue-500 uppercase tracking-[0.3em] mt-0.5 md:mt-1">
+                  {formatTime(isTimerRunning ? seconds : sessionTotalSeconds).split(':')[0]}h
+                </div>
+              </div>
+
+              <div className="flex gap-2 pb-4 md:pb-8">
+                <button
+                  onClick={handleToggleTimer}
+                  className={`flex-1 md:flex-none flex items-center justify-center gap-2 md:gap-3 px-4 md:px-8 py-3 md:py-4 !rounded-none md:rounded-2xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all hover:scale-105 active:scale-95 shadow-2xl ${isTimerRunning
+                    ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20 hover:bg-rose-500 hover:text-white'
+                    : 'bg-blue-600 text-white shadow-blue-600/20 hover:bg-blue-500'
+                    }`}
+                >
+                  {isTimerRunning ? (
+                    <>
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+                      Pausar
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                      {sessionTotalSeconds > 0 ? 'Retomar' : 'Iniciar'}
+                    </>
+                  )}
+                </button>
+
+                <button
+                  onClick={handleResetTimer}
+                  className={`p-3 md:p-4 !rounded-none md:rounded-2xl transition-all shadow-xl hover:scale-105 active:scale-95 flex items-center justify-center ${isTimerRunning
+                    ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20 hover:bg-rose-500 hover:text-white'
+                    : 'bg-white text-slate-400 hover:text-rose-500 border border-slate-200 shadow-sm'
+                    }`}
+                  title="Reiniciar Cronômetro"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                </button>
+
+                <button
+                  onClick={handleCompleteTaskRequest}
+                  className={`flex-1 md:flex-none px-4 md:px-6 py-3 md:py-4 !rounded-none md:rounded-2xl text-[8px] md:text-[9px] font-black uppercase tracking-widest transition-all shadow-xl ${task.status === 'concluído'
+                    ? 'bg-emerald-500 text-white'
+                    : isTimerRunning
+                      ? 'bg-white/5 text-white/40 border border-white/10 hover:bg-white/10 hover:text-white'
+                      : 'bg-white text-slate-400 border border-slate-200 shadow-sm hover:bg-slate-50 hover:text-slate-600'
+                    }`}
+                >
+                  {task.status === 'concluído' ? 'Concluída' : 'Finalizar'}
+                </button>
+              </div>
+            </div>
+
+            {/* Schedule & Progress Section */}
+            <div className="relative z-10 w-full mt-auto space-y-4 md:space-y-6">
+              {/* Timeline Progress Bar */}
+              {task.horario_inicio && task.horario_fim && (
+                <div className="space-y-2">
+                  <div className="flex justify-between items-end">
+                    <span className={`text-[8px] font-black uppercase tracking-[0.2em] transition-colors ${isTimerRunning ? 'text-white/20' : 'text-slate-400'}`}>Progresso do Horário</span>
+                    <span className="text-[9px] font-bold text-blue-400">
+                      {(() => {
+                        const now = currentTime;
+                        const [sh, sm] = task.horario_inicio!.split(':').map(Number);
+                        const [eh, em] = task.horario_fim!.split(':').map(Number);
+                        const sMin = sh * 60 + sm;
+                        const eMin = eh * 60 + em;
+                        const cMin = now.getHours() * 60 + now.getMinutes();
+                        if (cMin < sMin) return 'Aguardando Início';
+                        if (cMin > eMin) return 'Tempo Esgotado';
+                        const p = Math.round(((cMin - sMin) / (eMin - sMin)) * 100);
+                        return `${p}% do tempo planejado`;
+                      })()}
+                    </span>
+                  </div>
+                  <div className={`h-1.5 w-full rounded-full overflow-hidden border transition-colors ${isTimerRunning ? 'bg-white/5 border-white/5' : 'bg-slate-200/50 border-slate-200'}`}>
+                    <div
+                      className="h-full bg-gradient-to-r from-blue-600 to-indigo-500 transition-all duration-1000 ease-out"
+                      style={{
+                        width: `${(() => {
+                          const now = currentTime;
+                          const [sh, sm] = task.horario_inicio!.split(':').map(Number);
+                          const [eh, em] = task.horario_fim!.split(':').map(Number);
+                          const sMin = sh * 60 + sm;
+                          const eMin = eh * 60 + em;
+                          const cMin = now.getHours() * 60 + now.getMinutes();
+                          if (cMin < sMin) return 0;
+                          if (cMin > eMin) return 100;
+                          return Math.min(100, Math.max(0, ((cMin - sMin) / (eMin - sMin)) * 100));
+                        })()}%`
+                      }}
+                    ></div>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className={`rounded-lg md:rounded-xl p-3 border flex flex-col items-center transition-colors ${isTimerRunning ? 'bg-white/5 border-white/5' : 'bg-white border-slate-100 shadow-sm'}`}>
+                  <span className={`text-[7px] font-black uppercase tracking-widest mb-1 transition-colors ${isTimerRunning ? 'text-white/20' : 'text-slate-300'}`}>Início</span>
+                  <span className={`text-[11px] font-bold transition-colors ${isTimerRunning ? 'text-white/80' : 'text-slate-700'}`}>{task.horario_inicio || '--:--'}</span>
+                </div>
+                <div className={`rounded-lg md:rounded-xl p-3 border flex flex-col items-center transition-colors ${isTimerRunning ? 'bg-white/5 border-white/5' : 'bg-white border-slate-100 shadow-sm'}`}>
+                  <span className={`text-[7px] font-black uppercase tracking-widest mb-1 transition-colors ${isTimerRunning ? 'text-white/20' : 'text-slate-300'}`}>Término</span>
+                  <span className={`text-[11px] font-bold transition-colors ${isTimerRunning ? 'text-white/80' : 'text-slate-700'}`}>{task.horario_fim || '--:--'}</span>
+                </div>
+
+                {/* Notification Area */}
+                <div className={`col-span-2 rounded-lg md:rounded-xl p-3 border flex items-center gap-3 transition-colors ${isTimerRunning ? 'bg-blue-500/5 border-blue-500/10' : 'bg-blue-50 border-blue-100'}`}>
+                  <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.5)]"></div>
+                  <div className="flex-1 overflow-hidden">
+                    <p className={`text-[8px] font-black uppercase tracking-widest mb-0.5 transition-colors ${isTimerRunning ? 'text-blue-400/60' : 'text-blue-400'}`}>Status da Organização</p>
+                    <p className={`text-[10px] font-bold truncate transition-colors ${isTimerRunning ? 'text-blue-200' : 'text-blue-600'}`}>
+                      {(() => {
+                        const now = currentTime;
+                        if (nextTask) {
+                          const [nh, nm] = nextTask.horario_inicio!.split(':').map(Number);
+                          const diff = (nh * 60 + nm) - (now.getHours() * 60 + now.getMinutes());
+                          if (diff > 0 && diff <= 15) return `Próxima tarefa em ${diff} min: ${nextTask.titulo}`;
+                        }
+
+                        if (task.horario_fim) {
+                          const [eh, em] = task.horario_fim!.split(':').map(Number);
+                          const diffEnd = (eh * 60 + em) - (now.getHours() * 60 + now.getMinutes());
+                          if (diffEnd > 0 && diffEnd <= 10) return `Atenção: Término previsto em ${diffEnd} minutos!`;
+                          if (diffEnd < 0) return `Execução ultrapassou o horário em ${Math.abs(diffEnd)} min.`;
+                        }
+
+                        return nextTask ? `Próxima às ${nextTask.horario_inicio}: ${nextTask.titulo}` : "Sem tarefas pendentes hoje";
+                      })()}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* COLUNA ESQUERDA (AGORA ABAIXO NO MOBILE): Pool e Diário (7 colunas) */}
+        <div className="lg:col-span-7 flex flex-col relative h-auto md:h-full overflow-hidden order-2 lg:order-1">
+
+          {/* Header Controls for Chat - Mobile side-by-side buttons */}
+          <div className="flex items-center gap-2 mb-2 shrink-0 px-4 md:px-0">
+            <button
+              onClick={() => setShowDiaryMobileModal(true)}
+              className={`lg:hidden flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isTimerRunning ? 'bg-white/10 text-white/60 hover:bg-white/20' : 'bg-white text-slate-500 hover:bg-slate-50 border border-slate-200 shadow-sm'}`}
+            >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+              Diário
+            </button>
+            <h4 className={`hidden lg:flex flex-1 text-[10px] md:text-sm font-black uppercase tracking-widest items-center gap-2 ${isTimerRunning ? 'text-white/40' : 'text-slate-400'}`}>
+              <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
               Diário de Bordo
             </h4>
             <button
               onClick={() => setShowPool(!showPool)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${showPool
-                  ? 'bg-blue-600 text-white'
-                  : isTimerRunning ? 'bg-white/10 text-white/60 hover:bg-white/20' : 'bg-white text-slate-500 hover:bg-slate-50 border border-slate-200'
+              className={`flex-1 lg:flex-none flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${showPool
+                ? 'bg-blue-600 text-white'
+                : isTimerRunning ? 'bg-white/10 text-white/60 hover:bg-white/20' : 'bg-white text-slate-500 hover:bg-slate-50 border border-slate-200 shadow-sm'
                 }`}
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" /></svg>
@@ -2727,11 +2954,11 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
           </div>
 
           {/* Main Area: Chat or Pool Overlay */}
-          <div className={`flex-1 rounded-none md:rounded-[2.5rem] border relative overflow-hidden flex flex-col transition-colors ${isTimerRunning ? 'bg-white/5 border-white/10 backdrop-blur-sm' : 'bg-white border-slate-200 shadow-sm'}`}>
+          <div className={`flex-1 !rounded-none md:rounded-[2.5rem] border relative overflow-hidden flex flex-col transition-colors ${isTimerRunning ? 'bg-white/5 border-white/10 backdrop-blur-sm' : 'bg-white border-slate-200 shadow-sm'}`}>
 
             {/* POOL OVERLAY */}
             {showPool && (
-              <div className={`absolute inset-0 z-20 backdrop-blur-xl flex flex-col animate-in slide-in-from-top-4 ${isTimerRunning ? 'bg-[#050505]/95' : 'bg-slate-50/95'}`}>
+              <div className={`fixed lg:absolute inset-0 z-[250] lg:z-20 backdrop-blur-xl flex flex-col animate-in slide-in-from-top-4 ${isTimerRunning ? 'bg-[#050505]/95' : 'bg-slate-50/95'}`}>
                 <div className={`p-6 border-b flex items-center justify-between ${isTimerRunning ? 'border-white/10' : 'border-slate-200'}`}>
                   <h3 className="text-sm font-black text-blue-400 uppercase tracking-widest">Pool de Dados do Projeto</h3>
                   <div className="flex items-center gap-2">
@@ -2752,8 +2979,8 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
                   {(task.pool_dados || []).map((item) => (
                     <div key={item.id} className={`p-4 rounded-none md:rounded-2xl border flex items-center gap-4 transition-all group ${isTimerRunning ? 'bg-white/5 border-white/5 hover:border-white/20' : 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'}`}>
                       <div className={`w-10 h-10 rounded-lg md:rounded-xl flex items-center justify-center shrink-0 ${item.tipo === 'arquivo' ? 'bg-amber-500/20 text-amber-500' :
-                          item.tipo === 'telefone' ? 'bg-emerald-500/20 text-emerald-500' :
-                            'bg-blue-500/20 text-blue-500'
+                        item.tipo === 'telefone' ? 'bg-emerald-500/20 text-emerald-500' :
+                          'bg-blue-500/20 text-blue-500'
                         }`}>
                         {item.tipo === 'arquivo' && <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
                         {item.tipo === 'telefone' && <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.022-.014-.503-.245-.583-.273-.08-.027-.138-.04-.197.048-.058.088-.227.288-.278.346-.05.058-.1.066-.188.022-.088-.044-.372-.137-.708-.437-.26-.231-.437-.515-.487-.603-.05-.088-.005-.135.039-.179.04-.04.088-.103.131-.154.044-.051.059-.088.088-.146.03-.058.015-.11-.008-.154-.022-.044-.197-.474-.27-.65-.072-.172-.143-.149-.197-.151l-.168-.002c-.058 0-.154.022-.234.11-.08.088-.307.3-.307.732 0 .432.315.849.359.907.044.058.62 1.04 1.502 1.42.21.09.372.143.5.184.21.067.4.057.55.035.168-.024.503-.205.574-.403.072-.198.072-.367.051-.403-.021-.037-.08-.058-.168-.102z" /><path d="M12 2C6.477 2 2 6.477 2 12c0 1.891.524 3.66 1.434 5.168L2 22l4.958-1.412A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.96 7.96 0 01-4.07-1.112l-.292-.174-3.024.863.878-2.946-.19-.302A7.957 7.957 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z" /></svg>}
@@ -2786,8 +3013,8 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
               </div>
             )}
 
-            {/* CHAT/DIARY INTERFACE */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-6 flex flex-col gap-4 relative z-10">
+            {/* CHAT/DIARY INTERFACE - Oculto no mobile para usar Modal */}
+            <div className="flex-1 min-h-[350px] md:min-h-0 overflow-y-auto custom-scrollbar p-0 md:p-6 hidden lg:flex flex-col gap-4 relative z-10">
               {/* Mensagem de Boas-vindas para contexto */}
               <div className="flex justify-center mb-6">
                 <div className={`border rounded-full px-4 py-2 text-[10px] uppercase tracking-widest font-black ${isTimerRunning ? 'bg-white/5 border-white/5 text-white/40' : 'bg-slate-100 border-slate-200 text-slate-400'}`}>
@@ -2797,7 +3024,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
 
               {task.acompanhamento && task.acompanhamento.map((entry, idx) => (
                 <div key={idx} className="flex flex-col gap-1 items-start animate-in fade-in slide-in-from-bottom-2 duration-300 w-full">
-                  <div className={`p-4 rounded-none md:rounded-2xl rounded-tl-none border max-w-[90%] shadow-lg relative group ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-100 shadow-slate-200'}`}>
+                  <div className={`p-4 !rounded-none md:rounded-2xl rounded-tl-none border max-w-full md:max-w-[90%] shadow-lg relative group ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-100 shadow-slate-200'}`}>
                     {renderDiaryContent(entry.nota)}
                     <div className="flex items-center justify-between mt-2 gap-4">
                       <span className={`text-[9px] font-black uppercase tracking-wider ${isTimerRunning ? 'text-white/30' : 'text-slate-300'}`}>
@@ -2911,8 +3138,8 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
                       handleAddFollowUp();
                     }
                   }}
-                  placeholder="Diagnóstico, progresso ou anotação..."
-                  className={`w-full bg-transparent border-none outline-none text-sm py-3 min-h-[44px] max-h-32 resize-none custom-scrollbar ${isTimerRunning ? 'text-white placeholder:text-white/20' : 'text-slate-800 placeholder:text-slate-400'}`}
+                  placeholder="Anotação..."
+                  className={`w-full bg-transparent border-none outline-none text-xs md:text-sm py-3 min-h-[44px] max-h-32 resize-none custom-scrollbar ${isTimerRunning ? 'text-white placeholder:text-white/20' : 'text-slate-800 placeholder:text-slate-400'}`}
                   rows={1}
                   style={{ height: 'auto' }}
                 />
@@ -2926,205 +3153,53 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
                 </button>
               </div>
               <div className={`text-[10px] text-center mt-2 font-medium tracking-wide ${isTimerRunning ? 'text-white/20' : 'text-slate-400'}`}>
-                Arraste arquivos para anexar • Enter para enviar
+                <span className="hidden md:inline">Arraste arquivos para anexar • </span>Enter para enviar
               </div>
             </div>
           </div>
-        </div>
+        </div>      </div>
 
-
-        {/* COLUNA DIREITA: Especialista + Cronômetro (5 colunas) */}
-        <div className="lg:col-span-5 flex flex-col gap-8 overflow-hidden">
-          {/* Especialista Virtual (Mantém estilo gradiente em ambos os modos, pois é um card destacado) */}
-          <div className="bg-gradient-to-br from-indigo-600 to-blue-700 rounded-none md:rounded-[3rem] p-8 text-white shadow-2xl flex-shrink-0 relative overflow-hidden group">
-            <div className="absolute -right-20 -top-20 w-64 h-64 bg-white/5 rounded-full blur-3xl group-hover:bg-white/10 transition-colors"></div>
-            <div className="flex items-center justify-between mb-6 relative z-10">
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 bg-white/10 rounded-lg md:rounded-[1.25rem] flex items-center justify-center backdrop-blur-xl border border-white/20">
-                  <svg className="w-7 h-7 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L14.85 8.15L21 11L14.85 13.85L12 20L9.15 13.85L3 11L9.15 8.15L12 2Z" /></svg>
-                </div>
-                <div>
-                  <h4 className="text-sm font-black uppercase tracking-widest leading-none mb-1">Especialista Virtual</h4>
-                  <p className="text-[10px] text-white/50 uppercase font-bold tracking-widest">Chat Contextual Gemini</p>
-                </div>
-              </div>
-              <a
-                href={task.chat_gemini_url || (task.categoria === 'CLC' ? "https://gemini.google.com/gem/096c0e51e1b9" : "https://gemini.google.com/")}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="bg-white text-indigo-600 px-6 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all flex items-center gap-2 shadow-xl shadow-indigo-900/40"
-              >
-                Abrir Chat
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-              </a>
-            </div>
-            <div className="relative z-10">
-              <input
-                type="text"
-                placeholder="Cole o link do chat contextual aqui..."
-                value={chatUrl}
-                onChange={e => setChatUrl(e.target.value)}
-                className="w-full bg-black/20 border border-white/10 rounded-none md:rounded-2xl px-5 py-4 text-xs font-medium focus:ring-2 focus:ring-white/30 outline-none text-white placeholder:text-white/20 transition-all"
-              />
-              {chatUrl !== (task.chat_gemini_url || '') && (
-                <button
-                  onClick={handleSaveChatUrl}
-                  className="absolute right-2 top-2 bg-emerald-500 text-white px-4 py-2 rounded-lg md:rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-emerald-600 transition-colors animate-in zoom-in-75"
-                >
-                  Salvar
-                </button>
-              )}
-            </div>
+      {/* Modal Diário Mobile */}
+      {showDiaryMobileModal && (
+        <div className={`fixed inset-0 z-[300] flex flex-col animate-in slide-in-from-bottom duration-300 lg:hidden ${isTimerRunning ? 'bg-[#050505] text-white' : 'bg-[#F2F4F7] text-slate-900'}`}>
+          <div className="p-6 border-b flex items-center justify-between shrink-0">
+            <h3 className="text-sm font-black uppercase tracking-widest text-blue-500">Registros do Diário</h3>
+            <button
+              onClick={() => setShowDiaryMobileModal(false)}
+              className={`p-2 rounded-xl border ${isTimerRunning ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200 text-slate-400'}`}
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
           </div>
-
-          {/* Cronômetro Section */}
-          <div className={`flex-1 rounded-none md:rounded-[3rem] border p-10 flex flex-col relative overflow-hidden transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200 shadow-xl shadow-slate-200/50'}`}>
-            <div className={`absolute inset-0 transition-opacity duration-700 ${isTimerRunning ? 'bg-blue-500/5' : 'bg-transparent'}`}></div>
-
-            <div className="relative z-10 text-center flex-1 flex flex-col items-center justify-center space-y-8">
-              <div className={`text-[10px] font-black uppercase tracking-[0.5em] transition-colors ${isTimerRunning ? 'text-white/20' : 'text-slate-300'}`}>
-                {isTimerRunning ? 'Sessão Ativa' : 'Foco em Pausa'}
-              </div>
-
-              <div className="flex flex-col items-center">
-                <div className={`text-[5rem] md:text-[6rem] lg:text-[7.5rem] font-black tracking-tighter tabular-nums leading-none transition-colors drop-shadow-[0_10px_40px_rgba(255,255,255,0.05)] ${isTimerRunning ? 'text-white' : 'text-slate-900'}`}>
-                  {formatTime(isTimerRunning ? seconds : sessionTotalSeconds).split(':').slice(1).join(':')}
-                </div>
-                <div className="text-lg font-bold text-blue-500 uppercase tracking-[0.3em] mt-1">
-                  {formatTime(isTimerRunning ? seconds : sessionTotalSeconds).split(':')[0]}h
-                </div>
-              </div>
-
-              <div className="flex gap-3 pb-8">
-                <button
-                  onClick={handleToggleTimer}
-                  className={`flex items-center gap-3 px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all hover:scale-105 active:scale-95 shadow-2xl ${isTimerRunning
-                      ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20 hover:bg-rose-500 hover:text-white'
-                      : 'bg-blue-600 text-white shadow-blue-600/20 hover:bg-blue-500'
-                    }`}
-                >
-                  {isTimerRunning ? (
-                    <>
-                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
-                      Pausar
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-                      {sessionTotalSeconds > 0 ? 'Retomar' : 'Iniciar'}
-                    </>
-                  )}
-                </button>
-
-                <button
-                  onClick={handleResetTimer}
-                  className={`p-4 rounded-none md:rounded-2xl transition-all shadow-xl hover:scale-105 active:scale-95 flex items-center justify-center ${isTimerRunning
-                      ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20 hover:bg-rose-500 hover:text-white'
-                      : 'bg-white text-slate-400 hover:text-rose-500 border border-slate-200 shadow-sm'
-                    }`}
-                  title="Reiniciar Cronômetro"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                </button>
-
-                <button
-                  onClick={handleCompleteTaskRequest}
-                  className={`px-6 py-4 rounded-none md:rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all shadow-xl ${task.status === 'concluído'
-                      ? 'bg-emerald-500 text-white'
-                      : isTimerRunning
-                        ? 'bg-white/5 text-white/40 border border-white/10 hover:bg-white/10 hover:text-white'
-                        : 'bg-white text-slate-400 border border-slate-200 shadow-sm hover:bg-slate-50 hover:text-slate-600'
-                    }`}
-                >
-                  {task.status === 'concluído' ? 'Concluída' : 'Finalizar'}
-                </button>
-              </div>
-            </div>
-
-            {/* Schedule & Progress Section */}
-            <div className="relative z-10 w-full mt-auto space-y-6">
-              {/* Timeline Progress Bar */}
-              {task.horario_inicio && task.horario_fim && (
-                <div className="space-y-2">
-                  <div className="flex justify-between items-end">
-                    <span className={`text-[8px] font-black uppercase tracking-[0.2em] transition-colors ${isTimerRunning ? 'text-white/20' : 'text-slate-400'}`}>Progresso do Horário</span>
-                    <span className="text-[9px] font-bold text-blue-400">
-                      {(() => {
-                        const now = currentTime;
-                        const [sh, sm] = task.horario_inicio!.split(':').map(Number);
-                        const [eh, em] = task.horario_fim!.split(':').map(Number);
-                        const sMin = sh * 60 + sm;
-                        const eMin = eh * 60 + em;
-                        const cMin = now.getHours() * 60 + now.getMinutes();
-                        if (cMin < sMin) return 'Aguardando Início';
-                        if (cMin > eMin) return 'Tempo Esgotado';
-                        const p = Math.round(((cMin - sMin) / (eMin - sMin)) * 100);
-                        return `${p}% do tempo planejado`;
-                      })()}
+          <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+            {task.acompanhamento && task.acompanhamento.map((entry, idx) => (
+              <div key={idx} className="flex flex-col gap-1 items-start w-full animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <div className={`p-4 rounded-2xl rounded-tl-none border shadow-lg relative ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-100 shadow-slate-200'}`}>
+                  {renderDiaryContent(entry.nota)}
+                  <div className="flex items-center justify-between mt-2 gap-4">
+                    <span className={`text-[9px] font-black uppercase tracking-wider ${isTimerRunning ? 'text-white/30' : 'text-slate-300'}`}>
+                      {new Date(entry.data).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                     </span>
-                  </div>
-                  <div className={`h-1.5 w-full rounded-full overflow-hidden border transition-colors ${isTimerRunning ? 'bg-white/5 border-white/5' : 'bg-slate-200/50 border-slate-200'}`}>
-                    <div
-                      className="h-full bg-gradient-to-r from-blue-600 to-indigo-500 transition-all duration-1000 ease-out"
-                      style={{
-                        width: `${(() => {
-                          const now = currentTime;
-                          const [sh, sm] = task.horario_inicio!.split(':').map(Number);
-                          const [eh, em] = task.horario_fim!.split(':').map(Number);
-                          const sMin = sh * 60 + sm;
-                          const eMin = eh * 60 + em;
-                          const cMin = now.getHours() * 60 + now.getMinutes();
-                          if (cMin < sMin) return 0;
-                          if (cMin > eMin) return 100;
-                          return Math.min(100, Math.max(0, ((cMin - sMin) / (eMin - sMin)) * 100));
-                        })()}%`
-                      }}
-                    ></div>
-                  </div>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className={`rounded-lg md:rounded-xl p-3 border flex flex-col items-center transition-colors ${isTimerRunning ? 'bg-white/5 border-white/5' : 'bg-white border-slate-100 shadow-sm'}`}>
-                  <span className={`text-[7px] font-black uppercase tracking-widest mb-1 transition-colors ${isTimerRunning ? 'text-white/20' : 'text-slate-300'}`}>Início</span>
-                  <span className={`text-[11px] font-bold transition-colors ${isTimerRunning ? 'text-white/80' : 'text-slate-700'}`}>{task.horario_inicio || '--:--'}</span>
-                </div>
-                <div className={`rounded-lg md:rounded-xl p-3 border flex flex-col items-center transition-colors ${isTimerRunning ? 'bg-white/5 border-white/5' : 'bg-white border-slate-100 shadow-sm'}`}>
-                  <span className={`text-[7px] font-black uppercase tracking-widest mb-1 transition-colors ${isTimerRunning ? 'text-white/20' : 'text-slate-300'}`}>Término</span>
-                  <span className={`text-[11px] font-bold transition-colors ${isTimerRunning ? 'text-white/80' : 'text-slate-700'}`}>{task.horario_fim || '--:--'}</span>
-                </div>
-
-                {/* Notification Area */}
-                <div className={`col-span-2 rounded-lg md:rounded-xl p-3 border flex items-center gap-3 transition-colors ${isTimerRunning ? 'bg-blue-500/5 border-blue-500/10' : 'bg-blue-50 border-blue-100'}`}>
-                  <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.5)]"></div>
-                  <div className="flex-1 overflow-hidden">
-                    <p className={`text-[8px] font-black uppercase tracking-widest mb-0.5 transition-colors ${isTimerRunning ? 'text-blue-400/60' : 'text-blue-400'}`}>Status da Organização</p>
-                    <p className={`text-[10px] font-bold truncate transition-colors ${isTimerRunning ? 'text-blue-200' : 'text-blue-600'}`}>
-                      {(() => {
-                        const now = currentTime;
-                        if (nextTask) {
-                          const [nh, nm] = nextTask.horario_inicio!.split(':').map(Number);
-                          const diff = (nh * 60 + nm) - (now.getHours() * 60 + now.getMinutes());
-                          if (diff > 0 && diff <= 15) return `Próxima tarefa em ${diff} min: ${nextTask.titulo}`;
-                        }
-
-                        if (task.horario_fim) {
-                          const [eh, em] = task.horario_fim!.split(':').map(Number);
-                          const diffEnd = (eh * 60 + em) - (now.getHours() * 60 + now.getMinutes());
-                          if (diffEnd > 0 && diffEnd <= 10) return `Atenção: Término previsto em ${diffEnd} minutos!`;
-                          if (diffEnd < 0) return `Execução ultrapassou o horário em ${Math.abs(diffEnd)} min.`;
-                        }
-
-                        return nextTask ? `Próxima às ${nextTask.horario_inicio}: ${nextTask.titulo}` : "Sem tarefas pendentes hoje";
-                      })()}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => handleEditDiaryEntry(idx)} className={`transition-colors ${isTimerRunning ? 'text-white/40 hover:text-blue-400' : 'text-slate-400 hover:text-blue-500'}`} title="Editar">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                      </button>
+                      <button onClick={() => handleDeleteDiaryEntry(idx)} className={`transition-colors ${isTimerRunning ? 'text-white/40 hover:text-rose-500' : 'text-slate-400 hover:text-rose-500'}`} title="Excluir">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
+            ))}
+            {(!task.acompanhamento || task.acompanhamento.length === 0) && (
+              <div className="flex-1 flex flex-col items-center justify-center text-center opacity-30 mt-10">
+                <p className={`text-sm font-medium ${isTimerRunning ? 'text-white' : 'text-slate-800'}`}>Nenhum registro no diário ainda.</p>
+              </div>
+            )}
           </div>
         </div>
-      </div>
+      )}
 
       {/* Confirmation Modal */}
       {isConfirmModalOpen && (
@@ -3223,8 +3298,8 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
               <button
                 onClick={handleModalConfirm}
                 className={`px-6 py-2 rounded-lg md:rounded-xl text-xs font-bold uppercase tracking-wider text-white shadow-lg transition-all transform active:scale-95 ${modalConfig.type === 'confirm_delete' || modalConfig.type === 'reset_timer'
-                    ? 'bg-rose-500 hover:bg-rose-600 shadow-rose-500/20'
-                    : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'
+                  ? 'bg-rose-500 hover:bg-rose-600 shadow-rose-500/20'
+                  : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'
                   }`}
               >
                 Confirmar
@@ -3280,10 +3355,10 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
 
   if (!activeTool) {
     return (
-      <div className="animate-in grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-8 pb-20 px-4 md:px-0">
+      <div className="animate-in grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-0 md:gap-8 pb-20 px-0">
         <button
           onClick={() => setActiveTool('brainstorming')}
-          className="bg-white p-6 md:p-12 rounded-none md:rounded-none md:rounded-[3rem] border border-slate-200 shadow-xl hover:shadow-2xl transition-all group text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6"
+          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-200 shadow-none md:shadow-xl hover:shadow-none md:hover:shadow-2xl transition-all group text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 -ml-px -mt-px md:m-0"
         >
           <div className="w-12 h-12 md:w-16 md:h-16 bg-blue-50 rounded-none md:rounded-2xl flex items-center justify-center text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all flex-shrink-0">
             <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
@@ -3296,7 +3371,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
 
         <button
           disabled
-          className="bg-white p-6 md:p-12 rounded-none md:rounded-none md:rounded-[3rem] border border-slate-100 shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden"
+          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-100 shadow-none md:shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden -ml-px -mt-px md:m-0"
         >
           <div className="absolute top-2 right-2 md:top-4 md:right-4 bg-slate-100 text-slate-400 text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Em Breve</div>
           <div className="w-12 h-12 md:w-16 md:h-16 bg-slate-50 rounded-none md:rounded-2xl flex items-center justify-center text-slate-400 flex-shrink-0">
@@ -3310,7 +3385,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
 
         <button
           disabled
-          className="bg-white p-6 md:p-12 rounded-none md:rounded-none md:rounded-[3rem] border border-slate-100 shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden"
+          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-100 shadow-none md:shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden -ml-px -mt-px md:m-0"
         >
           <div className="absolute top-2 right-2 md:top-4 md:right-4 bg-slate-100 text-slate-400 text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Em Breve</div>
           <div className="w-12 h-12 md:w-16 md:h-16 bg-slate-50 rounded-none md:rounded-2xl flex items-center justify-center text-slate-400 flex-shrink-0">
@@ -3324,7 +3399,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
 
         <button
           disabled
-          className="bg-white p-6 md:p-12 rounded-none md:rounded-none md:rounded-[3rem] border border-slate-100 shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden"
+          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-100 shadow-none md:shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden -ml-px -mt-px md:m-0"
         >
           <div className="absolute top-2 right-2 md:top-4 md:right-4 bg-slate-100 text-slate-400 text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Em Breve</div>
           <div className="w-12 h-12 md:w-16 md:h-16 bg-slate-50 rounded-none md:rounded-2xl flex items-center justify-center text-slate-400 flex-shrink-0">
@@ -3354,8 +3429,8 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
           </div>
         </div>
 
-        <div className="flex flex-col md:flex-row gap-4 max-w-4xl mx-auto w-full mb-8 px-2 md:px-0">
-          <div className="flex-1 bg-white border border-slate-200 rounded-lg md:rounded-xl px-4 py-3 flex items-center gap-3 shadow-sm focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+        <div className="flex flex-col md:flex-row gap-4 max-w-4xl mx-auto w-full mb-8 px-0">
+          <div className="flex-1 bg-white border border-slate-200 rounded-none md:rounded-xl px-4 py-3 flex items-center gap-3 shadow-none md:shadow-sm focus-within:ring-2 focus-within:ring-blue-100 transition-all">
             <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
             <input
               type="text"
@@ -3383,7 +3458,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
 
         {/* Inserção de Nova Ideia via Digitação */}
         <div className="max-w-4xl mx-auto w-full mb-12 animate-in slide-in-from-top-4 duration-500">
-          <div className="bg-white p-2 rounded-none md:rounded-[2rem] border-2 border-slate-100 shadow-xl flex items-center gap-4 focus-within:border-blue-500 transition-all">
+          <div className="bg-white p-2 rounded-none md:rounded-[2rem] border-2 border-slate-100 shadow-none md:shadow-xl flex items-center gap-4 focus-within:border-blue-500 transition-all">
             <input
               type="text"
               placeholder="Digite uma nova ideia..."
@@ -3411,9 +3486,9 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
           </div>
         </div>
 
-        <div className="flex flex-col md:grid md:grid-cols-2 lg:grid-cols-3 gap-2 md:gap-8 mb-32 md:mb-0">
+        <div className="flex flex-col md:grid md:grid-cols-2 lg:grid-cols-3 gap-0 md:gap-8 mb-32 md:mb-0">
           {activeIdeas.map(idea => (
-            <div key={idea.id} className="bg-white p-5 md:p-8 rounded-none md:rounded-[2.5rem] border border-slate-100 md:border-slate-200 shadow-sm md:shadow-lg hover:shadow-md md:hover:shadow-2xl transition-all group flex flex-col relative overflow-hidden">
+            <div key={idea.id} className="bg-white p-5 md:p-8 rounded-none md:rounded-[2.5rem] border border-slate-100 md:border-slate-200 shadow-none md:shadow-lg hover:shadow-none md:hover:shadow-2xl transition-all group flex flex-col relative overflow-hidden -ml-px -mt-px md:m-0">
               <div className="flex items-center justify-between mb-3 md:mb-6">
                 <span className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">{formatDate(idea.timestamp.split('T')[0])}</span>
                 <div className="flex items-center gap-1 md:gap-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-all">
@@ -3653,6 +3728,8 @@ const App: React.FC = () => {
   const [workItems, setWorkItems] = useState<WorkItem[]>([]);
   const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
   const [selectedWorkItem, setSelectedWorkItem] = useState<WorkItem | null>(null);
+  const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
+  const [editingResource, setEditingResource] = useState<{ field: string, label: string, value: string } | null>(null);
 
   const [newLogText, setNewLogText] = useState('');
   const [newLogTipo, setNewLogTipo] = useState<'desenvolvimento' | 'ajuste'>('desenvolvimento');
@@ -3674,7 +3751,6 @@ const App: React.FC = () => {
   const [isBrainstormingAddingText, setIsBrainstormingAddingText] = useState(false);
   const [convertingIdea, setConvertingIdea] = useState<BrainstormIdea | null>(null);
   const [isSystemSelectorOpen, setIsSystemSelectorOpen] = useState(false);
-
 
 
   // Finance Sync
@@ -3948,6 +4024,61 @@ const App: React.FC = () => {
   const [syncData, setSyncData] = useState<any>(null);
   const [activePopup, setActivePopup] = useState<HermesNotification | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [lastBackPress, setLastBackPress] = useState(0);
+
+  // Sync state changes with history to enable back button
+  useEffect(() => {
+    // Only push if we are NOT at home/gallery (root)
+    if (activeModule !== 'home' || viewMode !== 'gallery' || selectedSystemId || isLogsModalOpen || activeFerramenta) {
+      window.history.pushState({ activeModule, viewMode, selectedSystemId, isLogsModalOpen, activeFerramenta }, "", window.location.pathname);
+    }
+  }, [activeModule, viewMode, selectedSystemId, isLogsModalOpen, activeFerramenta]);
+
+  // Sync state changes with history to enable back button
+  useEffect(() => {
+    // Only push if we are NOT at home/gallery (root)
+    if (activeModule !== 'home' || viewMode !== 'gallery' || selectedSystemId || isLogsModalOpen || activeFerramenta) {
+      window.history.pushState({ activeModule, viewMode, selectedSystemId, isLogsModalOpen, activeFerramenta }, "", window.location.pathname);
+    }
+  }, [activeModule, viewMode, selectedSystemId, isLogsModalOpen, activeFerramenta]);
+
+  // Handle hardware/browser back button
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      if (isLogsModalOpen) {
+        setIsLogsModalOpen(false);
+        e.preventDefault();
+      } else if (selectedSystemId) {
+        setSelectedSystemId(null);
+        e.preventDefault();
+      } else if (activeFerramenta) {
+        setActiveFerramenta(null);
+        e.preventDefault();
+      } else if (viewMode !== 'gallery') {
+        setViewMode('gallery');
+        e.preventDefault();
+      } else if (activeModule !== 'home') {
+        setActiveModule('home');
+        e.preventDefault();
+      } else {
+        const now = Date.now();
+        if (now - lastBackPress < 2000) return;
+        e.preventDefault();
+        setLastBackPress(now);
+        showToast("Pressione voltar novamente para minimizar", "info");
+        // Maintain the history entry to wait for second press
+        window.history.pushState(null, "", window.location.pathname);
+      }
+    };
+
+    // Initial dummy state to capture back press
+    if (window.history.state === null) {
+      window.history.pushState({}, "", window.location.pathname);
+    }
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [activeModule, viewMode, selectedSystemId, isLogsModalOpen, activeFerramenta, lastBackPress]);
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [isHabitsReminderOpen, setIsHabitsReminderOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'notifications' | 'context' | 'sistemas'>('notifications');
@@ -3959,28 +4090,37 @@ const App: React.FC = () => {
     const setupFCM = async () => {
       if (!messaging) return;
       try {
+        console.log('Iniciando configuração de Push...');
         const permission = await Notification.requestPermission();
+        console.log('Permissão de Notificação:', permission);
+
         if (permission === 'granted') {
-          // Nota: A VAPID Key deve ser obtida no Firebase Console (Configurações do Projeto > Cloud Messaging)
-          // Se não configurada, o push via web pode não funcionar em alguns navegadores.
+          // Garante que o service worker está registrado antes de pedir o token
+          const registration = await navigator.serviceWorker.ready;
+
           const token = await getToken(messaging, {
-            vapidKey: 'BBXF5bMrAdRIXKGLHXMzsZSREaQoVo2VbVgcJJkA7_qu05v2G'
+            vapidKey: 'BBXF5bMrAdRIXKGLHXMzsZSREaQoVo2VbVgcJJkA7_qu05v2GOcCqgLRjc54airIqf087t46jvggg7ZdmPzuqiE',
+            serviceWorkerRegistration: registration
           }).catch(err => {
-            console.warn("VAPID Key inválida ou não configurada. Push background pode falhar.", err);
+            console.error("Erro ao obter FCM Token:", err);
             return null;
           });
 
           if (token) {
-            console.log('FCM Token:', token);
+            console.log('FCM Token obtido com sucesso:', token);
             await setDoc(doc(db, 'fcm_tokens', token), {
               token,
               last_updated: new Date().toISOString(),
-              platform: 'web_pwa'
+              platform: 'web_pwa',
+              userAgent: navigator.userAgent
             });
+            console.log('Token persistido no Firestore.');
+          } else {
+            console.warn('FCM Token não foi gerado. Verifique a VAPID Key no Firebase Console.');
           }
         }
       } catch (error) {
-        console.error('Erro ao configurar FCM:', error);
+        console.error('Falha crítica no setup do FCM:', error);
       }
     };
 
@@ -4013,7 +4153,7 @@ const App: React.FC = () => {
       type,
       timestamp: new Date().toISOString(),
       isRead: false,
-      link
+      link: link || ""
     };
 
     // 1. Atualiza estado local para feedback imediato (evita duplicados por ID)
@@ -4026,12 +4166,20 @@ const App: React.FC = () => {
     // 2. Persiste no Firestore para disparar Push Notification via Cloud Function
     try {
       // Usa setDoc com ID específico para evitar duplicados no Firestore
+      // Garante que não há campos undefined
+      const firestoreData = JSON.parse(JSON.stringify(newNotif));
+
+      // Verifica configurações globais de push
+      const shouldSendPush = appSettings.notifications?.enablePush !== false; // Default true
+
       await setDoc(doc(db, 'notificacoes', newNotif.id), {
-        ...newNotif,
-        sent_to_push: false
+        ...firestoreData,
+        sent_to_push: !shouldSendPush // Se não deve enviar, já marca como enviado para a function ignorar
       });
     } catch (err) {
       console.error("Erro ao persistir notificação:", err);
+      // Feedback visual do erro para o usuário (agora que estamos validando)
+      alert(`Erro no sistema de notificação: ${err}`);
     }
   };
 
@@ -4194,7 +4342,10 @@ const App: React.FC = () => {
       const now = new Date();
       const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       const monthlyBudget = financeSettings.monthlyBudgets?.[currentMonthStr] || financeSettings.monthlyBudget;
-      const totalSpend = financeTransactions.filter(t => t.date.startsWith(currentMonthStr)).reduce((acc, t) => acc + t.amount, 0);
+      const totalSpend = financeTransactions.filter(t => {
+        const d = new Date(t.date);
+        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      }).reduce((acc, t) => acc + t.amount, 0);
 
       if (monthlyBudget > 0) {
         const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
@@ -4777,7 +4928,7 @@ const App: React.FC = () => {
     ).length;
   }, [tarefas]);
 
-  const tarefasAgrupadas = useMemo<Record<string, Tarefa[]>>(() => {
+  const tarefasAgrupadas: Record<string, Tarefa[]> = useMemo(() => {
     const buckets = {
       atrasadas: [] as Tarefa[],
       hoje: [] as Tarefa[],
@@ -4878,7 +5029,7 @@ const App: React.FC = () => {
 
   // No PGC, filtramos as tarefas pelo período selecionado (mês/ano)
   // No PGC, filtramos as tarefas pelo período selecionado (mês/ano)
-  const pgcTasks = useMemo<Tarefa[]>(() => {
+  const pgcTasks: Tarefa[] = useMemo(() => {
     // Normalização agressiva para comparação de texto
     const norm = (val: any) => {
       if (!val) return "";
@@ -4925,11 +5076,11 @@ const App: React.FC = () => {
     });
   }, [tarefas, currentMonth, currentYear]);
 
-  const pgcEntregas = useMemo<EntregaInstitucional[]>(() => entregas.filter(e => {
+  const pgcEntregas: EntregaInstitucional[] = useMemo(() => entregas.filter(e => {
     return e.mes === currentMonth && e.ano === currentYear;
   }), [entregas, currentMonth, currentYear]);
 
-  const pgcTasksAguardando = useMemo<Tarefa[]>(() => {
+  const pgcTasksAguardando: Tarefa[] = useMemo(() => {
     const currentDeliveryIds = pgcEntregas.map(e => e.id);
     const norm = (val: any) => (val || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
@@ -5043,7 +5194,7 @@ const App: React.FC = () => {
                     setViewMode('ferramentas');
                     setActiveFerramenta('brainstorming');
                   }}
-                  className="bg-white border-2 border-slate-100 text-amber-500 p-4 rounded-none md:rounded-2xl shadow-xl hover:bg-slate-50 transition-all active:scale-95 group"
+                  className="text-amber-500 p-3 hover:bg-amber-50 rounded-xl transition-all active:scale-95 group"
                   aria-label="Ideias Rápidas"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
@@ -5053,7 +5204,7 @@ const App: React.FC = () => {
               <div className="relative">
                 <button
                   onClick={() => setIsSettingsModalOpen(true)}
-                  className="bg-white border-2 border-slate-100 text-slate-700 p-4 rounded-none md:rounded-2xl shadow-xl hover:bg-slate-50 transition-all active:scale-95 group"
+                  className="text-slate-500 p-3 hover:bg-slate-100 rounded-xl transition-all active:scale-95 group"
                   aria-label="Configurações"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
@@ -5063,7 +5214,7 @@ const App: React.FC = () => {
               <div className="relative">
                 <button
                   onClick={() => setIsNotificationCenterOpen(!isNotificationCenterOpen)}
-                  className="bg-white border-2 border-slate-100 text-slate-700 p-4 rounded-none md:rounded-2xl shadow-xl hover:bg-slate-50 transition-all active:scale-95 group relative notification-trigger"
+                  className="text-slate-500 p-3 hover:bg-slate-100 rounded-xl transition-all active:scale-95 group relative notification-trigger"
                   aria-label="Notificações"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
@@ -5087,7 +5238,7 @@ const App: React.FC = () => {
                 <img src="/logo.png" alt="Hermes" className="w-16 h-16 md:w-20 md:h-20 object-contain" />
                 <h1 className="text-4xl md:text-6xl font-black tracking-tighter text-slate-900">HERMES</h1>
               </div>
-              <p className="text-slate-500 text-sm md:text-base font-bold uppercase tracking-widest">Sistema de Gestão Integrada</p>
+
             </div>
 
             {/* Cards dos Módulos */}
@@ -5954,7 +6105,7 @@ const App: React.FC = () => {
                   {!selectedSystemId ? (
                     /* VISÃO GERAL - LISTA DE SISTEMAS */
                     <>
-                      <div className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] p-8 shadow-sm flex items-center justify-between">
+                      <div className="hidden md:flex bg-white border border-slate-200 rounded-none md:rounded-[2rem] p-8 shadow-sm items-center justify-between mb-8">
                         <div>
                           <h2 className="text-3xl font-black text-slate-900 tracking-tight">Sistemas em Desenvolvimento</h2>
                           <p className="text-slate-500 font-bold mt-1">Gestão do Ciclo de Vida de Software</p>
@@ -5976,7 +6127,7 @@ const App: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-0 md:gap-8 px-0">
                         {unidades.filter(u => u.nome.startsWith('SISTEMA:')).map(unit => {
                           const sysDetails = sistemasDetalhes.find(s => s.id === unit.id) || {
                             id: unit.id,
@@ -5992,7 +6143,7 @@ const App: React.FC = () => {
                             <button
                               key={unit.id}
                               onClick={() => setSelectedSystemId(unit.id)}
-                              className="bg-white border border-slate-200 rounded-none md:rounded-[2.5rem] p-8 text-left hover:shadow-xl hover:border-violet-300 transition-all group relative overflow-hidden"
+                              className="bg-white border border-slate-200 rounded-none md:rounded-[2.5rem] p-8 text-left shadow-none md:shadow-xl hover:shadow-none md:hover:shadow-2xl hover:border-violet-300 transition-all group relative overflow-hidden -ml-px -mt-px md:m-0"
                             >
                               <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                               <div className="relative z-10 space-y-6">
@@ -6001,9 +6152,9 @@ const App: React.FC = () => {
                                     <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
                                   </div>
                                   <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${sysDetails.status === 'producao' ? 'bg-emerald-100 text-emerald-700' :
-                                      sysDetails.status === 'desenvolvimento' ? 'bg-blue-100 text-blue-700' :
-                                        sysDetails.status === 'testes' ? 'bg-amber-100 text-amber-700' :
-                                          'bg-slate-100 text-slate-500'
+                                    sysDetails.status === 'desenvolvimento' ? 'bg-blue-100 text-blue-700' :
+                                      sysDetails.status === 'testes' ? 'bg-amber-100 text-amber-700' :
+                                        'bg-slate-100 text-slate-500'
                                     }`}>
                                     {sysDetails.status === 'prototipacao' ? 'Prototipação' :
                                       sysDetails.status === 'producao' ? 'Produção' :
@@ -6063,7 +6214,7 @@ const App: React.FC = () => {
                           {/* Navigation */}
                           <button
                             onClick={() => setSelectedSystemId(null)}
-                            className="mb-8 flex items-center gap-2 text-slate-500 hover:text-slate-800 font-bold text-xs uppercase tracking-widest transition-colors"
+                            className="mb-8 px-6 md:px-0 flex items-center gap-2 text-slate-500 hover:text-slate-800 font-bold text-xs uppercase tracking-widest transition-colors"
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
                             Voltar para Lista
@@ -6071,7 +6222,7 @@ const App: React.FC = () => {
 
                           <div className="bg-white border border-slate-200 rounded-none md:rounded-[2.5rem] overflow-hidden shadow-xl">
                             {/* Header Detalhado */}
-                            <div className="bg-slate-900 p-8 md:p-12 text-white relative overflow-hidden">
+                            <div className="hidden md:block bg-slate-900 p-8 md:p-12 text-white relative overflow-hidden">
                               <div className="absolute top-0 right-0 w-64 h-64 bg-violet-500/20 rounded-full -mr-20 -mt-20 blur-3xl"></div>
                               <div className="relative z-10 flex flex-col md:flex-row md:items-end justify-between gap-8">
                                 <div className="space-y-4">
@@ -6093,14 +6244,19 @@ const App: React.FC = () => {
                             </div>
 
                             {/* Status Stepper */}
-                            <div className="bg-slate-50 border-b border-slate-100 p-4 flex items-center justify-center overflow-x-auto">
-                              <div className="flex items-center bg-slate-200/50 p-1.5 rounded-none md:rounded-2xl gap-1 min-w-max">
+                            <div className="bg-slate-50 border-b border-slate-100 p-6 md:p-10 flex flex-col items-center gap-8">
+                              <div className="text-center">
+                                <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight uppercase">{systemName}</h2>
+                                <div className="w-12 h-1.5 bg-violet-500 mx-auto mt-3 rounded-full"></div>
+                              </div>
+
+                              <div className="flex flex-wrap items-center justify-center bg-slate-200/50 p-1.5 rounded-none md:rounded-2xl gap-1 w-full md:w-auto">
                                 {steps.map((step, idx) => {
                                   const isActive = sysDetails.status === step;
                                   const stepLabels: Record<string, string> = {
                                     ideia: 'Ideia',
-                                    prototipacao: 'Prototipação',
-                                    desenvolvimento: 'Desenvolvimento',
+                                    prototipacao: 'Protótipo',
+                                    desenvolvimento: 'Dev',
                                     testes: 'Testes',
                                     producao: 'Produção'
                                   };
@@ -6108,15 +6264,15 @@ const App: React.FC = () => {
                                     <React.Fragment key={step}>
                                       <button
                                         onClick={() => handleUpdateSistema(unit.id, { status: step })}
-                                        className={`px-4 py-2 rounded-lg md:rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${isActive
-                                            ? 'bg-violet-600 text-white shadow-lg'
-                                            : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'
+                                        className={`flex-1 md:flex-none px-2 md:px-4 py-2 rounded-lg md:rounded-xl text-[8px] md:text-[9px] font-black uppercase tracking-widest transition-all ${isActive
+                                          ? 'bg-violet-600 text-white shadow-lg'
+                                          : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'
                                           }`}
                                       >
                                         {stepLabels[step]}
                                       </button>
                                       {idx < steps.length - 1 && (
-                                        <div className="flex items-center text-slate-300 px-1">
+                                        <div className="hidden md:flex items-center text-slate-300 px-1">
                                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
                                         </div>
                                       )}
@@ -6126,153 +6282,155 @@ const App: React.FC = () => {
                               </div>
                             </div>
 
-                            <div className="p-8 grid grid-cols-1 lg:grid-cols-3 gap-12">
-                              {/* Coluna 1: Links e Recursos */}
-                              <div className="lg:col-span-1 space-y-8">
-                                <div>
-                                  <h4 className="text-xs font-black text-slate-900 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
+                            <div className="p-0 md:p-8 grid grid-cols-1 lg:grid-cols-3 gap-0 md:gap-12">
+                              {/* Coluna 2: Links e Recursos (Agora embaixo no mobile) */}
+                              <div className="lg:col-span-1 order-2 md:order-1 space-y-0 md:space-y-8">
+                                <div className="p-6 md:p-0">
+                                  <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
                                     <span className="w-1 h-4 bg-violet-500 rounded-full"></span>
                                     Recursos Principais
                                   </h4>
+                                </div>
 
-                                  <div className="space-y-6">
-
-
-                                    {/* Repositório Principal */}
-                                    <div className="group bg-slate-900 p-4 rounded-none md:rounded-2xl border border-slate-800 hover:border-slate-600 hover:shadow-md transition-all">
-                                      <div className="flex items-center justify-between mb-2">
-                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide flex items-center gap-2">
-                                          <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" /></svg>
-                                          Repositório
-                                        </label>
-                                        {sysDetails.repositorio_principal && <span className="w-2 h-2 rounded-full bg-emerald-400"></span>}
-                                      </div>
-                                      <div className="flex gap-2">
-                                        <input
-                                          type="text"
-                                          value={sysDetails.repositorio_principal || ''}
-                                          onChange={(e) => handleUpdateSistema(unit.id, { repositorio_principal: e.target.value })}
-                                          placeholder="github.com/usuario/projeto"
-                                          className="w-full bg-slate-800 border-none rounded-lg md:rounded-xl px-0 py-1 text-sm font-bold text-white outline-none placeholder:text-slate-600 focus:ring-0"
-                                        />
-                                        {sysDetails.repositorio_principal && (
-                                          <a href={sysDetails.repositorio_principal} target="_blank" rel="noreferrer" className="shrink-0 p-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors">
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                                          </a>
-                                        )}
-                                      </div>
-                                    </div>
-
-                                    {/* Documentação */}
-                                    <div className="group bg-slate-50 p-4 rounded-none md:rounded-2xl border border-slate-100 hover:border-violet-200 hover:shadow-md transition-all">
-                                      <div className="flex items-center justify-between mb-2">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-2">
-                                          <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                                          Documentação
-                                        </label>
-                                        {sysDetails.link_documentacao && <span className="w-2 h-2 rounded-full bg-emerald-400"></span>}
-                                      </div>
-                                      <div className="flex gap-2">
-                                        <input
-                                          type="text"
-                                          value={sysDetails.link_documentacao || ''}
-                                          onChange={(e) => handleUpdateSistema(unit.id, { link_documentacao: e.target.value })}
-                                          placeholder="https://notion.so/..."
-                                          className="w-full bg-white border-none rounded-lg md:rounded-xl px-0 py-1 text-sm font-bold text-slate-700 outline-none placeholder:text-slate-300 focus:ring-0"
-                                        />
-                                        {sysDetails.link_documentacao && (
-                                          <a href={sysDetails.link_documentacao} target="_blank" rel="noreferrer" className="shrink-0 p-2 bg-violet-100 text-violet-600 rounded-lg hover:bg-violet-200 transition-colors">
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                                          </a>
-                                        )}
-                                      </div>
-                                    </div>
-
-                                    {/* AI Studio */}
-                                    {(['prototipacao', 'desenvolvimento', 'testes', 'producao'].includes(sysDetails.status) || sysDetails.link_google_ai_studio) && (
-                                      <div className="group bg-slate-50 p-4 rounded-none md:rounded-2xl border border-slate-100 hover:border-blue-200 hover:shadow-md transition-all animate-in slide-in-from-left-4">
-                                        <div className="flex items-center justify-between mb-2">
-                                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-2">
-                                            <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                                            AI Studio
-                                          </label>
-                                          {sysDetails.link_google_ai_studio && <span className="w-2 h-2 rounded-full bg-emerald-400"></span>}
-                                        </div>
-                                        <div className="flex gap-2">
-                                          <input
-                                            type="text"
-                                            value={sysDetails.link_google_ai_studio || ''}
-                                            onChange={(e) => handleUpdateSistema(unit.id, { link_google_ai_studio: e.target.value })}
-                                            placeholder="Link do Prompt..."
-                                            className="w-full bg-white border-none rounded-lg md:rounded-xl px-0 py-1 text-sm font-bold text-slate-700 outline-none placeholder:text-slate-300 focus:ring-0"
-                                          />
-                                          {sysDetails.link_google_ai_studio && (
-                                            <a href={sysDetails.link_google_ai_studio} target="_blank" rel="noreferrer" className="shrink-0 p-2 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors">
-                                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                                            </a>
-                                          )}
-                                        </div>
-                                      </div>
+                                <div className="grid grid-cols-2 md:grid-cols-1 gap-0 md:gap-6">
+                                  {/* Repositório */}
+                                  <button
+                                    onClick={() => setEditingResource({ field: 'repositorio_principal', label: 'Repositório', value: sysDetails.repositorio_principal || '' })}
+                                    className="group bg-slate-900 p-6 rounded-none md:rounded-3xl border border-slate-800 hover:border-slate-600 hover:shadow-xl transition-all text-left flex flex-col justify-between aspect-square md:aspect-auto md:min-h-[120px] relative overflow-hidden -ml-px -mt-px md:m-0"
+                                  >
+                                    <div className="absolute top-0 right-0 w-24 h-24 bg-violet-500/10 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
+                                    {sysDetails.repositorio_principal && (
+                                      <a
+                                        href={sysDetails.repositorio_principal}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="absolute top-4 right-4 z-20 p-2 bg-white/10 text-white rounded-lg hover:bg-violet-500 transition-all"
+                                      >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                      </a>
                                     )}
-
-
-
-                                    {/* Produção */}
-                                    {(['desenvolvimento', 'testes', 'producao'].includes(sysDetails.status) || sysDetails.link_hospedado) && (
-                                      <div className="group bg-emerald-50 p-4 rounded-none md:rounded-2xl border border-emerald-100 hover:border-emerald-300 hover:shadow-md transition-all animate-in slide-in-from-left-4 delay-100">
-                                        <div className="flex items-center justify-between mb-2">
-                                          <label className="text-[10px] font-bold text-emerald-600 uppercase tracking-wide flex items-center gap-2">
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
-                                            Link Hospedado
-                                          </label>
-                                          {sysDetails.link_hospedado && <span className="w-2 h-2 rounded-full bg-emerald-500"></span>}
-                                        </div>
-                                        <div className="flex gap-2">
-                                          <input
-                                            type="text"
-                                            value={sysDetails.link_hospedado || ''}
-                                            onChange={(e) => handleUpdateSistema(unit.id, { link_hospedado: e.target.value })}
-                                            placeholder="https://..."
-                                            className="w-full bg-white border-none rounded-lg md:rounded-xl px-0 py-1 text-sm font-bold text-emerald-800 outline-none placeholder:text-emerald-200 focus:ring-0"
-                                          />
-                                          {sysDetails.link_hospedado && (
-                                            <a href={sysDetails.link_hospedado} target="_blank" rel="noreferrer" className="shrink-0 p-2 bg-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-300 transition-colors">
-                                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                                            </a>
-                                          )}
-                                        </div>
-
-                                        {sysDetails.link_hospedado && sysDetails.link_hospedado.startsWith('http') && (
-                                          <div className="mt-4 rounded-lg md:rounded-xl overflow-hidden border border-emerald-100 shadow-sm group/preview relative aspect-video bg-white">
-                                            <img
-                                              src={`https://api.microlink.io?url=${encodeURIComponent(sysDetails.link_hospedado)}&screenshot=true&waitFor=5000&embed=screenshot.url`}
-                                              alt="Preview do sistema"
-                                              className="w-full h-full object-cover group-hover/preview:scale-105 transition-transform duration-700"
-                                              onError={(e) => (e.currentTarget.style.display = 'none')}
-                                            />
-                                            <div className="absolute inset-0 bg-emerald-900/5 opacity-0 group-hover/preview:opacity-100 transition-opacity pointer-events-none" />
-                                          </div>
-                                        )}
+                                    <div className="relative z-10 space-y-3">
+                                      <div className="w-8 h-8 bg-white/10 text-white rounded-lg flex items-center justify-center">
+                                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" /></svg>
                                       </div>
+                                      <h5 className="text-[10px] md:text-xs font-black text-white uppercase tracking-widest">Repositório</h5>
+                                    </div>
+                                    <div className="relative z-10">
+                                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{sysDetails.repositorio_principal ? 'Editar' : 'Configurar'}</span>
+                                    </div>
+                                  </button>
+
+                                  {/* Documentação */}
+                                  <button
+                                    onClick={() => setEditingResource({ field: 'link_documentacao', label: 'Documentação', value: sysDetails.link_documentacao || '' })}
+                                    className="group bg-white p-6 rounded-none md:rounded-3xl border border-slate-200 hover:border-violet-300 hover:shadow-xl transition-all text-left flex flex-col justify-between aspect-square md:aspect-auto md:min-h-[120px] relative overflow-hidden -ml-px -mt-px md:m-0"
+                                  >
+                                    <div className="absolute top-0 right-0 w-24 h-24 bg-violet-500/5 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
+                                    {sysDetails.link_documentacao && (
+                                      <a
+                                        href={sysDetails.link_documentacao}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="absolute top-4 right-4 z-20 p-2 bg-violet-50 text-violet-600 rounded-lg hover:bg-violet-500 hover:text-white transition-all"
+                                      >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                      </a>
                                     )}
-                                  </div>
+                                    <div className="relative z-10 space-y-3">
+                                      <div className="w-8 h-8 bg-violet-100 text-violet-600 rounded-lg flex items-center justify-center">
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                      </div>
+                                      <h5 className="text-[10px] md:text-xs font-black text-slate-900 uppercase tracking-widest">Docs</h5>
+                                    </div>
+                                    <div className="relative z-10">
+                                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{sysDetails.link_documentacao ? 'Editar' : 'Configurar'}</span>
+                                    </div>
+                                  </button>
+
+                                  {/* AI Studio */}
+                                  <button
+                                    onClick={() => setEditingResource({ field: 'link_google_ai_studio', label: 'AI Studio', value: sysDetails.link_google_ai_studio || '' })}
+                                    className="group bg-white p-6 rounded-none md:rounded-3xl border border-slate-200 hover:border-blue-300 hover:shadow-xl transition-all text-left flex flex-col justify-between aspect-square md:aspect-auto md:min-h-[120px] relative overflow-hidden -ml-px -mt-px md:m-0"
+                                  >
+                                    <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
+                                    {sysDetails.link_google_ai_studio && (
+                                      <a
+                                        href={sysDetails.link_google_ai_studio}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="absolute top-4 right-4 z-20 p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-500 hover:text-white transition-all"
+                                      >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                      </a>
+                                    )}
+                                    <div className="relative z-10 space-y-3">
+                                      <div className="w-8 h-8 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center">
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                      </div>
+                                      <h5 className="text-[10px] md:text-xs font-black text-slate-900 uppercase tracking-widest">AI Studio</h5>
+                                    </div>
+                                    <div className="relative z-10">
+                                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{sysDetails.link_google_ai_studio ? 'Editar' : 'Configurar'}</span>
+                                    </div>
+                                  </button>
+
+                                  {/* Link Hospedado */}
+                                  <button
+                                    onClick={() => setEditingResource({ field: 'link_hospedado', label: 'Hospedagem', value: sysDetails.link_hospedado || '' })}
+                                    className="group bg-emerald-50 p-6 rounded-none md:rounded-3xl border border-emerald-100 hover:border-emerald-300 hover:shadow-xl transition-all text-left flex flex-col justify-between aspect-square md:aspect-auto md:min-h-[120px] relative overflow-hidden -ml-px -mt-px md:m-0"
+                                  >
+                                    <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
+                                    {sysDetails.link_hospedado && (
+                                      <a
+                                        href={sysDetails.link_hospedado}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="absolute top-4 right-4 z-20 p-2 bg-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-500 hover:text-white transition-all"
+                                      >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                      </a>
+                                    )}
+                                    <div className="relative z-10 space-y-3">
+                                      <div className="w-8 h-8 bg-emerald-100 text-emerald-600 rounded-lg flex items-center justify-center">
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
+                                      </div>
+                                      <h5 className="text-[10px] md:text-xs font-black text-emerald-900 uppercase tracking-widest">Produção</h5>
+                                    </div>
+                                    <div className="relative z-10">
+                                      <span className="text-[10px] font-bold text-emerald-600/60 uppercase tracking-widest">{sysDetails.link_hospedado ? 'Editar' : 'Configurar'}</span>
+                                    </div>
+                                  </button>
                                 </div>
                               </div>
 
-                              {/* Coluna 2 e 3: Logs de Trabalho */}
-                              <div className="lg:col-span-2 space-y-6">
-                                <div className="bg-white border border-slate-200 rounded-none md:rounded-[2.5rem] overflow-hidden flex flex-col min-h-[600px] shadow-sm">
+                              {/* Coluna 1: Logs de Trabalho (Agora em cima no mobile) */}
+                              <div className="lg:col-span-2 order-1 md:order-2 space-y-0 md:space-y-6">
+                                <div className="bg-white border-0 md:border border-slate-200 rounded-none md:rounded-[2.5rem] overflow-hidden flex flex-col min-h-[400px] md:min-h-[600px] shadow-none md:shadow-sm">
                                   {/* Novo Log Input */}
-                                  <div className="p-8 border-b border-slate-100 bg-slate-50">
-                                    <div className="flex flex-col gap-4">
-                                      <div className="flex items-center justify-between">
+                                  <div className="p-6 md:p-8 border-b border-slate-100 bg-slate-50">
+                                    <div className="flex flex-col gap-6">
+                                      <div className="flex items-center justify-between gap-4">
                                         <div className="flex items-center gap-3">
                                           <div className="p-2 bg-violet-600 text-white rounded-lg md:rounded-xl">
                                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                                           </div>
-                                          <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Registrar Desenvolvimento / Ajuste</h4>
+                                          <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Registro de Desenvolvimento</h4>
                                         </div>
-                                        <div className="flex bg-white p-1 rounded-lg md:rounded-xl border border-slate-200">
+                                        <button
+                                          onClick={() => setIsLogsModalOpen(true)}
+                                          className="flex items-center gap-2 px-4 py-2 bg-violet-50 text-violet-600 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-violet-100 transition-all border border-violet-100"
+                                        >
+                                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                          Logs Ativos
+                                        </button>
+                                      </div>
+
+                                      <div className="flex flex-col gap-4">
+                                        <div className="flex bg-white p-1 rounded-lg md:rounded-xl border border-slate-200 w-fit self-end">
                                           <button
                                             onClick={() => setNewLogTipo('desenvolvimento')}
                                             className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${newLogTipo === 'desenvolvimento' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
@@ -6286,14 +6444,12 @@ const App: React.FC = () => {
                                             Ajuste
                                           </button>
                                         </div>
-                                      </div>
-                                      <div className="flex gap-4">
                                         <textarea
                                           value={newLogText}
                                           onChange={(e) => setNewLogText(e.target.value)}
                                           placeholder="O que foi feito ou o que precisa ser ajustado?"
-                                          rows={2}
-                                          className="flex-1 bg-white border border-slate-200 rounded-none md:rounded-2xl px-6 py-4 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-violet-500 outline-none transition-all resize-none"
+                                          rows={4}
+                                          className="w-full bg-white border border-slate-200 rounded-none md:rounded-2xl px-6 py-4 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-violet-500 outline-none transition-all resize-none shadow-sm"
                                         />
                                         <button
                                           onClick={() => {
@@ -6301,7 +6457,7 @@ const App: React.FC = () => {
                                             setNewLogText('');
                                           }}
                                           disabled={!newLogText.trim()}
-                                          className="bg-slate-900 text-white px-8 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 disabled:grayscale"
+                                          className="w-full bg-slate-900 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 disabled:grayscale"
                                         >
                                           Registrar
                                         </button>
@@ -6309,8 +6465,8 @@ const App: React.FC = () => {
                                     </div>
                                   </div>
 
-                                  {/* Listagem de Logs */}
-                                  <div className="flex-1 overflow-y-auto p-8 bg-white space-y-8">
+                                  {/* Listagem de Logs (Desktop) - Hidden on Mobile if Modal is preferred, but user said "similar to action diary", so we show a button to open modal */}
+                                  <div className="hidden md:block flex-1 overflow-y-auto p-8 bg-white space-y-8">
                                     {/* Ativos (Não concluídos) */}
                                     <div className="space-y-4">
                                       <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-violet-500 pl-3">Logs Ativos</h5>
@@ -6341,7 +6497,6 @@ const App: React.FC = () => {
                                         </div>
                                       )}
                                     </div>
-
                                     {/* Concluídos */}
                                     {systemWorkItems.filter(w => w.concluido).length > 0 && (
                                       <div className="space-y-4 pt-8">
@@ -6370,6 +6525,132 @@ const App: React.FC = () => {
                                 </div>
                               </div>
                             </div>
+
+                            {/* Modal de Edição de Recurso (Link) */}
+                            {editingResource && (
+                              <div className="fixed inset-0 z-[400] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 md:p-8 animate-in zoom-in-95 duration-300">
+                                <div className="bg-white w-full max-w-lg rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden">
+                                  <div className="p-8 border-b border-slate-100 flex items-center justify-between">
+                                    <h3 className="text-xl font-black text-slate-900 tracking-tight">Editar {editingResource.label}</h3>
+                                    <button onClick={() => setEditingResource(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                    </button>
+                                  </div>
+                                  <div className="p-8 space-y-6">
+                                    <div className="space-y-2">
+                                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">URL do Recurso</label>
+                                      <input
+                                        type="text"
+                                        value={editingResource.value}
+                                        onChange={(e) => setEditingResource({ ...editingResource, value: e.target.value })}
+                                        placeholder="https://..."
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-violet-500 transition-all"
+                                      />
+                                    </div>
+                                    <div className="flex gap-4">
+                                      <button
+                                        onClick={() => setEditingResource(null)}
+                                        className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-none md:rounded-2xl transition-all"
+                                      >
+                                        Cancelar
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          handleUpdateSistema(unit.id, { [editingResource.field]: editingResource.value });
+                                          setEditingResource(null);
+                                        }}
+                                        className="flex-1 bg-slate-900 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all"
+                                      >
+                                        Salvar Link
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Modal de Logs Full-screen */}
+                            {isLogsModalOpen && (
+                              <div className="fixed inset-0 z-[300] bg-white md:bg-black/60 md:backdrop-blur-sm flex items-center justify-center p-0 md:p-8 animate-in fade-in duration-300">
+                                <div className="bg-white w-full h-full md:h-auto md:max-w-4xl md:rounded-[2.5rem] flex flex-col overflow-hidden shadow-2xl">
+                                  <div className="p-6 md:p-10 border-b border-slate-100 flex items-center justify-between bg-white sticky top-0 z-10">
+                                    <div className="flex items-center gap-4">
+                                      <div className="p-3 bg-violet-100 text-violet-600 rounded-none md:rounded-2xl">
+                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                      </div>
+                                      <div>
+                                        <h3 className="text-2xl font-black text-slate-900 tracking-tight">Registro de Atividades</h3>
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">{systemName}</p>
+                                      </div>
+                                    </div>
+                                    <button
+                                      onClick={() => setIsLogsModalOpen(false)}
+                                      className="p-3 bg-slate-100 text-slate-500 rounded-full hover:bg-slate-200 transition-all active:scale-95"
+                                    >
+                                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                    </button>
+                                  </div>
+
+                                  <div className="flex-1 overflow-y-auto p-6 md:p-12 space-y-12">
+                                    <div className="space-y-6">
+                                      <div className="flex items-center justify-between">
+                                        <h5 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] border-l-4 border-violet-500 pl-4">Logs em Aberto</h5>
+                                        <span className="bg-violet-100 text-violet-600 text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest">
+                                          {systemWorkItems.filter(w => !w.concluido).length} Pendentes
+                                        </span>
+                                      </div>
+                                      <div className="grid grid-cols-1 gap-4">
+                                        {systemWorkItems.filter(w => !w.concluido).sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime()).map(log => (
+                                          <div key={log.id} className="bg-slate-50 border border-slate-100 rounded-none md:rounded-[2rem] p-6 hover:shadow-md transition-all">
+                                            <div className="flex items-start justify-between gap-6">
+                                              <div className="flex-1 space-y-3">
+                                                <div className="flex items-center gap-3">
+                                                  <span className={`text-[8px] font-black px-2 py-1 rounded uppercase tracking-widest ${log.tipo === 'desenvolvimento' ? 'bg-violet-100 text-violet-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                    {log.tipo}
+                                                  </span>
+                                                  <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">{new Date(log.data_criacao).toLocaleDateString('pt-BR')}</span>
+                                                </div>
+                                                <p className="text-sm md:text-base font-bold text-slate-700 leading-relaxed">{log.descricao}</p>
+                                              </div>
+                                              <button
+                                                onClick={() => handleUpdateWorkItem(log.id, { concluido: true, data_conclusao: new Date().toISOString() })}
+                                                className="w-12 h-12 rounded-full border-2 border-slate-200 flex items-center justify-center text-slate-300 hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-50 transition-all group/check shadow-sm"
+                                              >
+                                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                              </button>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+
+                                    {systemWorkItems.filter(w => w.concluido).length > 0 && (
+                                      <div className="space-y-6">
+                                        <h5 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] border-l-4 border-emerald-500 pl-4">Concluídos</h5>
+                                        <div className="grid grid-cols-1 gap-4 opacity-70">
+                                          {systemWorkItems.filter(w => w.concluido).sort((a, b) => new Date(b.data_conclusao!).getTime() - new Date(a.data_conclusao!).getTime()).map(log => (
+                                            <div key={log.id} className="bg-white border border-slate-100 rounded-none md:rounded-2xl p-6 flex items-center justify-between gap-6">
+                                              <div className="flex-1 space-y-2">
+                                                <div className="flex items-center gap-3">
+                                                  <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">Concluído em {new Date(log.data_conclusao!).toLocaleDateString('pt-BR')}</span>
+                                                </div>
+                                                <p className="text-sm font-medium text-slate-500 leading-relaxed">{log.descricao}</p>
+                                              </div>
+                                              <button
+                                                onClick={() => handleUpdateWorkItem(log.id, { concluido: false })}
+                                                className="text-[10px] font-black text-violet-400 hover:text-violet-600 uppercase tracking-widest"
+                                              >
+                                                Reabrir
+                                              </button>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -6674,6 +6955,7 @@ const App: React.FC = () => {
             onAddUnidade={handleAddUnidade}
             onDeleteUnidade={handleDeleteUnidade}
             onUpdateUnidade={handleUpdateUnidade}
+            onEmitNotification={emitNotification}
           />
         )
       }

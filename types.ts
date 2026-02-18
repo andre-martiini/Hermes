@@ -206,6 +206,7 @@ export interface HermesNotification {
 export interface AppSettings {
     googleDriveFolderId?: string;
     notifications: {
+        enablePush: boolean;
         habitsReminder: {
             enabled: boolean;
             time: string; // format "HH:mm"

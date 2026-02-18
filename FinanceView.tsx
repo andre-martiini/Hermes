@@ -43,7 +43,7 @@ const FinanceSection = ({ title, children, defaultExpanded = true }: { title: st
     const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 
     return (
-        <div className="bg-white p-6 md:p-8 rounded-none md:rounded-lg border border-slate-200 shadow-lg">
+        <div className="bg-white p-6 md:p-8 rounded-none md:rounded-lg border-b md:border border-slate-200 shadow-none md:shadow-lg">
             <button
                 onClick={() => setIsExpanded(!isExpanded)}
                 className="w-full flex items-center justify-between group"
@@ -245,68 +245,70 @@ const FinanceView = ({
     };
 
     return (
-        <div className="animate-in space-y-8 pb-32">
+        <div className="animate-in space-y-0 md:space-y-8 pb-32">
             {/* Header & Tabs */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                 <div className="flex flex-col md:flex-row md:items-center gap-6">
                     <div>
-                        <h3 className="text-3xl font-black text-slate-900 tracking-tighter">Financeiro</h3>
-                        <div className="flex gap-4 mt-2">
+                        <h3 className="hidden md:block text-3xl font-black text-slate-900 tracking-tighter">Financeiro</h3>
+                        <div className="flex bg-slate-100 p-1 rounded-lg w-full md:w-auto mt-2 md:mt-4">
                             <button
                                 onClick={() => setActiveTab('dashboard')}
-                                className={`text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full transition-all ${activeTab === 'dashboard' ? 'bg-slate-900 text-white' : 'text-slate-400 hover:text-slate-600'}`}
+                                className={`flex-1 md:flex-none px-4 py-2 text-[10px] uppercase font-black rounded-md transition-all ${activeTab === 'dashboard' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
                             >
                                 Visão Geral
                             </button>
                             <button
                                 onClick={() => setActiveTab('fixed')}
-                                className={`text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full transition-all ${activeTab === 'fixed' ? 'bg-slate-900 text-white' : 'text-slate-400 hover:text-slate-600'}`}
+                                className={`flex-1 md:flex-none px-4 py-2 text-[10px] uppercase font-black rounded-md transition-all ${activeTab === 'fixed' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
                             >
                                 Rendas e Obrigações
                             </button>
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-3 bg-white p-2 rounded-lg md:rounded-2xl border border-slate-200 shadow-sm">
-                        <button
-                            onClick={() => {
-                                const newMonth = currentMonth === 0 ? 11 : currentMonth - 1;
-                                const newYear = currentMonth === 0 ? currentYear - 1 : currentYear;
-                                onMonthChange(newMonth, newYear);
-                            }}
-                            className="p-2 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-slate-900 transition-all"
-                        >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 19l-7-7 7-7" /></svg>
-                        </button>
-                        <div className="px-4 text-center min-w-[140px]">
-                            <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Período</div>
-                            <div className="text-sm font-black text-slate-900">
-                                {new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(new Date(currentYear, currentMonth))}
+                    <div className="flex items-stretch w-full md:w-auto">
+                        <div className="flex items-center gap-2 bg-white p-2 rounded-l-xl md:rounded-2xl border border-slate-200 shadow-sm flex-1 md:flex-none justify-center">
+                            <button
+                                onClick={() => {
+                                    const newMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+                                    const newYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+                                    onMonthChange(newMonth, newYear);
+                                }}
+                                className="p-1 px-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-900 transition-all"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 19l-7-7 7-7" /></svg>
+                            </button>
+                            <div className="px-2 text-center min-w-[100px] md:min-w-[120px]">
+                                <div className="text-[8px] md:text-[9px] font-black uppercase tracking-widest text-slate-400">Período</div>
+                                <div className="text-[11px] md:text-sm font-black text-slate-900 capitalize leading-none">
+                                    {new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(new Date(currentYear, currentMonth))}
+                                </div>
                             </div>
+                            <button
+                                onClick={() => {
+                                    const newMonth = currentMonth === 11 ? 0 : currentMonth + 1;
+                                    const newYear = currentMonth === 11 ? currentYear + 1 : currentYear;
+                                    onMonthChange(newMonth, newYear);
+                                }}
+                                className="p-1 px-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-900 transition-all"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
+                            </button>
                         </div>
                         <button
-                            onClick={() => {
-                                const newMonth = currentMonth === 11 ? 0 : currentMonth + 1;
-                                const newYear = currentMonth === 11 ? currentYear + 1 : currentYear;
-                                onMonthChange(newMonth, newYear);
-                            }}
-                            className="p-2 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-slate-900 transition-all"
+                            onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+                            className="bg-white border-y border-r border-slate-200 text-slate-400 p-4 !rounded-none hover:bg-slate-50 transition-all flex items-center justify-center shadow-sm"
+                            title="Configurações"
                         >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                         </button>
                     </div>
                 </div>
-                <button
-                    onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-                    className="bg-white border border-slate-200 text-slate-500 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all flex items-center gap-2"
-                >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                    Configurações
-                </button>
             </div>
 
             {isSettingsOpen && (
-                <div className="bg-slate-900 text-white p-6 rounded-none md:rounded-[2rem] shadow-xl animate-in slide-in-from-top-4 space-y-6">
+                <div className="bg-slate-900 text-white p-6 rounded-none md:rounded-[2rem] shadow-none md:shadow-xl animate-in slide-in-from-top-4 space-y-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
                             <h4 className="text-sm font-black uppercase tracking-widest mb-4 text-white/60">Orçamento de {new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}</h4>
@@ -456,25 +458,26 @@ const FinanceView = ({
 
             {/* DASHBOARD VIEW */}
             {activeTab === 'dashboard' && (
-                <>
+                <div className="flex flex-col space-y-0 md:space-y-8">
                     {/* Budget Bar Section */}
-                    <div className="bg-white p-8 rounded-none md:rounded-[2.5rem] border border-slate-200 shadow-xl relative overflow-hidden">
+                    <div className="bg-white p-6 md:p-8 rounded-none md:rounded-[2.5rem] border-b md:border border-slate-200 shadow-none md:shadow-xl relative overflow-hidden order-1">
                         <div className="flex justify-between items-end mb-6">
                             <div>
                                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">
                                     Gasto Acumulado • {new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}
                                 </h4>
-                                <div className="text-4xl md:text-5xl font-black text-slate-900 tracking-tighter">
+                                <div className="text-2xl md:text-5xl font-black text-slate-900 tracking-tighter leading-none">
                                     R$ {currentMonthTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                    <span className="text-slate-300 text-xl md:text-2xl ml-2">/ {currentBudget.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                    <span className="text-slate-300 text-sm md:text-2xl ml-1">/ {currentBudget.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                                 </div>
-                                <div className="flex flex-wrap gap-4 mt-1">
-                                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">
+                                <div className="flex flex-wrap gap-4 mt-2">
+                                    <p className="text-slate-400 text-[9px] md:text-[10px] font-bold uppercase tracking-widest flex items-center gap-1">
+                                        <span className="w-1 h-1 bg-slate-300 rounded-full"></span>
                                         Disponível: R$ {(currentBudget - currentMonthTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </p>
                                 </div>
                             </div>
-                            <div className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest text-white ${getSprintStatus()}`}>
+                            <div className={`px-3 py-1.5 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-widest text-white shadow-sm ${getSprintStatus()}`}>
                                 Sprint {currentSprint}
                             </div>
                         </div>
@@ -499,15 +502,17 @@ const FinanceView = ({
                         </div>
                     </div>
 
-                    {/* Waterfall Goals */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        <div className="space-y-6">
+                    {/* Content Grid */}
+                    <div className="flex flex-col md:grid md:grid-cols-2 md:gap-8 space-y-0 md:space-y-0 contents md:block">
+                        {/* On desktop, we use the grid. On mobile, the 'contents' or just flat children will allow the parent flex to order them. */}
+                        {/* Actually, 'contents' makes the div invisible for layout purposes, but its children become direct flex items of the parent. */}
+
+                        <div className="flex flex-col space-y-0 md:space-y-6 order-3 md:order-1">
                             {/* Emergency Reserve Section */}
-                            <div className="bg-white p-6 rounded-none md:rounded-[2rem] border border-emerald-100 shadow-lg relative overflow-hidden group">
-                                <div className="absolute top-0 right-0 bg-emerald-500 text-white text-[9px] font-black px-3 py-1 rounded-bl-xl uppercase tracking-widest">Reserva de Emergência</div>
+                            <div className="bg-white p-6 rounded-none md:rounded-[2rem] border-b md:border border-emerald-100 shadow-none md:shadow-lg relative overflow-hidden group">
                                 <div className="mt-2">
                                     <h5 className="text-lg font-black text-slate-900 flex items-center gap-2">
-                                        🛡️ Reserva de Emergência
+                                        Reserva de Emergência
                                     </h5>
                                     <div className="flex items-end gap-2 mt-1">
                                         <div className="group/edit relative flex items-center">
@@ -536,131 +541,136 @@ const FinanceView = ({
                                 )}
                             </div>
 
-                            <FinanceSection title="Metas em Cascata">
-                                <div className="flex justify-end mb-4">
-                                    <button
-                                        onClick={() => {
-                                            setNewGoalName('');
-                                            setNewGoalTarget('');
-                                            setEditingGoal(null);
-                                        }}
-                                        className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:underline"
-                                    >
-                                        + Nova Meta
-                                    </button>
-                                </div>
-
-                            {sortedGoals.length > 0 ? (
-                                <div className="space-y-4">
-                                    {sortedGoals.map((goal, idx) => (
-                                        <div key={goal.id} className={`bg-white p-5 rounded-none md:rounded-[2rem] border-2 transition-all relative group ${idx === 0 ? 'border-slate-900 shadow-xl' : 'border-slate-100 opacity-80 hover:opacity-100 shadow-sm'}`}>
-                                            <div className="absolute top-4 right-5 flex items-center gap-1">
-                                                <button onClick={() => setEditingGoal(goal)} className="p-1 text-slate-300 hover:text-blue-500 transition-colors">
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                                                </button>
-                                                <button onClick={() => onDeleteGoal(goal.id)} className="p-1 text-slate-300 hover:text-rose-500 transition-colors">
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                </button>
-                                                <div className="ml-2 bg-slate-900 text-white text-[8px] font-black px-2 py-1 rounded-lg uppercase tracking-widest shadow-lg">P{idx + 1}</div>
-                                            </div>
-
-                                            <div className="flex items-start gap-4 mb-4">
-                                                <div className="flex flex-col gap-1 mt-1">
-                                                    <button
-                                                        onClick={() => swapGoals(idx, idx - 1)}
-                                                        disabled={idx === 0}
-                                                        className="p-1 rounded bg-slate-50 hover:bg-slate-100 disabled:opacity-20 transition-all"
-                                                        title="Mover para cima"
-                                                    >
-                                                        <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 15l7-7 7 7" /></svg>
-                                                    </button>
-                                                    <button
-                                                        onClick={() => swapGoals(idx, idx + 1)}
-                                                        disabled={idx === sortedGoals.length - 1}
-                                                        className="p-1 rounded bg-slate-50 hover:bg-slate-100 disabled:opacity-20 transition-all"
-                                                        title="Mover para baixo"
-                                                    >
-                                                        <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" /></svg>
-                                                    </button>
-                                                </div>
-                                                <div className="flex-1">
-                                                    <h5 className="font-black text-slate-900 leading-tight">{goal.name}</h5>
-                                                    <div className="text-[10px] font-bold text-slate-400 mt-0.5 uppercase tracking-widest">
-                                                        R$ {goal.currentAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de {goal.targetAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden shadow-inner">
-                                                <div
-                                                    className={`h-full transition-all duration-1000 ${idx === 0 ? 'bg-slate-900' : 'bg-blue-500'}`}
-                                                    style={{ width: `${Math.min((goal.currentAmount / goal.targetAmount) * 100, 100)}%` }}
-                                                ></div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : (
-                                <div className="p-8 border-2 border-dashed border-slate-200 rounded-none md:rounded-[2rem] text-center">
-                                    <p className="text-slate-400 font-bold">Nenhuma meta definida.</p>
-                                </div>
-                            )}
-
-                            {/* Add/Edit Goal Form */}
-                            <div className="bg-slate-50 p-6 rounded-none md:rounded-[2rem] border border-slate-200 animate-in slide-in-from-bottom-2">
-                                <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">{editingGoal ? 'Editar Meta' : 'Adicionar Nova Meta na Fila'}</h5>
-                                <div className="flex gap-3 mb-3">
-                                    <input
-                                        type="text"
-                                        placeholder="Nome da Meta"
-                                        value={editingGoal ? editingGoal.name : newGoalName}
-                                        onChange={(e) => editingGoal ? setEditingGoal({ ...editingGoal, name: e.target.value }) : setNewGoalName(e.target.value)}
-                                        className="flex-1 text-sm bg-white border border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
-                                    />
-                                    <input
-                                        type="number"
-                                        placeholder="Alvo (R$)"
-                                        value={editingGoal ? editingGoal.targetAmount : newGoalTarget}
-                                        onChange={(e) => editingGoal ? setEditingGoal({ ...editingGoal, targetAmount: Number(e.target.value) }) : setNewGoalTarget(e.target.value)}
-                                        className="w-32 text-sm bg-white border border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
-                                    />
-                                </div>
-                                <div className="flex gap-2">
-                                    {editingGoal && (
+                            <div className="order-4 md:order-2">
+                                <FinanceSection title="Metas em Cascata">
+                                    <div className="flex justify-end mb-4">
                                         <button
-                                            onClick={() => setEditingGoal(null)}
-                                            className="flex-1 bg-slate-200 text-slate-600 text-[10px] font-black uppercase py-3 rounded-xl hover:bg-slate-300"
-                                        >
-                                            Cancelar
-                                        </button>
-                                    )}
-                                    <button
-                                        onClick={() => {
-                                            if (editingGoal) {
-                                                onUpdateGoal(editingGoal);
-                                                setEditingGoal(null);
-                                            } else if (newGoalName && newGoalTarget) {
-                                                onAddGoal({
-                                                    name: newGoalName,
-                                                    targetAmount: Number(newGoalTarget),
-                                                    currentAmount: 0,
-                                                    priority: goals.length + 1,
-                                                    status: goals.length === 0 ? 'active' : 'queued'
-                                                });
+                                            onClick={() => {
                                                 setNewGoalName('');
                                                 setNewGoalTarget('');
-                                            }
-                                        }}
-                                        className="flex-[2] bg-slate-900 text-white text-[10px] font-black uppercase py-3 rounded-xl hover:bg-slate-800 shadow-lg transition-all active:scale-[0.98]"
-                                    >
-                                        {editingGoal ? 'Salvar Alterações' : 'Adicionar Meta'}
-                                    </button>
-                                </div>
+                                                setEditingGoal(null);
+                                            }}
+                                            className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:underline"
+                                        >
+                                            + Nova Meta
+                                        </button>
+                                    </div>
+
+                                    {sortedGoals.length > 0 ? (
+                                        <div className="space-y-4">
+                                            {sortedGoals.map((goal, idx) => (
+                                                <div key={goal.id} className={`bg-white p-5 rounded-none md:rounded-[2rem] border-2 transition-all relative group ${idx === 0 ? 'border-slate-900 shadow-none md:shadow-xl' : 'border-slate-100 opacity-80 hover:opacity-100 shadow-none md:shadow-sm'}`}>
+                                                    <div className="flex flex-col gap-4">
+                                                        <div className="flex items-start justify-between gap-4">
+                                                            <div className="flex items-start gap-4">
+                                                                <div className="flex flex-col gap-1 mt-1">
+                                                                    <button
+                                                                        onClick={() => swapGoals(idx, idx - 1)}
+                                                                        disabled={idx === 0}
+                                                                        className="p-1 rounded bg-slate-50 hover:bg-slate-100 disabled:opacity-20 transition-all"
+                                                                        title="Mover para cima"
+                                                                    >
+                                                                        <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 15l7-7 7 7" /></svg>
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => swapGoals(idx, idx + 1)}
+                                                                        disabled={idx === sortedGoals.length - 1}
+                                                                        className="p-1 rounded bg-slate-50 hover:bg-slate-100 disabled:opacity-20 transition-all"
+                                                                        title="Mover para baixo"
+                                                                    >
+                                                                        <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" /></svg>
+                                                                    </button>
+                                                                </div>
+                                                                <div className="flex-1 min-w-0">
+                                                                    <h5 className="font-black text-slate-900 leading-tight break-words pr-2">{goal.name}</h5>
+                                                                    <div className="text-[10px] font-bold text-slate-400 mt-0.5 uppercase tracking-widest">
+                                                                        R$ {goal.currentAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de {goal.targetAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex items-center gap-1 shrink-0">
+                                                                <button onClick={() => setEditingGoal(goal)} className="p-1 text-slate-300 hover:text-blue-500 transition-colors">
+                                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                                </button>
+                                                                <button onClick={() => onDeleteGoal(goal.id)} className="p-1 text-slate-300 hover:text-rose-500 transition-colors">
+                                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                                </button>
+                                                                <div className="ml-2 bg-slate-900 text-white text-[8px] font-black px-2 py-1 rounded-lg uppercase tracking-widest shadow-lg shrink-0">P{idx + 1}</div>
+                                                            </div>
+                                                        </div>
+                                                        <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden shadow-inner w-full">
+                                                            <div
+                                                                className={`h-full transition-all duration-1000 ${idx === 0 ? 'bg-slate-900' : 'bg-blue-500'}`}
+                                                                style={{ width: `${Math.min((goal.currentAmount / goal.targetAmount) * 100, 100)}%` }}
+                                                            ></div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="p-8 border-2 border-dashed border-slate-200 rounded-none md:rounded-[2rem] text-center">
+                                            <p className="text-slate-400 font-bold">Nenhuma meta definida.</p>
+                                        </div>
+                                    )}
+
+                                    {/* Add/Edit Goal Form */}
+                                    <div className="bg-slate-50 p-6 rounded-none md:rounded-[2rem] border border-slate-200 animate-in slide-in-from-bottom-2">
+                                        <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">{editingGoal ? 'Editar Meta' : 'Adicionar Nova Meta na Fila'}</h5>
+                                        <div className="flex gap-3 mb-3">
+                                            <input
+                                                type="text"
+                                                placeholder="Nome da Meta"
+                                                value={editingGoal ? editingGoal.name : newGoalName}
+                                                onChange={(e) => editingGoal ? setEditingGoal({ ...editingGoal, name: e.target.value }) : setNewGoalName(e.target.value)}
+                                                className="flex-1 text-sm bg-white border border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                            <input
+                                                type="number"
+                                                placeholder="Alvo (R$)"
+                                                value={editingGoal ? editingGoal.targetAmount : newGoalTarget}
+                                                onChange={(e) => editingGoal ? setEditingGoal({ ...editingGoal, targetAmount: Number(e.target.value) }) : setNewGoalTarget(e.target.value)}
+                                                className="w-32 text-sm bg-white border border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+                                        <div className="flex gap-2">
+                                            {editingGoal && (
+                                                <button
+                                                    onClick={() => setEditingGoal(null)}
+                                                    className="flex-1 bg-slate-200 text-slate-600 text-[10px] font-black uppercase py-3 rounded-xl hover:bg-slate-300"
+                                                >
+                                                    Cancelar
+                                                </button>
+                                            )}
+                                            <button
+                                                onClick={() => {
+                                                    if (editingGoal) {
+                                                        onUpdateGoal(editingGoal);
+                                                        setEditingGoal(null);
+                                                    } else if (newGoalName && newGoalTarget) {
+                                                        onAddGoal({
+                                                            name: newGoalName,
+                                                            targetAmount: Number(newGoalTarget),
+                                                            currentAmount: 0,
+                                                            priority: goals.length + 1,
+                                                            status: goals.length === 0 ? 'active' : 'queued'
+                                                        });
+                                                        setNewGoalName('');
+                                                        setNewGoalTarget('');
+                                                    }
+                                                }}
+                                                className="flex-[2] bg-slate-900 text-white text-[10px] font-black uppercase py-3 rounded-xl hover:bg-slate-800 shadow-lg transition-all active:scale-[0.98]"
+                                            >
+                                                {editingGoal ? 'Salvar Alterações' : 'Adicionar Meta'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </FinanceSection>
                             </div>
-                        </FinanceSection>
                         </div>
 
                         {/* Transactions/Activity Feed */}
+                        <div className="order-2 md:order-3">
                             <FinanceSection title={`Lançamentos de ${new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}`}>
                                 <div className="flex justify-end mb-4">
                                     <button
@@ -674,110 +684,111 @@ const FinanceView = ({
                                     </button>
                                 </div>
 
-                            {/* Form para Adicionar/Editar Transação */}
-                            {(isAddingTransaction || editingTransaction) && (
-                                <div className="mb-6 p-4 bg-slate-50 rounded-lg md:rounded-2xl border border-slate-100 space-y-3">
-                                    <h5 className="text-[10px] font-black uppercase text-slate-400">{editingTransaction ? 'Editar Lançamento' : 'Novo Lançamento'}</h5>
-                                    <input 
-                                        type="text" 
-                                        placeholder="Descrição"
-                                        className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold"
-                                        value={(editingTransaction || newTransaction).description || ''}
-                                        onChange={e => editingTransaction ? setEditingTransaction({...editingTransaction, description: e.target.value}) : setNewTransaction({...newTransaction, description: e.target.value})}
-                                    />
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <input 
-                                            type="number" 
-                                            placeholder="Valor"
-                                            className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold"
-                                            value={(editingTransaction || newTransaction).amount || ''}
-                                            onChange={e => editingTransaction ? setEditingTransaction({...editingTransaction, amount: Number(e.target.value)}) : setNewTransaction({...newTransaction, amount: Number(e.target.value)})}
+                                {/* Form para Adicionar/Editar Transação */}
+                                {(isAddingTransaction || editingTransaction) && (
+                                    <div className="mb-6 p-4 bg-slate-50 rounded-lg md:rounded-2xl border border-slate-100 space-y-3">
+                                        <h5 className="text-[10px] font-black uppercase text-slate-400">{editingTransaction ? 'Editar Lançamento' : 'Novo Lançamento'}</h5>
+                                        <input
+                                            type="text"
+                                            placeholder="Descrição"
+                                            className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold"
+                                            value={(editingTransaction || newTransaction).description || ''}
+                                            onChange={e => editingTransaction ? setEditingTransaction({ ...editingTransaction, description: e.target.value }) : setNewTransaction({ ...newTransaction, description: e.target.value })}
                                         />
-                                        <input 
-                                            type="date" 
-                                            className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold"
-                                            value={(editingTransaction || newTransaction).date?.split('T')[0] || ''}
-                                            onChange={e => {
-                                                const date = new Date(e.target.value).toISOString();
-                                                const day = new Date(e.target.value).getDate();
-                                                const sprint = day < 8 ? 1 : day < 15 ? 2 : day < 22 ? 3 : 4;
-                                                editingTransaction ? setEditingTransaction({...editingTransaction, date, sprint}) : setNewTransaction({...newTransaction, date, sprint});
-                                            }}
-                                        />
-                                    </div>
-                                    <div className="flex gap-2">
-                                        <button 
-                                            onClick={() => { setIsAddingTransaction(false); setEditingTransaction(null); }}
-                                            className="flex-1 px-4 py-2 bg-slate-200 text-slate-600 rounded-xl text-[10px] font-black uppercase"
-                                        >
-                                            Cancelar
-                                        </button>
-                                        <button 
-                                            onClick={async () => {
-                                                const data = (editingTransaction || newTransaction);
-                                                if (data.description && data.amount && data.date) {
-                                                    if (editingTransaction) {
-                                                        await onUpdateTransaction(editingTransaction);
-                                                    } else {
-                                                        await onAddTransaction(newTransaction as Omit<FinanceTransaction, 'id'>);
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <input
+                                                type="number"
+                                                placeholder="Valor"
+                                                className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold"
+                                                value={(editingTransaction || newTransaction).amount || ''}
+                                                onChange={e => editingTransaction ? setEditingTransaction({ ...editingTransaction, amount: Number(e.target.value) }) : setNewTransaction({ ...newTransaction, amount: Number(e.target.value) })}
+                                            />
+                                            <input
+                                                type="date"
+                                                className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold"
+                                                value={(editingTransaction || newTransaction).date?.split('T')[0] || ''}
+                                                onChange={e => {
+                                                    const date = new Date(e.target.value).toISOString();
+                                                    const day = new Date(e.target.value).getDate();
+                                                    const sprint = day < 8 ? 1 : day < 15 ? 2 : day < 22 ? 3 : 4;
+                                                    editingTransaction ? setEditingTransaction({ ...editingTransaction, date, sprint }) : setNewTransaction({ ...newTransaction, date, sprint });
+                                                }}
+                                            />
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => { setIsAddingTransaction(false); setEditingTransaction(null); }}
+                                                className="flex-1 px-4 py-2 bg-slate-200 text-slate-600 rounded-xl text-[10px] font-black uppercase"
+                                            >
+                                                Cancelar
+                                            </button>
+                                            <button
+                                                onClick={async () => {
+                                                    const data = (editingTransaction || newTransaction);
+                                                    if (data.description && data.amount && data.date) {
+                                                        if (editingTransaction) {
+                                                            await onUpdateTransaction(editingTransaction);
+                                                        } else {
+                                                            await onAddTransaction(newTransaction as Omit<FinanceTransaction, 'id'>);
+                                                        }
+                                                        setIsAddingTransaction(false);
+                                                        setEditingTransaction(null);
+                                                        setNewTransaction({});
                                                     }
-                                                    setIsAddingTransaction(false);
-                                                    setEditingTransaction(null);
-                                                    setNewTransaction({});
-                                                }
-                                            }}
-                                            className="flex-1 px-4 py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase"
-                                        >
-                                            Salvar
-                                        </button>
+                                                }}
+                                                className="flex-1 px-4 py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase"
+                                            >
+                                                Salvar
+                                            </button>
+                                        </div>
                                     </div>
-                                </div>
-                            )}
+                                )}
 
-                            <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin">
-                                {transactions
-                                    .filter(t => {
-                                        const d = new Date(t.date);
-                                        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-                                    })
-                                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                                    .map(t => (
-                                        <div key={t.id} className="group relative flex justify-between items-center p-3 hover:bg-slate-50 rounded-xl transition-colors border-b border-slate-50 last:border-0">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 font-bold text-xs">
-                                                    {new Date(t.date).getUTCDate()}
+                                <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin">
+                                    {transactions
+                                        .filter(t => {
+                                            const d = new Date(t.date);
+                                            return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+                                        })
+                                        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                                        .map(t => (
+                                            <div key={t.id} className="group relative flex flex-col sm:flex-row sm:justify-between sm:items-center p-3 hover:bg-slate-50 rounded-xl transition-colors border-b border-slate-50 last:border-0 gap-2 sm:gap-4">
+                                                <div className="flex items-center gap-3 min-w-0">
+                                                    <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 font-bold text-xs shrink-0">
+                                                        {new Date(t.date).getUTCDate()}
+                                                    </div>
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="text-xs font-black text-slate-800 uppercase truncate pr-8" title={t.description}>{t.description || 'Gasto Semanal'}</div>
+                                                        <div className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">
+                                                            {new Date(t.date).toLocaleDateString('pt-BR')} • Sprint {t.sprint}
+                                                        </div>
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <div className="text-xs font-black text-slate-800 uppercase line-clamp-1 pr-12">{t.description || 'Gasto Semanal'}</div>
-                                                    <div className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">
-                                                        {new Date(t.date).toLocaleDateString('pt-BR')} • Sprint {t.sprint}
+                                                <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto">
+                                                    <div className="font-mono font-bold text-slate-900 whitespace-nowrap">
+                                                        - R$ {t.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    </div>
+                                                    <div className="flex sm:hidden group-hover:flex items-center gap-1">
+                                                        <button onClick={() => setEditingTransaction(t)} className="p-1 text-slate-300 hover:text-blue-500 transition-colors">
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                        </button>
+                                                        <button onClick={() => onDeleteTransaction(t.id)} className="p-1 text-slate-300 hover:text-rose-500 transition-colors">
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                        </button>
                                                     </div>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-4">
-                                                <div className="font-mono font-bold text-slate-900 whitespace-nowrap">
-                                                    - R$ {t.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                </div>
-                                                <div className="hidden group-hover:flex items-center gap-1">
-                                                    <button onClick={() => setEditingTransaction(t)} className="p-1 text-slate-300 hover:text-blue-500 transition-colors">
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                                                    </button>
-                                                    <button onClick={() => onDeleteTransaction(t.id)} className="p-1 text-slate-300 hover:text-rose-500 transition-colors">
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                    </button>
-                                                </div>
-                                            </div>
+                                        ))}
+                                    {transactions.length === 0 && (
+                                        <div className="text-center py-10">
+                                            <p className="text-slate-300 font-black text-xs uppercase tracking-widest">Nenhum gasto registrado este mês</p>
                                         </div>
-                                    ))}
-                                {transactions.length === 0 && (
-                                    <div className="text-center py-10">
-                                        <p className="text-slate-300 font-black text-xs uppercase tracking-widest">Nenhum gasto registrado este mês</p>
-                                    </div>
-                                )}
-                            </div>
-                        </FinanceSection>
+                                    )}
+                                </div>
+                            </FinanceSection>
+                        </div>
                     </div>
-                </>
+                </div>
             )}
 
             {/* RENDAS E OBRIGAÇÕES VIEW */}
@@ -786,7 +797,7 @@ const FinanceView = ({
 
                     {/* HUB DE SAÚDE FINANCEIRA (COMPARATIVOS) */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-2 bg-white p-8 rounded-none md:rounded-[2.5rem] border border-slate-200 shadow-xl flex flex-col justify-between relative overflow-hidden group">
+                        <div className="lg:col-span-2 bg-white p-8 rounded-none md:rounded-[2.5rem] border border-slate-200 shadow-none md:shadow-xl flex flex-col justify-between relative overflow-hidden group">
                             <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
                                 <svg className="w-32 h-32" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" /></svg>
                             </div>
@@ -837,9 +848,9 @@ const FinanceView = ({
                             </div>
                         </div>
 
-                        <div className={`p-8 rounded-none md:rounded-[2.5rem] border shadow-xl flex flex-col justify-center items-center text-center transition-all ${currentMonthIncome - currentTotalBills >= 0 ? 'bg-emerald-950 border-emerald-900 text-white' : 'bg-rose-950 border-rose-900 text-white'}`}>
+                        <div className={`p-8 rounded-none md:rounded-[2.5rem] border shadow-none md:shadow-xl flex flex-col justify-center items-center text-center transition-all ${currentMonthIncome - currentTotalBills >= 0 ? 'bg-emerald-950 border-emerald-900 text-white' : 'bg-rose-950 border-rose-900 text-white'}`}>
                             <h4 className="text-[10px] font-black uppercase tracking-[0.2em] mb-2 opacity-60">Saldo Projetado</h4>
-                            <div className="text-5xl font-black tracking-tighter mb-2">
+                            <div className="text-4xl md:text-5xl font-black tracking-tighter mb-2">
                                 R$ {(currentMonthIncome - currentTotalBills).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </div>
                             <p className="text-[10px] font-bold uppercase opacity-40 tracking-widest">Disponível após obrigações</p>
@@ -870,7 +881,7 @@ const FinanceView = ({
 
                         {/* Gestão de Rubricas de Renda */}
                         {isManagingIncomeRubrics && (
-                            <div className="bg-emerald-900 text-white p-8 rounded-none md:rounded-[2.5rem] shadow-xl animate-in fade-in zoom-in-95 duration-300">
+                            <div className="bg-emerald-900 text-white p-8 rounded-none md:rounded-[2.5rem] shadow-none md:shadow-xl animate-in fade-in zoom-in-95 duration-300">
                                 <div className="flex justify-between items-center mb-8">
                                     <div>
                                         <h5 className="text-lg font-black uppercase tracking-tighter text-emerald-100">Canais de Renda</h5>
@@ -978,7 +989,7 @@ const FinanceView = ({
 
                         {/* Formulário de Registro de Recebimento */}
                         {isAddingIncome && (
-                            <div className="bg-white p-6 rounded-none md:rounded-[2rem] border border-emerald-200 shadow-xl space-y-4 animate-in slide-in-from-top-4">
+                            <div className="bg-white p-6 rounded-none md:rounded-[2rem] border border-emerald-200 shadow-none md:shadow-xl space-y-4 animate-in slide-in-from-top-4">
                                 <h5 className="text-sm font-black text-emerald-900 uppercase tracking-widest">Efetivar Recebimento</h5>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                     <input type="text" placeholder="Origem" className="px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium" value={newIncome.description || ''} onChange={(e) => setNewIncome({ ...newIncome, description: e.target.value })} />
@@ -1111,7 +1122,7 @@ const FinanceView = ({
 
                         {/* Gestão de Rubricas */}
                         {isManagingRubrics && (
-                            <div className="bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-xl animate-in fade-in zoom-in-95 duration-300">
+                            <div className="bg-slate-900 text-white p-8 rounded-none md:rounded-[2.5rem] shadow-none md:shadow-xl animate-in fade-in zoom-in-95 duration-300">
                                 <div className="flex justify-between items-center mb-8">
                                     <div>
                                         <h5 className="text-lg font-black uppercase tracking-tighter">Rubricas Recorrentes</h5>
@@ -1222,7 +1233,7 @@ const FinanceView = ({
 
                         {/* Form de Adição */}
                         {isAddingBill && (
-                            <div className="bg-white p-6 rounded-none md:rounded-[2rem] border border-slate-200 shadow-xl space-y-4">
+                            <div className="bg-white p-6 rounded-none md:rounded-[2rem] border border-slate-200 shadow-none md:shadow-xl space-y-4">
                                 <h5 className="text-sm font-black text-slate-900 uppercase tracking-widest">Adicionar Nova Conta/Aporte</h5>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <input type="text" placeholder="Descrição (ex: Aluguel, Poupança)" className="px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium" value={newBill.description || ''} onChange={(e) => setNewBill({ ...newBill, description: e.target.value })} />

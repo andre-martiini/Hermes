@@ -360,9 +360,9 @@ def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapsh
             body=message,
         ),
         data={
-            'id': notif.get('id', ''),
-            'link': notif.get('link', ''),
-            'type': notif.get('type', 'info')
+            'id': str(notif.get('id', '')),
+            'link': str(notif.get('link', '')),
+            'type': str(notif.get('type', 'info'))
         },
         tokens=tokens,
     )
