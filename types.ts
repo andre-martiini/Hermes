@@ -193,6 +193,17 @@ export interface HealthSettings {
     targetWeight: number;
 }
 
+export interface HealthExam {
+    id: string;
+    titulo: string;
+    data: string;
+    tipo: 'exame' | 'consulta';
+    doutor_local?: string;
+    resultados?: string;
+    pool_dados?: PoolItem[];
+    data_criacao: string;
+}
+
 export interface HermesNotification {
     id: string;
     title: string;
@@ -201,6 +212,16 @@ export interface HermesNotification {
     timestamp: string;
     isRead: boolean;
     link?: string;
+}
+
+export interface CustomNotification {
+    id: string;
+    message: string;
+    frequency: 'daily' | 'weekly' | 'monthly';
+    time: string; // HH:mm
+    daysOfWeek?: number[]; // 0-6, for weekly
+    dayOfMonth?: number; // 1-31, for monthly
+    enabled: boolean;
 }
 
 export interface AppSettings {
@@ -227,6 +248,7 @@ export interface AppSettings {
             enabled: boolean;
             daysBeforeEnd: number;
         };
+        custom?: CustomNotification[];
     }
 }
 
@@ -289,6 +311,7 @@ export interface WorkItem {
     concluido: boolean;
     data_criacao: string;
     data_conclusao?: string;
+    pool_dados?: PoolItem[];
 }
 
 export interface AjusteSistema {

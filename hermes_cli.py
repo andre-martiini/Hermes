@@ -114,6 +114,29 @@ def cleanup_old_sync_badges(db, log_func=None):
     except Exception as e:
         log(f"Aviso: Erro na limpeza de badges: {e}")
 
+def extract_time_from_notes(notes):
+    if not notes: return None, None
+    match = re.search(r'\[Horário:\s*(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})\]', notes)
+    if match:
+        return match.group(1), match.group(2)
+    return None, None
+
+def update_notes_with_time(notes, start, end):
+    if not notes: notes = ""
+    pattern = r'\[Horário:\s*\d{2}:\d{2}\s*-\s*\d{2}:\d{2}\]'
+    new_block = f"[Horário: {start} - {end}]" if start and end else ""
+    
+    if re.search(pattern, notes):
+        if new_block:
+            return re.sub(pattern, new_block, notes)
+        else:
+            return re.sub(pattern, '', notes).strip()
+    else:
+        if new_block:
+            return f"{notes}\n\n{new_block}".strip()
+        else:
+            return notes
+
 def sync_google_tasks(db, log_list=None, sync_ref=None):
     last_ui_update = [0]
     def log(msg, force_ui=False):
@@ -168,13 +191,30 @@ def sync_google_tasks(db, log_list=None, sync_ref=None):
             deadline = due.split('T')[0] if due else '-'
             h_status = 'concluído' if gt.get('status') == 'completed' else 'em andamento'
             
-            categoria, sistema, contabilizar_meta = classify_task(title, gt.get('notes', ''), dynamic_mapping)
+            # Extração de horários das notas
+            g_notes = gt.get('notes', '')
+            h_inicio, h_fim = extract_time_from_notes(g_notes)
+            
+            # Duração padrão de 1h se houver início mas não fim
+            if h_inicio and not h_fim:
+                try:
+                    h, m = map(int, h_inicio.split(':'))
+                    h_fim = f"{(h+1)%24:02d}:{m:02d}"
+                except: pass
+
+            categoria, sistema, contabilizar_meta = classify_task(title, g_notes, dynamic_mapping)
             existing_data = local_tasks.get(g_id) or local_tasks.get(f"title_{title}")
             
             if existing_data:
                 doc_id, t_old = existing_data
                 if not t_old.get('google_id'):
-                    db.collection('tarefas').document(doc_id).update({'google_id': g_id, 'data_atualizacao': g_updated, 'notas': gt.get('notes', '')})
+                    db.collection('tarefas').document(doc_id).update({
+                        'google_id': g_id, 
+                        'data_atualizacao': g_updated, 
+                        'notas': g_notes,
+                        'horario_inicio': h_inicio,
+                        'horario_fim': h_fim
+                    })
                     log(f"[*] VINCULADA: {title}")
                     continue
                 
@@ -186,12 +226,20 @@ def sync_google_tasks(db, log_list=None, sync_ref=None):
                 # Se o prazo mudou, ignoramos o shortcut do timestamp para garantir a sincronia
                 if h_updated and g_updated and h_updated >= g_updated and not deadline_changed: continue
                 
-                has_changed = (t_old.get('status') != h_status or t_old.get('titulo') != title or deadline_changed)
+                has_changed = (t_old.get('status') != h_status or 
+                               t_old.get('titulo') != title or 
+                               deadline_changed or 
+                               t_old.get('horario_inicio') != h_inicio or
+                               t_old.get('horario_fim') != h_fim)
+                
                 if has_changed:
                     db.collection('tarefas').document(doc_id).update({
                         'titulo': title, 'data_limite': deadline, 'status': h_status,
                         'data_conclusao': gt.get('completed'), 'data_atualizacao': g_updated,
-                        'notas': gt.get('notes', ''), 'sync_status': 'updated', 'last_sync_date': datetime.now().isoformat()
+                        'notas': g_notes, 'sync_status': 'updated', 
+                        'last_sync_date': datetime.now().isoformat(),
+                        'horario_inicio': h_inicio,
+                        'horario_fim': h_fim
                     })
                     if deadline_changed:
                         log(f"[#] PRAZO SINCRONIZADO: {title} ({deadline})")
@@ -203,7 +251,8 @@ def sync_google_tasks(db, log_list=None, sync_ref=None):
                     'google_id': g_id, 'status': h_status, 'data_criacao': datetime.now().isoformat(),
                     'data_conclusao': gt.get('completed'), 'data_atualizacao': g_updated,
                     'categoria': categoria, 'contabilizar_meta': contabilizar_meta,
-                    'notas': gt.get('notes', ''), 'sync_status': 'new', 'last_sync_date': datetime.now().isoformat()
+                    'notas': g_notes, 'sync_status': 'new', 'last_sync_date': datetime.now().isoformat(),
+                    'horario_inicio': h_inicio, 'horario_fim': h_fim
                 })
                 log(f"[+] IMPORTADA: {title}")
         cleanup_old_sync_badges(db, log)
@@ -319,16 +368,37 @@ def push_google_tasks(db, log_list=None, sync_ref=None):
                 doc.reference.delete()
                 continue
             due_date = f"{t['data_limite']}T00:00:00Z" if t.get('data_limite') and t.get('data_limite') != '-' else None
+            
+            # Se houver horário de início, tentamos enviar no due (mesmo que o Google descarte a hora na maioria das views)
+            if t.get('horario_inicio') and due_date:
+                due_date = f"{t['data_limite']}T{t['horario_inicio']}:00Z"
+
             g_status = 'completed' if t.get('status') == 'concluído' else 'needsAction'
+            
+            # Atualiza as notas com o horário para garantir a sincronia de volta
+            h_inicio, h_fim = t.get('horario_inicio'), t.get('horario_fim')
+            # Se não houver fim mas houver início, assume-se 1h de duração (conforme pedido)
+            if h_inicio and not h_fim:
+                try:
+                    h, m = map(int, h_inicio.split(':'))
+                    h_fim = f"{(h+1)%24:02d}:{m:02d}"
+                except: pass
+            
+            updated_notes = update_notes_with_time(t.get('notas', ''), h_inicio, h_fim)
+
             if not g_id:
-                new_task = service.tasks().insert(tasklist=tasklist_id, body={'title': t['titulo'], 'notes': t.get('notas', ''), 'status': g_status, 'due': due_date}).execute()
-                doc.reference.update({'google_id': new_task['id'], 'data_atualizacao': new_task.get('updated')})
+                body = {'title': t['titulo'], 'notes': updated_notes, 'status': g_status, 'due': due_date}
+                new_task = service.tasks().insert(tasklist=tasklist_id, body=body).execute()
+                doc.reference.update({'google_id': new_task['id'], 'data_atualizacao': new_task.get('updated'), 'notas': updated_notes, 'horario_fim': h_fim if not t.get('horario_fim') else t.get('horario_fim')})
                 log(f"[+] ENVIADA: {t['titulo']}"); count += 1
                 continue
             g_task = g_tasks_map.get(g_id)
             if g_task and t.get('data_atualizacao', '') > g_task.get('updated', ''):
-                service.tasks().update(tasklist=tasklist_id, task=g_id, body={'id': g_id, 'title': t['titulo'], 'notes': t.get('notas', ''), 'status': g_status, 'due': due_date}).execute()
+                body = {'id': g_id, 'title': t['titulo'], 'notes': updated_notes, 'status': g_status, 'due': due_date}
+                service.tasks().update(tasklist=tasklist_id, task=g_id, body=body).execute()
                 log(f"[^] ATUALIZADA NO GOOGLE: {t['titulo']}"); count += 1
+                if updated_notes != t.get('notas', ''):
+                    doc.reference.update({'notas': updated_notes})
         log(f"PUSH FINALIZADO: {count} atualizações.", force_ui=True)
     except Exception as e:
         log(f"ERRO PUSH: {e}", force_ui=True)

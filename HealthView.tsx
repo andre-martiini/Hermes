@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { HealthWeight, DailyHabits, HealthSettings, formatDate } from './types';
+import { HealthWeight, DailyHabits, HealthSettings, formatDate, HealthExam, PoolItem } from './types';
 
 interface HealthViewProps {
     weights: HealthWeight[];
@@ -9,6 +9,10 @@ interface HealthViewProps {
     onAddWeight: (weight: number, date: string) => void;
     onDeleteWeight: (id: string) => void;
     onUpdateHabits: (date: string, habits: Partial<DailyHabits>) => void;
+    exams: HealthExam[];
+    onAddExam: (exam: Omit<HealthExam, 'id' | 'data_criacao' | 'pool_dados'>, files: File[]) => void;
+    onDeleteExam: (id: string) => void;
+    onUpdateExam: (id: string, updates: Partial<HealthExam>) => void;
 }
 
 const HealthSection = ({ title, children, iconColor, defaultExpanded = true }: { title: string, children: React.ReactNode, iconColor: string, defaultExpanded?: boolean }) => {
@@ -115,6 +119,205 @@ const HabitHeatmap = ({ habits, selectedDate, onSelectDate }: { habits: DailyHab
     );
 };
 
+const ExamsAndConsultationsManager = ({ 
+    exams, 
+    onAddExam, 
+    onDeleteExam, 
+    onUpdateExam 
+}: { 
+    exams: HealthExam[], 
+    onAddExam: (exam: Omit<HealthExam, 'id' | 'data_criacao' | 'pool_dados'>, files: File[]) => void,
+    onDeleteExam: (id: string) => void,
+    onUpdateExam: (id: string, updates: Partial<HealthExam>) => void
+}) => {
+    const [isAdding, setIsAdding] = useState(false);
+    const [newExam, setNewExam] = useState<Partial<HealthExam>>({
+        tipo: 'consulta',
+        data: new Date().toISOString().split('T')[0]
+    });
+    const [files, setFiles] = useState<File[]>([]);
+    
+    // Convert FileList to array correctly when handling input
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files) {
+            setFiles(Array.from(e.target.files));
+        }
+    };
+
+    const handleSubmit = () => {
+        if (!newExam.titulo || !newExam.data || !newExam.tipo) return;
+        
+        onAddExam({
+            titulo: newExam.titulo,
+            data: newExam.data,
+            tipo: newExam.tipo,
+            doutor_local: newExam.doutor_local,
+            resultados: newExam.resultados
+        }, files);
+
+        setIsAdding(false);
+        setNewExam({ tipo: 'consulta', data: new Date().toISOString().split('T')[0] });
+        setFiles([]);
+    };
+
+    return (
+        <div className="space-y-6">
+            {!isAdding ? (
+                <button 
+                    onClick={() => setIsAdding(true)}
+                    className="w-full py-4 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 font-bold hover:border-sky-400 hover:text-sky-600 transition-colors flex items-center justify-center gap-2"
+                >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
+                    Novo Registro
+                </button>
+            ) : (
+                <div className="bg-slate-50 p-6 rounded-2xl border border-sky-100 space-y-4 animate-in fade-in slide-in-from-top-4">
+                    <div className="flex justify-between items-center mb-2">
+                        <h4 className="text-sm font-black text-slate-900 uppercase tracking-wide">Novo Registro</h4>
+                        <button onClick={() => setIsAdding(false)} className="text-slate-400 hover:text-rose-500">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Tipo</label>
+                            <div className="flex bg-white p-1 rounded-lg border border-slate-200">
+                                <button 
+                                    onClick={() => setNewExam({ ...newExam, tipo: 'consulta' })}
+                                    className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${newExam.tipo === 'consulta' ? 'bg-sky-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}
+                                >
+                                    Consulta
+                                </button>
+                                <button 
+                                    onClick={() => setNewExam({ ...newExam, tipo: 'exame' })}
+                                    className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${newExam.tipo === 'exame' ? 'bg-indigo-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}
+                                >
+                                    Exame
+                                </button>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Data</label>
+                            <input 
+                                type="date"
+                                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-sky-500"
+                                value={newExam.data}
+                                onChange={e => setNewExam({ ...newExam, data: e.target.value })}
+                            />
+                        </div>
+
+                        <div className="md:col-span-2">
+                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Título / Especialidade</label>
+                            <input 
+                                type="text"
+                                placeholder="Ex: Cardiologista, Hemograma Completo..."
+                                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-sky-500"
+                                value={newExam.titulo || ''}
+                                onChange={e => setNewExam({ ...newExam, titulo: e.target.value })}
+                            />
+                        </div>
+
+                        <div className="md:col-span-2">
+                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Local / Médico / Laboratório</label>
+                            <input 
+                                type="text"
+                                placeholder="Ex: Dr. Silva, Lab. Exame..."
+                                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-sky-500"
+                                value={newExam.doutor_local || ''}
+                                onChange={e => setNewExam({ ...newExam, doutor_local: e.target.value })}
+                            />
+                        </div>
+
+                        <div className="md:col-span-2">
+                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Arquivos / Resultados (Google Drive)</label>
+                            <div className="border-2 border-dashed border-slate-200 rounded-lg p-4 bg-white hover:bg-slate-50 transition-colors text-center cursor-pointer relative">
+                                <input 
+                                    type="file" 
+                                    multiple
+                                    className="absolute inset-0 opacity-0 cursor-pointer"
+                                    onChange={handleFileChange}
+                                />
+                                <div className="text-slate-400 text-xs font-bold">
+                                    {files.length > 0 ? (
+                                        <span className="text-sky-600">{files.length} arquivo(s) selecionado(s)</span>
+                                    ) : (
+                                        <span>Arraste ou clique para adicionar arquivos</span>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex justify-start md:justify-end pt-2">
+                        <button 
+                            disabled={!newExam.titulo || !newExam.data}
+                            onClick={handleSubmit}
+                            className="w-full md:w-auto bg-sky-500 text-white px-6 py-3 md:py-2 rounded-lg text-xs font-black uppercase tracking-widest hover:bg-sky-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-sky-200"
+                        >
+                            Salvar Registro
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            <div className="space-y-3">
+                {exams.sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime()).map(exam => (
+                    <div key={exam.id} className="bg-white border border-slate-100 rounded-xl p-4 hover:shadow-md transition-all group relative">
+                        <div className="flex justify-between items-start mb-2">
+                            <div className="flex items-center gap-2">
+                                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${exam.tipo === 'consulta' ? 'bg-sky-50 text-sky-600' : 'bg-indigo-50 text-indigo-600'}`}>
+                                    {exam.tipo === 'consulta' ? 'Consulta' : 'Exame'}
+                                </span>
+                                <span className="text-[10px] font-black text-slate-300 uppercase">{formatDate(exam.data)}</span>
+                            </div>
+                            <button 
+                                onClick={() => onDeleteExam(exam.id)}
+                                className="text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                title="Excluir"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                            </button>
+                        </div>
+
+                        <h4 className="text-sm font-black text-slate-800 leading-tight mb-1">{exam.titulo}</h4>
+                        {exam.doutor_local && (
+                            <p className="text-xs text-slate-500 font-medium mb-3 flex items-center gap-1">
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                                {exam.doutor_local}
+                            </p>
+                        )}
+
+                        {exam.pool_dados && exam.pool_dados.length > 0 && (
+                            <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-slate-50">
+                                {exam.pool_dados.map(file => (
+                                    <a 
+                                        key={file.id}
+                                        href={file.valor}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 rounded-lg border border-slate-100 text-[10px] font-bold text-slate-600 hover:bg-slate-100 hover:text-sky-600 transition-colors"
+                                    >
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                                        {file.nome || 'Anexo'}
+                                    </a>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                ))}
+                
+                {exams.length === 0 && !isAdding && (
+                    <div className="text-center py-8 text-slate-300 text-[10px] font-black uppercase tracking-widest italic border-2 border-dashed border-slate-50 rounded-xl">
+                        Nenhum registro ainda
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
 const HealthView: React.FC<HealthViewProps> = ({
     weights,
     dailyHabits,
@@ -122,7 +325,11 @@ const HealthView: React.FC<HealthViewProps> = ({
     onUpdateSettings,
     onAddWeight,
     onDeleteWeight,
-    onUpdateHabits
+    onUpdateHabits,
+    exams,
+    onAddExam,
+    onDeleteExam,
+    onUpdateExam
 }) => {
     const todayStr = new Date().toISOString().split('T')[0];
     const [selectedDate, setSelectedDate] = useState<string>(todayStr);
@@ -462,6 +669,17 @@ const HealthView: React.FC<HealthViewProps> = ({
                         </div>
                     </HealthSection>
                 </div>
+            </div>
+            {/* Exams and Consultations Section */}
+            <div className="flex flex-col gap-0 md:gap-8">
+                <HealthSection title="Exames e Consultas" iconColor="bg-sky-500">
+                    <ExamsAndConsultationsManager
+                        exams={exams}
+                        onAddExam={onAddExam}
+                        onDeleteExam={onDeleteExam}
+                        onUpdateExam={onUpdateExam}
+                    />
+                </HealthSection>
             </div>
         </div>
     );

@@ -43,12 +43,12 @@ const FinanceSection = ({ title, children, defaultExpanded = true }: { title: st
     const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 
     return (
-        <div className="bg-white p-6 md:p-8 rounded-none md:rounded-lg border-b md:border border-slate-200 shadow-none md:shadow-lg">
+        <div className="bg-white p-6 md:p-8 rounded-none md:rounded-[2rem] border-b md:border border-slate-200 shadow-none md:shadow-lg">
             <button
                 onClick={() => setIsExpanded(!isExpanded)}
                 className="w-full flex items-center justify-between group"
             >
-                <h4 className="text-sm md:text-base font-black text-slate-900 uppercase tracking-widest">{title}</h4>
+                <h4 className="text-lg font-black text-slate-900">{title}</h4>
                 <svg className={`w-5 h-5 text-slate-300 group-hover:text-slate-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
                 </svg>
@@ -249,61 +249,63 @@ const FinanceView = ({
             {/* Header & Tabs */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                 <div className="flex flex-col md:flex-row md:items-center gap-6">
-                    <div>
-                        <h3 className="hidden md:block text-3xl font-black text-slate-900 tracking-tighter">Financeiro</h3>
-                        <div className="flex bg-slate-100 p-1 rounded-lg w-full md:w-auto mt-2 md:mt-4">
-                            <button
-                                onClick={() => setActiveTab('dashboard')}
-                                className={`flex-1 md:flex-none px-4 py-2 text-[10px] uppercase font-black rounded-md transition-all ${activeTab === 'dashboard' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
-                            >
-                                Visão Geral
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('fixed')}
-                                className={`flex-1 md:flex-none px-4 py-2 text-[10px] uppercase font-black rounded-md transition-all ${activeTab === 'fixed' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
-                            >
-                                Rendas e Obrigações
-                            </button>
+                    <h3 className="text-3xl font-black text-slate-900 tracking-tighter">Financeiro</h3>
+                    
+                    <div className="flex bg-slate-100 p-1 rounded-lg w-full md:w-auto self-start md:self-auto">
+                        <button
+                            onClick={() => setActiveTab('dashboard')}
+                            className={`flex-1 md:flex-none px-4 py-2 text-[10px] uppercase font-black rounded-md transition-all ${activeTab === 'dashboard' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+                        >
+                            Visão Geral
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('fixed')}
+                            className={`flex-1 md:flex-none px-4 py-2 text-[10px] uppercase font-black rounded-md transition-all ${activeTab === 'fixed' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+                        >
+                            Rendas e Obrigações
+                        </button>
+                    </div>
+                </div>
+
+                <div className="flex items-center bg-white rounded-2xl border border-slate-200 shadow-sm self-start md:self-auto">
+                    <button
+                        onClick={() => {
+                            const newMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+                            const newYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+                            onMonthChange(newMonth, newYear);
+                        }}
+                        className="p-3 hover:bg-slate-50 rounded-l-2xl text-slate-400 hover:text-slate-900 transition-all border-r border-slate-100"
+                    >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 19l-7-7 7-7" /></svg>
+                    </button>
+                    
+                    <div className="px-4 text-center min-w-[140px]">
+                        <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">Período</div>
+                        <div className="text-sm font-black text-slate-900 capitalize leading-none mt-0.5">
+                            {new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(new Date(currentYear, currentMonth))}
                         </div>
                     </div>
 
-                    <div className="flex items-stretch w-full md:w-auto">
-                        <div className="flex items-center gap-2 bg-white p-2 rounded-l-xl md:rounded-2xl border border-slate-200 shadow-sm flex-1 md:flex-none justify-center">
-                            <button
-                                onClick={() => {
-                                    const newMonth = currentMonth === 0 ? 11 : currentMonth - 1;
-                                    const newYear = currentMonth === 0 ? currentYear - 1 : currentYear;
-                                    onMonthChange(newMonth, newYear);
-                                }}
-                                className="p-1 px-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-900 transition-all"
-                            >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 19l-7-7 7-7" /></svg>
-                            </button>
-                            <div className="px-2 text-center min-w-[100px] md:min-w-[120px]">
-                                <div className="text-[8px] md:text-[9px] font-black uppercase tracking-widest text-slate-400">Período</div>
-                                <div className="text-[11px] md:text-sm font-black text-slate-900 capitalize leading-none">
-                                    {new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(new Date(currentYear, currentMonth))}
-                                </div>
-                            </div>
-                            <button
-                                onClick={() => {
-                                    const newMonth = currentMonth === 11 ? 0 : currentMonth + 1;
-                                    const newYear = currentMonth === 11 ? currentYear + 1 : currentYear;
-                                    onMonthChange(newMonth, newYear);
-                                }}
-                                className="p-1 px-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-900 transition-all"
-                            >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
-                            </button>
-                        </div>
-                        <button
-                            onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-                            className="bg-white border-y border-r border-slate-200 text-slate-400 p-4 !rounded-none hover:bg-slate-50 transition-all flex items-center justify-center shadow-sm"
-                            title="Configurações"
-                        >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                        </button>
-                    </div>
+                    <button
+                        onClick={() => {
+                            const newMonth = currentMonth === 11 ? 0 : currentMonth + 1;
+                            const newYear = currentMonth === 11 ? currentYear + 1 : currentYear;
+                            onMonthChange(newMonth, newYear);
+                        }}
+                        className="p-3 hover:bg-slate-50 text-slate-400 hover:text-slate-900 transition-all border-l border-slate-100"
+                    >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
+                    </button>
+
+                    <div className="w-px h-6 bg-slate-200 mx-1"></div>
+
+                    <button
+                        onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+                        className={`p-3 rounded-r-2xl hover:bg-slate-50 transition-all ${isSettingsOpen ? 'text-blue-600 bg-blue-50' : 'text-slate-400 hover:text-blue-500'}`}
+                        title="Configurações"
+                    >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                    </button>
                 </div>
             </div>
 
@@ -458,12 +460,12 @@ const FinanceView = ({
 
             {/* DASHBOARD VIEW */}
             {activeTab === 'dashboard' && (
-                <div className="flex flex-col space-y-0 md:space-y-8">
+                <div className="flex flex-col gap-6 md:gap-8">
                     {/* Budget Bar Section */}
-                    <div className="bg-white p-6 md:p-8 rounded-none md:rounded-[2.5rem] border-b md:border border-slate-200 shadow-none md:shadow-xl relative overflow-hidden order-1">
+                    <div className="bg-white p-6 md:p-8 rounded-none md:rounded-[2rem] border-b md:border border-slate-200 shadow-none md:shadow-xl relative overflow-hidden">
                         <div className="flex justify-between items-end mb-6">
                             <div>
-                                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">
+                                <h4 className="text-lg font-black text-slate-900 tracking-tight mb-1">
                                     Gasto Acumulado • {new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}
                                 </h4>
                                 <div className="text-2xl md:text-5xl font-black text-slate-900 tracking-tighter leading-none">
@@ -503,11 +505,129 @@ const FinanceView = ({
                     </div>
 
                     {/* Content Grid */}
-                    <div className="flex flex-col md:grid md:grid-cols-2 md:gap-8 space-y-0 md:space-y-0 contents md:block">
-                        {/* On desktop, we use the grid. On mobile, the 'contents' or just flat children will allow the parent flex to order them. */}
-                        {/* Actually, 'contents' makes the div invisible for layout purposes, but its children become direct flex items of the parent. */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
+                        
+                        {/* TRANSACTIONS (LEFT COLUMN) */}
+                        <div className="order-2 md:order-1 h-full">
+                            <FinanceSection title={`Lançamentos de ${new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}`}>
+                                <div className="flex justify-end mb-4">
+                                    <button
+                                        onClick={() => {
+                                            setNewTransaction({ date: new Date().toISOString(), sprint: 1, category: 'Alimentação' });
+                                            setIsAddingTransaction(true);
+                                        }}
+                                        className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:underline"
+                                    >
+                                        + Novo
+                                    </button>
+                                </div>
 
-                        <div className="flex flex-col space-y-0 md:space-y-6 order-3 md:order-1">
+                                {/* Form para Adicionar/Editar Transação */}
+                                {(isAddingTransaction || editingTransaction) && (
+                                    <div className="mb-6 p-4 bg-slate-50 rounded-lg md:rounded-2xl border border-slate-100 space-y-3">
+                                        <h5 className="text-[10px] font-black uppercase text-slate-400">{editingTransaction ? 'Editar Lançamento' : 'Novo Lançamento'}</h5>
+                                        <input
+                                            type="text"
+                                            placeholder="Descrição"
+                                            className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold"
+                                            value={(editingTransaction || newTransaction).description || ''}
+                                            onChange={e => editingTransaction ? setEditingTransaction({ ...editingTransaction, description: e.target.value }) : setNewTransaction({ ...newTransaction, description: e.target.value })}
+                                        />
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <input
+                                                type="number"
+                                                placeholder="Valor"
+                                                className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold"
+                                                value={(editingTransaction || newTransaction).amount || ''}
+                                                onChange={e => editingTransaction ? setEditingTransaction({ ...editingTransaction, amount: Number(e.target.value) }) : setNewTransaction({ ...newTransaction, amount: Number(e.target.value) })}
+                                            />
+                                            <input
+                                                type="date"
+                                                className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold"
+                                                value={(editingTransaction || newTransaction).date?.split('T')[0] || ''}
+                                                onChange={e => {
+                                                    const date = new Date(e.target.value).toISOString();
+                                                    const day = new Date(e.target.value).getDate();
+                                                    const sprint = day < 8 ? 1 : day < 15 ? 2 : day < 22 ? 3 : 4;
+                                                    editingTransaction ? setEditingTransaction({ ...editingTransaction, date, sprint }) : setNewTransaction({ ...newTransaction, date, sprint });
+                                                }}
+                                            />
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => { setIsAddingTransaction(false); setEditingTransaction(null); }}
+                                                className="flex-1 px-4 py-2 bg-slate-200 text-slate-600 rounded-xl text-[10px] font-black uppercase"
+                                            >
+                                                Cancelar
+                                            </button>
+                                            <button
+                                                onClick={async () => {
+                                                    const data = (editingTransaction || newTransaction);
+                                                    if (data.description && data.amount && data.date) {
+                                                        if (editingTransaction) {
+                                                            await onUpdateTransaction(editingTransaction);
+                                                        } else {
+                                                            await onAddTransaction(newTransaction as Omit<FinanceTransaction, 'id'>);
+                                                        }
+                                                        setIsAddingTransaction(false);
+                                                        setEditingTransaction(null);
+                                                        setNewTransaction({});
+                                                    }
+                                                }}
+                                                className="flex-1 px-4 py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase"
+                                            >
+                                                Salvar
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 scrollbar-thin">
+                                    {transactions
+                                        .filter(t => {
+                                            const d = new Date(t.date);
+                                            return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+                                        })
+                                        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                                        .map(t => (
+                                            <div key={t.id} className="group relative flex flex-col sm:flex-row sm:justify-between sm:items-center p-3 hover:bg-slate-50 rounded-xl transition-colors border-b border-slate-50 last:border-0 gap-2 sm:gap-4">
+                                                <div className="flex items-center gap-3 min-w-0">
+                                                    <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 font-bold text-xs shrink-0">
+                                                        {new Date(t.date).getUTCDate()}
+                                                    </div>
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="text-xs font-black text-slate-800 uppercase truncate pr-8" title={t.description}>{t.description || 'Gasto Semanal'}</div>
+                                                        <div className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">
+                                                            {new Date(t.date).toLocaleDateString('pt-BR')} • Sprint {t.sprint}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto">
+                                                    <div className="font-mono font-bold text-slate-900 whitespace-nowrap">
+                                                        - R$ {t.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    </div>
+                                                    <div className="flex sm:hidden group-hover:flex items-center gap-1">
+                                                        <button onClick={() => setEditingTransaction(t)} className="p-1 text-slate-300 hover:text-blue-500 transition-colors">
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                        </button>
+                                                        <button onClick={() => onDeleteTransaction(t.id)} className="p-1 text-slate-300 hover:text-rose-500 transition-colors">
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    {transactions.length === 0 && (
+                                        <div className="text-center py-10">
+                                            <p className="text-slate-300 font-black text-xs uppercase tracking-widest">Nenhum gasto registrado este mês</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </FinanceSection>
+                        </div>
+
+                        {/* EMERGENCY & GOALS (RIGHT COLUMN) */}
+                        <div className="order-3 md:order-2 space-y-6">
                             {/* Emergency Reserve Section */}
                             <div className="bg-white p-6 rounded-none md:rounded-[2rem] border-b md:border border-emerald-100 shadow-none md:shadow-lg relative overflow-hidden group">
                                 <div className="mt-2">
@@ -541,7 +661,7 @@ const FinanceView = ({
                                 )}
                             </div>
 
-                            <div className="order-4 md:order-2">
+                            <div className="">
                                 <FinanceSection title="Metas em Cascata">
                                     <div className="flex justify-end mb-4">
                                         <button
@@ -668,125 +788,6 @@ const FinanceView = ({
                                 </FinanceSection>
                             </div>
                         </div>
-
-                        {/* Transactions/Activity Feed */}
-                        <div className="order-2 md:order-3">
-                            <FinanceSection title={`Lançamentos de ${new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}`}>
-                                <div className="flex justify-end mb-4">
-                                    <button
-                                        onClick={() => {
-                                            setNewTransaction({ date: new Date().toISOString(), sprint: 1, category: 'Alimentação' });
-                                            setIsAddingTransaction(true);
-                                        }}
-                                        className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:underline"
-                                    >
-                                        + Novo
-                                    </button>
-                                </div>
-
-                                {/* Form para Adicionar/Editar Transação */}
-                                {(isAddingTransaction || editingTransaction) && (
-                                    <div className="mb-6 p-4 bg-slate-50 rounded-lg md:rounded-2xl border border-slate-100 space-y-3">
-                                        <h5 className="text-[10px] font-black uppercase text-slate-400">{editingTransaction ? 'Editar Lançamento' : 'Novo Lançamento'}</h5>
-                                        <input
-                                            type="text"
-                                            placeholder="Descrição"
-                                            className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold"
-                                            value={(editingTransaction || newTransaction).description || ''}
-                                            onChange={e => editingTransaction ? setEditingTransaction({ ...editingTransaction, description: e.target.value }) : setNewTransaction({ ...newTransaction, description: e.target.value })}
-                                        />
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <input
-                                                type="number"
-                                                placeholder="Valor"
-                                                className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold"
-                                                value={(editingTransaction || newTransaction).amount || ''}
-                                                onChange={e => editingTransaction ? setEditingTransaction({ ...editingTransaction, amount: Number(e.target.value) }) : setNewTransaction({ ...newTransaction, amount: Number(e.target.value) })}
-                                            />
-                                            <input
-                                                type="date"
-                                                className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold"
-                                                value={(editingTransaction || newTransaction).date?.split('T')[0] || ''}
-                                                onChange={e => {
-                                                    const date = new Date(e.target.value).toISOString();
-                                                    const day = new Date(e.target.value).getDate();
-                                                    const sprint = day < 8 ? 1 : day < 15 ? 2 : day < 22 ? 3 : 4;
-                                                    editingTransaction ? setEditingTransaction({ ...editingTransaction, date, sprint }) : setNewTransaction({ ...newTransaction, date, sprint });
-                                                }}
-                                            />
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <button
-                                                onClick={() => { setIsAddingTransaction(false); setEditingTransaction(null); }}
-                                                className="flex-1 px-4 py-2 bg-slate-200 text-slate-600 rounded-xl text-[10px] font-black uppercase"
-                                            >
-                                                Cancelar
-                                            </button>
-                                            <button
-                                                onClick={async () => {
-                                                    const data = (editingTransaction || newTransaction);
-                                                    if (data.description && data.amount && data.date) {
-                                                        if (editingTransaction) {
-                                                            await onUpdateTransaction(editingTransaction);
-                                                        } else {
-                                                            await onAddTransaction(newTransaction as Omit<FinanceTransaction, 'id'>);
-                                                        }
-                                                        setIsAddingTransaction(false);
-                                                        setEditingTransaction(null);
-                                                        setNewTransaction({});
-                                                    }
-                                                }}
-                                                className="flex-1 px-4 py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase"
-                                            >
-                                                Salvar
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-
-                                <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin">
-                                    {transactions
-                                        .filter(t => {
-                                            const d = new Date(t.date);
-                                            return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-                                        })
-                                        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                                        .map(t => (
-                                            <div key={t.id} className="group relative flex flex-col sm:flex-row sm:justify-between sm:items-center p-3 hover:bg-slate-50 rounded-xl transition-colors border-b border-slate-50 last:border-0 gap-2 sm:gap-4">
-                                                <div className="flex items-center gap-3 min-w-0">
-                                                    <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 font-bold text-xs shrink-0">
-                                                        {new Date(t.date).getUTCDate()}
-                                                    </div>
-                                                    <div className="min-w-0 flex-1">
-                                                        <div className="text-xs font-black text-slate-800 uppercase truncate pr-8" title={t.description}>{t.description || 'Gasto Semanal'}</div>
-                                                        <div className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">
-                                                            {new Date(t.date).toLocaleDateString('pt-BR')} • Sprint {t.sprint}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto">
-                                                    <div className="font-mono font-bold text-slate-900 whitespace-nowrap">
-                                                        - R$ {t.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                    </div>
-                                                    <div className="flex sm:hidden group-hover:flex items-center gap-1">
-                                                        <button onClick={() => setEditingTransaction(t)} className="p-1 text-slate-300 hover:text-blue-500 transition-colors">
-                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                                                        </button>
-                                                        <button onClick={() => onDeleteTransaction(t.id)} className="p-1 text-slate-300 hover:text-rose-500 transition-colors">
-                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    {transactions.length === 0 && (
-                                        <div className="text-center py-10">
-                                            <p className="text-slate-300 font-black text-xs uppercase tracking-widest">Nenhum gasto registrado este mês</p>
-                                        </div>
-                                    )}
-                                </div>
-                            </FinanceSection>
-                        </div>
                     </div>
                 </div>
             )}
@@ -797,7 +798,7 @@ const FinanceView = ({
 
                     {/* HUB DE SAÚDE FINANCEIRA (COMPARATIVOS) */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-2 bg-white p-8 rounded-none md:rounded-[2.5rem] border border-slate-200 shadow-none md:shadow-xl flex flex-col justify-between relative overflow-hidden group">
+                        <div className="lg:col-span-2 bg-white p-8 rounded-none md:rounded-[2rem] border border-slate-200 shadow-none md:shadow-xl flex flex-col justify-between relative overflow-hidden group">
                             <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
                                 <svg className="w-32 h-32" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" /></svg>
                             </div>
@@ -848,7 +849,7 @@ const FinanceView = ({
                             </div>
                         </div>
 
-                        <div className={`p-8 rounded-none md:rounded-[2.5rem] border shadow-none md:shadow-xl flex flex-col justify-center items-center text-center transition-all ${currentMonthIncome - currentTotalBills >= 0 ? 'bg-emerald-950 border-emerald-900 text-white' : 'bg-rose-950 border-rose-900 text-white'}`}>
+                        <div className={`p-8 rounded-none md:rounded-[2rem] border shadow-none md:shadow-xl flex flex-col justify-center items-center text-center transition-all ${currentMonthIncome - currentTotalBills >= 0 ? 'bg-emerald-950 border-emerald-900 text-white' : 'bg-rose-950 border-rose-900 text-white'}`}>
                             <h4 className="text-[10px] font-black uppercase tracking-[0.2em] mb-2 opacity-60">Saldo Projetado</h4>
                             <div className="text-4xl md:text-5xl font-black tracking-tighter mb-2">
                                 R$ {(currentMonthIncome - currentTotalBills).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -918,7 +919,7 @@ const FinanceView = ({
                                     ))}
                                 </div>
 
-                                <div className="bg-white/5 p-6 rounded-none md:rounded-3xl border border-white/10">
+                                <div className="bg-white/5 p-6 rounded-none md:rounded-[2rem] border border-white/10">
                                     <h6 className="text-[10px] font-black text-emerald-300/40 uppercase tracking-widest mb-4">
                                         {editingIncomeRubric ? 'Editar Fonte de Renda' : 'Configurar Nova Fonte'}
                                     </h6>
@@ -1159,7 +1160,7 @@ const FinanceView = ({
                                     ))}
                                 </div>
 
-                                <div className="bg-white/5 p-6 rounded-none md:rounded-3xl border border-white/10">
+                                <div className="bg-white/5 p-6 rounded-none md:rounded-[2rem] border border-white/10">
                                     <h6 className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-4">
                                         {editingRubric ? 'Editar Rubrica' : 'Cadastrar Nova Rubrica'}
                                     </h6>
