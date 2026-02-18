@@ -368,7 +368,7 @@ def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapsh
     )
 
     try:
-        response = messaging.send_multicast(push_message)
+        response = messaging.send_each_for_multicast(push_message)
         print(f"Push enviado: {response.success_count} sucesso, {response.failure_count} falha.")
 
         # Opcional: Limpar tokens que falharam por não estarem mais registrados

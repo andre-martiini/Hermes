@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { 
+import {
   Tarefa, Status, EntregaInstitucional, Prioridade, AtividadeRealizada,
   Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento,
   BrainstormIdea, FinanceTransaction, FinanceGoal, FinanceSettings,
@@ -144,7 +144,7 @@ const PgcMiniTaskCard = React.memo(({ task, onClick }: { task: Tarefa, onClick?:
           {task.projeto}
         </span>
         <span className="text-[8px] font-black text-slate-400 uppercase">{formatDate(task.data_limite)}</span>
-        
+
         {/* Badge de Sincronização */}
         {task.sync_status === 'new' && (
           <span className="text-[7px] font-black px-1.5 py-0.5 rounded uppercase bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-sm animate-pulse">
@@ -337,22 +337,22 @@ const DayView = ({
 
   const dayTasks = useMemo(() => tasks.filter(t => {
     if (t.status === 'excluído' as any) return false;
-    
+
     // Se a tarefa já tem horário definido (está alocada), respeitamos estritamente a data definida
     if (t.horario_inicio && t.data_inicio) {
       return t.data_inicio === dayStr;
     }
-    
+
     const end = t.data_limite;
     const hasDeadline = end && end !== '-' && end !== '0000-00-00';
-    
+
     // Se não tem prazo, aparece sempre no sidebar para alocação (conforme o pedido opcional)
     if (!hasDeadline) return true;
-    
+
     // Alinha com o pedido: tarefas com prazo devem aparecer "exclusivamente no dia delas"
     // Consideramos o intervalo [data_inicio, data_limite] se houver início, caso contrário apenas o dia do prazo
     const start = t.data_inicio || end;
-    
+
     return dayStr >= start && dayStr <= end;
   }), [tasks, dayStr]);
 
@@ -409,7 +409,7 @@ const DayView = ({
         e.clientY >= sidebarRect.top &&
         e.clientY <= sidebarRect.bottom
       ) {
-         onTaskUpdate(dragging.id, { horario_inicio: null, horario_fim: null }, false);
+        onTaskUpdate(dragging.id, { horario_inicio: null, horario_fim: null }, false);
       }
     }
     setResizing(null);
@@ -435,7 +435,7 @@ const DayView = ({
           <div className="w-16 flex-shrink-0 text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">Dia Todo</div>
           <div className="flex-1 flex flex-wrap gap-2">
             {allDayEvents.map(event => (
-              <div 
+              <div
                 key={event.id}
                 className="px-3 py-1 bg-amber-50 border border-amber-200 rounded-full text-[10px] font-bold text-amber-700 flex items-center gap-2 shadow-sm"
               >
@@ -450,9 +450,9 @@ const DayView = ({
 
       <div className="flex flex-1 overflow-hidden relative">
         <div className="flex-1 overflow-y-auto custom-scrollbar relative">
-          <div 
-            className="relative w-full" 
-            style={{ height: 24 * hourHeight }} 
+          <div
+            className="relative w-full"
+            style={{ height: 24 * hourHeight }}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               const taskId = e.dataTransfer.getData('task-id') || e.dataTransfer.getData('tarefaId');
@@ -575,15 +575,15 @@ const DayView = ({
           </div>
         </div>
 
-        <div 
+        <div
           ref={sidebarRef}
           className="hidden md:block w-64 bg-slate-50 border-l border-slate-200 p-6 overflow-y-auto custom-scrollbar"
           onDragOver={e => e.preventDefault()}
           onDrop={(e) => {
-             const taskId = e.dataTransfer.getData('task-id');
-             if (taskId) {
-               onTaskUpdate(taskId, { horario_inicio: null, horario_fim: null });
-             }
+            const taskId = e.dataTransfer.getData('task-id');
+            if (taskId) {
+              onTaskUpdate(taskId, { horario_inicio: null, horario_fim: null });
+            }
           }}
         >
           <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6">Aguardando Alocação</h4>
@@ -599,7 +599,7 @@ const DayView = ({
                 <div className="flex items-center gap-2">
                   <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${PROJECT_COLORS[task.projeto] || 'bg-slate-100 text-slate-600'}`}>{task.projeto}</span>
                   {(!task.data_limite || task.data_limite === '-' || task.data_limite === '0000-00-00') && (
-                     <span className="text-[8px] font-black px-1.5 py-0.5 rounded uppercase bg-amber-100 text-amber-700">Sem Prazo</span>
+                    <span className="text-[8px] font-black px-1.5 py-0.5 rounded uppercase bg-amber-100 text-amber-700">Sem Prazo</span>
                   )}
                 </div>
               </div>
@@ -905,10 +905,10 @@ const CalendarView = ({
   );
 };
 
-const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit }: { 
-  task: Tarefa, 
-  onClick?: () => void, 
-  onToggle: (id: string, currentStatus: string) => void, 
+const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit }: {
+  task: Tarefa,
+  onClick?: () => void,
+  onToggle: (id: string, currentStatus: string) => void,
   onDelete: (id: string) => void,
   onEdit: (t: Tarefa) => void
 }) => {
@@ -924,7 +924,7 @@ const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit }: {
     if (parts.length !== 3) return dateStr;
     const date = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
     const today = new Date();
-    today.setHours(0,0,0,0);
+    today.setHours(0, 0, 0, 0);
     if (date.getTime() === today.getTime()) return 'Hoje';
     const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
     return `${parts[2]} ${months[Number(parts[1]) - 1]}`;
@@ -970,7 +970,7 @@ const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit }: {
         >
           <svg className="w-4 h-4 sm:w-3.5 sm:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" /></svg>
         </button>
-        
+
         <div className={`text-sm md:text-base font-bold text-[#1a202c] leading-tight transition-colors ${isCompleted ? 'line-through text-slate-400' : 'group-hover:text-blue-600'} line-clamp-2 sm:line-clamp-1`}>
           {task.titulo}
         </div>
@@ -987,7 +987,7 @@ const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit }: {
           <span className={`text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded-full border whitespace-nowrap ${getTagStyle(task.projeto, 'project')}`}>
             {task.projeto}
           </span>
-          
+
           {task.sync_status && (
             <div className={`w-2 h-2 rounded-full ${task.sync_status === 'new' ? 'bg-purple-500 animate-pulse' : 'bg-amber-500'}`} title={task.sync_status === 'new' ? 'Nova' : 'Atualizada'}></div>
           )}
@@ -1023,7 +1023,7 @@ const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit }: {
                 title={isConfirmingDelete ? "Confirmar?" : "Excluir"}
               >
                 {isConfirmingDelete ? (
-                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                 ) : (
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                 )}
@@ -1219,7 +1219,7 @@ const NotificationCenter = ({
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element;
       if (
-        dropdownRef.current && 
+        dropdownRef.current &&
         !dropdownRef.current.contains(target as Node) &&
         !target.closest('.notification-trigger')
       ) {
@@ -1619,7 +1619,7 @@ const SettingsModal = ({
                           <h5 className="text-xs font-black text-slate-900 uppercase tracking-widest">{u.nome}</h5>
                           {isProtected && <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest">Protegido</span>}
                         </div>
-                        
+
                         {!isProtected && (
                           <button
                             onClick={() => onDeleteUnidade(u.id)}
@@ -1931,23 +1931,23 @@ const DailyHabitsModal = ({
 // Função para detectar automaticamente a área baseada em palavras-chave
 const detectAreaFromTitle = (titulo: string): Categoria => {
   const tituloLower = titulo.toLowerCase();
-  
+
   // Palavras-chave para CLC
   const clcKeywords = ['licitação', 'licitacao', 'pregão', 'pregao', 'contrato', 'dispensa', 'inexigibilidade', 'compra', 'aquisição', 'aquisicao'];
-  
+
   // Palavras-chave para Assistência Estudantil
   const assistenciaKeywords = ['assistência', 'assistencia', 'estudantil', 'aluno', 'bolsa', 'auxílio', 'auxilio', 'permanência', 'permanencia'];
-  
+
   // Verifica CLC primeiro
   if (clcKeywords.some(keyword => tituloLower.includes(keyword))) {
     return 'CLC';
   }
-  
+
   // Verifica Assistência Estudantil
   if (assistenciaKeywords.some(keyword => tituloLower.includes(keyword))) {
     return 'ASSISTÊNCIA';
   }
-  
+
   // Se não encontrar palavras-chave específicas, retorna GERAL
   return 'GERAL';
 };
@@ -1965,7 +1965,7 @@ const TaskCreateModal = ({ unidades, onSave, onClose }: { unidades: { id: string
     notas: '',
     is_single_day: false
   });
-  
+
   const [autoClassified, setAutoClassified] = useState(false);
 
   return (
@@ -1989,9 +1989,9 @@ const TaskCreateModal = ({ unidades, onSave, onClose }: { unidades: { id: string
               onChange={e => {
                 const newTitulo = e.target.value;
                 const detectedArea = detectAreaFromTitle(newTitulo);
-                
-                setFormData({ 
-                  ...formData, 
+
+                setFormData({
+                  ...formData,
                   titulo: newTitulo,
                   // Só atualiza a categoria automaticamente se ainda não foi manualmente alterada
                   categoria: autoClassified ? formData.categoria : detectedArea
@@ -2394,7 +2394,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
   };
 
   const handleResetTimer = () => {
-      setModalConfig({ type: 'reset_timer', isOpen: true });
+    setModalConfig({ type: 'reset_timer', isOpen: true });
   };
 
   const formatTime = (totalSeconds: number) => {
@@ -2479,10 +2479,10 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
 
       // Add to pool
       const updatedPool = [...(currentTaskData.pool_dados || []), ...newPoolItems];
-      
+
       // If adding via chat, also add a diary entry
       if (newPoolItems.length > 0) {
-         // Optionally you could add automatic note here, but we will let user type details
+        // Optionally you could add automatic note here, but we will let user type details
       }
 
       onSave(task.id, { pool_dados: updatedPool });
@@ -2503,53 +2503,53 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
   };
 
   const handleAddPoolItem = (valor: string, tipo: 'link' | 'telefone' | 'arquivo' = 'link', nome: string = '') => {
-      if (!valor.trim()) return;
+    if (!valor.trim()) return;
 
-      const newItem: PoolItem = {
-        id: Math.random().toString(36).substr(2, 9),
-        tipo: tipo,
-        valor: valor,
-        nome: nome || valor, 
-        data_criacao: new Date().toISOString()
-      };
+    const newItem: PoolItem = {
+      id: Math.random().toString(36).substr(2, 9),
+      tipo: tipo,
+      valor: valor,
+      nome: nome || valor,
+      data_criacao: new Date().toISOString()
+    };
 
-      const updatedPool = [...(currentTaskData.pool_dados || []), newItem];
-      
-      // Auto-log no diário
-      let notaContent = '';
-      if (tipo === 'link') notaContent = `LINK::${nome}::${valor}`;
-      else if (tipo === 'telefone') notaContent = `CONTACT::${nome}::${valor}`;
-      else notaContent = valor;
+    const updatedPool = [...(currentTaskData.pool_dados || []), newItem];
 
-      const noteObject = { 
-          data: new Date().toISOString(), 
-          nota: notaContent 
-      };
-      
-      const updatedAcompanhamento = [...(currentTaskData.acompanhamento || []), noteObject];
-      
-      onSave(task.id, { pool_dados: updatedPool, acompanhamento: updatedAcompanhamento });
+    // Auto-log no diário
+    let notaContent = '';
+    if (tipo === 'link') notaContent = `LINK::${nome}::${valor}`;
+    else if (tipo === 'telefone') notaContent = `CONTACT::${nome}::${valor}`;
+    else notaContent = valor;
 
-      setNewPoolItem('');
-      setShowAttachMenu(false);
+    const noteObject = {
+      data: new Date().toISOString(),
+      nota: notaContent
+    };
+
+    const updatedAcompanhamento = [...(currentTaskData.acompanhamento || []), noteObject];
+
+    onSave(task.id, { pool_dados: updatedPool, acompanhamento: updatedAcompanhamento });
+
+    setNewPoolItem('');
+    setShowAttachMenu(false);
   };
 
 
   const handleFileUploadInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (e.target.files && e.target.files.length > 0) {
-          const files = e.target.files;
-          setShowAttachMenu(false);
-          const uploadedItems = await handleFileUpload(files);
-          
-          if (uploadedItems && uploadedItems.length > 0) {
-             const newEntries = uploadedItems.map(item => ({
-                 data: new Date().toISOString(),
-                 nota: `FILE::${item.nome}::${item.valor}`
-             }));
-             const updatedAcompanhamento = [...(currentTaskData.acompanhamento || []), ...newEntries];
-             onSave(task.id, { acompanhamento: updatedAcompanhamento });
-          }
+    if (e.target.files && e.target.files.length > 0) {
+      const files = e.target.files;
+      setShowAttachMenu(false);
+      const uploadedItems = await handleFileUpload(files);
+
+      if (uploadedItems && uploadedItems.length > 0) {
+        const newEntries = uploadedItems.map(item => ({
+          data: new Date().toISOString(),
+          nota: `FILE::${item.nome}::${item.valor}`
+        }));
+        const updatedAcompanhamento = [...(currentTaskData.acompanhamento || []), ...newEntries];
+        onSave(task.id, { acompanhamento: updatedAcompanhamento });
       }
+    }
   };
 
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
@@ -2576,16 +2576,16 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
         break;
       case 'confirm_delete':
         if (modalConfig.data?.index !== undefined) {
-             const updated = [...(currentTaskData.acompanhamento || [])];
-             updated.splice(modalConfig.data.index, 1);
-             onSave(task.id, { acompanhamento: updated });
+          const updated = [...(currentTaskData.acompanhamento || [])];
+          updated.splice(modalConfig.data.index, 1);
+          onSave(task.id, { acompanhamento: updated });
         }
         break;
       case 'edit_diary':
         if (modalConfig.data?.index !== undefined && modalInputValue.trim()) {
-             const updated = [...(currentTaskData.acompanhamento || [])];
-             updated[modalConfig.data.index] = { ...updated[modalConfig.data.index], nota: modalInputValue };
-             onSave(task.id, { acompanhamento: updated });
+          const updated = [...(currentTaskData.acompanhamento || [])];
+          updated[modalConfig.data.index] = { ...updated[modalConfig.data.index], nota: modalInputValue };
+          onSave(task.id, { acompanhamento: updated });
         }
         break;
       case 'link':
@@ -2605,78 +2605,78 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
       const parts = text.split('::');
       let url = '';
       let nome = '';
-      
+
       if (parts.length >= 3) {
-          nome = parts[1];
-          url = parts[2];
+        nome = parts[1];
+        url = parts[2];
       } else {
-          url = text.replace('LINK::', '');
+        url = text.replace('LINK::', '');
       }
 
       return (
-         <a href={url} target="_blank" rel="noreferrer" className={`group flex items-center gap-4 p-4 rounded-none md:rounded-2xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-blue-50/50 border-blue-100 hover:bg-blue-50'}`}>
-           <div className={`w-10 h-10 rounded-lg md:rounded-xl flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-blue-200 text-blue-600'}`}>
-             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
-           </div>
-           <div className="flex-1 min-w-0">
-             <p className={`text-xs font-bold truncate ${isTimerRunning ? 'text-white' : 'text-blue-900'}`}>{nome || url}</p>
-             <p className={`text-[10px] uppercase font-black tracking-widest mt-0.5 ${isTimerRunning ? 'text-white/40' : 'text-blue-400'}`}>Link Externo</p>
-           </div>
-           <svg className={`w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity ${isTimerRunning ? 'text-white/60' : 'text-blue-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-         </a>
+        <a href={url} target="_blank" rel="noreferrer" className={`group flex items-center gap-4 p-4 rounded-none md:rounded-2xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-blue-50/50 border-blue-100 hover:bg-blue-50'}`}>
+          <div className={`w-10 h-10 rounded-lg md:rounded-xl flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-blue-200 text-blue-600'}`}>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className={`text-xs font-bold truncate ${isTimerRunning ? 'text-white' : 'text-blue-900'}`}>{nome || url}</p>
+            <p className={`text-[10px] uppercase font-black tracking-widest mt-0.5 ${isTimerRunning ? 'text-white/40' : 'text-blue-400'}`}>Link Externo</p>
+          </div>
+          <svg className={`w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity ${isTimerRunning ? 'text-white/60' : 'text-blue-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+        </a>
       );
     }
     if (text.startsWith('CONTACT::')) {
-       const parts = text.split('::');
-       let contact = '';
-       let nome = '';
-       
-       if (parts.length >= 3) {
-          nome = parts[1];
-          contact = parts[2];
-       } else {
-          contact = text.replace('CONTACT::', '');
-       }
+      const parts = text.split('::');
+      let contact = '';
+      let nome = '';
 
-       const num = contact.replace(/\D/g, '');
-       const waLink = num.length >= 10 ? `https://wa.me/55${num}` : null;
-       
-       return (
-          <div className={`group flex items-center gap-4 p-4 rounded-none md:rounded-2xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-emerald-50/50 border-emerald-100'}`}>
-             <div className={`w-10 h-10 rounded-lg md:rounded-xl flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-emerald-200 text-emerald-600'}`}>
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.022-.014-.503-.245-.583-.273-.08-.027-.138-.04-.197.048-.058.088-.227.288-.278.346-.05.058-.1.066-.188.022-.088-.044-.372-.137-.708-.437-.26-.231-.437-.515-.487-.603-.05-.088-.005-.135.039-.179.04-.04.088-.103.131-.154.044-.051.059-.088.088-.146.03-.058.015-.11-.008-.154-.022-.044-.197-.474-.27-.65-.072-.172-.143-.149-.197-.151l-.168-.002c-.058 0-.154.022-.234.11-.08.088-.307.3-.307.732 0 .432.315.849.359.907.044.058.62 1.04 1.502 1.42.21.09.372.143.5.184.21.067.4.057.55.035.168-.024.503-.205.574-.403.072-.198.072-.367.051-.403-.021-.037-.08-.058-.168-.102z"/><path d="M12 2C6.477 2 2 6.477 2 12c0 1.891.524 3.66 1.434 5.168L2 22l4.958-1.412A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.96 7.96 0 01-4.07-1.112l-.292-.174-3.024.863.878-2.946-.19-.302A7.957 7.957 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z"/></svg>
-             </div>
-             <div className="flex-1 min-w-0">
-               <p className={`text-xs font-bold truncate ${isTimerRunning ? 'text-white' : 'text-emerald-900'}`}>{nome || contact}</p>
-               <p className={`text-[10px] uppercase font-black tracking-widest mt-0.5 ${isTimerRunning ? 'text-white/40' : 'text-emerald-500'}`}>Contato Profissional</p>
-             </div>
-             {waLink && (
-               <a href={waLink} target="_blank" rel="noreferrer" className={`p-2 rounded-lg transition-colors ${isTimerRunning ? 'hover:bg-white/10 text-white' : 'hover:bg-emerald-200 text-emerald-600'}`} title="WhatsApp">
-                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
-               </a>
-             )}
+      if (parts.length >= 3) {
+        nome = parts[1];
+        contact = parts[2];
+      } else {
+        contact = text.replace('CONTACT::', '');
+      }
+
+      const num = contact.replace(/\D/g, '');
+      const waLink = num.length >= 10 ? `https://wa.me/55${num}` : null;
+
+      return (
+        <div className={`group flex items-center gap-4 p-4 rounded-none md:rounded-2xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-emerald-50/50 border-emerald-100'}`}>
+          <div className={`w-10 h-10 rounded-lg md:rounded-xl flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-emerald-200 text-emerald-600'}`}>
+            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.022-.014-.503-.245-.583-.273-.08-.027-.138-.04-.197.048-.058.088-.227.288-.278.346-.05.058-.1.066-.188.022-.088-.044-.372-.137-.708-.437-.26-.231-.437-.515-.487-.603-.05-.088-.005-.135.039-.179.04-.04.088-.103.131-.154.044-.051.059-.088.088-.146.03-.058.015-.11-.008-.154-.022-.044-.197-.474-.27-.65-.072-.172-.143-.149-.197-.151l-.168-.002c-.058 0-.154.022-.234.11-.08.088-.307.3-.307.732 0 .432.315.849.359.907.044.058.62 1.04 1.502 1.42.21.09.372.143.5.184.21.067.4.057.55.035.168-.024.503-.205.574-.403.072-.198.072-.367.051-.403-.021-.037-.08-.058-.168-.102z" /><path d="M12 2C6.477 2 2 6.477 2 12c0 1.891.524 3.66 1.434 5.168L2 22l4.958-1.412A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.96 7.96 0 01-4.07-1.112l-.292-.174-3.024.863.878-2.946-.19-.302A7.957 7.957 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z" /></svg>
           </div>
-       );
+          <div className="flex-1 min-w-0">
+            <p className={`text-xs font-bold truncate ${isTimerRunning ? 'text-white' : 'text-emerald-900'}`}>{nome || contact}</p>
+            <p className={`text-[10px] uppercase font-black tracking-widest mt-0.5 ${isTimerRunning ? 'text-white/40' : 'text-emerald-500'}`}>Contato Profissional</p>
+          </div>
+          {waLink && (
+            <a href={waLink} target="_blank" rel="noreferrer" className={`p-2 rounded-lg transition-colors ${isTimerRunning ? 'hover:bg-white/10 text-white' : 'hover:bg-emerald-200 text-emerald-600'}`} title="WhatsApp">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+            </a>
+          )}
+        </div>
+      );
     }
     if (text.startsWith('FILE::')) {
-       const parts = text.split('::');
-       const nome = parts[1] || 'Arquivo';
-       const url = parts[2] || '#';
-       
-       return (
-          <a href={url} target="_blank" rel="noreferrer" className={`group flex items-center gap-4 p-4 rounded-none md:rounded-2xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-amber-50/50 border-amber-100 hover:bg-amber-50'}`}>
-             <div className={`w-10 h-10 rounded-lg md:rounded-xl flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-amber-200 text-amber-600'}`}>
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-             </div>
-             <div className="flex-1 min-w-0">
-               <p className={`text-xs font-bold truncate ${isTimerRunning ? 'text-white' : 'text-amber-900'}`}>{nome}</p>
-               <p className={`text-[10px] uppercase font-black tracking-widest mt-0.5 ${isTimerRunning ? 'text-white/40' : 'text-amber-600'}`}>Anexo</p>
-             </div>
-             <svg className={`w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity ${isTimerRunning ? 'text-white/60' : 'text-amber-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-          </a>
-       );
+      const parts = text.split('::');
+      const nome = parts[1] || 'Arquivo';
+      const url = parts[2] || '#';
+
+      return (
+        <a href={url} target="_blank" rel="noreferrer" className={`group flex items-center gap-4 p-4 rounded-none md:rounded-2xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-amber-50/50 border-amber-100 hover:bg-amber-50'}`}>
+          <div className={`w-10 h-10 rounded-lg md:rounded-xl flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-amber-200 text-amber-600'}`}>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className={`text-xs font-bold truncate ${isTimerRunning ? 'text-white' : 'text-amber-900'}`}>{nome}</p>
+            <p className={`text-[10px] uppercase font-black tracking-widest mt-0.5 ${isTimerRunning ? 'text-white/40' : 'text-amber-600'}`}>Anexo</p>
+          </div>
+          <svg className={`w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity ${isTimerRunning ? 'text-white/60' : 'text-amber-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+        </a>
+      );
     }
-    
+
     return <p className={`text-sm leading-relaxed whitespace-pre-wrap ${isTimerRunning ? 'text-white/90' : 'text-slate-700'}`}>{text}</p>;
   };
 
@@ -2707,231 +2707,229 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 p-10 pt-4 overflow-hidden">
         {/* Pool e Diário no Modo Foco (Left Column) */}
         <div className="lg:col-span-7 flex flex-col relative h-full overflow-hidden">
-           
-           {/* Header Controls for Chat */}
-           <div className="flex items-center justify-between mb-4 shrink-0">
-              <h4 className={`text-sm font-black uppercase tracking-widest flex items-center gap-2 ${isTimerRunning ? 'text-white/40' : 'text-slate-400'}`}>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
-                Diário de Bordo
-              </h4>
-              <button 
-                onClick={() => setShowPool(!showPool)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                    showPool 
-                        ? 'bg-blue-600 text-white' 
-                        : isTimerRunning ? 'bg-white/10 text-white/60 hover:bg-white/20' : 'bg-white text-slate-500 hover:bg-slate-50 border border-slate-200'
+
+          {/* Header Controls for Chat */}
+          <div className="flex items-center justify-between mb-4 shrink-0">
+            <h4 className={`text-sm font-black uppercase tracking-widest flex items-center gap-2 ${isTimerRunning ? 'text-white/40' : 'text-slate-400'}`}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+              Diário de Bordo
+            </h4>
+            <button
+              onClick={() => setShowPool(!showPool)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${showPool
+                  ? 'bg-blue-600 text-white'
+                  : isTimerRunning ? 'bg-white/10 text-white/60 hover:bg-white/20' : 'bg-white text-slate-500 hover:bg-slate-50 border border-slate-200'
                 }`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" /></svg>
-                {showPool ? 'Ocultar Arquivos' : 'Ver Arquivos'}
-              </button>
-           </div>
-           
-           {/* Main Area: Chat or Pool Overlay */}
-           <div className={`flex-1 rounded-none md:rounded-[2.5rem] border relative overflow-hidden flex flex-col transition-colors ${isTimerRunning ? 'bg-white/5 border-white/10 backdrop-blur-sm' : 'bg-white border-slate-200 shadow-sm'}`}>
-             
-             {/* POOL OVERLAY */}
-             {showPool && (
-               <div className={`absolute inset-0 z-20 backdrop-blur-xl flex flex-col animate-in slide-in-from-top-4 ${isTimerRunning ? 'bg-[#050505]/95' : 'bg-slate-50/95'}`}>
-                  <div className={`p-6 border-b flex items-center justify-between ${isTimerRunning ? 'border-white/10' : 'border-slate-200'}`}>
-                    <h3 className="text-sm font-black text-blue-400 uppercase tracking-widest">Pool de Dados do Projeto</h3>
-                    <div className="flex items-center gap-2">
-                       <input
-                          type="text"
-                          value={newPoolItem}
-                          onChange={e => setNewPoolItem(e.target.value)}
-                          placeholder="Adicionar link..."
-                          className={`border rounded-lg px-3 py-1.5 text-xs outline-none focus:border-blue-500 w-48 transition-colors ${isTimerRunning ? 'bg-white/10 border-white/10 text-white placeholder:text-white/20' : 'bg-white border-slate-200 text-slate-800 placeholder:text-slate-400'}`}
-                          onKeyDown={e => e.key === 'Enter' && handleAddPoolItem(newPoolItem)}
-                       />
-                       <button onClick={() => setShowPool(false)} className={`p-2 rounded-lg transition-colors ${isTimerRunning ? 'hover:bg-white/10 text-white/40 hover:text-white' : 'hover:bg-slate-100 text-slate-400 hover:text-slate-600'}`}>
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
-                       </button>
-                    </div>
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" /></svg>
+              {showPool ? 'Ocultar Arquivos' : 'Ver Arquivos'}
+            </button>
+          </div>
+
+          {/* Main Area: Chat or Pool Overlay */}
+          <div className={`flex-1 rounded-none md:rounded-[2.5rem] border relative overflow-hidden flex flex-col transition-colors ${isTimerRunning ? 'bg-white/5 border-white/10 backdrop-blur-sm' : 'bg-white border-slate-200 shadow-sm'}`}>
+
+            {/* POOL OVERLAY */}
+            {showPool && (
+              <div className={`absolute inset-0 z-20 backdrop-blur-xl flex flex-col animate-in slide-in-from-top-4 ${isTimerRunning ? 'bg-[#050505]/95' : 'bg-slate-50/95'}`}>
+                <div className={`p-6 border-b flex items-center justify-between ${isTimerRunning ? 'border-white/10' : 'border-slate-200'}`}>
+                  <h3 className="text-sm font-black text-blue-400 uppercase tracking-widest">Pool de Dados do Projeto</h3>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={newPoolItem}
+                      onChange={e => setNewPoolItem(e.target.value)}
+                      placeholder="Adicionar link..."
+                      className={`border rounded-lg px-3 py-1.5 text-xs outline-none focus:border-blue-500 w-48 transition-colors ${isTimerRunning ? 'bg-white/10 border-white/10 text-white placeholder:text-white/20' : 'bg-white border-slate-200 text-slate-800 placeholder:text-slate-400'}`}
+                      onKeyDown={e => e.key === 'Enter' && handleAddPoolItem(newPoolItem)}
+                    />
+                    <button onClick={() => setShowPool(false)} className={`p-2 rounded-lg transition-colors ${isTimerRunning ? 'hover:bg-white/10 text-white/40 hover:text-white' : 'hover:bg-slate-100 text-slate-400 hover:text-slate-600'}`}>
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
                   </div>
-                  <div className="flex-1 overflow-y-auto custom-scrollbar p-6 grid grid-cols-1 md:grid-cols-2 gap-4 content-start">
-                    {(task.pool_dados || []).map((item) => (
-                      <div key={item.id} className={`p-4 rounded-none md:rounded-2xl border flex items-center gap-4 transition-all group ${isTimerRunning ? 'bg-white/5 border-white/5 hover:border-white/20' : 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'}`}>
-                        <div className={`w-10 h-10 rounded-lg md:rounded-xl flex items-center justify-center shrink-0 ${
-                            item.tipo === 'arquivo' ? 'bg-amber-500/20 text-amber-500' :
-                            item.tipo === 'telefone' ? 'bg-emerald-500/20 text-emerald-500' :
+                </div>
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-6 grid grid-cols-1 md:grid-cols-2 gap-4 content-start">
+                  {(task.pool_dados || []).map((item) => (
+                    <div key={item.id} className={`p-4 rounded-none md:rounded-2xl border flex items-center gap-4 transition-all group ${isTimerRunning ? 'bg-white/5 border-white/5 hover:border-white/20' : 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'}`}>
+                      <div className={`w-10 h-10 rounded-lg md:rounded-xl flex items-center justify-center shrink-0 ${item.tipo === 'arquivo' ? 'bg-amber-500/20 text-amber-500' :
+                          item.tipo === 'telefone' ? 'bg-emerald-500/20 text-emerald-500' :
                             'bg-blue-500/20 text-blue-500'
-                          }`}>
-                            {item.tipo === 'arquivo' && <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
-                            {item.tipo === 'telefone' && <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.022-.014-.503-.245-.583-.273-.08-.027-.138-.04-.197.048-.058.088-.227.288-.278.346-.05.058-.1.066-.188.022-.088-.044-.372-.137-.708-.437-.26-.231-.437-.515-.487-.603-.05-.088-.005-.135.039-.179.04-.04.088-.103.131-.154.044-.051.059-.088.088-.146.03-.058.015-.11-.008-.154-.022-.044-.197-.474-.27-.65-.072-.172-.143-.149-.197-.151l-.168-.002c-.058 0-.154.022-.234.11-.08.088-.307.3-.307.732 0 .432.315.849.359.907.044.058.62 1.04 1.502 1.42.21.09.372.143.5.184.21.067.4.057.55.035.168-.024.503-.205.574-.403.072-.198.072-.367.051-.403-.021-.037-.08-.058-.168-.102z"/><path d="M12 2C6.477 2 2 6.477 2 12c0 1.891.524 3.66 1.434 5.168L2 22l4.958-1.412A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.96 7.96 0 01-4.07-1.112l-.292-.174-3.024.863.878-2.946-.19-.302A7.957 7.957 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z"/></svg>}
-                            {item.tipo === 'link' && <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-sm font-bold truncate ${isTimerRunning ? 'text-white/90' : 'text-slate-800'}`}>{item.nome || item.valor}</p>
-                          <p className={`text-[10px] truncate ${isTimerRunning ? 'text-white/40' : 'text-slate-400'}`}>{new Date(item.data_criacao).toLocaleString('pt-BR')}</p>
-                        </div>
-                        <div className="flex gap-2">
-                             <a href={item.valor} target="_blank" rel="noreferrer" className={`p-2 rounded-lg transition-colors ${isTimerRunning ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`} title="Abrir">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                             </a>
-                             <button onClick={() => removePoolItem(item.id)} className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 rounded-lg transition-colors" title="Excluir">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                             </button>
-                        </div>
+                        }`}>
+                        {item.tipo === 'arquivo' && <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
+                        {item.tipo === 'telefone' && <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.022-.014-.503-.245-.583-.273-.08-.027-.138-.04-.197.048-.058.088-.227.288-.278.346-.05.058-.1.066-.188.022-.088-.044-.372-.137-.708-.437-.26-.231-.437-.515-.487-.603-.05-.088-.005-.135.039-.179.04-.04.088-.103.131-.154.044-.051.059-.088.088-.146.03-.058.015-.11-.008-.154-.022-.044-.197-.474-.27-.65-.072-.172-.143-.149-.197-.151l-.168-.002c-.058 0-.154.022-.234.11-.08.088-.307.3-.307.732 0 .432.315.849.359.907.044.058.62 1.04 1.502 1.42.21.09.372.143.5.184.21.067.4.057.55.035.168-.024.503-.205.574-.403.072-.198.072-.367.051-.403-.021-.037-.08-.058-.168-.102z" /><path d="M12 2C6.477 2 2 6.477 2 12c0 1.891.524 3.66 1.434 5.168L2 22l4.958-1.412A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.96 7.96 0 01-4.07-1.112l-.292-.174-3.024.863.878-2.946-.19-.302A7.957 7.957 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z" /></svg>}
+                        {item.tipo === 'link' && <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>}
                       </div>
-                    ))}
-                    {(task.pool_dados || []).length === 0 && (
-                      <div className="col-span-full py-20 text-center">
-                         <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 border ${isTimerRunning ? 'bg-white/5 border-white/5' : 'bg-slate-100 border-slate-200'}`}>
-                            <svg className={`w-10 h-10 ${isTimerRunning ? 'text-white/20' : 'text-slate-300'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" /></svg>
-                         </div>
-                         <p className={`text-xs font-medium ${isTimerRunning ? 'text-white/30' : 'text-slate-400'}`}>Nenhum arquivo no projeto</p>
-                         <p className={`text-[10px] mt-1 ${isTimerRunning ? 'text-white/20' : 'text-slate-300'}`}>Use o menu de anexo ou arraste arquivos</p>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm font-bold truncate ${isTimerRunning ? 'text-white/90' : 'text-slate-800'}`}>{item.nome || item.valor}</p>
+                        <p className={`text-[10px] truncate ${isTimerRunning ? 'text-white/40' : 'text-slate-400'}`}>{new Date(item.data_criacao).toLocaleString('pt-BR')}</p>
                       </div>
-                    )}
+                      <div className="flex gap-2">
+                        <a href={item.valor} target="_blank" rel="noreferrer" className={`p-2 rounded-lg transition-colors ${isTimerRunning ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`} title="Abrir">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                        </a>
+                        <button onClick={() => removePoolItem(item.id)} className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 rounded-lg transition-colors" title="Excluir">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {(task.pool_dados || []).length === 0 && (
+                    <div className="col-span-full py-20 text-center">
+                      <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 border ${isTimerRunning ? 'bg-white/5 border-white/5' : 'bg-slate-100 border-slate-200'}`}>
+                        <svg className={`w-10 h-10 ${isTimerRunning ? 'text-white/20' : 'text-slate-300'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" /></svg>
+                      </div>
+                      <p className={`text-xs font-medium ${isTimerRunning ? 'text-white/30' : 'text-slate-400'}`}>Nenhum arquivo no projeto</p>
+                      <p className={`text-[10px] mt-1 ${isTimerRunning ? 'text-white/20' : 'text-slate-300'}`}>Use o menu de anexo ou arraste arquivos</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* CHAT/DIARY INTERFACE */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-6 flex flex-col gap-4 relative z-10">
+              {/* Mensagem de Boas-vindas para contexto */}
+              <div className="flex justify-center mb-6">
+                <div className={`border rounded-full px-4 py-2 text-[10px] uppercase tracking-widest font-black ${isTimerRunning ? 'bg-white/5 border-white/5 text-white/40' : 'bg-slate-100 border-slate-200 text-slate-400'}`}>
+                  Início da Sessão • {new Date(task.data_criacao || Date.now()).toLocaleDateString()}
+                </div>
+              </div>
+
+              {task.acompanhamento && task.acompanhamento.map((entry, idx) => (
+                <div key={idx} className="flex flex-col gap-1 items-start animate-in fade-in slide-in-from-bottom-2 duration-300 w-full">
+                  <div className={`p-4 rounded-none md:rounded-2xl rounded-tl-none border max-w-[90%] shadow-lg relative group ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-100 shadow-slate-200'}`}>
+                    {renderDiaryContent(entry.nota)}
+                    <div className="flex items-center justify-between mt-2 gap-4">
+                      <span className={`text-[9px] font-black uppercase tracking-wider ${isTimerRunning ? 'text-white/30' : 'text-slate-300'}`}>
+                        {new Date(entry.data).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+
+                      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => handleEditDiaryEntry(idx)} className={`transition-colors ${isTimerRunning ? 'text-white/40 hover:text-blue-400' : 'text-slate-400 hover:text-blue-500'}`} title="Editar">
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                        </button>
+                        <button onClick={() => handleDeleteDiaryEntry(idx)} className={`transition-colors ${isTimerRunning ? 'text-white/40 hover:text-rose-500' : 'text-slate-400 hover:text-rose-500'}`} title="Excluir">
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                      </div>
+                    </div>
                   </div>
-               </div>
-             )}
+                </div>
+              ))}
 
-             {/* CHAT/DIARY INTERFACE */}
-             <div className="flex-1 overflow-y-auto custom-scrollbar p-6 flex flex-col gap-4 relative z-10">
-                 {/* Mensagem de Boas-vindas para contexto */}
-                 <div className="flex justify-center mb-6">
-                    <div className={`border rounded-full px-4 py-2 text-[10px] uppercase tracking-widest font-black ${isTimerRunning ? 'bg-white/5 border-white/5 text-white/40' : 'bg-slate-100 border-slate-200 text-slate-400'}`}>
-                       Início da Sessão • {new Date(task.data_criacao || Date.now()).toLocaleDateString()}
+              {isUploading && (
+                <div className="flex flex-col gap-1 items-start animate-in fade-in slide-in-from-bottom-2 duration-300 w-full opacity-60">
+                  <div className={`p-4 rounded-none md:rounded-2xl rounded-tl-none border max-w-[90%] shadow-lg ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-100 shadow-slate-200'}`}>
+                    <div className="flex items-center gap-3">
+                      <div className="w-4 h-4 rounded-full border-2 border-slate-300 border-t-blue-500 animate-spin"></div>
+                      <p className={`text-xs font-bold ${isTimerRunning ? 'text-white/60' : 'text-slate-500'}`}>Enviando arquivos...</p>
                     </div>
-                 </div>
+                  </div>
+                </div>
+              )}
 
-                 {task.acompanhamento && task.acompanhamento.map((entry, idx) => (
-                    <div key={idx} className="flex flex-col gap-1 items-start animate-in fade-in slide-in-from-bottom-2 duration-300 w-full">
-                       <div className={`p-4 rounded-none md:rounded-2xl rounded-tl-none border max-w-[90%] shadow-lg relative group ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-100 shadow-slate-200'}`}>
-                          {renderDiaryContent(entry.nota)}
-                          <div className="flex items-center justify-between mt-2 gap-4">
-                              <span className={`text-[9px] font-black uppercase tracking-wider ${isTimerRunning ? 'text-white/30' : 'text-slate-300'}`}>
-                                 {new Date(entry.data).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                              </span>
-                              
-                              <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onClick={() => handleEditDiaryEntry(idx)} className={`transition-colors ${isTimerRunning ? 'text-white/40 hover:text-blue-400' : 'text-slate-400 hover:text-blue-500'}`} title="Editar">
-                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                </button>
-                                <button onClick={() => handleDeleteDiaryEntry(idx)} className={`transition-colors ${isTimerRunning ? 'text-white/40 hover:text-rose-500' : 'text-slate-400 hover:text-rose-500'}`} title="Excluir">
-                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                </button>
-                              </div>
-                          </div>
-                       </div>
+              {(!task.acompanhamento || task.acompanhamento.length === 0) && (
+                <div className="flex-1 flex flex-col items-center justify-center text-center opacity-30 mt-10">
+                  <p className={`text-sm font-medium mb-2 ${isTimerRunning ? 'text-white' : 'text-slate-800'}`}>Tudo pronto para começar?</p>
+                  <p className={`text-xs ${isTimerRunning ? 'text-white/60' : 'text-slate-500'}`}>Registre seu diário de execução abaixo.</p>
+                </div>
+              )}
+              {/* Invisible spacer for scrolling */}
+              <div style={{ float: "left", clear: "both" }} ref={(el) => { if (el) el.scrollIntoView({ behavior: "smooth" }); }}></div>
+            </div>
+
+            {/* INPUT AREA */}
+            <div className={`p-4 border-t shrink-0 ${isTimerRunning ? 'bg-[#0A0A0A] border-white/10' : 'bg-white border-slate-100'}`}>
+              <div
+                onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add('bg-blue-500/10', 'border-blue-500/50'); }}
+                onDragLeave={e => { e.currentTarget.classList.remove('bg-blue-500/10', 'border-blue-500/50'); }}
+                onDrop={async e => {
+                  e.preventDefault();
+                  e.currentTarget.classList.remove('bg-blue-500/10', 'border-blue-500/50');
+                  const files = e.dataTransfer.files;
+                  if (files && files.length > 0) {
+                    const uploadedItems = await handleFileUpload(files);
+                    if (uploadedItems && uploadedItems.length > 0) {
+                      const newEntries = uploadedItems.map(item => ({
+                        data: new Date().toISOString(),
+                        nota: `FILE::${item.nome}::${item.valor}`
+                      }));
+                      onSave(task.id, {
+                        acompanhamento: [...(currentTaskData.acompanhamento || []), ...newEntries]
+                      });
+                    }
+                  }
+                }}
+                className={`relative border rounded-none md:rounded-2xl flex items-end gap-2 p-2 transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200 focus-within:bg-white focus-within:border-blue-300'}`}
+              >
+                <div className="relative">
+                  <button
+                    onClick={() => setShowAttachMenu(!showAttachMenu)}
+                    className={`p-3 rounded-lg md:rounded-xl transition-colors shrink-0 ${isTimerRunning ? 'text-white/40 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}
+                    title="Anexar"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                  </button>
+
+                  {/* Attachment Menu */}
+                  {showAttachMenu && (
+                    <div className={`absolute bottom-12 left-0 w-48 rounded-lg md:rounded-xl border shadow-xl overflow-hidden animate-in zoom-in-95 origin-bottom-left z-[100] ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-200'}`}>
+                      <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleFileUploadInput} />
+
+                      <button onClick={() => fileInputRef.current?.click()} className={`w-full text-left px-4 py-3 text-xs font-bold flex items-center gap-2 ${isTimerRunning ? 'text-white/80 hover:bg-white/10' : 'text-slate-700 hover:bg-slate-50'}`}>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        Carregar Arquivo
+                      </button>
+                      <button onClick={() => {
+                        setModalConfig({ type: 'link', isOpen: true });
+                        setModalInputValue('');
+                        setModalInputName('');
+                        setShowAttachMenu(false);
+                      }} className={`w-full text-left px-4 py-3 text-xs font-bold flex items-center gap-2 ${isTimerRunning ? 'text-white/80 hover:bg-white/10' : 'text-slate-700 hover:bg-slate-50'}`}>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                        Inserir Link
+                      </button>
+                      <button onClick={() => {
+                        setModalConfig({ type: 'contact', isOpen: true });
+                        setModalInputValue('');
+                        setModalInputName('');
+                        setShowAttachMenu(false);
+                      }} className={`w-full text-left px-4 py-3 text-xs font-bold flex items-center gap-2 ${isTimerRunning ? 'text-white/80 hover:bg-white/10' : 'text-slate-700 hover:bg-slate-50'}`}>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
+                        Inserir Contato
+                      </button>
                     </div>
-                 ))}
+                  )}
+                </div>
 
-                 {isUploading && (
-                   <div className="flex flex-col gap-1 items-start animate-in fade-in slide-in-from-bottom-2 duration-300 w-full opacity-60">
-                        <div className={`p-4 rounded-none md:rounded-2xl rounded-tl-none border max-w-[90%] shadow-lg ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-100 shadow-slate-200'}`}>
-                           <div className="flex items-center gap-3">
-                              <div className="w-4 h-4 rounded-full border-2 border-slate-300 border-t-blue-500 animate-spin"></div>
-                              <p className={`text-xs font-bold ${isTimerRunning ? 'text-white/60' : 'text-slate-500'}`}>Enviando arquivos...</p>
-                           </div>
-                        </div>
-                   </div>
-                 )}
-                 
-                 {(!task.acompanhamento || task.acompanhamento.length === 0) && (
-                    <div className="flex-1 flex flex-col items-center justify-center text-center opacity-30 mt-10">
-                       <p className={`text-sm font-medium mb-2 ${isTimerRunning ? 'text-white' : 'text-slate-800'}`}>Tudo pronto para começar?</p>
-                       <p className={`text-xs ${isTimerRunning ? 'text-white/60' : 'text-slate-500'}`}>Registre seu diário de execução abaixo.</p>
-                    </div>
-                 )}
-                 {/* Invisible spacer for scrolling */}
-                 <div style={{ float: "left", clear: "both" }} ref={(el) => { if(el) el.scrollIntoView({ behavior: "smooth" }); }}></div>
-             </div>
-
-             {/* INPUT AREA */}
-             <div className={`p-4 border-t shrink-0 ${isTimerRunning ? 'bg-[#0A0A0A] border-white/10' : 'bg-white border-slate-100'}`}>
-                <div 
-                   onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add('bg-blue-500/10', 'border-blue-500/50'); }}
-                   onDragLeave={e => { e.currentTarget.classList.remove('bg-blue-500/10', 'border-blue-500/50'); }}
-                   onDrop={async e => {
+                <textarea
+                  value={newFollowUp}
+                  onChange={e => setNewFollowUp(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
-                      e.currentTarget.classList.remove('bg-blue-500/10', 'border-blue-500/50');
-                      const files = e.dataTransfer.files;
-                      if (files && files.length > 0) {
-                         const uploadedItems = await handleFileUpload(files);
-                         if (uploadedItems && uploadedItems.length > 0) {
-                            const newEntries = uploadedItems.map(item => ({
-                                data: new Date().toISOString(),
-                                nota: `FILE::${item.nome}::${item.valor}`
-                            }));
-                            onSave(task.id, { 
-                               acompanhamento: [...(currentTaskData.acompanhamento || []), ...newEntries] 
-                            });
-                         }
-                      }
-                   }}
-                   className={`relative border rounded-none md:rounded-2xl flex items-end gap-2 p-2 transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200 focus-within:bg-white focus-within:border-blue-300'}`}
-               >
-                   <div className="relative">
-                       <button 
-                         onClick={() => setShowAttachMenu(!showAttachMenu)}
-                         className={`p-3 rounded-lg md:rounded-xl transition-colors shrink-0 ${isTimerRunning ? 'text-white/40 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}
-                         title="Anexar"
-                       >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
-                       </button>
+                      handleAddFollowUp();
+                    }
+                  }}
+                  placeholder="Diagnóstico, progresso ou anotação..."
+                  className={`w-full bg-transparent border-none outline-none text-sm py-3 min-h-[44px] max-h-32 resize-none custom-scrollbar ${isTimerRunning ? 'text-white placeholder:text-white/20' : 'text-slate-800 placeholder:text-slate-400'}`}
+                  rows={1}
+                  style={{ height: 'auto' }}
+                />
 
-                       {/* Attachment Menu */}
-                       {showAttachMenu && (
-                          <div className={`absolute bottom-12 left-0 w-48 rounded-lg md:rounded-xl border shadow-xl overflow-hidden animate-in zoom-in-95 origin-bottom-left z-[100] ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-200'}`}>
-                             <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleFileUploadInput} />
-                             
-                             <button onClick={() => fileInputRef.current?.click()} className={`w-full text-left px-4 py-3 text-xs font-bold flex items-center gap-2 ${isTimerRunning ? 'text-white/80 hover:bg-white/10' : 'text-slate-700 hover:bg-slate-50'}`}>
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                                Carregar Arquivo
-                             </button>
-                              <button onClick={() => {
-                                 setModalConfig({ type: 'link', isOpen: true });
-                                 setModalInputValue('');
-                                 setModalInputName('');
-                                 setShowAttachMenu(false);
-                              }} className={`w-full text-left px-4 py-3 text-xs font-bold flex items-center gap-2 ${isTimerRunning ? 'text-white/80 hover:bg-white/10' : 'text-slate-700 hover:bg-slate-50'}`}>
-                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
-                                 Inserir Link
-                              </button>
-                              <button onClick={() => {
-                                 setModalConfig({ type: 'contact', isOpen: true });
-                                 setModalInputValue('');
-                                 setModalInputName('');
-                                 setShowAttachMenu(false);
-                              }} className={`w-full text-left px-4 py-3 text-xs font-bold flex items-center gap-2 ${isTimerRunning ? 'text-white/80 hover:bg-white/10' : 'text-slate-700 hover:bg-slate-50'}`}>
-                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
-                                 Inserir Contato
-                              </button>
-                          </div>
-                       )}
-                   </div>
-                   
-                   <textarea
-                      value={newFollowUp}
-                      onChange={e => setNewFollowUp(e.target.value)}
-                      onKeyDown={e => {
-                         if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            handleAddFollowUp();
-                         }
-                      }}
-                      placeholder="Diagnóstico, progresso ou anotação..."
-                      className={`w-full bg-transparent border-none outline-none text-sm py-3 min-h-[44px] max-h-32 resize-none custom-scrollbar ${isTimerRunning ? 'text-white placeholder:text-white/20' : 'text-slate-800 placeholder:text-slate-400'}`}
-                      rows={1}
-                      style={{ height: 'auto' }}
-                   />
-                   
-                   <button 
-                      onClick={handleAddFollowUp}
-                      disabled={!newFollowUp.trim()}
-                      className={`p-3 rounded-lg md:rounded-xl transition-all shrink-0 ${newFollowUp.trim() ? 'bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-900/40' : (isTimerRunning ? 'bg-white/5 text-white/20 cursor-not-allowed' : 'bg-slate-100 text-slate-300 cursor-not-allowed')}`}
-                   >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                   </button>
-               </div>
-               <div className={`text-[10px] text-center mt-2 font-medium tracking-wide ${isTimerRunning ? 'text-white/20' : 'text-slate-400'}`}>
-                  Arraste arquivos para anexar • Enter para enviar
-               </div>
-             </div>
-           </div>
+                <button
+                  onClick={handleAddFollowUp}
+                  disabled={!newFollowUp.trim()}
+                  className={`p-3 rounded-lg md:rounded-xl transition-all shrink-0 ${newFollowUp.trim() ? 'bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-900/40' : (isTimerRunning ? 'bg-white/5 text-white/20 cursor-not-allowed' : 'bg-slate-100 text-slate-300 cursor-not-allowed')}`}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                </button>
+              </div>
+              <div className={`text-[10px] text-center mt-2 font-medium tracking-wide ${isTimerRunning ? 'text-white/20' : 'text-slate-400'}`}>
+                Arraste arquivos para anexar • Enter para enviar
+              </div>
+            </div>
+          </div>
         </div>
 
 
@@ -2969,8 +2967,8 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
                 className="w-full bg-black/20 border border-white/10 rounded-none md:rounded-2xl px-5 py-4 text-xs font-medium focus:ring-2 focus:ring-white/30 outline-none text-white placeholder:text-white/20 transition-all"
               />
               {chatUrl !== (task.chat_gemini_url || '') && (
-                <button 
-                  onClick={handleSaveChatUrl} 
+                <button
+                  onClick={handleSaveChatUrl}
                   className="absolute right-2 top-2 bg-emerald-500 text-white px-4 py-2 rounded-lg md:rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-emerald-600 transition-colors animate-in zoom-in-75"
                 >
                   Salvar
@@ -2982,12 +2980,12 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
           {/* Cronômetro Section */}
           <div className={`flex-1 rounded-none md:rounded-[3rem] border p-10 flex flex-col relative overflow-hidden transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200 shadow-xl shadow-slate-200/50'}`}>
             <div className={`absolute inset-0 transition-opacity duration-700 ${isTimerRunning ? 'bg-blue-500/5' : 'bg-transparent'}`}></div>
-            
+
             <div className="relative z-10 text-center flex-1 flex flex-col items-center justify-center space-y-8">
               <div className={`text-[10px] font-black uppercase tracking-[0.5em] transition-colors ${isTimerRunning ? 'text-white/20' : 'text-slate-300'}`}>
                 {isTimerRunning ? 'Sessão Ativa' : 'Foco em Pausa'}
               </div>
-              
+
               <div className="flex flex-col items-center">
                 <div className={`text-[5rem] md:text-[6rem] lg:text-[7.5rem] font-black tracking-tighter tabular-nums leading-none transition-colors drop-shadow-[0_10px_40px_rgba(255,255,255,0.05)] ${isTimerRunning ? 'text-white' : 'text-slate-900'}`}>
                   {formatTime(isTimerRunning ? seconds : sessionTotalSeconds).split(':').slice(1).join(':')}
@@ -3000,11 +2998,10 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
               <div className="flex gap-3 pb-8">
                 <button
                   onClick={handleToggleTimer}
-                  className={`flex items-center gap-3 px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all hover:scale-105 active:scale-95 shadow-2xl ${
-                    isTimerRunning 
-                      ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20 hover:bg-rose-500 hover:text-white' 
+                  className={`flex items-center gap-3 px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all hover:scale-105 active:scale-95 shadow-2xl ${isTimerRunning
+                      ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20 hover:bg-rose-500 hover:text-white'
                       : 'bg-blue-600 text-white shadow-blue-600/20 hover:bg-blue-500'
-                  }`}
+                    }`}
                 >
                   {isTimerRunning ? (
                     <>
@@ -3021,11 +3018,10 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
 
                 <button
                   onClick={handleResetTimer}
-                  className={`p-4 rounded-none md:rounded-2xl transition-all shadow-xl hover:scale-105 active:scale-95 flex items-center justify-center ${
-                    isTimerRunning
+                  className={`p-4 rounded-none md:rounded-2xl transition-all shadow-xl hover:scale-105 active:scale-95 flex items-center justify-center ${isTimerRunning
                       ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20 hover:bg-rose-500 hover:text-white'
                       : 'bg-white text-slate-400 hover:text-rose-500 border border-slate-200 shadow-sm'
-                  }`}
+                    }`}
                   title="Reiniciar Cronômetro"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
@@ -3033,13 +3029,12 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
 
                 <button
                   onClick={handleCompleteTaskRequest}
-                  className={`px-6 py-4 rounded-none md:rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all shadow-xl ${
-                    task.status === 'concluído' 
-                      ? 'bg-emerald-500 text-white' 
+                  className={`px-6 py-4 rounded-none md:rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all shadow-xl ${task.status === 'concluído'
+                      ? 'bg-emerald-500 text-white'
                       : isTimerRunning
                         ? 'bg-white/5 text-white/40 border border-white/10 hover:bg-white/10 hover:text-white'
                         : 'bg-white text-slate-400 border border-slate-200 shadow-sm hover:bg-slate-50 hover:text-slate-600'
-                  }`}
+                    }`}
                 >
                   {task.status === 'concluído' ? 'Concluída' : 'Finalizar'}
                 </button>
@@ -3069,60 +3064,62 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
                     </span>
                   </div>
                   <div className={`h-1.5 w-full rounded-full overflow-hidden border transition-colors ${isTimerRunning ? 'bg-white/5 border-white/5' : 'bg-slate-200/50 border-slate-200'}`}>
-                    <div 
+                    <div
                       className="h-full bg-gradient-to-r from-blue-600 to-indigo-500 transition-all duration-1000 ease-out"
-                      style={{ width: `${(() => {
-                        const now = currentTime;
-                        const [sh, sm] = task.horario_inicio!.split(':').map(Number);
-                        const [eh, em] = task.horario_fim!.split(':').map(Number);
-                        const sMin = sh * 60 + sm;
-                        const eMin = eh * 60 + em;
-                        const cMin = now.getHours() * 60 + now.getMinutes();
-                        if (cMin < sMin) return 0;
-                        if (cMin > eMin) return 100;
-                        return Math.min(100, Math.max(0, ((cMin - sMin) / (eMin - sMin)) * 100));
-                      })()}%` }}
+                      style={{
+                        width: `${(() => {
+                          const now = currentTime;
+                          const [sh, sm] = task.horario_inicio!.split(':').map(Number);
+                          const [eh, em] = task.horario_fim!.split(':').map(Number);
+                          const sMin = sh * 60 + sm;
+                          const eMin = eh * 60 + em;
+                          const cMin = now.getHours() * 60 + now.getMinutes();
+                          if (cMin < sMin) return 0;
+                          if (cMin > eMin) return 100;
+                          return Math.min(100, Math.max(0, ((cMin - sMin) / (eMin - sMin)) * 100));
+                        })()}%`
+                      }}
                     ></div>
                   </div>
                 </div>
               )}
 
               <div className="grid grid-cols-2 gap-3">
-                 <div className={`rounded-lg md:rounded-xl p-3 border flex flex-col items-center transition-colors ${isTimerRunning ? 'bg-white/5 border-white/5' : 'bg-white border-slate-100 shadow-sm'}`}>
-                   <span className={`text-[7px] font-black uppercase tracking-widest mb-1 transition-colors ${isTimerRunning ? 'text-white/20' : 'text-slate-300'}`}>Início</span>
-                   <span className={`text-[11px] font-bold transition-colors ${isTimerRunning ? 'text-white/80' : 'text-slate-700'}`}>{task.horario_inicio || '--:--'}</span>
-                 </div>
-                 <div className={`rounded-lg md:rounded-xl p-3 border flex flex-col items-center transition-colors ${isTimerRunning ? 'bg-white/5 border-white/5' : 'bg-white border-slate-100 shadow-sm'}`}>
-                   <span className={`text-[7px] font-black uppercase tracking-widest mb-1 transition-colors ${isTimerRunning ? 'text-white/20' : 'text-slate-300'}`}>Término</span>
-                   <span className={`text-[11px] font-bold transition-colors ${isTimerRunning ? 'text-white/80' : 'text-slate-700'}`}>{task.horario_fim || '--:--'}</span>
-                 </div>
-                 
-                 {/* Notification Area */}
-                 <div className={`col-span-2 rounded-lg md:rounded-xl p-3 border flex items-center gap-3 transition-colors ${isTimerRunning ? 'bg-blue-500/5 border-blue-500/10' : 'bg-blue-50 border-blue-100'}`}>
-                    <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.5)]"></div>
-                    <div className="flex-1 overflow-hidden">
-                      <p className={`text-[8px] font-black uppercase tracking-widest mb-0.5 transition-colors ${isTimerRunning ? 'text-blue-400/60' : 'text-blue-400'}`}>Status da Organização</p>
-                      <p className={`text-[10px] font-bold truncate transition-colors ${isTimerRunning ? 'text-blue-200' : 'text-blue-600'}`}>
-                        {(() => {
-                           const now = currentTime;
-                           if (nextTask) {
-                             const [nh, nm] = nextTask.horario_inicio!.split(':').map(Number);
-                             const diff = (nh * 60 + nm) - (now.getHours() * 60 + now.getMinutes());
-                             if (diff > 0 && diff <= 15) return `Próxima tarefa em ${diff} min: ${nextTask.titulo}`;
-                           }
-                           
-                           if (task.horario_fim) {
-                             const [eh, em] = task.horario_fim!.split(':').map(Number);
-                             const diffEnd = (eh * 60 + em) - (now.getHours() * 60 + now.getMinutes());
-                             if (diffEnd > 0 && diffEnd <= 10) return `Atenção: Término previsto em ${diffEnd} minutos!`;
-                             if (diffEnd < 0) return `Execução ultrapassou o horário em ${Math.abs(diffEnd)} min.`;
-                           }
+                <div className={`rounded-lg md:rounded-xl p-3 border flex flex-col items-center transition-colors ${isTimerRunning ? 'bg-white/5 border-white/5' : 'bg-white border-slate-100 shadow-sm'}`}>
+                  <span className={`text-[7px] font-black uppercase tracking-widest mb-1 transition-colors ${isTimerRunning ? 'text-white/20' : 'text-slate-300'}`}>Início</span>
+                  <span className={`text-[11px] font-bold transition-colors ${isTimerRunning ? 'text-white/80' : 'text-slate-700'}`}>{task.horario_inicio || '--:--'}</span>
+                </div>
+                <div className={`rounded-lg md:rounded-xl p-3 border flex flex-col items-center transition-colors ${isTimerRunning ? 'bg-white/5 border-white/5' : 'bg-white border-slate-100 shadow-sm'}`}>
+                  <span className={`text-[7px] font-black uppercase tracking-widest mb-1 transition-colors ${isTimerRunning ? 'text-white/20' : 'text-slate-300'}`}>Término</span>
+                  <span className={`text-[11px] font-bold transition-colors ${isTimerRunning ? 'text-white/80' : 'text-slate-700'}`}>{task.horario_fim || '--:--'}</span>
+                </div>
 
-                           return nextTask ? `Próxima às ${nextTask.horario_inicio}: ${nextTask.titulo}` : "Sem tarefas pendentes hoje";
-                        })()}
-                      </p>
-                    </div>
-                 </div>
+                {/* Notification Area */}
+                <div className={`col-span-2 rounded-lg md:rounded-xl p-3 border flex items-center gap-3 transition-colors ${isTimerRunning ? 'bg-blue-500/5 border-blue-500/10' : 'bg-blue-50 border-blue-100'}`}>
+                  <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.5)]"></div>
+                  <div className="flex-1 overflow-hidden">
+                    <p className={`text-[8px] font-black uppercase tracking-widest mb-0.5 transition-colors ${isTimerRunning ? 'text-blue-400/60' : 'text-blue-400'}`}>Status da Organização</p>
+                    <p className={`text-[10px] font-bold truncate transition-colors ${isTimerRunning ? 'text-blue-200' : 'text-blue-600'}`}>
+                      {(() => {
+                        const now = currentTime;
+                        if (nextTask) {
+                          const [nh, nm] = nextTask.horario_inicio!.split(':').map(Number);
+                          const diff = (nh * 60 + nm) - (now.getHours() * 60 + now.getMinutes());
+                          if (diff > 0 && diff <= 15) return `Próxima tarefa em ${diff} min: ${nextTask.titulo}`;
+                        }
+
+                        if (task.horario_fim) {
+                          const [eh, em] = task.horario_fim!.split(':').map(Number);
+                          const diffEnd = (eh * 60 + em) - (now.getHours() * 60 + now.getMinutes());
+                          if (diffEnd > 0 && diffEnd <= 10) return `Atenção: Término previsto em ${diffEnd} minutos!`;
+                          if (diffEnd < 0) return `Execução ultrapassou o horário em ${Math.abs(diffEnd)} min.`;
+                        }
+
+                        return nextTask ? `Próxima às ${nextTask.horario_inicio}: ${nextTask.titulo}` : "Sem tarefas pendentes hoje";
+                      })()}
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -3139,13 +3136,13 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
             <h3 className="text-white font-black text-2xl mb-2 tracking-tight">Concluir Tarefa?</h3>
             <p className="text-slate-400 text-sm mb-8 leading-relaxed">Você confirma a conclusão da ação <strong>{task.titulo}</strong>?</p>
             <div className="flex gap-4">
-              <button 
+              <button
                 onClick={() => setIsConfirmModalOpen(false)}
                 className="flex-1 px-6 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-white/5 transition-all"
               >
                 Agora não
               </button>
-              <button 
+              <button
                 onClick={confirmCompletion}
                 className="flex-1 bg-emerald-500 text-white px-6 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-xl shadow-emerald-500/20"
               >
@@ -3159,82 +3156,81 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
       {/* GLOBAL MODAL */}
       {modalConfig.isOpen && (
         <div className="fixed inset-0 z-[300] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-           <div className={`w-full max-w-md p-6 rounded-none md:rounded-3xl shadow-2xl scale-100 animate-in zoom-in-95 duration-200 ${isTimerRunning ? 'bg-[#1A1A1A] border border-white/10 text-white' : 'bg-white text-slate-900 border border-slate-200'}`}>
-              <h3 className="text-lg font-black tracking-tight mb-4">
-                 {modalConfig.type === 'link' && 'Inserir Link'}
-                 {modalConfig.type === 'contact' && 'Inserir Contato'}
-                 {modalConfig.type === 'edit_diary' && 'Editar Anotação'}
-                 {modalConfig.type === 'confirm_delete' && 'Confirmar Exclusão'}
-                 {modalConfig.type === 'reset_timer' && 'Reiniciar Cronômetro'}
-              </h3>
-              
-              {(modalConfig.type === 'link' || modalConfig.type === 'contact') && (
-                 <div className="flex flex-col gap-4">
-                    <div>
-                       <label className={`text-[10px] uppercase font-bold tracking-widest opacity-50 mb-1.5 block ${isTimerRunning ? 'text-white' : 'text-slate-500'}`}>Nome (Opcional)</label>
-                       <input 
-                         type="text" 
-                         value={modalInputName}
-                         onChange={e => setModalInputName(e.target.value)}
-                         className={`w-full p-3 rounded-lg md:rounded-xl outline-none text-sm font-medium transition-all ${isTimerRunning ? 'bg-white/5 border border-white/10 focus:border-white/30 text-white' : 'bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800'}`}
-                         placeholder={modalConfig.type === 'link' ? "Ex: Documento Google" : "Ex: João Silva"}
-                         autoFocus
-                       />
-                    </div>
-                    <div>
-                       <label className={`text-[10px] uppercase font-bold tracking-widest opacity-50 mb-1.5 block ${isTimerRunning ? 'text-white' : 'text-slate-500'}`}>
-                          {modalConfig.type === 'link' ? 'URL' : 'Número / Contato'}
-                       </label>
-                       <input 
-                         type="text" 
-                         value={modalInputValue}
-                         onChange={e => setModalInputValue(e.target.value)}
-                         className={`w-full p-3 rounded-lg md:rounded-xl outline-none text-sm font-medium transition-all ${isTimerRunning ? 'bg-white/5 border border-white/10 focus:border-white/30 text-white' : 'bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800'}`}
-                         placeholder={modalConfig.type === 'link' ? 'https://...' : '(11) 9...'}
-                         onKeyDown={e => e.key === 'Enter' && handleModalConfirm()}
-                       />
-                    </div>
-                 </div>
-              )}
-              
-              {modalConfig.type === 'edit_diary' && (
-                 <div>
-                    <textarea 
-                       value={modalInputValue}
-                       onChange={e => setModalInputValue(e.target.value)}
-                       className={`w-full p-3 rounded-lg md:rounded-xl outline-none text-sm font-medium transition-all min-h-[120px] resize-none ${isTimerRunning ? 'bg-white/5 border border-white/10 focus:border-white/30 text-white' : 'bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800'}`}
-                       autoFocus
-                    />
-                 </div>
-              )}
+          <div className={`w-full max-w-md p-6 rounded-none md:rounded-3xl shadow-2xl scale-100 animate-in zoom-in-95 duration-200 ${isTimerRunning ? 'bg-[#1A1A1A] border border-white/10 text-white' : 'bg-white text-slate-900 border border-slate-200'}`}>
+            <h3 className="text-lg font-black tracking-tight mb-4">
+              {modalConfig.type === 'link' && 'Inserir Link'}
+              {modalConfig.type === 'contact' && 'Inserir Contato'}
+              {modalConfig.type === 'edit_diary' && 'Editar Anotação'}
+              {modalConfig.type === 'confirm_delete' && 'Confirmar Exclusão'}
+              {modalConfig.type === 'reset_timer' && 'Reiniciar Cronômetro'}
+            </h3>
 
-              {modalConfig.type === 'confirm_delete' && (
-                 <p className={`text-sm opacity-70 ${isTimerRunning ? 'text-white' : 'text-slate-600'}`}>Tem certeza que deseja excluir este item permanentemente?</p>
-              )}
-              
-              {modalConfig.type === 'reset_timer' && (
-                 <p className={`text-sm opacity-70 ${isTimerRunning ? 'text-white' : 'text-slate-600'}`}>Deseja zerar totalmente o tempo registrado nesta tarefa? Esta ação não pode ser desfeita.</p>
-              )}
-
-              <div className="flex gap-3 mt-6 justify-end">
-                 <button 
-                   onClick={() => setModalConfig({ ...modalConfig, isOpen: false })}
-                   className={`px-4 py-2 rounded-lg md:rounded-xl text-xs font-bold uppercase tracking-wider transition-colors ${isTimerRunning ? 'hover:bg-white/10 text-white/60' : 'hover:bg-slate-100 text-slate-500'}`}
-                 >
-                   Cancelar
-                 </button>
-                 <button 
-                   onClick={handleModalConfirm}
-                   className={`px-6 py-2 rounded-lg md:rounded-xl text-xs font-bold uppercase tracking-wider text-white shadow-lg transition-all transform active:scale-95 ${
-                      modalConfig.type === 'confirm_delete' || modalConfig.type === 'reset_timer' 
-                      ? 'bg-rose-500 hover:bg-rose-600 shadow-rose-500/20' 
-                      : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'
-                   }`}
-                 >
-                   Confirmar
-                 </button>
+            {(modalConfig.type === 'link' || modalConfig.type === 'contact') && (
+              <div className="flex flex-col gap-4">
+                <div>
+                  <label className={`text-[10px] uppercase font-bold tracking-widest opacity-50 mb-1.5 block ${isTimerRunning ? 'text-white' : 'text-slate-500'}`}>Nome (Opcional)</label>
+                  <input
+                    type="text"
+                    value={modalInputName}
+                    onChange={e => setModalInputName(e.target.value)}
+                    className={`w-full p-3 rounded-lg md:rounded-xl outline-none text-sm font-medium transition-all ${isTimerRunning ? 'bg-white/5 border border-white/10 focus:border-white/30 text-white' : 'bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800'}`}
+                    placeholder={modalConfig.type === 'link' ? "Ex: Documento Google" : "Ex: João Silva"}
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className={`text-[10px] uppercase font-bold tracking-widest opacity-50 mb-1.5 block ${isTimerRunning ? 'text-white' : 'text-slate-500'}`}>
+                    {modalConfig.type === 'link' ? 'URL' : 'Número / Contato'}
+                  </label>
+                  <input
+                    type="text"
+                    value={modalInputValue}
+                    onChange={e => setModalInputValue(e.target.value)}
+                    className={`w-full p-3 rounded-lg md:rounded-xl outline-none text-sm font-medium transition-all ${isTimerRunning ? 'bg-white/5 border border-white/10 focus:border-white/30 text-white' : 'bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800'}`}
+                    placeholder={modalConfig.type === 'link' ? 'https://...' : '(11) 9...'}
+                    onKeyDown={e => e.key === 'Enter' && handleModalConfirm()}
+                  />
+                </div>
               </div>
-           </div>
+            )}
+
+            {modalConfig.type === 'edit_diary' && (
+              <div>
+                <textarea
+                  value={modalInputValue}
+                  onChange={e => setModalInputValue(e.target.value)}
+                  className={`w-full p-3 rounded-lg md:rounded-xl outline-none text-sm font-medium transition-all min-h-[120px] resize-none ${isTimerRunning ? 'bg-white/5 border border-white/10 focus:border-white/30 text-white' : 'bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800'}`}
+                  autoFocus
+                />
+              </div>
+            )}
+
+            {modalConfig.type === 'confirm_delete' && (
+              <p className={`text-sm opacity-70 ${isTimerRunning ? 'text-white' : 'text-slate-600'}`}>Tem certeza que deseja excluir este item permanentemente?</p>
+            )}
+
+            {modalConfig.type === 'reset_timer' && (
+              <p className={`text-sm opacity-70 ${isTimerRunning ? 'text-white' : 'text-slate-600'}`}>Deseja zerar totalmente o tempo registrado nesta tarefa? Esta ação não pode ser desfeita.</p>
+            )}
+
+            <div className="flex gap-3 mt-6 justify-end">
+              <button
+                onClick={() => setModalConfig({ ...modalConfig, isOpen: false })}
+                className={`px-4 py-2 rounded-lg md:rounded-xl text-xs font-bold uppercase tracking-wider transition-colors ${isTimerRunning ? 'hover:bg-white/10 text-white/60' : 'hover:bg-slate-100 text-slate-500'}`}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleModalConfirm}
+                className={`px-6 py-2 rounded-lg md:rounded-xl text-xs font-bold uppercase tracking-wider text-white shadow-lg transition-all transform active:scale-95 ${modalConfig.type === 'confirm_delete' || modalConfig.type === 'reset_timer'
+                    ? 'bg-rose-500 hover:bg-rose-600 shadow-rose-500/20'
+                    : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'
+                  }`}
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -3578,52 +3574,52 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
 
 const getBucketStartDate = (label: string): string => {
   const now = new Date();
-  now.setHours(0,0,0,0);
-  
+  now.setHours(0, 0, 0, 0);
+
   if (label === 'Hoje') return now.toLocaleDateString('en-CA');
-  
+
   if (label === 'Amanhã') {
     const d = new Date(now);
     d.setDate(d.getDate() + 1);
     return d.toLocaleDateString('en-CA');
   }
-  
+
   if (label === 'Esta Semana') {
-     const tomorrow = new Date(now);
-     tomorrow.setDate(tomorrow.getDate() + 1);
-     const d = new Date(tomorrow);
-     d.setDate(d.getDate() + 1); 
-     return d.toLocaleDateString('en-CA');
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const d = new Date(tomorrow);
+    d.setDate(d.getDate() + 1);
+    return d.toLocaleDateString('en-CA');
   }
 
   if (label === 'Este Mês') {
-     const endOfWeek = new Date(now);
-     endOfWeek.setDate(now.getDate() + (6 - now.getDay())); 
-     const d = new Date(endOfWeek);
-     d.setDate(d.getDate() + 1);
-     return d.toLocaleDateString('en-CA');
+    const endOfWeek = new Date(now);
+    endOfWeek.setDate(now.getDate() + (6 - now.getDay()));
+    const d = new Date(endOfWeek);
+    d.setDate(d.getDate() + 1);
+    return d.toLocaleDateString('en-CA');
   }
 
   const meses = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
   const lowerLabel = label.toLowerCase();
-  
+
   const mesIndex = meses.findIndex(m => lowerLabel.includes(m));
   if (mesIndex >= 0) {
-      const anoMatch = lowerLabel.match(/\d{4}/);
-      if (anoMatch) {
-          const ano = parseInt(anoMatch[0]);
-          const d = new Date(ano, mesIndex, 1);
-          return d.toLocaleDateString('en-CA');
-      }
-  }
-  
-  if (label === 'Atrasadas') {
-     const d = new Date(now);
-     d.setDate(d.getDate() - 1);
-     return d.toLocaleDateString('en-CA');
+    const anoMatch = lowerLabel.match(/\d{4}/);
+    if (anoMatch) {
+      const ano = parseInt(anoMatch[0]);
+      const d = new Date(ano, mesIndex, 1);
+      return d.toLocaleDateString('en-CA');
+    }
   }
 
-  return ''; 
+  if (label === 'Atrasadas') {
+    const d = new Date(now);
+    d.setDate(d.getDate() - 1);
+    return d.toLocaleDateString('en-CA');
+  }
+
+  return '';
 };
 
 const App: React.FC = () => {
@@ -3657,7 +3653,7 @@ const App: React.FC = () => {
   const [workItems, setWorkItems] = useState<WorkItem[]>([]);
   const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
   const [selectedWorkItem, setSelectedWorkItem] = useState<WorkItem | null>(null);
-  
+
   const [newLogText, setNewLogText] = useState('');
   const [newLogTipo, setNewLogTipo] = useState<'desenvolvimento' | 'ajuste'>('desenvolvimento');
 
@@ -3968,7 +3964,7 @@ const App: React.FC = () => {
           // Nota: A VAPID Key deve ser obtida no Firebase Console (Configurações do Projeto > Cloud Messaging)
           // Se não configurada, o push via web pode não funcionar em alguns navegadores.
           const token = await getToken(messaging, {
-            vapidKey: 'BD_5Jt_m5zO-X5Cq5B_Q9E5G-z6l-8K-X-X_X-X_X-X'
+            vapidKey: 'BBXF5bMrAdRIXKGLHXMzsZSREaQoVo2VbVgcJJkA7_qu05v2G'
           }).catch(err => {
             console.warn("VAPID Key inválida ou não configurada. Push background pode falhar.", err);
             return null;
@@ -4093,7 +4089,7 @@ const App: React.FC = () => {
     const interval = setInterval(() => {
       const now = new Date();
       const current_time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-      
+
       // Calculate local date string (YYYY-MM-DD) to match local time configuration
       const offset = now.getTimezoneOffset() * 60000;
       const localDate = new Date(now.getTime() - offset);
@@ -4739,15 +4735,15 @@ const App: React.FC = () => {
     }
 
     if (areaFilter !== 'TODAS') {
-       const norm = (val: any) => (val || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-       const filterNorm = norm(areaFilter);
-       result = result.filter(t => {
-         const cat = norm(t.categoria);
-         if (filterNorm === 'CLC') return cat === 'CLC';
-         if (filterNorm === 'ASSISTENCIA') return cat === 'ASSISTENCIA' || cat === 'ASSISTENCIA ESTUDANTIL';
-         if (filterNorm === 'NAO CLASSIFICADA') return !t.categoria || cat === 'NAO CLASSIFICADA'; 
-         return cat === filterNorm;
-       });
+      const norm = (val: any) => (val || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      const filterNorm = norm(areaFilter);
+      result = result.filter(t => {
+        const cat = norm(t.categoria);
+        if (filterNorm === 'CLC') return cat === 'CLC';
+        if (filterNorm === 'ASSISTENCIA') return cat === 'ASSISTENCIA' || cat === 'ASSISTENCIA ESTUDANTIL';
+        if (filterNorm === 'NAO CLASSIFICADA') return !t.categoria || cat === 'NAO CLASSIFICADA';
+        return cat === filterNorm;
+      });
     }
 
     // Sempre remove excluídos
@@ -4796,14 +4792,14 @@ const App: React.FC = () => {
     // Reset hours to ensure clean comparisons
     now.setHours(0, 0, 0, 0);
     const todayStr = now.toLocaleDateString('en-CA'); // YYYY-MM-DD
-    
+
     const tomorrow = new Date(now);
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = tomorrow.toLocaleDateString('en-CA');
 
     // End of current week (Saturday)
     const endOfWeek = new Date(now);
-    endOfWeek.setDate(now.getDate() + (6 - now.getDay())); 
+    endOfWeek.setDate(now.getDate() + (6 - now.getDay()));
     const endOfWeekStr = endOfWeek.toLocaleDateString('en-CA');
 
     // End of current month
@@ -4819,8 +4815,8 @@ const App: React.FC = () => {
 
       // Check for valid date format to prevent errors
       if (!/^\d{4}-\d{2}-\d{2}$/.test(t.data_limite)) {
-         buckets.semData.push(t);
-         return;
+        buckets.semData.push(t);
+        return;
       }
 
       if (t.data_limite < todayStr) {
@@ -4837,12 +4833,12 @@ const App: React.FC = () => {
         // Future Months
         const parts = t.data_limite.split('-');
         const key = `${parts[0]}-${parts[1]}`; // sortable key YYYY-MM
-        
+
         if (!mesesFuturos[key]) {
-             const dateObj = new Date(Number(parts[0]), Number(parts[1]) - 1, 2);
-             const monthName = dateObj.toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
-             const label = monthName.charAt(0).toUpperCase() + monthName.slice(1);
-             mesesFuturos[key] = { label, tasks: [] };
+          const dateObj = new Date(Number(parts[0]), Number(parts[1]) - 1, 2);
+          const monthName = dateObj.toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+          const label = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+          mesesFuturos[key] = { label, tasks: [] };
         }
         mesesFuturos[key].tasks.push(t);
       }
@@ -4859,7 +4855,7 @@ const App: React.FC = () => {
 
     // Sort future months chronologically
     Object.keys(mesesFuturos).sort().forEach(key => {
-        finalGroups[mesesFuturos[key].label] = mesesFuturos[key].tasks;
+      finalGroups[mesesFuturos[key].label] = mesesFuturos[key].tasks;
     });
 
     if (buckets.semData.length > 0) finalGroups["Sem Prazo Definido"] = buckets.semData;
@@ -4947,8 +4943,8 @@ const App: React.FC = () => {
       // Regra de Filtro por Data (Visualização Diária)
       // Se estiver na visão de dia, mostra APENAS o que está agendado para aquele dia específico
       if (calendarViewMode === 'day') {
-          const targetDateStr = calendarDate.toLocaleDateString('en-CA');
-          if (t.data_limite !== targetDateStr) return false;
+        const targetDateStr = calendarDate.toLocaleDateString('en-CA');
+        if (t.data_limite !== targetDateStr) return false;
       }
 
       // Regra 2: Verifica vínculos com entregas DO MÊS ATUAL
@@ -5290,7 +5286,7 @@ const App: React.FC = () => {
                         setViewMode('ferramentas');
                         setActiveFerramenta('brainstorming');
                       }}
-                       className="p-1.5 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors text-amber-500"
+                      className="p-1.5 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors text-amber-500"
                       aria-label="Ideias Rápidas"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
@@ -5387,14 +5383,14 @@ const App: React.FC = () => {
                     <div className="relative">
                       <button
                         onClick={() => {
-                           setActiveModule('acoes');
-                           setViewMode('ferramentas');
-                           setActiveFerramenta('brainstorming');
+                          setActiveModule('acoes');
+                          setViewMode('ferramentas');
+                          setActiveFerramenta('brainstorming');
                         }}
-                         className="bg-white border border-slate-200 text-amber-500 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
+                        className="bg-white border border-slate-200 text-amber-500 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
                         aria-label="Ideias Rápidas"
                       >
-                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
                       </button>
                     </div>
                     <div className="relative">
@@ -5509,7 +5505,7 @@ const App: React.FC = () => {
                     {/* Layout & Sort Controls */}
                     <div className="flex flex-wrap items-center gap-4 justify-center md:justify-start">
                       {/* Area Filter */}
-                       <div className="relative group">
+                      <div className="relative group">
                         <select
                           value={areaFilter}
                           onChange={(e) => setAreaFilter(e.target.value)}
@@ -5703,8 +5699,8 @@ const App: React.FC = () => {
                         <div className="animate-in border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl bg-white">
                           {Object.keys(tarefasAgrupadas).length > 0 ? (
                             Object.entries(tarefasAgrupadas).map(([label, tasks]: [string, Tarefa[]]) => (
-                              <div 
-                                key={label} 
+                              <div
+                                key={label}
                                 className="border-b last:border-b-0 border-slate-200 transition-colors"
                                 onDragOver={(e) => {
                                   e.preventDefault();
@@ -5718,10 +5714,10 @@ const App: React.FC = () => {
                                   e.currentTarget.style.backgroundColor = '';
                                   const taskId = e.dataTransfer.getData('task-id');
                                   if (taskId) {
-                                      const date = getBucketStartDate(label);
-                                      if (date || label === 'Sem Prazo Definido') {
-                                          handleUpdateTarefa(taskId, { data_limite: date });
-                                      }
+                                    const date = getBucketStartDate(label);
+                                    if (date || label === 'Sem Prazo Definido') {
+                                      handleUpdateTarefa(taskId, { data_limite: date });
+                                    }
                                   }
                                 }}
                               >
@@ -6004,15 +6000,14 @@ const App: React.FC = () => {
                                   <div className="w-14 h-14 bg-violet-100 text-violet-600 rounded-none md:rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
                                     <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
                                   </div>
-                                  <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${
-                                    sysDetails.status === 'producao' ? 'bg-emerald-100 text-emerald-700' : 
-                                    sysDetails.status === 'desenvolvimento' ? 'bg-blue-100 text-blue-700' :
-                                    sysDetails.status === 'testes' ? 'bg-amber-100 text-amber-700' :
-                                    'bg-slate-100 text-slate-500'
-                                  }`}>
-                                    {sysDetails.status === 'prototipacao' ? 'Prototipação' : 
-                                     sysDetails.status === 'producao' ? 'Produção' : 
-                                     sysDetails.status}
+                                  <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${sysDetails.status === 'producao' ? 'bg-emerald-100 text-emerald-700' :
+                                      sysDetails.status === 'desenvolvimento' ? 'bg-blue-100 text-blue-700' :
+                                        sysDetails.status === 'testes' ? 'bg-amber-100 text-amber-700' :
+                                          'bg-slate-100 text-slate-500'
+                                    }`}>
+                                    {sysDetails.status === 'prototipacao' ? 'Prototipação' :
+                                      sysDetails.status === 'producao' ? 'Produção' :
+                                        sysDetails.status}
                                   </span>
                                 </div>
                                 <div>
@@ -6083,9 +6078,9 @@ const App: React.FC = () => {
                                   <div className="inline-flex items-center gap-2 bg-white/10 px-3 py-1 rounded-lg backdrop-blur-sm border border-white/10">
                                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                                     <span className="text-[10px] font-black uppercase tracking-widest">
-                                      {sysDetails.status === 'prototipacao' ? 'Prototipação' : 
-                                       sysDetails.status === 'producao' ? 'Produção' : 
-                                       sysDetails.status}
+                                      {sysDetails.status === 'prototipacao' ? 'Prototipação' :
+                                        sysDetails.status === 'producao' ? 'Produção' :
+                                          sysDetails.status}
                                     </span>
                                   </div>
                                   <h2 className="text-4xl md:text-5xl font-black tracking-tight">{systemName}</h2>
@@ -6113,11 +6108,10 @@ const App: React.FC = () => {
                                     <React.Fragment key={step}>
                                       <button
                                         onClick={() => handleUpdateSistema(unit.id, { status: step })}
-                                        className={`px-4 py-2 rounded-lg md:rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${
-                                          isActive 
-                                            ? 'bg-violet-600 text-white shadow-lg' 
+                                        className={`px-4 py-2 rounded-lg md:rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${isActive
+                                            ? 'bg-violet-600 text-white shadow-lg'
                                             : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'
-                                        }`}
+                                          }`}
                                       >
                                         {stepLabels[step]}
                                       </button>
@@ -6247,10 +6241,10 @@ const App: React.FC = () => {
                                             </a>
                                           )}
                                         </div>
-                                        
+
                                         {sysDetails.link_hospedado && sysDetails.link_hospedado.startsWith('http') && (
                                           <div className="mt-4 rounded-lg md:rounded-xl overflow-hidden border border-emerald-100 shadow-sm group/preview relative aspect-video bg-white">
-                                            <img 
+                                            <img
                                               src={`https://api.microlink.io?url=${encodeURIComponent(sysDetails.link_hospedado)}&screenshot=true&waitFor=5000&embed=screenshot.url`}
                                               alt="Preview do sistema"
                                               className="w-full h-full object-cover group-hover/preview:scale-105 transition-transform duration-700"
@@ -6320,7 +6314,7 @@ const App: React.FC = () => {
                                     {/* Ativos (Não concluídos) */}
                                     <div className="space-y-4">
                                       <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-violet-500 pl-3">Logs Ativos</h5>
-                                      {systemWorkItems.filter(w => !w.concluido).sort((a,b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime()).map(log => (
+                                      {systemWorkItems.filter(w => !w.concluido).sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime()).map(log => (
                                         <div key={log.id} className="group bg-slate-50 border border-slate-100 rounded-none md:rounded-3xl p-6 hover:border-violet-200 hover:bg-white transition-all">
                                           <div className="flex items-start justify-between gap-6">
                                             <div className="flex-1 space-y-2">
@@ -6353,7 +6347,7 @@ const App: React.FC = () => {
                                       <div className="space-y-4 pt-8">
                                         <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-emerald-500 pl-3">Concluídos</h5>
                                         <div className="space-y-3 opacity-60">
-                                          {systemWorkItems.filter(w => w.concluido).sort((a,b) => new Date(b.data_conclusao!).getTime() - new Date(a.data_conclusao!).getTime()).map(log => (
+                                          {systemWorkItems.filter(w => w.concluido).sort((a, b) => new Date(b.data_conclusao!).getTime() - new Date(a.data_conclusao!).getTime()).map(log => (
                                             <div key={log.id} className="bg-white border border-slate-100 rounded-none md:rounded-2xl p-4 flex items-center justify-between gap-4">
                                               <div className="flex-1 flex items-center gap-4">
                                                 <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
@@ -6402,7 +6396,7 @@ const App: React.FC = () => {
                           Importar Planilha
                         </button>
                       )}
-                      
+
                       <select
                         value={currentMonth}
                         onChange={(e) => setCurrentMonth(Number(e.target.value))}
@@ -6495,66 +6489,66 @@ const App: React.FC = () => {
                   )}
 
                   {pgcSubView === 'plano' && (
-                  <div className="animate-in space-y-8">
-                    <div className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl">
-                      {/* Desktop Table */}
-                      <table className="w-full text-left min-w-[800px] hidden md:table">
-                        <thead className="bg-slate-50 border-b border-slate-200">
-                          <tr>
-                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Origem / Unidade</th>
-                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Entrega Institucional</th>
-                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Descrição</th>
-                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-[200px]">% Carga Horária</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)?.itens.map((item, i) => (
-                            <tr key={i} className="hover:bg-slate-50 transition-colors">
-                              <td className="px-8 py-6">
-                                <div className="text-[10px] font-black text-slate-400 uppercase mb-1">{item.origem}</div>
-                                <div className="text-xs font-black text-slate-900">{item.unidade}</div>
-                              </td>
-                              <td className="px-8 py-6 text-sm font-black text-slate-900">{item.entrega}</td>
-                              <td className="px-8 py-6 text-xs font-medium text-slate-600 leading-relaxed max-w-xs">{item.descricao}</td>
-                              <td className="px-8 py-6">
-                                <div className="flex items-center gap-4">
-                                  <div className="flex-1 h-3 bg-slate-100 rounded-full overflow-hidden">
-                                    <div className="h-full bg-indigo-500 rounded-full transition-all duration-1000" style={{ width: `${item.percentual}%` }}></div>
-                                  </div>
-                                  <span className="text-[10px] font-black text-slate-900 w-10">{item.percentual}%</span>
-                                </div>
-                              </td>
+                    <div className="animate-in space-y-8">
+                      <div className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl">
+                        {/* Desktop Table */}
+                        <table className="w-full text-left min-w-[800px] hidden md:table">
+                          <thead className="bg-slate-50 border-b border-slate-200">
+                            <tr>
+                              <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Origem / Unidade</th>
+                              <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Entrega Institucional</th>
+                              <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Descrição</th>
+                              <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-[200px]">% Carga Horária</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)?.itens.map((item, i) => (
+                              <tr key={i} className="hover:bg-slate-50 transition-colors">
+                                <td className="px-8 py-6">
+                                  <div className="text-[10px] font-black text-slate-400 uppercase mb-1">{item.origem}</div>
+                                  <div className="text-xs font-black text-slate-900">{item.unidade}</div>
+                                </td>
+                                <td className="px-8 py-6 text-sm font-black text-slate-900">{item.entrega}</td>
+                                <td className="px-8 py-6 text-xs font-medium text-slate-600 leading-relaxed max-w-xs">{item.descricao}</td>
+                                <td className="px-8 py-6">
+                                  <div className="flex items-center gap-4">
+                                    <div className="flex-1 h-3 bg-slate-100 rounded-full overflow-hidden">
+                                      <div className="h-full bg-indigo-500 rounded-full transition-all duration-1000" style={{ width: `${item.percentual}%` }}></div>
+                                    </div>
+                                    <span className="text-[10px] font-black text-slate-900 w-10">{item.percentual}%</span>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
 
-                      {/* Mobile Card View */}
-                      <div className="md:hidden divide-y divide-slate-100">
-                        {planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)?.itens.map((item, i) => (
-                          <div key={i} className="p-6 space-y-4">
-                            <div className="flex justify-between items-start gap-4">
-                              <div className="flex-1">
-                                <div className="text-[8px] font-black text-slate-400 uppercase mb-1">{item.origem} • {item.unidade}</div>
-                                <div className="text-sm font-black text-slate-900 leading-tight">{item.entrega}</div>
+                        {/* Mobile Card View */}
+                        <div className="md:hidden divide-y divide-slate-100">
+                          {planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)?.itens.map((item, i) => (
+                            <div key={i} className="p-6 space-y-4">
+                              <div className="flex justify-between items-start gap-4">
+                                <div className="flex-1">
+                                  <div className="text-[8px] font-black text-slate-400 uppercase mb-1">{item.origem} • {item.unidade}</div>
+                                  <div className="text-sm font-black text-slate-900 leading-tight">{item.entrega}</div>
+                                </div>
+                                <div className="bg-indigo-50 text-indigo-600 px-2 py-1 rounded text-[10px] font-black">{item.percentual}%</div>
                               </div>
-                              <div className="bg-indigo-50 text-indigo-600 px-2 py-1 rounded text-[10px] font-black">{item.percentual}%</div>
+                              <p className="text-xs text-slate-500 leading-relaxed">{item.descricao}</p>
+                              <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${item.percentual}%` }}></div>
+                              </div>
                             </div>
-                            <p className="text-xs text-slate-500 leading-relaxed">{item.descricao}</p>
-                            <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                              <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${item.percentual}%` }}></div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      {(!planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)) && (
-                        <div className="px-8 py-20 text-center">
-                          <p className="text-slate-300 font-black text-sm uppercase tracking-widest italic">Nenhum plano de trabalho configurado para este período.</p>
+                          ))}
                         </div>
-                      )}
+
+                        {(!planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)) && (
+                          <div className="px-8 py-20 text-center">
+                            <p className="text-slate-300 font-black text-sm uppercase tracking-widest italic">Nenhum plano de trabalho configurado para este período.</p>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
                   )}
                 </div>
               )}
