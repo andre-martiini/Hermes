@@ -6180,10 +6180,14 @@ const App: React.FC = () => {
                   fixedBills={fixedBills}
                   incomeEntries={incomeEntries}
                   healthWeights={healthWeights}
+                  healthDailyHabits={healthDailyHabits}
+                  healthSettings={healthSettings}
                   unidades={unidades}
                   sistemasDetalhes={sistemasDetalhes}
+                  workItems={workItems}
                   currentMonth={currentMonth}
                   currentYear={currentYear}
+                  onNavigate={setViewMode}
                 />
               ) : viewMode === 'gallery' ? (
                 <>
