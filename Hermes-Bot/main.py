@@ -5,6 +5,10 @@ from google.genai import types
 import firebase_admin
 from firebase_admin import credentials, firestore
 import datetime
+from dotenv import load_dotenv
+
+# Carrega variáveis de ambiente do arquivo .env
+load_dotenv()
 
 # Inicialização do Firebase (Aponte para o arquivo que está na sua pasta)
 # Certifique-se de que o nome coincide com o arquivo baixado
@@ -17,8 +21,8 @@ if not firebase_admin._apps:
 db = firestore.client()
 
 # --- CONFIGURAÇÕES ---
-TELEGRAM_TOKEN = "8541098493:AAGGQCjXV9T7yazGVNSpNEepOYvkqvAXOz8"
-GEMINI_API_KEY = "AIzaSyBlX78LneusUNi-C-4W_VBVZd_vDvIC1yc"
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Inicializa o Cliente Google GenAI (Novo SDK)
 client = genai.Client(api_key=GEMINI_API_KEY)
@@ -59,31 +63,34 @@ Você gerencia os seguintes pilares para o André:
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-def consultar_hermes(colecao: str, campo: str = None, valor: str = None, limite: int = 5):
+def consultar_hermes(colecao: str, campo: str = None, valor: str = None, limite: int = 20):
     """
-    Consulta informações em qualquer coleção do sistema Hermes no Firestore.
-    Use para buscar tarefas, transações, pesos, etc.
-    Se 'campo' e 'valor' forem fornecidos, filtra os resultados.
+    Consulta informações no sistema Hermes.
+    Se 'valor' for fornecido, realiza uma busca por aproximação no campo especificado.
     """
     try:
         ref = db.collection(colecao)
-        if campo and valor:
-            # Busca aproximada não existe no Firestore nativo, então buscamos por igualdade
-            # ou usamos uma lógica simples aqui.
-            docs = ref.where(campo, "==", valor).limit(limite).stream()
-        else:
-            docs = ref.order_by("created_at", direction=firestore.Query.DESCENDING).limit(limite).stream()
+        docs = ref.order_by("created_at", direction=firestore.Query.DESCENDING).limit(50).stream()
         
         resultados = []
         for doc in docs:
             d = doc.to_dict()
             d['id'] = doc.id
-            # Limpa o timestamp do firestore para serialização
             if 'created_at' in d: d['created_at'] = str(d['created_at'])
-            resultados.append(d)
+            
+            # Se houver filtro, verifica se o valor está contido no campo (case-insensitive)
+            if campo and valor:
+                campo_val = str(d.get(campo, "")).lower()
+                if valor.lower() in campo_val:
+                    resultados.append(d)
+            else:
+                resultados.append(d)
+                
+            if len(resultados) >= limite:
+                break
         
         if not resultados:
-            return f"Nenhum registro encontrado na coleção '{colecao}'."
+            return f"Nenhum registro encontrado para '{valor}' na coleção '{colecao}'."
         return resultados
     except Exception as e:
         return f"Erro na consulta: {str(e)}"
@@ -151,22 +158,38 @@ def registrar_saude(tipo: str, valor: any, notas: str = ""):
     except Exception as e:
         return f"Erro saúde: {str(e)}"
 
-def buscar_documentos_tarefa(titulo_tarefa: str):
+def buscar_documentos_tarefa(termo_busca: str):
     """
-    Busca especificamente os links/documentos de uma tarefa pelo título.
+    Busca documentos (links do Drive) de uma tarefa. 
+    O 'termo_busca' não precisa ser o título exato.
     """
     try:
-        docs = db.collection("tarefas").where("titulo", "==", titulo_tarefa).limit(1).stream()
+        # Busca as últimas 50 tarefas para encontrar o melhor match
+        docs = db.collection("tarefas").order_by("created_at", direction=firestore.Query.DESCENDING).limit(50).stream()
+        
+        possiveis_tarefas = []
         for doc in docs:
             data = doc.to_dict()
-            pool = data.get("pool_dados", [])
-            if not pool:
-                return f"A tarefa '{titulo_tarefa}' não possui documentos vinculados."
-            links = [f"- {item.get('nome', 'Sem nome')}: {item.get('valor')}" for item in pool]
-            return "Documentos encontrados:\n" + "\n".join(links)
-        return "Tarefa não encontrada para busca de documentos."
+            titulo = data.get("titulo", "").lower()
+            if termo_busca.lower() in titulo:
+                possiveis_tarefas.append(data)
+        
+        if not possiveis_tarefas:
+            return f"André, não encontrei nenhuma tarefa contendo '{termo_busca}'."
+        
+        # Pega a mais recente que combine
+        tarefa = possiveis_tarefas[0]
+        titulo_encontrado = tarefa.get("titulo")
+        pool = tarefa.get("pool_dados", [])
+        
+        if not pool:
+            return f"André, encontrei a tarefa '{titulo_encontrado}', mas ela não possui documentos vinculados no momento."
+            
+        links = [f"- {item.get('nome', 'Arquivo')}: {item.get('valor')}" for item in pool]
+        return f"André, localizei a tarefa '{titulo_encontrado}'. Aqui estão os documentos:\n" + "\n".join(links)
+        
     except Exception as e:
-        return f"Erro na busca de documentos: {str(e)}"
+        return f"Erro na busca: {str(e)}"
 
 # Lista expandida de ferramentas
 tools_list = [
