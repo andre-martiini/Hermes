@@ -2547,9 +2547,33 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showDiaryMobileModal, setShowDiaryMobileModal] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const diaryEndRef = useRef<HTMLDivElement>(null);
+  const diaryMobileEndRef = useRef<HTMLDivElement>(null);
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
 
   // Garantir que estamos usando a versão mais recente da tarefa vinda do Firestore
   const currentTaskData = useMemo(() => tarefas.find(t => t.id === task.id) || task, [tarefas, task.id, task]);
+
+  // Auto-scroll logic for Desktop
+  useEffect(() => {
+    if (shouldAutoScroll && diaryEndRef.current) {
+      diaryEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [currentTaskData.acompanhamento, shouldAutoScroll]);
+
+  // Auto-scroll logic for Mobile
+  useEffect(() => {
+    if (shouldAutoScroll && diaryMobileEndRef.current) {
+      diaryMobileEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [currentTaskData.acompanhamento, showDiaryMobileModal, shouldAutoScroll]);
+
+  const handleDiaryScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    // Se o usuário está a menos de 100px do fundo, habilita auto-scroll
+    const isAtBottom = scrollHeight - scrollTop <= clientHeight + 100;
+    setShouldAutoScroll(isAtBottom);
+  };
 
   const nextTask = useMemo(() => {
     const now = new Date();
@@ -2622,6 +2646,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
     const updatedAcompanhamento = [...(currentTaskData.acompanhamento || []), newEntry];
     onSave(task.id, { acompanhamento: updatedAcompanhamento });
     setNewFollowUp('');
+    setShouldAutoScroll(true);
   };
 
   const handleDeleteDiaryEntry = (index: number) => {
@@ -2756,6 +2781,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
         }));
         const updatedAcompanhamento = [...(currentTaskData.acompanhamento || []), ...newEntries];
         onSave(task.id, { acompanhamento: updatedAcompanhamento });
+        setShouldAutoScroll(true);
       }
     }
   };
@@ -3189,7 +3215,10 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
             )}
 
             {/* CHAT/DIARY INTERFACE - Oculto no mobile para usar Modal */}
-            <div className="flex-1 min-h-[350px] md:min-h-0 overflow-y-auto custom-scrollbar p-0 md:p-6 hidden lg:flex flex-col gap-4 relative z-10">
+            <div 
+              onScroll={handleDiaryScroll}
+              className="flex-1 min-h-[350px] md:min-h-0 overflow-y-auto custom-scrollbar p-0 md:p-6 hidden lg:flex flex-col gap-4 relative z-10"
+            >
               {/* Mensagem de Boas-vindas para contexto */}
               <div className="flex justify-center mb-6">
                 <div className={`border rounded-full px-4 py-2 text-[10px] uppercase tracking-widest font-black ${isTimerRunning ? 'bg-white/5 border-white/5 text-white/40' : 'bg-slate-100 border-slate-200 text-slate-400'}`}>
@@ -3237,7 +3266,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
                 </div>
               )}
               {/* Invisible spacer for scrolling */}
-              <div style={{ float: "left", clear: "both" }} ref={(el) => { if (el) el.scrollIntoView({ behavior: "smooth" }); }}></div>
+              <div style={{ float: "left", clear: "both" }} ref={diaryEndRef}></div>
             </div>
 
             {/* INPUT AREA */}
@@ -3346,7 +3375,10 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+          <div 
+            onScroll={handleDiaryScroll}
+            className="flex-1 overflow-y-auto p-4 flex flex-col gap-4"
+          >
             {task.acompanhamento && task.acompanhamento.map((entry, idx) => (
               <div key={idx} className="flex flex-col gap-1 items-start w-full animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className={`p-4 rounded-2xl rounded-tl-none border shadow-lg relative ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-100 shadow-slate-200'}`}>
@@ -3372,6 +3404,8 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
                 <p className={`text-sm font-medium ${isTimerRunning ? 'text-white' : 'text-slate-800'}`}>Nenhum registro no diário ainda.</p>
               </div>
             )}
+            {/* Invisible spacer for scrolling Mobile */}
+            <div style={{ float: "left", clear: "both" }} ref={diaryMobileEndRef}></div>
           </div>
         </div>
       )}
@@ -3507,6 +3541,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
   const [searchTerm, setSearchTerm] = useState('');
   const [sortOrder, setSortOrder] = useState<'date-desc' | 'date-asc'>('date-desc');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [isArchivedIdeasOpen, setIsArchivedIdeasOpen] = useState(false);
 
   // Gravador
   const [isRecording, setIsRecording] = useState(false);
@@ -3515,6 +3550,14 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
 
   const activeIdeas = ideas
     .filter(i => i.status !== 'archived')
+    .filter(i => i.text.toLowerCase().includes(searchTerm.toLowerCase()))
+    .sort((a, b) => {
+      if (sortOrder === 'date-desc') return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+      return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+    });
+
+  const archivedIdeas = ideas
+    .filter(i => i.status === 'archived')
     .filter(i => i.text.toLowerCase().includes(searchTerm.toLowerCase()))
     .sort((a, b) => {
       if (sortOrder === 'date-desc') return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
@@ -3544,8 +3587,8 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
             <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
           </div>
           <div>
-            <h3 className="text-lg md:text-2xl font-black text-slate-900 tracking-tighter mb-1 md:mb-2">Brainstorming</h3>
-            <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Registre ideias rápidas para organizar depois.</p>
+            <h3 className="text-lg md:text-2xl font-black text-slate-900 tracking-tighter mb-1 md:mb-2">Notas Rápidas</h3>
+            <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Registre notas rápidas para organizar depois.</p>
           </div>
         </button>
 
@@ -3673,7 +3716,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
             </button>
-            <h3 className="text-2xl font-black text-slate-900 tracking-tight uppercase tracking-widest text-[10px]">Ferramentas / Brainstorming</h3>
+            <h3 className="text-2xl font-black text-slate-900 tracking-tight uppercase tracking-widest text-[10px]">Ferramentas / Notas Rápidas</h3>
           </div>
         </div>
 
@@ -3682,7 +3725,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
             <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
             <input
               type="text"
-              placeholder="Pesquisar nas ideias..."
+              placeholder="Pesquisar nas notas..."
               className="flex-1 bg-transparent outline-none text-xs md:text-sm font-bold text-slate-700 placeholder:text-slate-400"
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
@@ -3741,7 +3784,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
                   ? "Gravando... Fale agora para transcrever." 
                   : isProcessing 
                     ? "Hermes AI está processando seu áudio..." 
-                    : "Digite ou grave uma nova ideia..."
+                    : "Digite ou grave uma nova nota..."
               }
               className={`flex-1 bg-transparent border-none outline-none px-2 py-4 text-sm font-bold text-slate-800 placeholder:text-slate-300 ${(isRecording || isProcessing) ? 'opacity-50' : ''}`}
               value={textInput}
@@ -3762,7 +3805,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
               }}
               className="bg-blue-600 text-white h-12 px-8 rounded-lg md:rounded-[1.25rem] text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 active:scale-95"
             >
-              Salvar Ideia
+              Salvar Nota
             </button>
           </div>
         </div>
@@ -3882,8 +3925,64 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
           ))}
           {activeIdeas.length === 0 && !isProcessing && (
             <div className="col-span-full py-20 text-center border-4 border-dashed border-slate-100 rounded-none md:rounded-none md:rounded-[3rem]">
-              <p className="text-slate-300 font-black text-xl uppercase tracking-widest">Nenhuma ideia ativa</p>
-              <p className="text-slate-400 text-sm font-medium mt-2">Grave ou digite uma ideia para começar.</p>
+              <p className="text-slate-300 font-black text-xl uppercase tracking-widest">Nenhuma nota ativa</p>
+              <p className="text-slate-400 text-sm font-medium mt-2">Grave ou digite uma nota para começar.</p>
+            </div>
+          )}
+        </div>
+
+        {/* Seção Retrátil de Ideias Arquivadas */}
+        <div className="mt-12 space-y-6">
+          <button
+            onClick={() => setIsArchivedIdeasOpen(!isArchivedIdeasOpen)}
+            className="w-full flex items-center gap-4 group cursor-pointer"
+          >
+            <div className="h-0.5 flex-1 bg-slate-100 group-hover:bg-slate-200 transition-colors"></div>
+            <div className="flex items-center gap-2 text-slate-400 group-hover:text-slate-600 transition-colors">
+              <h3 className="text-[10px] font-black uppercase tracking-[0.3em]">Notas Arquivadas</h3>
+              <svg className={`w-4 h-4 transition-transform duration-300 ${isArchivedIdeasOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+            <div className="h-0.5 flex-1 bg-slate-100 group-hover:bg-slate-200 transition-colors"></div>
+          </button>
+
+          {isArchivedIdeasOpen && (
+            <div className="flex flex-col md:grid md:grid-cols-2 lg:grid-cols-3 gap-0 md:gap-8 opacity-60 hover:opacity-100 transition-opacity animate-in slide-in-from-top-4 duration-300">
+              {archivedIdeas.map(idea => (
+                <div key={idea.id} className="bg-white p-5 md:p-8 rounded-none md:rounded-[2.5rem] border border-slate-100 md:border-slate-200 shadow-none md:shadow-lg hover:shadow-none md:hover:shadow-2xl transition-all group flex flex-col relative overflow-hidden -ml-px -mt-px md:m-0">
+                  <div className="flex items-center justify-between mb-3 md:mb-6">
+                    <span className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">{formatDate(idea.timestamp.split('T')[0])}</span>
+                    <div className="flex items-center gap-1 md:gap-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-all">
+                      <button
+                        onClick={() => onArchiveIdea(idea.id)}
+                        className="text-blue-500 hover:bg-blue-50 p-2 rounded-lg md:rounded-xl transition-colors"
+                        title="Restaurar Ideia"
+                      >
+                        <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
+                      </button>
+                      <button
+                        onClick={() => onDeleteIdea(idea.id)}
+                        className="text-slate-300 hover:text-rose-500 p-2 rounded-lg md:rounded-xl transition-colors"
+                        title="Excluir Permanentemente"
+                      >
+                        <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex-1">
+                    <p className="text-slate-500 font-bold italic leading-relaxed mb-3 md:mb-6 text-sm md:text-lg line-clamp-3">
+                      "{idea.text}"
+                    </p>
+                  </div>
+                </div>
+              ))}
+              {archivedIdeas.length === 0 && (
+                <div className="col-span-full py-12 text-center">
+                  <p className="text-slate-300 font-black text-[10px] uppercase tracking-widest italic">Nenhuma nota arquivada</p>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -3913,7 +4012,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
             type="text"
             disabled={isRecording}
             autoFocus
-            placeholder={isRecording ? "Gravando... Fale agora." : "Digite ou grave sua ideia..."}
+            placeholder={isRecording ? "Gravando... Fale agora." : "Digite ou grave sua nota..."}
             className={`flex-1 bg-white border border-slate-200 rounded-none md:rounded-2xl px-6 py-4 text-sm font-medium focus:ring-4 focus:ring-blue-100 outline-none shadow-sm transition-all ${isRecording ? 'opacity-50' : ''}`}
             value={textInput}
             onChange={e => setTextInput(e.target.value)}
@@ -4858,10 +4957,10 @@ const App: React.FC = () => {
   const handleUpdateIdea = async (id: string, text: string) => {
     try {
       await updateDoc(doc(db, 'brainstorm_ideas', id), { text });
-      showToast("Ideia atualizada!", "success");
+      showToast("Nota atualizada!", "success");
     } catch (err) {
       console.error(err);
-      showToast("Erro ao atualizar ideia.", "error");
+      showToast("Erro ao atualizar nota.", "error");
     }
   };
 
@@ -4870,17 +4969,15 @@ const App: React.FC = () => {
     const unit = unidades.find(u => u.id === sistemaId);
     if (!unit) return;
 
-    await handleCreateTarefa({
-      titulo: convertingIdea.text,
-      categoria: unit.nome,
-      data_limite: new Date().toISOString().split('T')[0],
-      status: 'em andamento'
-    });
+    // Criar o log no sistema ao invés de uma tarefa geral (ação)
+    await handleCreateWorkItem(sistemaId, 'ajuste', convertingIdea.text);
 
-    await handleDeleteIdea(convertingIdea.id);
+    // Remover a nota original após a conversão bem-sucedida
+    await deleteDoc(doc(db, 'brainstorm_ideas', convertingIdea.id));
+
     setIsSystemSelectorOpen(false);
     setConvertingIdea(null);
-    showToast("Ideia convertida em Log com sucesso!", "success");
+    showToast("Nota convertida em log do sistema com sucesso!", "success");
   };
 
   const handleUpdateSistema = async (id: string, updates: Partial<Sistema>) => {
@@ -4988,13 +5085,17 @@ const App: React.FC = () => {
 
   const handleArchiveIdea = async (id: string) => {
     try {
+      const idea = brainstormIdeas.find(i => i.id === id);
+      if (!idea) return;
+
+      const newStatus = idea.status === 'archived' ? 'active' : 'archived';
       await updateDoc(doc(db, 'brainstorm_ideas', id), {
-        status: 'archived'
+        status: newStatus
       });
-      showToast("Ideia concluída e arquivada!", "success");
+      showToast(newStatus === 'archived' ? "Nota concluída e arquivada!" : "Nota restaurada!", "success");
     } catch (err) {
       console.error(err);
-      showToast("Erro ao arquivar.", "error");
+      showToast("Erro ao processar nota.", "error");
     }
   };
 
@@ -5005,17 +5106,17 @@ const App: React.FC = () => {
         timestamp: new Date().toISOString(),
         status: 'active'
       });
-      showToast("Ideia registrada!", "success");
+      showToast("Nota registrada!", "success");
     } catch (err) {
       console.error(err);
-      showToast("Erro ao salvar ideia.", "error");
+      showToast("Erro ao salvar nota.", "error");
     }
   };
 
   const handleDeleteIdea = async (id: string) => {
     try {
       await deleteDoc(doc(db, 'brainstorm_ideas', id));
-      showToast("Ideia removida.", "info");
+      showToast("Nota removida.", "info");
     } catch (err) {
       console.error(err);
       showToast("Erro ao remover.", "error");
@@ -5625,7 +5726,7 @@ const App: React.FC = () => {
                     setActiveFerramenta('brainstorming');
                   }}
                   className="text-amber-500 p-3 hover:bg-amber-50 rounded-xl transition-all active:scale-95 group"
-                  aria-label="Ideias Rápidas"
+                  aria-label="Notas Rápidas"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
                 </button>
@@ -5799,7 +5900,7 @@ const App: React.FC = () => {
                     </svg>
                   </div>
                   <h2 className="text-lg md:text-xl font-black text-slate-900 mb-2 group-hover:text-amber-600 transition-colors">Ferramentas</h2>
-                  <p className="text-slate-500 text-xs font-medium leading-relaxed">Brainstorming e IA</p>
+                  <p className="text-slate-500 text-xs font-medium leading-relaxed">Notas Rápidas e IA</p>
                   <div className="mt-6 flex items-center gap-2 text-amber-600 font-black text-xs uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
                     <span>Acessar</span>
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -5869,7 +5970,7 @@ const App: React.FC = () => {
                         setActiveFerramenta('brainstorming');
                       }}
                       className="p-1.5 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors text-amber-500"
-                      aria-label="Ideias Rápidas"
+                      aria-label="Notas Rápidas"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
                     </button>
@@ -5971,7 +6072,7 @@ const App: React.FC = () => {
                           setActiveFerramenta('brainstorming');
                         }}
                         className="bg-white border border-slate-200 text-amber-500 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
-                        aria-label="Ideias Rápidas"
+                        aria-label="Notas Rápidas"
                       >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
                       </button>

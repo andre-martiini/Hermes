@@ -9,7 +9,7 @@ Sistema integrado de gestão de tarefas com sincronização automática com Goog
 - ✅ Categorização automática (CLC, Assistência Estudantil, etc.)
 - ✅ Plano de Trabalho Mensal
 - ✅ Auditoria PGC
-- ✅ Ferramentas de Brainstorming com IA
+- ✅ Notas Rápidas com IA
 
 ## 📦 Instalação
 

@@ -527,7 +527,7 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
         # Refinamento via Gemini Flash
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-3-flash-preview")
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
         prompt = f"""
         Atue como um redator especialista. O texto a seguir é uma transcrição de voz bruta.
         Sua tarefa:
