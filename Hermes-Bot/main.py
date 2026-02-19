@@ -10,10 +10,8 @@ from dotenv import load_dotenv
 # Carrega variáveis de ambiente do arquivo .env
 load_dotenv()
 
-# Inicialização do Firebase (Aponte para o arquivo que está na sua pasta)
-# Certifique-se de que o nome coincide com o arquivo baixado
+# Inicialização do Firebase
 if not firebase_admin._apps:
-    # O arquivo está no diretório pai
     path_key = os.path.join("..", "firebase_service_account_key.json")
     cred = credentials.Certificate(path_key)
     firebase_admin.initialize_app(cred)
@@ -23,6 +21,14 @@ db = firestore.client()
 # --- CONFIGURAÇÕES ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+if GEMINI_API_KEY:
+    print(f"API Key carregada: {GEMINI_API_KEY[:4]}...{GEMINI_API_KEY[-4:]}")
+else:
+    print("ERRO: GEMINI_API_KEY não encontrada no .env!")
+
+if not TELEGRAM_TOKEN:
+    print("ERRO: TELEGRAM_TOKEN não encontrada no .env!")
 
 # Inicializa o Cliente Google GenAI (Novo SDK)
 client = genai.Client(api_key=GEMINI_API_KEY)
