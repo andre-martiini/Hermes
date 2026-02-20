@@ -17,6 +17,7 @@ interface DashboardViewProps {
     currentMonth: number;
     currentYear: number;
     onNavigate: (view: 'gallery' | 'finance' | 'saude' | 'sistemas-dev') => void;
+    onOpenBacklog: () => void;
 }
 
 const DashboardCard = ({ title, iconColor, onRedirect, children }: { title: string, iconColor: string, onRedirect: () => void, children: React.ReactNode }) => {
@@ -58,7 +59,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     workItems,
     currentMonth,
     currentYear,
-    onNavigate
+    onNavigate,
+    onOpenBacklog
 }) => {
     const todayStr = new Date().toISOString().split('T')[0];
     const tomorrow = new Date();
@@ -308,12 +310,30 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
     return (
         <div className="animate-in fade-in duration-700 space-y-8 md:space-y-12 pb-20">
-            <div className="max-w-6xl mx-auto px-4 md:px-0 text-center md:text-left">
-                <h2 className="text-3xl md:text-5xl font-black text-slate-900 tracking-tighter uppercase mb-2">Painel de Controle</h2>
-                <div className="flex items-center justify-center md:justify-start gap-3">
-                    <span className="w-12 h-1 bg-blue-600 rounded-full"></span>
-                    <p className="text-slate-400 text-[10px] md:text-xs font-black uppercase tracking-[0.2em]">Visão Geral • André Martini</p>
+            <div className="max-w-6xl mx-auto px-4 md:px-0 flex flex-col md:flex-row items-center justify-between gap-6">
+                <div className="text-center md:text-left">
+                    <h2 className="text-3xl md:text-5xl font-black text-slate-900 tracking-tighter uppercase mb-2">Painel de Controle</h2>
+                    <div className="flex items-center justify-center md:justify-start gap-3">
+                        <span className="w-12 h-1 bg-blue-600 rounded-full"></span>
+                        <p className="text-slate-400 text-[10px] md:text-xs font-black uppercase tracking-[0.2em]">Visão Geral • André Martini</p>
+                    </div>
                 </div>
+
+                <button
+                    onClick={onOpenBacklog}
+                    className="p-4 bg-amber-100 text-amber-600 rounded-2xl md:rounded-[2rem] shadow-lg shadow-amber-100 hover:bg-amber-200 hover:scale-105 transition-all group flex items-center gap-3"
+                    title="Ajustes e Melhorias do Sistema"
+                >
+                    <div className="bg-white p-2 rounded-xl shadow-sm">
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                        </svg>
+                    </div>
+                    <div className="text-left hidden md:block">
+                        <p className="text-[10px] font-black uppercase tracking-widest leading-none">Ajustes</p>
+                        <p className="text-[8px] font-bold opacity-60 uppercase tracking-widest">Backlog Geral</p>
+                    </div>
+                </button>
             </div>
             
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 max-w-6xl mx-auto">
