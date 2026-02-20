@@ -517,7 +517,8 @@ const DayView = ({
   currentDate: Date,
   onTaskClick: (t: Tarefa) => void,
   onTaskUpdate: (id: string, updates: Partial<Tarefa>, suppressToast?: boolean) => void,
-  onExecuteTask: (t: Tarefa) => void
+  onExecuteTask: (t: Tarefa) => void,
+  onReorderTasks?: (taskId: string, targetTaskId: string, label?: string) => void
 }) => {
   const timeToMinutes = (time: string) => {
     if (!time) return 0;
@@ -586,8 +587,14 @@ const DayView = ({
   const dayTasks = useMemo(() => tasks.filter(t => {
     if (t.status === 'excluído' as any) return false;
 
+    const isConcluido = normalizeStatus(t.status) === 'concluido';
+
     // Se a tarefa já tem horário definido (está alocada), respeitamos estritamente a data definida
     if (t.horario_inicio && t.data_inicio) {
+      // Se não está concluída e é do passado, permitimos aparecer no sidebar de hoje (rollover)
+      if (!isConcluido && t.data_inicio < dayStr && dayStr === formatDateLocalISO(new Date())) {
+        return true;
+      }
       return t.data_inicio === dayStr;
     }
 
@@ -597,12 +604,15 @@ const DayView = ({
     // Se não tem prazo, aparece sempre no sidebar para alocação (Critério: ações sem data definida)
     if (!hasDeadline) return true;
 
+    // Se já está concluída e o prazo passou, não deve aparecer hoje (a menos que estejamos vendo o dia em que ela venceu)
+    if (isConcluido && end < dayStr) return false;
+
     // Critérios únicos para o campo aguardando alocação:
     // - As ações que são daquele dia (dayStr === end)
     // - As ações que são dos dias anteriores àquele dia (dayStr > end)
     // Ou seja: dayStr >= end
     return dayStr >= end;
-  }), [tasks, dayStr]);
+  }).sort((a, b) => (a.ordem || 0) - (b.ordem || 0)), [tasks, dayStr]);
 
   const positionedEvents = useMemo(() => {
     const allItems = [
@@ -614,7 +624,7 @@ const DayView = ({
         type: 'google' as const,
         data: e
       })),
-      ...dayTasks.filter(t => t.horario_inicio).map(t => ({
+      ...dayTasks.filter(t => t.horario_inicio && t.data_inicio === dayStr).map(t => ({
         id: t.id,
         title: t.titulo,
         start: timeToMinutes(t.horario_inicio || '00:00'),
@@ -890,11 +900,20 @@ const DayView = ({
           </div>
 
           <div className="space-y-3">
-            {dayTasks.filter(t => !t.horario_inicio).map(task => (
+            {dayTasks.filter(t => !t.horario_inicio || (t.data_inicio && t.data_inicio < dayStr)).map(task => (
               <div
                 key={task.id}
                 draggable
                 onDragStart={(e) => e.dataTransfer.setData('task-id', task.id)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const draggedId = e.dataTransfer.getData('task-id');
+                  if (draggedId && draggedId !== task.id && onReorderTasks) {
+                    onReorderTasks(draggedId, task.id);
+                  }
+                }}
                 onClick={() => {
                   if (window.innerWidth < 768) {
                     // Mobile: Allocate to current hour by default if clicked
@@ -966,7 +985,8 @@ const CalendarView = ({
   onTaskClick: (t: Tarefa) => void,
   onViewModeChange: (m: 'month' | 'week' | 'day') => void,
   onTaskUpdate: (id: string, updates: Partial<Tarefa>, suppressToast?: boolean) => void,
-  onExecuteTask: (t: Tarefa) => void
+  onExecuteTask: (t: Tarefa) => void,
+  onReorderTasks?: (taskId: string, targetTaskId: string, label?: string) => void
 }) => {
   const [days, setDays] = React.useState<Date[]>([]);
 
@@ -1128,6 +1148,7 @@ const CalendarView = ({
           onTaskClick={onTaskClick}
           onTaskUpdate={onTaskUpdate}
           onExecuteTask={onExecuteTask}
+          onReorderTasks={onReorderTasks}
         />
       ) : (
         <>
@@ -1224,12 +1245,13 @@ const CalendarView = ({
   );
 };
 
-const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit }: {
+const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, highlighted }: {
   task: Tarefa,
   onClick?: () => void,
   onToggle: (id: string, currentStatus: string) => void,
   onDelete: (id: string) => void,
-  onEdit: (t: Tarefa) => void
+  onEdit: (t: Tarefa) => void,
+  highlighted?: boolean
 }) => {
   const statusValue = normalizeStatus(task.status);
   const isCompleted = statusValue === 'concluido';
@@ -1276,7 +1298,7 @@ const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit }: {
         e.dataTransfer.effectAllowed = 'move';
       }}
       title={task.data_criacao ? `Criada em: ${formatDate(task.data_criacao.split('T')[0])}` : ''}
-      className={`group bg-white w-full px-4 md:px-6 py-4 md:py-3 border-b border-slate-100 hover:bg-slate-50/80 transition-all flex flex-col sm:flex-row sm:items-center gap-4 md:gap-6 animate-in cursor-pointer relative ${isCompleted ? 'opacity-60 grayscale-[0.5]' : ''}`}
+      className={`group w-full px-4 md:px-6 py-4 md:py-3 border-b border-slate-100 hover:bg-slate-50/80 transition-all flex flex-col sm:flex-row sm:items-center gap-4 md:gap-6 animate-in cursor-pointer relative ${isCompleted ? 'opacity-60 grayscale-[0.5]' : ''} ${highlighted ? 'bg-gradient-to-r from-blue-50 to-white border-l-4 border-l-blue-500 py-6 md:py-5 shadow-sm' : 'bg-white'}`}
     >
       {/* Esquerda: Checkbox + Título */}
       <div className="flex items-center gap-4 flex-1 min-w-0">
@@ -1290,7 +1312,7 @@ const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit }: {
           <svg className="w-4 h-4 sm:w-3.5 sm:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" /></svg>
         </button>
 
-        <div className={`text-sm md:text-base font-bold text-[#1a202c] leading-tight transition-colors ${isCompleted ? 'line-through text-slate-400' : 'group-hover:text-blue-600'} line-clamp-2 sm:line-clamp-1`}>
+        <div className={`${highlighted ? 'text-base md:text-lg font-black' : 'text-sm md:text-base font-bold'} text-[#1a202c] leading-tight transition-colors ${isCompleted ? 'line-through text-slate-400' : 'group-hover:text-blue-600'} line-clamp-2 sm:line-clamp-1`}>
           {task.titulo}
         </div>
       </div>
@@ -1315,7 +1337,7 @@ const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit }: {
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-1.5 text-slate-400 font-black uppercase text-[9px] md:text-[10px] tracking-widest min-w-[65px]">
             <svg className="w-3 h-3 md:w-3.5 md:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-            {dateDisplay}
+            {dateDisplay} {task.horario_inicio ? `• ${task.horario_inicio}` : ''}
           </div>
 
           {/* Ações: Sempre visíveis no mobile (sm:opacity-0), hover no desktop */}
@@ -5812,6 +5834,62 @@ const App: React.FC = () => {
     }
   };
 
+  const handleReorderTasks = async (taskId: string, targetTaskId: string, label?: string) => {
+    let currentLabel = label;
+    if (!currentLabel) {
+      // Encontra em qual bucket o target está
+      for (const [l, ts] of Object.entries(tarefasAgrupadas)) {
+        if (ts.some(t => t.id === targetTaskId)) {
+          currentLabel = l;
+          break;
+        }
+      }
+    }
+    if (!currentLabel) return;
+
+    const tasksInBucket = [...(tarefasAgrupadas[currentLabel] || [])];
+    if (tasksInBucket.length === 0) return;
+
+    const oldIndex = tasksInBucket.findIndex(t => t.id === taskId);
+    const newIndex = tasksInBucket.findIndex(t => t.id === targetTaskId);
+
+    // Se estiver movendo dentro do mesmo bucket
+    if (oldIndex !== -1) {
+      if (oldIndex === newIndex) return;
+      const [removed] = tasksInBucket.splice(oldIndex, 1);
+      tasksInBucket.splice(newIndex, 0, removed);
+    } else {
+      // Movendo de outro bucket para este
+      const draggedTask = tarefas.find(t => t.id === taskId);
+      if (!draggedTask) return;
+      const targetTask = tasksInBucket[newIndex];
+
+      // Atualiza a data da tarefa arrastada para coincidir com o bucket de destino
+      const newDate = targetTask.data_limite || formatDateLocalISO(new Date());
+      await updateDoc(doc(db, 'tarefas', taskId), {
+        data_limite: newDate,
+        data_inicio: draggedTask.horario_inicio ? newDate : (draggedTask.data_inicio || newDate),
+        data_atualizacao: new Date().toISOString()
+      });
+
+      // Insere na posição correta para o remapeamento de ordem
+      tasksInBucket.splice(newIndex, 0, { ...draggedTask, data_limite: newDate });
+    }
+
+    // Reatribui ordens
+    const promises = tasksInBucket.map((t, i) => {
+      if (t.ordem !== i) {
+        return updateDoc(doc(db, 'tarefas', t.id), { ordem: i, data_atualizacao: new Date().toISOString() });
+      }
+      return null;
+    }).filter(Boolean);
+
+    if (promises.length > 0) {
+      await Promise.all(promises);
+      showToast("Ordem atualizada!", "success");
+    }
+  };
+
   const handleToggleTarefaStatus = async (id: string, currentStatus: string) => {
     try {
       const isConcluido = normalizeStatus(currentStatus) === 'concluido';
@@ -6394,8 +6472,25 @@ const App: React.FC = () => {
 
     result.sort((a, b) => {
       const dVal = (t: Tarefa) => (!t.data_limite || t.data_limite === "-" || t.data_limite.trim() === "") ? (sortOption === 'date-asc' ? Infinity : -Infinity) : new Date(t.data_limite).getTime();
-      if (sortOption === 'date-asc') return dVal(a) - dVal(b);
-      if (sortOption === 'date-desc') return dVal(b) - dVal(a);
+      const dateCompare = sortOption === 'date-asc' ? dVal(a) - dVal(b) : dVal(b) - dVal(a);
+      if (dateCompare !== 0) return dateCompare;
+
+      // Se as datas são iguais, usamos a ordem manual se existir
+      if (a.ordem !== undefined && b.ordem !== undefined) return a.ordem - b.ordem;
+      if (a.ordem !== undefined) return -1;
+      if (b.ordem !== undefined) return 1;
+
+      // Se não houver ordem manual, usamos prioridade
+      const priorityOrder = { 'alta': 3, 'média': 2, 'baixa': 1 };
+      const pA = priorityOrder[a.prioridade] || 0;
+      const pB = priorityOrder[b.prioridade] || 0;
+      if (pA !== pB) return pB - pA;
+
+      // Se ainda empatar, usamos o horário
+      if (a.horario_inicio && b.horario_inicio) return a.horario_inicio.localeCompare(b.horario_inicio);
+      if (a.horario_inicio) return -1;
+      if (b.horario_inicio) return 1;
+
       return 0;
     });
     return result;
@@ -7122,6 +7217,7 @@ const App: React.FC = () => {
                       onViewModeChange={setCalendarViewMode}
                       onTaskUpdate={handleUpdateTarefa}
                       onExecuteTask={(t) => { setSelectedTask(t); setTaskModalMode('execute'); }}
+                      onReorderTasks={handleReorderTasks}
                     />
                   ) : (
                     <>
@@ -7299,9 +7395,19 @@ const App: React.FC = () => {
                                         onDragEnd={(e) => {
                                           e.currentTarget.style.opacity = '1';
                                         }}
+                                        onDragOver={(e) => e.preventDefault()}
+                                        onDrop={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          const draggedId = e.dataTransfer.getData('task-id');
+                                          if (draggedId && draggedId !== task.id) {
+                                            handleReorderTasks(draggedId, task.id, label);
+                                          }
+                                        }}
                                       >
                                         <RowCard
                                           task={task}
+                                          highlighted={label === 'Hoje' && tasks.filter(t => normalizeStatus(t.status) !== 'concluido')[0]?.id === task.id}
                                           onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
                                           onToggle={handleToggleTarefaStatus}
                                           onDelete={handleDeleteTarefa}
