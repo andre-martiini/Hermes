@@ -119,8 +119,8 @@ const formatWhatsAppText = (text: string) => {
 
   // Process block-level elements
   const lines = text.split('\n');
-  const processedLines: JSX.Element[] = [];
-  let currentList: JSX.Element[] = [];
+  const processedLines: React.JSX.Element[] = [];
+  let currentList: React.JSX.Element[] = [];
 
   const flushList = () => {
     if (currentList.length > 0) {
@@ -156,10 +156,10 @@ const formatWhatsAppText = (text: string) => {
 };
 
 const formatInlineWhatsAppText = (text: string) => {
-  let parts: (string | JSX.Element)[] = [text];
+  let parts: (string | React.JSX.Element)[] = [text];
 
-  const applyRegex = (regex: RegExp, formatter: (match: string) => JSX.Element) => {
-    const newParts: (string | JSX.Element)[] = [];
+  const applyRegex = (regex: RegExp, formatter: (match: string) => React.JSX.Element) => {
+    const newParts: (string | React.JSX.Element)[] = [];
     parts.forEach(part => {
       if (typeof part !== 'string') {
         newParts.push(part);
@@ -2677,7 +2677,7 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
   );
 };
 
-const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { task: Tarefa, tarefas: Tarefa[], appSettings: AppSettings, onSave: (id: string, updates: Partial<Tarefa>) => void, onClose: () => void }) => {
+const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showToast }: { task: Tarefa, tarefas: Tarefa[], appSettings: AppSettings, onSave: (id: string, updates: Partial<Tarefa>) => void, onClose: () => void, showToast: (msg: string, type?: 'success' | 'error' | 'info') => void }) => {
   const [newFollowUp, setNewFollowUp] = useState('');
   const [newPoolItem, setNewPoolItem] = useState('');
   const [showPool, setShowPool] = useState(false);
@@ -4461,7 +4461,7 @@ const App: React.FC = () => {
   // Estados PGC
   const [atividadesPGC, setAtividadesPGC] = useState<AtividadeRealizada[]>([]);
   const [afastamentos, setAfastamentos] = useState<Afastamento[]>([]);
-  const [pgcSubView, setPgcSubView] = useState<'audit' | 'heatmap' | 'config'>('audit');
+  const [pgcSubView, setPgcSubView] = useState<'audit' | 'heatmap' | 'config' | 'plano'>('audit');
   const [unidades, setUnidades] = useState<{ id: string, nome: string }[]>([]);
   const [sistemasAtivos, setSistemasAtivos] = useState<string[]>([]);
 
@@ -6274,8 +6274,13 @@ const App: React.FC = () => {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" />
                     </svg>
                   </button>
-                  <img src="/logo.png" alt="Hermes" className="w-8 h-8 md:w-10 md:h-10 object-contain" />
-                  <h1 className="text-base md:text-lg font-black tracking-tighter text-slate-900">HERMES</h1>
+                  <div 
+                    onClick={() => setActiveModule('home')}
+                    className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
+                  >
+                    <img src="/logo.png" alt="Hermes" className="w-8 h-8 md:w-10 md:h-10 object-contain" />
+                    <h1 className="text-base md:text-lg font-black tracking-tighter text-slate-900">HERMES</h1>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="relative">
@@ -6355,8 +6360,13 @@ const App: React.FC = () => {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" />
                       </svg>
                     </button>
-                    <img src="/logo.png" alt="Hermes" className="w-9 h-9 object-contain" />
-                    <h1 className="text-xl font-black tracking-tighter text-slate-900">HERMES</h1>
+                    <div 
+                      onClick={() => setActiveModule('home')}
+                      className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
+                    >
+                      <img src="/logo.png" alt="Hermes" className="w-9 h-9 object-contain" />
+                      <h1 className="text-xl font-black tracking-tighter text-slate-900">HERMES</h1>
+                    </div>
                   </div>
                   {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
                     <nav className="flex bg-slate-100 p-1 rounded-lg md:rounded-xl border border-slate-200">
@@ -6871,9 +6881,7 @@ const App: React.FC = () => {
                     ))}
                   </div>
                 </div>
-              ) : viewMode === 'plano-trabalho-REMOVED' ? (
-                /* Removed Plano de Trabalho View as it is now inside PGC */
-                null
+
               ) : viewMode === 'saude' ? (
                 <HealthView
                   weights={healthWeights}
@@ -8043,6 +8051,7 @@ const App: React.FC = () => {
               appSettings={appSettings}
               onSave={handleUpdateTarefa}
               onClose={() => setSelectedTask(null)}
+              showToast={showToast}
             />
           ) : (
             <TaskEditModal
