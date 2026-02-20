@@ -114,6 +114,92 @@ const normalizeStatus = (status: string): string => {
     .replace(/[\u0300-\u036f]/g, "");
 };
 
+const formatWhatsAppText = (text: string) => {
+  if (!text) return text;
+
+  // Process block-level elements
+  const lines = text.split('\n');
+  const processedLines: JSX.Element[] = [];
+  let currentList: JSX.Element[] = [];
+
+  const flushList = () => {
+    if (currentList.length > 0) {
+      processedLines.push(<ul key={`list-${processedLines.length}`} className="list-disc ml-6 my-2 space-y-1">{currentList}</ul>);
+      currentList = [];
+    }
+  };
+
+  lines.forEach((line, index) => {
+    // Lists
+    if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
+      currentList.push(<li key={index} className="pl-1">{formatInlineWhatsAppText(line.trim().substring(2))}</li>);
+    } else {
+      flushList();
+
+      // Blockquote
+      if (line.trim().startsWith('>')) {
+        processedLines.push(
+          <blockquote key={index} className="border-l-4 border-slate-300 pl-4 py-1 my-2 italic text-slate-500 bg-slate-50/50 rounded-r-lg">
+            {formatInlineWhatsAppText(line.trim().substring(1).trim())}
+          </blockquote>
+        );
+      } else if (line.trim() === '') {
+        processedLines.push(<div key={index} className="h-2"></div>);
+      } else {
+        processedLines.push(<div key={index}>{formatInlineWhatsAppText(line)}</div>);
+      }
+    }
+  });
+  flushList();
+
+  return <div className="space-y-0.5">{processedLines}</div>;
+};
+
+const formatInlineWhatsAppText = (text: string) => {
+  let parts: (string | JSX.Element)[] = [text];
+
+  const applyRegex = (regex: RegExp, formatter: (match: string) => JSX.Element) => {
+    const newParts: (string | JSX.Element)[] = [];
+    parts.forEach(part => {
+      if (typeof part !== 'string') {
+        newParts.push(part);
+        return;
+      }
+
+      let lastIndex = 0;
+      let match;
+      while ((match = regex.exec(part)) !== null) {
+        if (match.index > lastIndex) {
+          newParts.push(part.substring(lastIndex, match.index));
+        }
+        newParts.push(formatter(match[1]));
+        lastIndex = regex.lastIndex;
+      }
+      if (lastIndex < part.length) {
+        newParts.push(part.substring(lastIndex));
+      }
+    });
+    parts = newParts;
+  };
+
+  // Monospace ```text``` (do this first to avoid other formatting inside)
+  applyRegex(/```([\s\S]+?)```/g, (inner) => <pre className="bg-slate-100/80 p-3 rounded-lg font-mono text-[11px] my-2 overflow-x-auto border border-slate-200 text-slate-800">{inner}</pre>);
+
+  // Inline Code `text`
+  applyRegex(/`([^`]+?)`/g, (inner) => <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-[11px] text-pink-600 border border-slate-200">{inner}</code>);
+
+  // Bold *text*
+  applyRegex(/\*([^\*]+?)\*/g, (inner) => <strong className="font-black text-slate-900">{inner}</strong>);
+
+  // Italic _text_
+  applyRegex(/_([^_]+?)_/g, (inner) => <em className="italic">{inner}</em>);
+
+  // Strikethrough ~text~
+  applyRegex(/~([^~]+?)~/g, (inner) => <del className="line-through opacity-60">{inner}</del>);
+
+  return <>{parts.map((part, i) => <React.Fragment key={i}>{part}</React.Fragment>)}</>;
+};
+
 // Moved formatDate to types.ts to break circular dependency
 
 
@@ -358,6 +444,59 @@ const DayView = ({
     return dayStr >= start && dayStr <= end;
   }), [tasks, dayStr]);
 
+  const positionedEvents = useMemo(() => {
+    const allItems = [
+      ...timedEvents.map(e => ({
+        id: e.id,
+        title: e.titulo,
+        start: timeToMinutes(e.data_inicio.includes('T') ? e.data_inicio.split('T')[1].substring(0, 5) : '00:00'),
+        end: timeToMinutes(e.data_fim.includes('T') ? e.data_fim.split('T')[1].substring(0, 5) : '23:59'),
+        type: 'google' as const,
+        data: e
+      })),
+      ...dayTasks.filter(t => t.horario_inicio).map(t => ({
+        id: t.id,
+        title: t.titulo,
+        start: timeToMinutes(t.horario_inicio || '00:00'),
+        end: timeToMinutes(t.horario_fim || '01:00'),
+        type: 'task' as const,
+        data: t
+      }))
+    ].sort((a, b) => a.start - b.start || b.end - a.end);
+
+    const clusters: (any[])[] = [];
+    let lastEnd = -1;
+
+    allItems.forEach(item => {
+      if (item.start >= lastEnd) {
+        clusters.push([item]);
+      } else {
+        clusters[clusters.length - 1].push(item);
+      }
+      lastEnd = Math.max(lastEnd, item.end);
+    });
+
+    return clusters.flatMap(cluster => {
+      const columns: (any[])[] = [];
+      return cluster.map(item => {
+        let colIndex = 0;
+        while (columns[colIndex] && columns[colIndex].some(other => item.start < other.end && item.end > other.start)) {
+          colIndex++;
+        }
+        if (!columns[colIndex]) columns[colIndex] = [];
+        columns[colIndex].push(item);
+
+        return {
+          ...item,
+          colIndex
+        };
+      }).map((item, _, clusterResults) => {
+        const maxCol = Math.max(...clusterResults.map(i => i.colIndex)) + 1;
+        return { ...item, totalCols: maxCol };
+      });
+    });
+  }, [timedEvents, dayTasks]);
+
   const timeToMinutes = (time: string) => {
     if (!time) return 0;
     const [h, m] = time.split(':').map(Number);
@@ -484,95 +623,93 @@ const DayView = ({
               </div>
             )}
 
-            {/* Timed Google Events */}
-            {timedEvents.map(event => {
-              const startStr = event.data_inicio.includes('T') ? event.data_inicio.split('T')[1].substring(0, 5) : '00:00';
-              const endStr = event.data_fim.includes('T') ? event.data_fim.split('T')[1].substring(0, 5) : '23:59';
-              const startMin = timeToMinutes(startStr);
-              const endMin = timeToMinutes(endStr);
+            {/* Timed Events (Tasks & Google) */}
+            {positionedEvents.map(event => {
+              const startMin = event.start;
+              const endMin = event.end;
               const top = (startMin / 60) * hourHeight;
               const height = ((endMin - startMin) / 60) * hourHeight;
 
-              return (
-                <div
-                  key={event.id}
-                  className="absolute left-16 right-4 rounded-lg md:rounded-xl border-l-4 p-2 shadow-sm bg-amber-50/90 border-amber-500 text-slate-800"
-                  style={{ top, height: Math.max(30, height), zIndex: 5 }}
-                >
-                  <div className="flex justify-between items-start gap-2">
-                    <div className="text-[11px] font-black leading-tight line-clamp-2 flex items-center gap-2">
-                      <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
-                      {event.titulo}
-                    </div>
-                    <span className="text-[8px] font-black px-1.5 py-0.5 rounded uppercase bg-amber-100 text-amber-700">Google</span>
-                  </div>
-                </div>
-              );
-            })}
+              const columnWidth = (100 - 18) / event.totalCols; // Remaining width after 18 units of left padding
+              const left = 18 + (event.colIndex * columnWidth);
+              const width = columnWidth - 0.5; // Minimal gap between columns
 
-            {/* Tasks */}
-            {dayTasks.filter(t => t.horario_inicio).map(task => {
-              const startMin = timeToMinutes(task.horario_inicio || '00:00');
-              const endMin = timeToMinutes(task.horario_fim || '01:00');
-              const top = (startMin / 60) * hourHeight;
-              const height = ((endMin - startMin) / 60) * hourHeight;
-
-              return (
-                <div
-                  key={task.id}
-                  className={`absolute left-16 right-4 rounded-lg md:rounded-xl border p-2 shadow-sm group transition-all cursor-grab active:cursor-grabbing overflow-hidden
-                    ${task.categoria === 'CLC' ? 'bg-blue-50 border-blue-200 text-blue-800' :
-                      task.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
-                        'bg-white border-slate-200 text-slate-800'}
-                  `}
-                  style={{ top, height: Math.max(30, height), zIndex: 10 }}
-                  onMouseDown={(e) => {
-                    const target = e.target as HTMLElement;
-                    if (target.classList.contains('resize-handle')) return;
-                    setDragging({ id: task.id, startY: e.clientY, startMin });
-                  }}
-                >
-                  <div className="flex justify-between items-start gap-2">
-                    <div className="text-[11px] font-black leading-tight line-clamp-2">{task.titulo}</div>
-                    <div className="flex gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setConfirmAction({
-                            taskId: task.id,
-                            newStatus: task.status === 'concluído' ? 'em andamento' : 'concluído'
-                          });
-                        }}
-                        className={`p-1 hover:bg-black/5 rounded ${task.status === 'concluído' ? 'text-emerald-600 bg-emerald-100' : 'text-slate-400 hover:text-emerald-600'}`}
-                        title={task.status === 'concluído' ? 'Reabrir' : 'Concluir'}
-                      >
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                      </button>
-                      <button onClick={(e) => { e.stopPropagation(); onExecuteTask(task); }} className="p-1 hover:bg-black/5 rounded text-indigo-600" title="Executar">
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                      </button>
-                      <button onClick={(e) => { e.stopPropagation(); onTaskClick(task); }} className="p-1 hover:bg-black/5 rounded" title="Editar">
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                      </button>
+              if (event.type === 'google') {
+                const googleEvent = event.data as GoogleCalendarEvent;
+                return (
+                  <div
+                    key={event.id}
+                    className="absolute rounded-lg md:rounded-xl border-l-4 p-2 shadow-sm bg-amber-50/90 border-amber-500 text-slate-800 transition-all hover:z-30"
+                    style={{ top, height: Math.max(30, height), left: `${left}%`, width: `${width}%`, zIndex: 5 }}
+                  >
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="text-[11px] font-black leading-tight line-clamp-2 flex items-center gap-2">
+                        <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
+                        {googleEvent.titulo}
+                      </div>
+                      <span className="text-[8px] font-black px-1.5 py-0.5 rounded uppercase bg-amber-100 text-amber-700">Google</span>
                     </div>
                   </div>
+                );
+              } else {
+                const task = event.data as Tarefa;
+                return (
+                  <div
+                    key={task.id}
+                    className={`absolute rounded-lg md:rounded-xl border p-2 shadow-sm group transition-all cursor-grab active:cursor-grabbing overflow-hidden hover:z-30
+                      ${task.categoria === 'CLC' ? 'bg-blue-50 border-blue-200 text-blue-800' :
+                        task.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
+                          'bg-white border-slate-200 text-slate-800'}
+                    `}
+                    style={{ top, height: Math.max(30, height), left: `${left}%`, width: `${width}%`, zIndex: 10 }}
+                    onMouseDown={(e) => {
+                      const target = e.target as HTMLElement;
+                      if (target.classList.contains('resize-handle')) return;
+                      setDragging({ id: task.id, startY: e.clientY, startMin });
+                    }}
+                  >
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="text-[11px] font-black leading-tight line-clamp-2">{task.titulo}</div>
+                      <div className="flex gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmAction({
+                              taskId: task.id,
+                              newStatus: task.status === 'concluído' ? 'em andamento' : 'concluído'
+                            });
+                          }}
+                          className={`p-1 hover:bg-black/5 rounded ${task.status === 'concluído' ? 'text-emerald-600 bg-emerald-100' : 'text-slate-400 hover:text-emerald-600'}`}
+                          title={task.status === 'concluído' ? 'Reabrir' : 'Concluir'}
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); onExecuteTask(task); }} className="p-1 hover:bg-black/5 rounded text-indigo-600" title="Executar">
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); onTaskClick(task); }} className="p-1 hover:bg-black/5 rounded" title="Editar">
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                        </button>
+                      </div>
+                    </div>
 
-                  <div
-                    className="resize-handle absolute top-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black/10 transition-colors"
-                    onMouseDown={(e) => {
-                      e.stopPropagation();
-                      setResizing({ id: task.id, type: 'top', startY: e.clientY, startMin });
-                    }}
-                  />
-                  <div
-                    className="resize-handle absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black/10 transition-colors"
-                    onMouseDown={(e) => {
-                      e.stopPropagation();
-                      setResizing({ id: task.id, type: 'bottom', startY: e.clientY, startMin: endMin });
-                    }}
-                  />
-                </div>
-              );
+                    <div
+                      className="resize-handle absolute top-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black/10 transition-colors"
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        setResizing({ id: task.id, type: 'top', startY: e.clientY, startMin });
+                      }}
+                    />
+                    <div
+                      className="resize-handle absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black/10 transition-colors"
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        setResizing({ id: task.id, type: 'bottom', startY: e.clientY, startMin: endMin });
+                      }}
+                    />
+                  </div>
+                );
+              }
             })}
           </div>
         </div>
@@ -627,6 +764,7 @@ const DayView = ({
           </div>
         </div>
       )}
+
     </div>
   );
 };
@@ -2660,6 +2798,20 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
     setModalConfig({ type: 'edit_diary', isOpen: true, data: { index } });
   };
 
+  const handleCopyAllHistory = () => {
+    if (!task.acompanhamento) return;
+    const history = task.acompanhamento
+      .map(entry => `[${new Date(entry.data).toLocaleString('pt-BR')}] ${entry.nota}`)
+      .join('\n\n');
+    navigator.clipboard.writeText(history);
+    showToast("Histórico completo copiado!", "success");
+  };
+
+  const handleCopyMessage = (text: string) => {
+    navigator.clipboard.writeText(text);
+    showToast("Mensagem copiada!", "success");
+  };
+
 
 
   const handleSaveChatUrl = () => {
@@ -2911,7 +3063,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
       );
     }
 
-    return <p className={`text-xs md:text-sm leading-relaxed whitespace-pre-wrap ${isTimerRunning ? 'text-white/90' : 'text-slate-700'}`}>{text}</p>;
+    return <div className={`text-xs md:text-sm leading-relaxed ${isTimerRunning ? 'text-white/90' : 'text-slate-700'}`}>{formatWhatsAppText(text)}</div>;
   };
 
   return (
@@ -3138,10 +3290,21 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
               Diário
             </button>
-            <h4 className={`hidden lg:flex flex-1 text-[10px] md:text-sm font-black uppercase tracking-widest items-center gap-2 ${isTimerRunning ? 'text-white/40' : 'text-slate-400'}`}>
-              <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
-              Diário de Bordo
-            </h4>
+            <div className={`hidden lg:flex flex-1 items-center gap-4`}>
+              <h4 className={`text-[10px] md:text-sm font-black uppercase tracking-widest flex items-center gap-2 ${isTimerRunning ? 'text-white/40' : 'text-slate-400'}`}>
+                <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                Diário de Bordo
+              </h4>
+              {task.acompanhamento && task.acompanhamento.length > 0 && (
+                <button
+                  onClick={handleCopyAllHistory}
+                  className={`flex items-center gap-2 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${isTimerRunning ? 'bg-white/5 text-white/40 hover:bg-white/10 hover:text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                  Copiar Tudo
+                </button>
+              )}
+            </div>
             <button
               onClick={() => setShowPool(!showPool)}
               className={`flex-1 lg:flex-none flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${showPool
@@ -3236,6 +3399,9 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
                       </span>
 
                       <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => handleCopyMessage(entry.nota)} className={`transition-colors ${isTimerRunning ? 'text-white/40 hover:text-emerald-400' : 'text-slate-400 hover:text-emerald-500'}`} title="Copiar">
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                        </button>
                         <button onClick={() => handleEditDiaryEntry(idx)} className={`transition-colors ${isTimerRunning ? 'text-white/40 hover:text-blue-400' : 'text-slate-400 hover:text-blue-500'}`} title="Editar">
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                         </button>
@@ -3343,9 +3509,8 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
                     }
                   }}
                   placeholder="Anotação..."
-                  className={`w-full bg-transparent border-none outline-none text-xs md:text-sm py-3 min-h-[44px] max-h-32 resize-none custom-scrollbar ${isTimerRunning ? 'text-white placeholder:text-white/20' : 'text-slate-800 placeholder:text-slate-400'}`}
+                  className={`w-full bg-transparent border-none outline-none text-xs md:text-sm py-3 min-h-[44px] focus:min-h-[120px] max-h-48 resize-none custom-scrollbar transition-all duration-300 ${isTimerRunning ? 'text-white placeholder:text-white/20' : 'text-slate-800 placeholder:text-slate-400'}`}
                   rows={1}
-                  style={{ height: 'auto' }}
                 />
 
                 <button
@@ -3388,6 +3553,9 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
                       {new Date(entry.data).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                     </span>
                     <div className="flex items-center gap-2">
+                      <button onClick={() => handleCopyMessage(entry.nota)} className={`transition-colors ${isTimerRunning ? 'text-white/40 hover:text-emerald-400' : 'text-slate-400 hover:text-emerald-500'}`} title="Copiar">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                      </button>
                       <button onClick={() => handleEditDiaryEntry(idx)} className={`transition-colors ${isTimerRunning ? 'text-white/40 hover:text-blue-400' : 'text-slate-400 hover:text-blue-500'}`} title="Editar">
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                       </button>
@@ -3517,6 +3685,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
           </div>
         </div>
       )}
+
     </div>
   );
 };
@@ -4095,6 +4264,141 @@ const getBucketStartDate = (label: string): string => {
   return '';
 };
 
+const QuickNoteModal = ({ isOpen, onClose, onAddIdea }: { isOpen: boolean, onClose: () => void, onAddIdea: (text: string) => void }) => {
+  const [textInput, setTextInput] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  if (!isOpen) return null;
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/m4a' });
+        await handleProcessAudio(audioBlob);
+        stream.getTracks().forEach(track => track.stop());
+      };
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Erro ao acessar microfone:", err);
+      alert("Permissão de microfone negada ou não disponível.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const handleProcessAudio = async (audioBlob: Blob) => {
+    setIsProcessing(true);
+    try {
+      const reader = new FileReader();
+      reader.readAsDataURL(audioBlob);
+      reader.onloadend = async () => {
+        try {
+          const base64String = (reader.result as string).split(',')[1];
+          const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
+          const response = await transcribeFunc({ audioBase64: base64String });
+          const data = response.data as { raw: string, refined: string };
+          if (data.refined) onAddIdea(data.refined);
+        } catch (error) {
+          console.error("Erro ao transcrever:", error);
+          alert("Erro ao processar áudio via Hermes AI.");
+        } finally {
+          setIsProcessing(false);
+        }
+      };
+    } catch (error) {
+      console.error("Erro ao ler áudio:", error);
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white w-full max-w-2xl rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95">
+        <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+          <div>
+            <h3 className="text-2xl font-black text-slate-900 tracking-tight">Nota Rápida</h3>
+            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">Captação Instantânea</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+            <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <div className="p-8 space-y-6">
+          <div className="bg-slate-50 p-2 rounded-none md:rounded-2xl border-2 border-slate-100 flex items-center gap-4 focus-within:border-blue-500 transition-all">
+            <button
+              onClick={isRecording ? stopRecording : startRecording}
+              disabled={isProcessing}
+              className={`p-4 rounded-none md:rounded-xl transition-all flex-shrink-0 ${
+                isRecording
+                  ? 'bg-rose-600 text-white animate-pulse shadow-lg'
+                  : isProcessing
+                    ? 'bg-blue-100 text-blue-600 cursor-wait'
+                    : 'bg-white border border-slate-200 text-slate-400 hover:text-blue-600'
+              }`}
+            >
+              {isProcessing ? (
+                <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+              ) : isRecording ? (
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+              )}
+            </button>
+            <input
+              autoFocus
+              type="text"
+              disabled={isRecording || isProcessing}
+              placeholder={isRecording ? "Gravando..." : isProcessing ? "Processando..." : "O que está pensando?"}
+              className="flex-1 bg-transparent border-none outline-none py-4 text-base font-bold text-slate-800 placeholder:text-slate-300"
+              value={textInput}
+              onChange={e => setTextInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && textInput.trim()) {
+                  onAddIdea(textInput);
+                  setTextInput('');
+                  onClose();
+                }
+              }}
+            />
+          </div>
+          <div className="flex gap-4">
+            <button onClick={onClose} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-none md:rounded-2xl transition-all">Cancelar</button>
+            <button
+              onClick={() => {
+                if (textInput.trim()) {
+                  onAddIdea(textInput);
+                  setTextInput('');
+                  onClose();
+                }
+              }}
+              disabled={!textInput.trim()}
+              className="flex-1 bg-blue-600 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all disabled:opacity-50"
+            >
+              Salvar Nota
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const App: React.FC = () => {
   const [tarefas, setTarefas] = useState<Tarefa[]>([]);
   const [googleCalendarEvents, setGoogleCalendarEvents] = useState<GoogleCalendarEvent[]>([]);
@@ -4138,6 +4442,7 @@ const App: React.FC = () => {
   const [isUploading, setIsUploading] = useState(false);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isQuickNoteModalOpen, setIsQuickNoteModalOpen] = useState(false);
   const [hasAutoExpanded, setHasAutoExpanded] = useState(false);
 
   // Estados PGC
@@ -6067,9 +6372,7 @@ const App: React.FC = () => {
                     <div className="relative">
                       <button
                         onClick={() => {
-                          setActiveModule('acoes');
-                          setViewMode('ferramentas');
-                          setActiveFerramenta('brainstorming');
+                          setIsQuickNoteModalOpen(true);
                         }}
                         className="bg-white border border-slate-200 text-amber-500 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
                         aria-label="Notas Rápidas"
@@ -6191,6 +6494,25 @@ const App: React.FC = () => {
                 />
               ) : viewMode === 'gallery' ? (
                 <>
+                  {/* Mobile Search Bar */}
+                  <div className="lg:hidden px-4 mb-6">
+                    <div className="flex items-center bg-white border border-slate-200 rounded-2xl px-4 py-3 shadow-sm focus-within:ring-2 focus-within:ring-blue-500 transition-all">
+                      <svg className="w-5 h-5 text-slate-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                      <input
+                        type="text"
+                        placeholder="Pesquisar ações..."
+                        className="bg-transparent border-none outline-none text-sm font-bold text-slate-900 w-full placeholder:text-slate-400"
+                        value={searchTerm === 'filter:unclassified' ? '' : searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                      />
+                      {searchTerm && searchTerm !== 'filter:unclassified' && (
+                        <button onClick={() => setSearchTerm('')} className="ml-2 text-slate-400 hover:text-slate-600">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
                   <div className="flex flex-col md:flex-row items-center justify-between mb-8 gap-4 px-4 md:px-0">
                     {/* Layout & Sort Controls */}
                     <div className="flex flex-wrap items-center gap-4 justify-center md:justify-start">
@@ -7961,6 +8283,14 @@ const App: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {isQuickNoteModalOpen && (
+        <QuickNoteModal
+          isOpen={isQuickNoteModalOpen}
+          onClose={() => setIsQuickNoteModalOpen(false)}
+          onAddIdea={handleAddTextIdea}
+        />
       )}
     </div>
   );
