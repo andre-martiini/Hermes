@@ -92,6 +92,17 @@ def classify_task(title, notes):
         categoria, contabilizar_meta = 'ASSISTÊNCIA', True
     elif 'GERAL' in tags:
         categoria = 'GERAL'
+
+    # Se não classificou por tag, tenta por palavra-chave no texto
+    if categoria == 'NÃO CLASSIFICADA':
+        clc_keywords = ['LICITAÇÃO', 'LICITACAO', 'PREGÃO', 'PREGAO', 'CONTRATO', 'DISPENSA', 'INEXIGIBILIDADE', 'COMPRA', 'AQUISIÇÃO', 'AQUISICAO', 'PROCESSO']
+        assist_keywords = ['ASSISTÊNCIA', 'ASSISTENCIA', 'ESTUDANTIL', 'ALUNO', 'BOLSA', 'AUXÍLIO', 'AUXILIO', 'PERMANÊNCIA', 'PERMANENCIA']
+
+        if any(kw in text for kw in clc_keywords):
+            categoria, contabilizar_meta = 'CLC', True
+        elif any(kw in text for kw in assist_keywords):
+            categoria, contabilizar_meta = 'ASSISTÊNCIA', True
+
     return categoria, None, contabilizar_meta
 
 def extract_time_from_notes(notes):
@@ -248,8 +259,10 @@ def sync_google_calendar(service, sync_ref, logs):
         events = events_result.get('items', [])
 
         count = 0
+        seen_ids = set()
         for event in events:
             event_id = event['id']
+            seen_ids.add(event_id)
             summary = event.get('summary', '(Sem título)')
             start = event['start'].get('dateTime', event['start'].get('date'))
             end = event['end'].get('dateTime', event['end'].get('date'))
@@ -262,7 +275,20 @@ def sync_google_calendar(service, sync_ref, logs):
                 'last_sync': datetime.now().isoformat()
             }, merge=True)
             count += 1
-        log_to_firestore(sync_ref, logs, f"[CAL] {count} eventos sincronizados.")
+
+        # Limpeza de eventos deletados no Google Calendar
+        # Buscamos apenas eventos no Firestore que estão dentro do período sincronizado para evitar stream total
+        docs = db.collection('google_calendar_events')\
+            .where('data_inicio', '>=', time_min)\
+            .where('data_inicio', '<=', time_max)\
+            .stream()
+        deleted_count = 0
+        for doc in docs:
+            if doc.id not in seen_ids:
+                doc.reference.delete()
+                deleted_count += 1
+
+        log_to_firestore(sync_ref, logs, f"[CAL] {count} eventos sincronizados. {deleted_count} removidos.")
     except Exception as e:
         log_to_firestore(sync_ref, logs, f"ERRO CAL: {e}")
 

@@ -33,7 +33,7 @@ KEY_FILE = 'firebase_service_account_key.json'
 
 def get_units_mapping(db):
     mapping = {
-        'CLC': ['licitação', 'pregão', 'irp'],
+        'CLC': ['licitação', 'pregão', 'irp', 'processo'],
         'ASSISTÊNCIA': ['bolsa', 'auxílio', 'assistência'],
         'DEV': ['bug', 'deploy', 'código']
     }

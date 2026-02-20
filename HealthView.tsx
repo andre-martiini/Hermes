@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { HealthWeight, DailyHabits, HealthSettings, formatDate, HealthExam, PoolItem } from './types';
+import { HealthWeight, DailyHabits, HealthSettings, formatDate, formatDateLocalISO, HealthExam, PoolItem } from './types';
 
 interface HealthViewProps {
     weights: HealthWeight[];
@@ -45,7 +45,7 @@ const HabitHeatmap = ({ habits, selectedDate, onSelectDate }: { habits: DailyHab
     const today = new Date();
     const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
     const monthName = new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(today);
-    const todayStr = today.toISOString().split('T')[0];
+    const todayStr = formatDateLocalISO(today);
 
     return (
         <HealthSection title={`Mapa de Consistência - ${monthName}`} iconColor="bg-blue-500">
@@ -133,7 +133,7 @@ const ExamsAndConsultationsManager = ({
     const [isAdding, setIsAdding] = useState(false);
     const [newExam, setNewExam] = useState<Partial<HealthExam>>({
         tipo: 'consulta',
-        data: new Date().toISOString().split('T')[0]
+        data: formatDateLocalISO(new Date())
     });
     const [files, setFiles] = useState<File[]>([]);
     
@@ -156,7 +156,7 @@ const ExamsAndConsultationsManager = ({
         }, files);
 
         setIsAdding(false);
-        setNewExam({ tipo: 'consulta', data: new Date().toISOString().split('T')[0] });
+        setNewExam({ tipo: 'consulta', data: formatDateLocalISO(new Date()) });
         setFiles([]);
     };
 
@@ -331,7 +331,7 @@ const HealthView: React.FC<HealthViewProps> = ({
     onDeleteExam,
     onUpdateExam
 }) => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = formatDateLocalISO(new Date());
     const [selectedDate, setSelectedDate] = useState<string>(todayStr);
     const [newWeight, setNewWeight] = useState<string>('');
     const [targetInput, setTargetInput] = useState<string>(settings.targetWeight?.toString() || '');
@@ -486,7 +486,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                             <button
                                 onClick={() => {
                                     if (newWeight) {
-                                        onAddWeight(parseFloat(newWeight), new Date().toISOString().split('T')[0]);
+                                        onAddWeight(parseFloat(newWeight), formatDateLocalISO(new Date()));
                                         setNewWeight('');
                                     }
                                 }}
