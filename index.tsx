@@ -5121,8 +5121,8 @@ const App: React.FC = () => {
       }
     }
 
-    // 2. Budget Risk (Whenever data changes, throttled to once per day notification)
-    if (appSettings.notifications.budgetRisk.enabled && localStorage.getItem('lastBudgetRiskNotifyDate') !== todayStr) {
+    // 2. Budget Risk (Whenever data changes, throttled to once per day notification AND real spending increase)
+    if (appSettings.notifications.budgetRisk.enabled) {
       const now = new Date();
       const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       const monthlyBudget = financeSettings.monthlyBudgets?.[currentMonthStr] || financeSettings.monthlyBudget;
@@ -5137,7 +5137,12 @@ const App: React.FC = () => {
         const budgetRatio = totalSpend / monthlyBudget;
         const timeRatio = currentDay / daysInMonth;
 
-        if (budgetRatio > timeRatio * 1.15 && budgetRatio > 0.1) {
+        // Condition: Over budget velocity AND (New day OR spending increased since last notification)
+        const lastNotifiedSpend = parseFloat(localStorage.getItem(`lastBudgetRiskNotifiedSpend_${currentMonthStr}`) || '0');
+        const isNewDay = localStorage.getItem('lastBudgetRiskNotifyDate') !== todayStr;
+        const hasSpendIncreased = totalSpend > lastNotifiedSpend;
+
+        if (budgetRatio > timeRatio * 1.15 && budgetRatio > 0.1 && hasSpendIncreased && isNewDay) {
           emitNotification(
             "Alerta de Orçamento",
             `Atenção: Gastos elevados! Você já utilizou ${(budgetRatio * 100).toFixed(0)}% do orçamento em ${(timeRatio * 100).toFixed(0)}% do mês.`,
@@ -5146,6 +5151,7 @@ const App: React.FC = () => {
             `budget-${todayStr}`
           );
           localStorage.setItem('lastBudgetRiskNotifyDate', todayStr);
+          localStorage.setItem(`lastBudgetRiskNotifiedSpend_${currentMonthStr}`, totalSpend.toString());
         }
       }
     }
