@@ -151,8 +151,8 @@ const ExamsAndConsultationsManager = ({
             titulo: newExam.titulo,
             data: newExam.data,
             tipo: newExam.tipo,
-            doutor_local: newExam.doutor_local,
-            resultados: newExam.resultados
+            ...(newExam.doutor_local && { doutor_local: newExam.doutor_local }),
+            ...(newExam.resultados && { resultados: newExam.resultados })
         }, files);
 
         setIsAdding(false);
