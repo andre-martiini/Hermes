@@ -44,6 +44,7 @@ export interface Tarefa {
     horario_inicio?: string; // format "HH:mm"
     horario_fim?: string;    // format "HH:mm"
     pool_dados?: PoolItem[];
+    ordem?: number;
 }
 
 export interface AtividadeRealizada {
