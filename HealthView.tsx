@@ -334,6 +334,7 @@ const HealthView: React.FC<HealthViewProps> = ({
     const todayStr = formatDateLocalISO(new Date());
     const [selectedDate, setSelectedDate] = useState<string>(todayStr);
     const [newWeight, setNewWeight] = useState<string>('');
+    const [isWeightModalOpen, setIsWeightModalOpen] = useState(false);
     const [targetInput, setTargetInput] = useState<string>(settings.targetWeight?.toString() || '');
     const [isEditingTarget, setIsEditingTarget] = useState(false);
 
@@ -413,11 +414,20 @@ const HealthView: React.FC<HealthViewProps> = ({
         <div className="space-y-0 md:space-y-8 pb-20">
             {/* Header Metrics */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-0 md:gap-6 border-b md:border-none border-slate-100">
-                <div className="bg-white p-6 rounded-none md:rounded-[2rem] border-b md:border border-slate-200 shadow-none md:shadow-xl flex flex-col justify-center">
+                <div className="bg-white p-6 rounded-none md:rounded-[2rem] border-b md:border border-slate-200 shadow-none md:shadow-xl flex flex-col justify-center relative group">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Peso Atual</span>
-                    <div className="flex items-baseline gap-2">
-                        <span className="text-4xl font-black text-slate-900">{currentWeight.toFixed(1) || '--'}</span>
-                        <span className="text-sm font-bold text-slate-400">kg</span>
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-baseline gap-2">
+                            <span className="text-4xl font-black text-slate-900">{currentWeight.toFixed(1) || '--'}</span>
+                            <span className="text-sm font-bold text-slate-400">kg</span>
+                        </div>
+                        <button
+                            onClick={() => setIsWeightModalOpen(true)}
+                            className="p-3 bg-rose-50 text-rose-500 rounded-xl hover:bg-rose-100 transition-all shadow-sm"
+                            title="Registrar Peso"
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+                        </button>
                     </div>
                 </div>
 
@@ -473,28 +483,6 @@ const HealthView: React.FC<HealthViewProps> = ({
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
                         <div>
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Geralmente aos sábados</p>
-                        </div>
-                        <div className="flex flex-wrap gap-3">
-                            <input
-                                type="number"
-                                step="0.1"
-                                placeholder="Peso (Kg)"
-                                value={newWeight}
-                                onChange={(e) => setNewWeight(e.target.value)}
-                                className="bg-slate-100 border-none rounded-lg md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 w-32 focus:ring-2 focus:ring-rose-500 transition-all"
-                            />
-                            <button
-                                onClick={() => {
-                                    if (newWeight) {
-                                        onAddWeight(parseFloat(newWeight), formatDateLocalISO(new Date()));
-                                        setNewWeight('');
-                                    }
-                                }}
-                                className="flex-1 bg-rose-500 text-white px-8 py-4 rounded-lg md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-rose-600 transition-all active:scale-95 flex items-center justify-center gap-3"
-                            >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
-                                Registrar
-                            </button>
                         </div>
                     </div>
 
@@ -681,6 +669,59 @@ const HealthView: React.FC<HealthViewProps> = ({
                     />
                 </HealthSection>
             </div>
+
+            {/* Modal de Registro de Peso */}
+            {isWeightModalOpen && (
+                <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+                    <div className="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+                        <div className="p-8 border-b border-slate-100 bg-rose-500/5 flex items-center justify-between">
+                            <div>
+                                <h3 className="text-xl font-black text-slate-900 tracking-tight">Registrar Peso</h3>
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Acompanhamento de Saúde</p>
+                            </div>
+                            <button onClick={() => setIsWeightModalOpen(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+                                <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+
+                        <div className="p-8 space-y-6">
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Peso Atual (kg)</label>
+                                <input
+                                    autoFocus
+                                    type="number"
+                                    step="0.1"
+                                    placeholder="00.0"
+                                    value={newWeight}
+                                    onChange={(e) => setNewWeight(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && newWeight) {
+                                            onAddWeight(parseFloat(newWeight), formatDateLocalISO(new Date()));
+                                            setNewWeight('');
+                                            setIsWeightModalOpen(false);
+                                        }
+                                    }}
+                                    className="w-full bg-slate-100 border-none rounded-2xl px-6 py-8 text-4xl font-black text-slate-900 text-center focus:ring-2 focus:ring-rose-500 transition-all"
+                                />
+                            </div>
+
+                            <button
+                                onClick={() => {
+                                    if (newWeight) {
+                                        onAddWeight(parseFloat(newWeight), formatDateLocalISO(new Date()));
+                                        setNewWeight('');
+                                        setIsWeightModalOpen(false);
+                                    }
+                                }}
+                                disabled={!newWeight}
+                                className="w-full bg-rose-500 text-white py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-rose-600 transition-all active:scale-95 disabled:opacity-50"
+                            >
+                                Confirmar Peso
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
