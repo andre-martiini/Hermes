@@ -241,6 +241,7 @@ export interface AppSettings {
     pomodoro?: {
         focusTime: number; // minutes
         breakTime: number; // minutes
+        enableBeep?: boolean;
     };
     notifications: {
         enablePush: boolean;
@@ -329,7 +330,7 @@ export interface WorkItemAudit {
 export interface WorkItem {
     id: string;
     sistema_id: string;
-    tipo: 'desenvolvimento' | 'ajuste';
+    tipo: 'desenvolvimento' | 'ajuste' | 'log';
     descricao: string;
     concluido: boolean;
     data_criacao: string;
@@ -353,4 +354,21 @@ export interface GoogleCalendarEvent {
     data_inicio: string;
     data_fim: string;
     last_sync: string;
+}
+
+export interface ConhecimentoItem {
+    id: string;
+    titulo: string;
+    tipo_arquivo: string; // pdf, imagem, doc, etc
+    url_drive: string;
+    tamanho: number;
+    data_criacao: string;
+    texto_bruto?: string;
+    resumo_tldr?: string;
+    tags?: string[];
+    categoria?: string;
+    origem?: {
+        modulo: string;
+        id_origem: string;
+    } | null;
 }

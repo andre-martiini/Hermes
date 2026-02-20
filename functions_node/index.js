@@ -1,5 +1,6 @@
-const functions = require('firebase-functions');
+const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
+const { FieldValue } = require('firebase-admin/firestore');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const iconv = require('iconv-lite');
@@ -15,7 +16,7 @@ const db = admin.firestore();
 const pubsub = new PubSub();
 
 async function getGoogleAuth() {
-    const credsDoc = await db.collection('system').document('google_credentials').get();
+    const credsDoc = await db.collection('system').doc('google_credentials').get();
     if (!credsDoc.exists) {
         throw new Error("Credenciais do Google não encontradas no Firestore.");
     }
@@ -71,27 +72,35 @@ async function runScraper(data) {
 
     try {
         const page = await browser.newPage();
+        // Aumenta o timeout para navegações pesadas do SIPAC
+        page.setDefaultNavigationTimeout(60000);
+        
         await page.goto('https://sipac.ifes.edu.br/public/jsp/portal.jsf', { waitUntil: 'networkidle2' });
 
-        await page.waitForSelector('input[id$="n_proc_p"]', { timeout: 15000 });
+        // Espera pelos campos de busca de processo
+        await page.waitForSelector('input[name="RADICAL_PROTOCOLO"]', { timeout: 20000 });
 
-        await page.type('input[id$="n_proc_p"]', radical);
-        await page.type('input[id$="n_proc_p2"]', numero).catch(() => {});
-        await page.type('input[id$="n_proc_p3"]', ano).catch(() => {});
-        await page.type('input[id$="n_proc_p4"]', dv).catch(() => {});
+        // Limpa e preenche os campos
+        await page.$eval('input[name="RADICAL_PROTOCOLO"]', el => el.value = '');
+        await page.type('input[name="RADICAL_PROTOCOLO"]', radical);
+        
+        await page.$eval('input[name="NUM_PROTOCOLO"]', el => el.value = '');
+        await page.type('input[name="NUM_PROTOCOLO"]', numero);
+        
+        await page.$eval('input[name="ANO_PROTOCOLO"]', el => el.value = '');
+        await page.type('input[name="ANO_PROTOCOLO"]', ano);
+        
+        await page.$eval('input[name="DV_PROTOCOLO"]', el => el.value = '');
+        await page.type('input[name="DV_PROTOCOLO"]', dv);
 
-        if (!(await page.$('input[id$="n_proc_p2"]'))) {
-             await page.type('input[id$="num_proc"]', numero).catch(() => {});
-             await page.type('input[id$="ano_proc"]', ano).catch(() => {});
-             await page.type('input[id$="dv_proc"]', dv).catch(() => {});
-        }
-
+        // Submete a consulta
         await Promise.all([
-            page.click('input[value="Consultar Processo"], input[id*="consultar"]'),
+            page.click('input[value="Consultar Processo"]'),
             page.waitForNavigation({ waitUntil: 'networkidle2' })
         ]);
 
-        const processLink = await page.$('a[id*="visualizar"], a[title*="Visualizar"]');
+        // Verifica se caiu na lista de resultados ou direto no processo
+        const processLink = await page.$('a[id*="visualizar"], a[title*="Visualizar"], img[src*="zoom.png"]');
         if (processLink) {
             await Promise.all([
                 processLink.click(),
@@ -99,31 +108,70 @@ async function runScraper(data) {
             ]);
         }
 
+        // Extração de Metadados de Dados Gerais
         const metadata = await page.evaluate(() => {
             const data = {};
-            const labels = Array.from(document.querySelectorAll('label, th, td.label'));
-            labels.forEach(label => {
-                const text = label.innerText.trim();
-                if (text.includes('Interessado:')) data.interessado = label.nextElementSibling?.innerText.trim();
-                if (text.includes('Assunto:')) data.assunto = label.nextElementSibling?.innerText.trim();
+            const ths = Array.from(document.querySelectorAll('th'));
+            ths.forEach(th => {
+                const text = th.innerText.trim();
+                // O HTML usa "Assunto do Processo:", "Assunto Detalhado:", etc.
+                if (text.includes('Assunto do Processo:')) data.assunto = th.nextElementSibling?.innerText.trim();
+                if (text.includes('Assunto Detalhado:')) data.assuntoDetalhado = th.nextElementSibling?.innerText.trim();
             });
+
+            // Interessado: Pega da tabela de Interessados
+            const tables = Array.from(document.querySelectorAll('table.subListagem'));
+            const intTable = tables.find(t => t.innerText.includes('Interessados Deste Processo'));
+            if (intTable) {
+                const firstRow = intTable.querySelector('tbody tr');
+                if (firstRow) {
+                    const cells = firstRow.querySelectorAll('td');
+                    if (cells.length >= 3) data.interessado = cells[2].innerText.trim();
+                }
+            }
             return data;
         });
 
+        // Extração de Documentos
         const docs = await page.evaluate(() => {
             const items = [];
-            const rows = Array.from(document.querySelectorAll('tr'));
-            rows.forEach((row, idx) => {
-                const links = Array.from(row.querySelectorAll('a'));
-                const docLink = links.find(a => a.href.includes('download') || a.onclick?.toString().includes('visualizarDocumento'));
-                if (docLink) {
-                    items.push({
-                        nome: row.innerText.split('\n')[0].trim() || `Documento ${idx}`,
-                        url: docLink.href,
-                        isJSF: !!docLink.onclick
-                    });
-                }
-            });
+            const tables = Array.from(document.querySelectorAll('table.subListagem'));
+            const docTable = tables.find(t => t.innerText.includes('Documentos do Processo'));
+            
+            if (docTable) {
+                const rows = Array.from(docTable.querySelectorAll('tbody tr'));
+                rows.forEach((row, idx) => {
+                    const cells = Array.from(row.querySelectorAll('td'));
+                    if (cells.length < 6) return; // Precisa de pelo menos 6 colunas
+
+                    const nome = cells[1].innerText.trim();
+                    // O link de download está na penúltima célula (índice 5)
+                    const linkElement = cells[5].querySelector('a');
+                    
+                    if (linkElement) {
+                        let url = '';
+                        const onclick = linkElement.getAttribute('onclick');
+                        
+                        if (onclick && onclick.includes('window.open')) {
+                            // Extrai o conteúdo entre aspas simples
+                            const matches = onclick.match(/'([^']+)'/g);
+                            if (matches && matches.length > 0) {
+                                url = matches[0].replace(/'/g, '');
+                            }
+                        } else {
+                            url = linkElement.href;
+                        }
+
+                        if (url && url !== '#' && !url.startsWith('javascript')) {
+                            items.push({
+                                nome: nome,
+                                url: url.startsWith('http') ? url : window.location.origin + url,
+                                isJSF: url.includes('.jsf') || (onclick && onclick.includes('.jsf'))
+                            });
+                        }
+                    }
+                });
+            }
             return items;
         });
 
@@ -190,8 +238,23 @@ async function runScraper(data) {
 
         await db.collection('tarefas').doc(taskId).update({
             sync_status: 'concluido',
-            pool_dados: admin.firestore.FieldValue.arrayUnion(...poolItems)
+            pool_dados: FieldValue.arrayUnion(...poolItems)
         });
+
+        // Mirror to Knowledge base
+        for (const item of poolItems) {
+            const knowledgeItem = {
+                id: item.id,
+                titulo: item.nome || 'Sem título',
+                tipo_arquivo: item.nome?.split('.').pop()?.toLowerCase() || 'unknown',
+                url_drive: item.valor,
+                tamanho: 0,
+                data_criacao: item.data_criacao,
+                origem: { modulo: 'tarefas', id_origem: taskId },
+                categoria: 'Ações'
+            };
+            await db.collection('conhecimento').doc(item.id).set(knowledgeItem);
+        }
 
         // Notifica vetorização via PubSub
         const topicName = 'vectorize-process';
