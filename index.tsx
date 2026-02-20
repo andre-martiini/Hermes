@@ -13,7 +13,8 @@ import {
 } from './types';
 import HealthView from './HealthView';
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
-import { db, functions, messaging } from './firebase';
+import { db, functions, messaging, auth, googleProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from './firebase';
+import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, onSnapshot, query, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { getToken, onMessage } from 'firebase/messaging';
 import { httpsCallable } from 'firebase/functions';
@@ -85,6 +86,11 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
       daysBeforeEnd: 5
     },
     custom: []
+  },
+  pomodoro: {
+    focusTime: 10,
+    breakTime: 5,
+    enableBeep: true
   }
 };
 
@@ -370,6 +376,107 @@ const PgcAuditRow = ({
 };
 
 // --- Components ---
+
+const ConsolidatedBacklogView = ({
+  unidades,
+  workItems,
+  onClose,
+  onUpdateWorkItem,
+  onDeleteWorkItem
+}: {
+  unidades: { id: string, nome: string }[],
+  workItems: WorkItem[],
+  onClose: () => void,
+  onUpdateWorkItem: (id: string, updates: Partial<WorkItem>) => void,
+  onDeleteWorkItem: (id: string) => void
+}) => {
+  const [expandedSystems, setExpandedSystems] = useState<string[]>([]);
+
+  const systemsWithItems = useMemo(() => {
+    return unidades
+      .filter(u => u.nome.startsWith('SISTEMA:'))
+      .map(u => ({
+        ...u,
+        items: workItems.filter(w => w.sistema_id === u.id && !w.concluido)
+      }))
+      .filter(s => s.items.length > 0);
+  }, [unidades, workItems]);
+
+  const toggleSystem = (id: string) => {
+    setExpandedSystems(prev =>
+      prev.includes(id) ? prev.filter(sysId => sysId !== id) : [...prev, id]
+    );
+  };
+
+  return (
+    <div className="animate-in fade-in slide-in-from-bottom-8 duration-500">
+      <div className="bg-white border border-slate-200 rounded-none md:rounded-[2.5rem] overflow-hidden shadow-xl">
+        <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+          <div>
+            <h3 className="text-2xl font-black text-slate-900 tracking-tight">Painel Geral de Demandas</h3>
+            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Backlog Consolidado por Sistema</p>
+          </div>
+          <button onClick={onClose} className="p-3 bg-white border border-slate-200 rounded-full hover:bg-slate-50 transition-colors">
+            <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div className="divide-y divide-slate-100">
+          {systemsWithItems.map(system => (
+            <div key={system.id} className="bg-white">
+              <button
+                onClick={() => toggleSystem(system.id)}
+                className="w-full p-8 flex items-center justify-between hover:bg-slate-50 transition-colors group"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-violet-100 text-violet-600 rounded-2xl flex items-center justify-center">
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+                  </div>
+                  <div className="text-left">
+                    <h4 className="text-lg font-black text-slate-900">{system.nome.replace('SISTEMA:', '').trim()}</h4>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{system.items.length} itens pendentes</p>
+                  </div>
+                </div>
+                <svg className={`w-6 h-6 text-slate-300 transition-transform duration-300 ${expandedSystems.includes(system.id) ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {expandedSystems.includes(system.id) && (
+                <div className="p-8 pt-0 space-y-3 animate-in slide-in-from-top-4 duration-300">
+                  {system.items.map(item => (
+                    <div key={item.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between group/item">
+                      <div className="flex items-center gap-4">
+                        <button
+                          onClick={() => onUpdateWorkItem(item.id, { concluido: true, data_conclusao: new Date().toISOString() })}
+                          className="w-6 h-6 rounded-lg border-2 border-slate-200 hover:border-emerald-500 hover:bg-emerald-50 transition-all flex items-center justify-center text-transparent hover:text-emerald-500"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                        </button>
+                        <span className="text-sm font-bold text-slate-700">{item.descricao}</span>
+                      </div>
+                      <button
+                        onClick={() => { if (window.confirm("Excluir item?")) onDeleteWorkItem(item.id); }}
+                        className="opacity-0 group-hover/item:opacity-100 p-2 text-slate-300 hover:text-rose-500 transition-all"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+          {systemsWithItems.length === 0 && (
+            <div className="p-20 text-center">
+              <p className="text-slate-300 font-black text-sm uppercase tracking-widest italic">Nenhuma demanda pendente em nenhum sistema.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const DayView = ({
   tasks,
@@ -2685,18 +2792,28 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [chatUrl, setChatUrl] = useState(task.chat_gemini_url || '');
+  const [processoSei, setProcessoSei] = useState(task.processo_sei || '');
   const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const [pomodoroMode, setPomodoroMode] = useState<'focus' | 'break'>('focus');
+  const [showPomodoroAlert, setShowPomodoroAlert] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [modalConfig, setModalConfig] = useState<{
-    type: 'link' | 'contact' | 'edit_diary' | 'confirm_delete' | 'reset_timer';
+    type: 'link' | 'contact' | 'edit_diary' | 'confirm_delete' | 'reset_timer' | 'file_upload';
     data?: any;
     isOpen: boolean;
   }>({ type: 'link', isOpen: false });
   const [modalInputValue, setModalInputValue] = useState('');
   const [modalInputName, setModalInputName] = useState('');
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [sessionTotalSeconds, setSessionTotalSeconds] = useState(task.tempo_total_segundos || 0);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showDiaryMobileModal, setShowDiaryMobileModal] = useState(false);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editedTitle, setEditedTitle] = useState(task.titulo);
+
+  useEffect(() => {
+    setEditedTitle(task.titulo);
+  }, [task.titulo]);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const diaryEndRef = useRef<HTMLDivElement>(null);
   const diaryMobileEndRef = useRef<HTMLDivElement>(null);
@@ -2756,8 +2873,32 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
     let interval: number | null = null;
     if (isTimerRunning) {
       interval = window.setInterval(() => {
-        setSeconds(prev => prev + 1);
-        setSessionTotalSeconds(prev => prev + 1);
+        setSeconds(prev => {
+          const next = prev + 1;
+          const focusTimeSeconds = (appSettings.pomodoro?.focusTime || 10) * 60;
+          const breakTimeSeconds = (appSettings.pomodoro?.breakTime || 5) * 60;
+
+          if (pomodoroMode === 'focus') {
+            if (next > 0 && next % focusTimeSeconds === 0) {
+              setShowPomodoroAlert(true);
+              try {
+                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+                audio.play().catch(() => {});
+              } catch (e) {}
+            }
+          } else {
+            if (next > 0 && next % breakTimeSeconds === 0) {
+              setPomodoroMode('focus');
+              setSeconds(0);
+              showToast("Intervalo finalizado! De volta ao foco.", "info");
+            }
+          }
+          return next;
+        });
+
+        if (pomodoroMode === 'focus') {
+          setSessionTotalSeconds(prev => prev + 1);
+        }
       }, 1000);
     } else {
       if (interval) clearInterval(interval);
@@ -2765,7 +2906,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isTimerRunning]);
+  }, [isTimerRunning, pomodoroMode, appSettings.pomodoro]);
 
   const handleToggleTimer = () => {
     if (isTimerRunning) {
@@ -2829,66 +2970,71 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
 
   const handleSaveChatUrl = () => {
     onSave(task.id, { chat_gemini_url: chatUrl });
+    showToast("Link do chat atualizado.", "success");
+  };
+
+  const handleSaveProcessoSei = () => {
+    onSave(task.id, { processo_sei: processoSei });
+    showToast("Processo SEI atualizado.", "success");
   };
 
 
 
-  const handleFileUpload = async (files: FileList | null) => {
+  const onFileSelect = (files: FileList | null) => {
     if (!files || files.length === 0) return;
+    const file = files[0];
+    setPendingFile(file);
+    setModalInputName(file.name);
+    setModalConfig({ type: 'file_upload', isOpen: true });
+  };
 
+  const handleFileUpload = async (file: File, customName: string) => {
     setIsUploading(true);
     const uploadFunc = httpsCallable(functions, 'upload_to_drive');
 
     try {
-      const newPoolItems: PoolItem[] = [];
-
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-
-        // Convert file to base64
-        const reader = new FileReader();
-        const fileContentB64 = await new Promise<string>((resolve, reject) => {
-          reader.onload = () => {
-            const result = reader.result as string;
-            resolve(result.split(',')[1]);
-          };
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-
-        const result = await uploadFunc({
-          fileName: file.name,
-          fileContent: fileContentB64,
-          mimeType: file.type,
-          folderId: appSettings.googleDriveFolderId
-        });
-
-        const data = result.data as any;
-
-        const newItem: PoolItem = {
-          id: Math.random().toString(36).substr(2, 9),
-          tipo: 'arquivo',
-          valor: data.webViewLink,
-          nome: file.name,
-          data_criacao: new Date().toISOString()
+      // Convert file to base64
+      const reader = new FileReader();
+      const fileContentB64 = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const result = reader.result as string;
+          resolve(result.split(',')[1]);
         };
-        newPoolItems.push(newItem);
-      }
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
 
-      // Add to pool
-      const updatedPool = [...(currentTaskData.pool_dados || []), ...newPoolItems];
+      const result = await uploadFunc({
+        fileName: customName || file.name,
+        fileContent: fileContentB64,
+        mimeType: file.type,
+        folderId: appSettings.googleDriveFolderId
+      });
 
-      // If adding via chat, also add a diary entry
-      if (newPoolItems.length > 0) {
-        // Optionally you could add automatic note here, but we will let user type details
-      }
+      const data = result.data as any;
 
-      onSave(task.id, { pool_dados: updatedPool });
-      return newPoolItems; // Return items for further processing if needed
+      const newItem: PoolItem = {
+        id: Math.random().toString(36).substr(2, 9),
+        tipo: 'arquivo',
+        valor: data.webViewLink,
+        nome: customName || file.name,
+        data_criacao: new Date().toISOString()
+      };
 
-    } catch (error) {
-      console.error("Erro no upload:", error);
-      alert("Erro ao fazer upload para o Google Drive. Verifique as credenciais.");
+      const newEntry = {
+        data: new Date().toISOString(),
+        nota: `FILE::${newItem.nome}::${newItem.valor}`
+      };
+
+      onSave(task.id, {
+        pool_dados: [...(currentTaskData.pool_dados || []), newItem],
+        acompanhamento: [...(currentTaskData.acompanhamento || []), newEntry]
+      });
+      showToast("Arquivo carregado com sucesso.", "success");
+      return [newItem];
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao carregar arquivo para o Google Drive.", "error");
       return [];
     } finally {
       setIsUploading(false);
@@ -2933,21 +3079,10 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
   };
 
 
-  const handleFileUploadInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUploadInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const files = e.target.files;
       setShowAttachMenu(false);
-      const uploadedItems = await handleFileUpload(files);
-
-      if (uploadedItems && uploadedItems.length > 0) {
-        const newEntries = uploadedItems.map(item => ({
-          data: new Date().toISOString(),
-          nota: `FILE::${item.nome}::${item.valor}`
-        }));
-        const updatedAcompanhamento = [...(currentTaskData.acompanhamento || []), ...newEntries];
-        onSave(task.id, { acompanhamento: updatedAcompanhamento });
-        setShouldAutoScroll(true);
-      }
+      onFileSelect(e.target.files);
     }
   };
 
@@ -2992,6 +3127,10 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
         break;
       case 'contact':
         if (modalInputValue.trim()) handleAddPoolItem(modalInputValue, 'telefone', modalInputName);
+        break;
+      case 'file_upload':
+        if (pendingFile) handleFileUpload(pendingFile, modalInputName);
+        setPendingFile(null);
         break;
     }
     setModalConfig({ ...modalConfig, isOpen: false });
@@ -3085,7 +3224,50 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
       <div className="p-6 md:p-10 pb-4 flex items-center justify-between shrink-0">
         <div className="flex flex-col">
           <span className="text-blue-500 text-[8px] md:text-[10px] font-black uppercase tracking-[0.3em] mb-1 md:mb-2 block">Central de Execução</span>
-          <h1 className={`text-xl md:text-2xl lg:text-4xl font-black tracking-tighter leading-tight transition-colors ${isTimerRunning ? 'text-white' : 'text-slate-900'}`}>{task.titulo}</h1>
+          {isEditingTitle ? (
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                autoFocus
+                value={editedTitle}
+                onChange={e => setEditedTitle(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    onSave(task.id, { titulo: editedTitle });
+                    setIsEditingTitle(false);
+                    showToast("Título atualizado!", "success");
+                  } else if (e.key === 'Escape') {
+                    setEditedTitle(task.titulo);
+                    setIsEditingTitle(false);
+                  }
+                }}
+                className={`text-xl md:text-2xl lg:text-4xl font-black tracking-tighter leading-tight bg-transparent border-b-2 outline-none w-full max-w-2xl ${isTimerRunning ? 'text-white border-white/20 focus:border-white/50' : 'text-slate-900 border-slate-200 focus:border-blue-500'}`}
+              />
+              <button
+                onClick={() => {
+                  onSave(task.id, { titulo: editedTitle });
+                  setIsEditingTitle(false);
+                  showToast("Título atualizado!", "success");
+                }}
+                className="p-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors shadow-lg"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+              </button>
+            </div>
+          ) : (
+            <div className="group flex items-center gap-4">
+              <h1 className={`text-xl md:text-2xl lg:text-4xl font-black tracking-tighter leading-tight transition-colors ${isTimerRunning ? 'text-white' : 'text-slate-900'}`}>
+                {task.titulo}
+              </h1>
+              <button
+                onClick={() => setIsEditingTitle(true)}
+                className={`p-2 opacity-0 group-hover:opacity-100 transition-all rounded-lg ${isTimerRunning ? 'text-white/40 hover:bg-white/10' : 'text-slate-400 hover:bg-slate-100'}`}
+                title="Editar título"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              </button>
+            </div>
+          )}
           {task.descricao && (
             <p className={`mt-4 text-sm font-medium max-w-2xl leading-relaxed whitespace-pre-wrap transition-colors ${isTimerRunning ? 'text-white/60' : 'text-slate-500'}`}>
               {task.descricao}
@@ -3110,36 +3292,61 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
           <div className="bg-gradient-to-br from-indigo-600 to-blue-700 !rounded-none md:rounded-[3rem] p-4 md:p-6 text-white shadow-2xl flex-shrink-0 relative overflow-hidden group">
             <div className="absolute -right-20 -top-20 w-64 h-64 bg-white/5 rounded-full blur-3xl group-hover:bg-white/10 transition-colors"></div>
 
-            <div className="relative z-10 flex flex-col gap-2">
-              <h4 className="text-[10px] md:text-xs font-black uppercase tracking-widest leading-none opacity-70">Especialista</h4>
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <input
-                    type="text"
-                    placeholder="Link do chat contextual..."
-                    value={chatUrl}
-                    onChange={e => setChatUrl(e.target.value)}
-                    className="w-full bg-black/20 border border-white/10 rounded-none md:rounded-2xl px-4 py-3 text-xs font-medium focus:ring-2 focus:ring-white/30 outline-none text-white placeholder:text-white/20 transition-all"
-                  />
-                  {chatUrl !== (task.chat_gemini_url || '') && (
-                    <button
-                      onClick={handleSaveChatUrl}
-                      className="absolute right-1 top-1 bottom-1 bg-emerald-500 text-white px-3 rounded-lg md:rounded-xl text-[8px] font-black uppercase shadow-lg hover:bg-emerald-600 transition-colors"
-                    >
-                      Salvar
-                    </button>
-                  )}
+            <div className="relative z-10 flex flex-col md:flex-row gap-6">
+              <div className="flex-1">
+                <h4 className="text-[10px] md:text-xs font-black uppercase tracking-widest leading-none opacity-70 mb-3">Especialista</h4>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      placeholder="Link do chat contextual..."
+                      value={chatUrl}
+                      onChange={e => setChatUrl(e.target.value)}
+                      className="w-full bg-black/20 border border-white/10 rounded-none md:rounded-2xl px-4 py-3 text-xs font-medium focus:ring-2 focus:ring-white/30 outline-none text-white placeholder:text-white/20 transition-all"
+                    />
+                    {chatUrl !== (task.chat_gemini_url || '') && (
+                      <button
+                        onClick={handleSaveChatUrl}
+                        className="absolute right-1 top-1 bottom-1 bg-emerald-500 text-white px-3 rounded-lg md:rounded-xl text-[8px] font-black uppercase shadow-lg hover:bg-emerald-600 transition-colors"
+                      >
+                        Salvar
+                      </button>
+                    )}
+                  </div>
+                  <a
+                    href={task.chat_gemini_url || (task.categoria === 'CLC' ? "https://gemini.google.com/gem/096c0e51e1b9" : "https://gemini.google.com/")}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-white text-indigo-600 w-10 h-10 md:w-11 md:h-11 flex items-center justify-center !rounded-none md:rounded-2xl hover:bg-slate-100 transition-all shadow-xl flex-shrink-0"
+                    title="Abrir Chat"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                  </a>
                 </div>
-                <a
-                  href={task.chat_gemini_url || (task.categoria === 'CLC' ? "https://gemini.google.com/gem/096c0e51e1b9" : "https://gemini.google.com/")}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="bg-white text-indigo-600 w-10 h-10 md:w-11 md:h-11 flex items-center justify-center !rounded-none md:rounded-2xl hover:bg-slate-100 transition-all shadow-xl flex-shrink-0"
-                  title="Abrir Chat"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                </a>
               </div>
+
+              {task.categoria === 'CLC' && (
+                <div className="flex-1 animate-in fade-in slide-in-from-top-2">
+                  <h4 className="text-[10px] md:text-xs font-black uppercase tracking-widest leading-none opacity-70 mb-3">Processo SEI</h4>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Nº do Processo..."
+                      value={processoSei}
+                      onChange={e => setProcessoSei(e.target.value)}
+                      className="w-full bg-black/20 border border-white/10 rounded-none md:rounded-2xl px-4 py-3 text-xs font-medium focus:ring-2 focus:ring-white/30 outline-none text-white placeholder:text-white/20 transition-all"
+                    />
+                    {processoSei !== (task.processo_sei || '') && (
+                      <button
+                        onClick={handleSaveProcessoSei}
+                        className="absolute right-1 top-1 bottom-1 bg-blue-500 text-white px-3 rounded-lg md:rounded-xl text-[8px] font-black uppercase shadow-lg hover:bg-blue-600 transition-colors"
+                      >
+                        Salvar
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -3159,6 +3366,21 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
                 <div className="text-[10px] md:text-lg font-bold text-blue-500 uppercase tracking-[0.3em] mt-0.5 md:mt-1">
                   {formatTime(isTimerRunning ? seconds : sessionTotalSeconds).split(':')[0]}h
                 </div>
+              </div>
+
+              <div className="flex items-center gap-1 bg-black/10 p-1 rounded-xl mb-4">
+                <button
+                  onClick={() => { setPomodoroMode('focus'); setSeconds(0); }}
+                  className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${pomodoroMode === 'focus' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400'}`}
+                >
+                  Foco
+                </button>
+                <button
+                  onClick={() => { setPomodoroMode('break'); setSeconds(0); }}
+                  className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${pomodoroMode === 'break' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400'}`}
+                >
+                  Intervalo
+                </button>
               </div>
 
               <div className="flex gap-2 pb-4 md:pb-8">
@@ -4413,10 +4635,14 @@ const QuickNoteModal = ({ isOpen, onClose, onAddIdea }: { isOpen: boolean, onClo
 };
 
 const App: React.FC = () => {
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [rememberMe, setRememberMe] = useState(true);
   const [tarefas, setTarefas] = useState<Tarefa[]>([]);
   const [googleCalendarEvents, setGoogleCalendarEvents] = useState<GoogleCalendarEvent[]>([]);
   const [entregas, setEntregas] = useState<EntregaInstitucional[]>([]);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
+  const [showConsolidatedBacklog, setShowConsolidatedBacklog] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Finance State
@@ -4472,6 +4698,34 @@ const App: React.FC = () => {
   const [isBrainstormingAddingText, setIsBrainstormingAddingText] = useState(false);
   const [convertingIdea, setConvertingIdea] = useState<BrainstormIdea | null>(null);
   const [isSystemSelectorOpen, setIsSystemSelectorOpen] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogin = async () => {
+    try {
+      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+      await signInWithPopup(auth, googleProvider);
+      showToast("Login realizado com sucesso!", "success");
+    } catch (error) {
+      console.error("Erro ao fazer login:", error);
+      showToast("Erro ao fazer login com Google.", "error");
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      showToast("Sessão encerrada.", "info");
+    } catch (error) {
+      console.error("Erro ao fazer logout:", error);
+    }
+  };
 
 
   // Finance Sync
@@ -5988,6 +6242,56 @@ const App: React.FC = () => {
     return { gaps, totalWorkDays: workDays.length };
   }, [atividadesPGC, afastamentos]);
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Hermes está carregando...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center p-6">
+        <div className="bg-white p-12 rounded-none md:rounded-[3rem] shadow-2xl border border-slate-100 max-w-md w-full text-center animate-in zoom-in-95">
+          <div className="w-20 h-20 bg-slate-900 rounded-[2rem] flex items-center justify-center mx-auto mb-8 shadow-xl">
+            <span className="text-white text-3xl font-black">H</span>
+          </div>
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight mb-2">Hermes</h1>
+          <p className="text-slate-500 text-sm font-medium mb-10 leading-relaxed">
+            Bem-vindo ao seu ecossistema de produtividade e gestão à vista.
+          </p>
+          <button
+            onClick={handleLogin}
+            className="w-full bg-slate-900 text-white py-5 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-2xl shadow-slate-200 hover:bg-blue-600 transition-all active:scale-95 flex items-center justify-center gap-4"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12.48 10.92v3.28h7.84c-.24 1.84-.908 3.152-2.112 4.076-1.028.724-2.48 1.408-5.728 1.408-5.104 0-9.272-4.144-9.272-9.232s4.168-9.232 9.272-9.232c2.808 0 4.58 1.104 5.612 2.056l2.312-2.312c-1.936-1.824-4.52-3.112-7.924-3.112-6.524 0-12 5.424-12 12s5.476 12 12 12c3.552 0 6.228-1.172 8.528-3.564 2.376-2.376 3.128-5.704 3.128-8.32 0-.824-.068-1.552-.2-2.224h-11.456z" />
+            </svg>
+            Entrar com Google
+          </button>
+
+          <div className="mt-6 flex items-center justify-center gap-3">
+            <input
+              type="checkbox"
+              id="remember-me"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              className="w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900 cursor-pointer"
+            />
+            <label htmlFor="remember-me" className="text-[10px] font-black uppercase tracking-widest text-slate-400 cursor-pointer select-none hover:text-slate-600 transition-colors">
+              Mantenha-me conectado
+            </label>
+          </div>
+          <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest mt-8">Secure Authentication via Firebase</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col relative">
 
@@ -6038,6 +6342,24 @@ const App: React.FC = () => {
           <div className="max-w-6xl w-full px-0 md:px-4">
             {/* Logo e Título */}
             <div className="flex justify-end p-4 md:absolute md:top-12 md:right-12 gap-3">
+              <div className="flex items-center gap-2 bg-white/50 backdrop-blur-sm p-1 pr-3 rounded-none md:rounded-2xl border border-slate-200/50 shadow-sm mr-2">
+                {user?.photoURL && (
+                  <img src={user.photoURL} alt="Profile" className="w-8 h-8 rounded-lg md:rounded-xl shadow-sm" />
+                )}
+                <div className="text-right hidden sm:block">
+                  <p className="text-[9px] font-black text-slate-900 uppercase tracking-tight leading-none">{user?.displayName}</p>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+                  title="Sair"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                  </svg>
+                </button>
+              </div>
+
               <div className="relative">
                 <button
                   onClick={() => setIsQuickNoteModalOpen(true)}
@@ -7023,7 +7345,15 @@ const App: React.FC = () => {
 
               ) : viewMode === 'sistemas-dev' ? (
                 <div className="space-y-8 animate-in fade-in duration-500 pb-20">
-                  {!selectedSystemId ? (
+                  {showConsolidatedBacklog ? (
+                    <ConsolidatedBacklogView
+                      unidades={unidades}
+                      workItems={workItems}
+                      onClose={() => setShowConsolidatedBacklog(false)}
+                      onUpdateWorkItem={handleUpdateWorkItem}
+                      onDeleteWorkItem={handleDeleteWorkItem}
+                    />
+                  ) : !selectedSystemId ? (
                     /* VISÃO GERAL - LISTA DE SISTEMAS */
                     <>
                       <div className="hidden md:flex bg-white border border-slate-200 rounded-none md:rounded-[2rem] p-8 shadow-sm items-center justify-between mb-8">
@@ -7035,6 +7365,13 @@ const App: React.FC = () => {
                           <div className="bg-violet-100 text-violet-700 px-4 py-2 rounded-lg md:rounded-xl text-sm font-black uppercase tracking-widest">
                             {unidades.filter(u => u.nome.startsWith('SISTEMA:')).length} Sistemas
                           </div>
+                          <button
+                            onClick={() => setShowConsolidatedBacklog(true)}
+                            className="bg-violet-600 text-white px-6 py-3 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-violet-700 transition-all flex items-center gap-3"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                            Backlog Consolidado
+                          </button>
                           <button
                             onClick={() => {
                               setSettingsTab('sistemas');

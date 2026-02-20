@@ -36,6 +36,7 @@ export interface Tarefa {
     is_single_day?: boolean;
     descricao?: string;
     chat_gemini_url?: string;
+    processo_sei?: string;
     tempo_total_segundos?: number;
     sync_status?: 'new' | 'updated' | 'synced' | null;
     last_sync_date?: string;
@@ -226,6 +227,10 @@ export interface CustomNotification {
 
 export interface AppSettings {
     googleDriveFolderId?: string;
+    pomodoro?: {
+        focusTime: number; // minutes
+        breakTime: number; // minutes
+    };
     notifications: {
         enablePush: boolean;
         habitsReminder: {
