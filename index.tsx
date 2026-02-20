@@ -460,14 +460,14 @@ const DayView = ({
     const end = t.data_limite;
     const hasDeadline = end && end !== '-' && end !== '0000-00-00';
 
-    // Se não tem prazo, aparece sempre no sidebar para alocação (conforme o pedido opcional)
+    // Se não tem prazo, aparece sempre no sidebar para alocação (Critério: ações sem data definida)
     if (!hasDeadline) return true;
 
-    // Alinha com o pedido: tarefas com prazo devem aparecer "exclusivamente no dia delas"
-    // Consideramos o intervalo [data_inicio, data_limite] se houver início, caso contrário apenas o dia do prazo
-    const start = t.data_inicio || end;
-
-    return dayStr >= start && dayStr <= end;
+    // Critérios únicos para o campo aguardando alocação:
+    // - As ações que são daquele dia (dayStr === end)
+    // - As ações que são dos dias anteriores àquele dia (dayStr > end)
+    // Ou seja: dayStr >= end
+    return dayStr >= end;
   }), [tasks, dayStr]);
 
   const positionedEvents = useMemo(() => {
