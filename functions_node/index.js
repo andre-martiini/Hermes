@@ -268,32 +268,32 @@ async function runScraper(data) {
     }
 }
 
-exports.scrapeSipacPubSub = functions.runWith({
-    timeoutSeconds: 540,
-    memory: '2GB'
-}).pubsub.topic('scrape-sipac').onPublish(async (message) => {
-    const data = message.json;
-    try {
-        await runScraper(data);
-    } catch (error) {
-        console.error("Erro no scrapeSipacPubSub:", error);
-        if (data.taskId) {
-            await db.collection('tarefas').doc(data.taskId).update({ sync_status: 'erro' });
-        }
-    }
-});
+//exports.scrapeSipacPubSub = functions.runWith({
+//    timeoutSeconds: 540,
+//    memory: '2GB'
+//}).pubsub.topic('scrape-sipac').onPublish(async (message) => {
+//    const data = message.json;
+//    try {
+//        await runScraper(data);
+//    } catch (error) {
+//        console.error("Erro no scrapeSipacPubSub:", error);
+//        if (data.taskId) {
+//            await db.collection('tarefas').doc(data.taskId).update({ sync_status: 'erro' });
+//        }
+//    }
+//    });
 
-exports.scrapeSipac = functions.runWith({
-    timeoutSeconds: 540,
-    memory: '2GB'
-}).https.onCall(async (data, context) => {
-    // Apenas dispara o PubSub e retorna rápido para o frontend
-    const topicName = 'scrape-sipac';
-    const dataBuffer = Buffer.from(JSON.stringify(data));
-    await pubsub.topic(topicName).publish(dataBuffer);
+//exports.scrapeSipac = functions.runWith({
+//    timeoutSeconds: 540,
+//    memory: '2GB'
+//}).https.onCall(async (data, context) => {
+//    // Apenas dispara o PubSub e retorna rápido para o frontend
+//    const topicName = 'scrape-sipac';
+//    const dataBuffer = Buffer.from(JSON.stringify(data));
+//    await pubsub.topic(topicName).publish(dataBuffer);
 
-    if (data.taskId) {
-        await db.collection('tarefas').doc(data.taskId).update({ sync_status: 'processando' });
-    }
-    return { success: true, message: "Sincronização iniciada em segundo plano." };
-});
+//    if (data.taskId) {
+//        await db.collection('tarefas').doc(data.taskId).update({ sync_status: 'processando' });
+//    }
+//    return { success: true, message: "Sincronização iniciada em segundo plano." };
+//});
