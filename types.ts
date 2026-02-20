@@ -241,6 +241,7 @@ export interface AppSettings {
     pomodoro?: {
         focusTime: number; // minutes
         breakTime: number; // minutes
+        enableBeep?: boolean;
     };
     notifications: {
         enablePush: boolean;

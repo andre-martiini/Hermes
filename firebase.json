@@ -13,7 +13,7 @@
         },
         {
             "source": "functions_node",
-            "runtime": "nodejs18",
+            "runtime": "nodejs20",
             "codebase": "node",
             "ignore": [
                 "node_modules",

@@ -101,6 +101,31 @@ const isWorkDay = (date: Date) => {
   return day !== 0 && day !== 6; // Seg-Sex
 };
 
+const callScrapeSipac = async (taskId: string, processoSei: string) => {
+  const data = { taskId, processoSei };
+  if (import.meta.env.DEV) {
+    try {
+      const response = await fetch('/proxy-functions/scrapeSipac', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data })
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Fetch error:', response.status, errorText);
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return response.json();
+    } catch (error) {
+      console.error('Erro na chamada via proxy:', error);
+      throw error;
+    }
+  } else {
+    const scrapeSipacFn = httpsCallable(functions, 'scrapeSipac');
+    return scrapeSipacFn(data);
+  }
+};
+
 const getMonthWorkDays = (year: number, month: number) => {
   const days = [];
   const totalDays = getDaysInMonth(year, month);
@@ -2742,8 +2767,7 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
                             if (!formData.processo_sei) return;
                             setIsSyncing(true);
                             try {
-                              const scrapeSipac = httpsCallable(functions, 'scrapeSipac');
-                              await scrapeSipac({ taskId: task.id, processoSei: formData.processo_sei });
+                              await callScrapeSipac(task.id, formData.processo_sei);
                               alert("Sincronização iniciada com sucesso!");
                             } catch (e) {
                               console.error(e);
@@ -3419,8 +3443,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
                       <button
                         onClick={async () => {
                           try {
-                            const scrapeSipac = httpsCallable(functions, 'scrapeSipac');
-                            await scrapeSipac({ taskId: task.id, processoSei: task.processo_sei });
+                            await callScrapeSipac(task.id, task.processo_sei);
                             showToast("Sincronização iniciada.", "info");
                           } catch (e) {
                             showToast("Erro na sincronização.", "error");
