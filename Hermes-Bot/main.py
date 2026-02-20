@@ -47,7 +47,12 @@ Sua personalidade é uma mistura de Jarvis (Homem de Ferro) com um Gerente de Pr
 1. **Familiar e Respeitoso**: Sempre chame o usuário de "André". Use um tom formal, porém próximo, como um assistente de confiança que trabalha com ele há anos.
 2. **Eficiência Implacável**: Suas respostas devem ser organizadas. Se o André perguntar sobre o dia dele, traga as informações divididas por módulos (Financeiro, Saúde, Tarefas).
 3. **Proatividade**: Se o André registrar uma despesa alta, você pode comentar algo breve e profissional como "Registrado, André. Vou atualizar seu teto de gastos mensal."
-4. **Precisão**: Você não "acha", você "consulta". Se não encontrar algo no Firestore, peça os detalhes de forma educada.
+4. **Precisão com Flexibilidade**: Você consulta o Firestore de forma inteligente. Se não encontrar algo de primeira, use sua capacidade de síntese para tentar variações de busca (keywords). Se após as tentativas nada for encontrado, informe ao André de forma educada.
+
+### BUSCAS E ENTENDIMENTO AMPLO:
+1. **Extração de Keywords**: Ao realizar buscas (em tarefas, documentos ou registros), identifique a palavra-chave principal. Nunca passe frases longas para as funções de busca.
+2. **Fuzzy Matching**: O sistema é flexível. Se o André pedir "documentos do chaveiro", busque apenas por "chaveiro".
+3. **Persistência**: Se uma busca inicial não retornar nada, tente com um termo relacionado ou uma palavra-chave mais genérico antes de declarar que não existe.
 
 ### CONHECIMENTO DO ECOSSISTEMA:
 Você gerencia os seguintes pilares para o André:
@@ -72,31 +77,48 @@ bot = telebot.TeleBot(TELEGRAM_TOKEN)
 def consultar_hermes(colecao: str, campo: str = None, valor: str = None, limite: int = 20):
     """
     Consulta informações no sistema Hermes.
-    Se 'valor' for fornecido, realiza uma busca por aproximação no campo especificado.
+    DICA PARA O LLM: Extraia apenas a palavra-chave principal do pedido do usuário para o 'valor'.
+    Se 'campo' não for informado, a busca será realizada em todos os campos de texto principais.
     """
     try:
         ref = db.collection(colecao)
-        docs = ref.order_by("created_at", direction=firestore.Query.DESCENDING).limit(50).stream()
+        # Aumentamos o limite de busca para garantir que encontre algo mesmo com ordem descrescente
+        docs = ref.order_by("created_at", direction=firestore.Query.DESCENDING).limit(100).stream()
         
         resultados = []
+        palavras_chave = []
+        if valor:
+            palavras_chave = [p.lower() for p in valor.split() if len(p) > 2]
+            if not palavras_chave:
+                palavras_chave = [valor.lower()]
+
         for doc in docs:
             d = doc.to_dict()
             d['id'] = doc.id
             if 'created_at' in d: d['created_at'] = str(d['created_at'])
             
-            # Se houver filtro, verifica se o valor está contido no campo (case-insensitive)
-            if campo and valor:
+            match = False
+            if not valor:
+                match = True
+            elif campo:
                 campo_val = str(d.get(campo, "")).lower()
-                if valor.lower() in campo_val:
-                    resultados.append(d)
+                if any(p in campo_val for p in palavras_chave):
+                    match = True
             else:
+                # Busca em campos comuns de texto para dar flexibilidade
+                campos_busca = ["titulo", "notas", "description", "category", "nome", "descricao"]
+                texto_completo = " ".join([str(d.get(c, "")).lower() for c in campos_busca])
+                if any(p in texto_completo for p in palavras_chave):
+                    match = True
+
+            if match:
                 resultados.append(d)
                 
             if len(resultados) >= limite:
                 break
         
         if not resultados:
-            return f"Nenhum registro encontrado para '{valor}' na coleção '{colecao}'."
+            return f"André, não encontrei nenhum registro relacionado a '{valor}' na coleção '{colecao}'."
         return resultados
     except Exception as e:
         return f"Erro na consulta: {str(e)}"
@@ -167,21 +189,35 @@ def registrar_saude(tipo: str, valor: any, notas: str = ""):
 def buscar_documentos_tarefa(termo_busca: str):
     """
     Busca documentos (links do Drive) de uma tarefa. 
-    O 'termo_busca' não precisa ser o título exato.
+    DICA PARA O LLM: Extraia apenas a palavra-chave principal (ex: 'chaveiro', 'termo') do pedido do usuário. Nunca passe frases inteiras como argumento.
     """
     try:
-        # Busca as últimas 50 tarefas para encontrar o melhor match
-        docs = db.collection("tarefas").order_by("created_at", direction=firestore.Query.DESCENDING).limit(50).stream()
+        # Puxa mais documentos para aumentar a base da busca
+        docs = db.collection("tarefas").order_by("created_at", direction=firestore.Query.DESCENDING).limit(100).stream()
         
         possiveis_tarefas = []
+        # Divide o termo em palavras e remove preposições curtas
+        palavras_chave = [p.lower() for p in termo_busca.split() if len(p) > 2]
+
+        if not palavras_chave: # Caso o termo seja muito curto, tenta usar ele mesmo
+            palavras_chave = [termo_busca.lower()]
+
         for doc in docs:
             data = doc.to_dict()
             titulo = data.get("titulo", "").lower()
-            if termo_busca.lower() in titulo:
+            notas = data.get("notas", "").lower()
+
+            # Extrai o nome dos arquivos no pool de dados para buscar lá também
+            pool_texto = " ".join([item.get('nome', '').lower() for item in data.get("pool_dados", [])])
+
+            texto_completo = f"{titulo} {notas} {pool_texto}"
+
+            # Se QUALQUER uma das palavras-chave estiver no texto completo, considera um match
+            if any(palavra in texto_completo for palavra in palavras_chave):
                 possiveis_tarefas.append(data)
         
         if not possiveis_tarefas:
-            return f"André, não encontrei nenhuma tarefa contendo '{termo_busca}'."
+            return f"André, não encontrei nenhuma tarefa relacionada a '{termo_busca}'."
         
         # Pega a mais recente que combine
         tarefa = possiveis_tarefas[0]
@@ -189,7 +225,7 @@ def buscar_documentos_tarefa(termo_busca: str):
         pool = tarefa.get("pool_dados", [])
         
         if not pool:
-            return f"André, encontrei a tarefa '{titulo_encontrado}', mas ela não possui documentos vinculados no momento."
+            return f"André, encontrei a tarefa '{titulo_encontrado}', mas ela não possui documentos vinculados no pool_dados."
             
         links = [f"- {item.get('nome', 'Arquivo')}: {item.get('valor')}" for item in pool]
         return f"André, localizei a tarefa '{titulo_encontrado}'. Aqui estão os documentos:\n" + "\n".join(links)
