@@ -326,7 +326,7 @@ def sync_pix_emails(service, sync_ref, logs):
     try:
         log_to_firestore(sync_ref, logs, "Buscando emails de Pix a partir de 01/02/2026...")
         # Query: Assuntos de Pix + Data limite
-        query = 'after:2026/02/01 subject:(Pix recebido OR Pix realizado OR "Pix enviado" OR "transferência Pix" OR "Pix enviado")'
+        query = 'after:2026/02/01 subject:(Pix recebido OR Pix realizado OR "Pix enviado" OR "transferência Pix")'
         
         results = service.users().messages().list(userId='me', q=query, maxResults=50).execute()
         messages = results.get('messages', [])
@@ -337,19 +337,35 @@ def sync_pix_emails(service, sync_ref, logs):
         
         log_to_firestore(sync_ref, logs, f"Encontrados {len(messages)} e-mails potenciais de Pix. Analisando...")
 
-        # Cache de transações existentes para evitar duplicatas
+        # Cache de transações existentes para evitar duplicatas (Bloqueio de duplicidade financeira)
+        # Cada item: {'amount': float, 'date': datetime, 'pix_id': str, 'description': str}
         existing_transactions = []
         existing_income = []
         existing_google_ids = set()
 
+        def parse_iso_date(date_str):
+            if not date_str: return None
+            try: return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+            except: return None
+
         for t in db.collection('finance_transactions').stream():
             data = t.to_dict()
-            existing_transactions.append((data.get('description'), data.get('amount'), data.get('date')))
+            existing_transactions.append({
+                'description': data.get('description'),
+                'amount': data.get('amount'),
+                'date': parse_iso_date(data.get('date')),
+                'pix_id': data.get('pix_id')
+            })
             if data.get('google_message_id'): existing_google_ids.add(data['google_message_id'])
 
         for t in db.collection('finance_income').stream():
             data = t.to_dict()
-            existing_income.append((data.get('description'), data.get('amount'), data.get('date')))
+            existing_income.append({
+                'description': data.get('description'),
+                'amount': data.get('amount'),
+                'date': parse_iso_date(data.get('date')),
+                'pix_id': data.get('pix_id')
+            })
             if data.get('google_message_id'): existing_google_ids.add(data['google_message_id'])
 
         processed_emails_doc = db.collection('system').document('processed_emails').get()
@@ -369,37 +385,62 @@ def sync_pix_emails(service, sync_ref, logs):
             for header in details.get('payload', {}).get('headers', []):
                 if header['name'] == 'Subject': subject = header['value']; break
             
-            # Regex para capturar valor R$
-            value_match = re.search(r'R\$\s*(\d+(?:[\.,]\d+)?)', f"{subject} {snippet}")
+            # Regex para capturar valor R$ e ID do Pix (E2E ID)
+            content = f"{subject} {snippet}"
+            value_match = re.search(r'R\$\s*(\d+(?:[\.,]\d+)?)', content)
+            pix_id_match = re.search(r'\b(E[A-Z0-9]{31})\b', content)
+            pix_id = pix_id_match.group(1) if pix_id_match else None
+
             if value_match:
                 val_str = value_match.group(1).replace('.', '').replace(',', '.')
                 amount = float(val_str)
-                is_income = any(word in subject.lower() or word in snippet.lower() for word in ['recebido', 'recebeu', 'recebida'])
+                # Classificação aprimorada de renda vs despesa
+                is_income = any(word in content.lower() for word in ['recebido', 'recebeu', 'recebida', 'recebimento', 'creditado', 'entrada'])
                 description = f"Pix: {subject}"
                 iso_date = dt.isoformat()
                 
-                # Verificação de redundância adicional
-                record = (description, amount, iso_date)
+                # Verificação de redundância aprimorada para evitar duplicatas de diferentes instituições
+                is_duplicate = False
+                target_cache = existing_income if is_income else existing_transactions
+
+                for item in target_cache:
+                    # 1. Por ID do Pix (E2E ID)
+                    if pix_id and item.get('pix_id') == pix_id:
+                        is_duplicate = True; break
+
+                    # 2. Por Valor e Proximidade Temporal (janela de 5 minutos)
+                    if item.get('amount') == amount and item.get('date'):
+                        diff = abs((item['date'] - dt).total_seconds())
+                        if diff < 300: # 5 minutos
+                            is_duplicate = True; break
+
+                    # 3. Legado/Exata (Descrição e Valor)
+                    if item.get('description') == description and item.get('amount') == amount:
+                        is_duplicate = True; break
+
+                if is_duplicate:
+                    new_processed_ids.append(msg_id)
+                    continue
+
+                new_record = {
+                    'description': description, 'amount': amount, 'date': iso_date,
+                    'google_message_id': msg_id, 'pix_id': pix_id, 'status': 'active'
+                }
+
                 if is_income:
-                    if record in existing_income:
-                        new_processed_ids.append(msg_id)
-                        continue
-                    db.collection('finance_income').add({
-                        'description': description, 'amount': amount, 'day': dt.day,
-                        'month': dt.month - 1, 'year': dt.year,
-                        'category': 'Renda Extra', 'isReceived': True, 'date': iso_date,
-                        'google_message_id': msg_id, 'status': 'active'
+                    new_record.update({
+                        'day': dt.day, 'month': dt.month - 1, 'year': dt.year,
+                        'category': 'Renda Extra', 'isReceived': True
                     })
+                    db.collection('finance_income').add(new_record)
+                    existing_income.append({'amount': amount, 'date': dt, 'pix_id': pix_id, 'description': description})
                 else:
-                    if record in existing_transactions:
-                        new_processed_ids.append(msg_id)
-                        continue
                     sprint = 1 if dt.day < 8 else 2 if dt.day < 15 else 3 if dt.day < 22 else 4
-                    db.collection('finance_transactions').add({
-                        'description': description, 'amount': amount, 'date': iso_date,
-                        'sprint': sprint, 'category': 'Alimentação',
-                        'google_message_id': msg_id, 'status': 'active'
+                    new_record.update({
+                        'sprint': sprint, 'category': 'Alimentação'
                     })
+                    db.collection('finance_transactions').add(new_record)
+                    existing_transactions.append({'amount': amount, 'date': dt, 'pix_id': pix_id, 'description': description})
                 new_processed_ids.append(msg_id)
                 log_to_firestore(sync_ref, logs, f"[PIX] {subject} (R$ {amount:.2f})")
 
