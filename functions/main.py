@@ -593,7 +593,7 @@ def process_vectorization(task_id):
     if not GEMINI_API_KEY: return {'success': False, 'error': 'Chave Gemini não configurada'}
 
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-2.5-flash-lite")
 
     count = 0
     for item in pool_dados:
@@ -696,7 +696,7 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
         # Refinamento via Gemini Flash
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
         prompt = f"""
         Atue como um redator especialista. O texto a seguir é uma transcrição de voz bruta.
         Sua tarefa:
@@ -757,7 +757,7 @@ def on_arquivo_adicionado(event: firestore_fn.Event[firestore_fn.DocumentSnapsho
         import json
 
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
 
         service = get_drive_service()
         file_metadata = service.files().get(fileId=file_id, fields='mimeType, name').execute()
