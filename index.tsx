@@ -6034,11 +6034,7 @@ const App: React.FC = () => {
             <div className="flex justify-end p-4 md:absolute md:top-12 md:right-12 gap-3">
               <div className="relative">
                 <button
-                  onClick={() => {
-                    setActiveModule('acoes');
-                    setViewMode('ferramentas');
-                    setActiveFerramenta('brainstorming');
-                  }}
+                  onClick={() => setIsQuickNoteModalOpen(true)}
                   className="text-amber-500 p-3 hover:bg-amber-50 rounded-xl transition-all active:scale-95 group"
                   aria-label="Notas Rápidas"
                 >
@@ -6278,11 +6274,7 @@ const App: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <div className="relative">
                     <button
-                      onClick={() => {
-                        setActiveModule('acoes');
-                        setViewMode('ferramentas');
-                        setActiveFerramenta('brainstorming');
-                      }}
+                      onClick={() => setIsQuickNoteModalOpen(true)}
                       className="p-1.5 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors text-amber-500"
                       aria-label="Notas Rápidas"
                     >
