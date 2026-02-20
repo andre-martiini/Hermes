@@ -437,13 +437,13 @@ const ConsolidatedBacklogView = ({
   return (
     <div className="animate-in fade-in slide-in-from-bottom-8 duration-500">
       <div className="bg-white border border-slate-200 rounded-none md:rounded-[2.5rem] overflow-hidden shadow-xl">
-        <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+        <div className="p-6 md:p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
           <div>
-            <h3 className="text-2xl font-black text-slate-900 tracking-tight">Painel Geral de Demandas</h3>
+            <h3 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight">Painel Geral de Demandas</h3>
             <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Backlog Consolidado por Sistema</p>
           </div>
-          <button onClick={onClose} className="p-3 bg-white border border-slate-200 rounded-full hover:bg-slate-50 transition-colors">
-            <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+          <button onClick={onClose} className="p-2 md:p-3 bg-white border border-slate-200 rounded-full hover:bg-slate-50 transition-colors">
+            <svg className="w-5 h-5 md:w-6 md:h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
 
@@ -452,15 +452,15 @@ const ConsolidatedBacklogView = ({
             <div key={system.id} className="bg-white">
               <button
                 onClick={() => toggleSystem(system.id)}
-                className="w-full p-8 flex items-center justify-between hover:bg-slate-50 transition-colors group"
+                className="w-full p-6 md:p-8 flex items-center justify-between hover:bg-slate-50 transition-colors group"
               >
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-violet-100 text-violet-600 rounded-2xl flex items-center justify-center">
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+                <div className="flex items-center gap-3 md:gap-4">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-violet-100 text-violet-600 rounded-xl md:rounded-2xl flex items-center justify-center shrink-0">
+                    <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
                   </div>
                   <div className="text-left">
-                    <h4 className="text-lg font-black text-slate-900">{system.nome.replace('SISTEMA:', '').trim()}</h4>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{system.items.length} itens pendentes</p>
+                    <h4 className="text-base md:text-lg font-black text-slate-900 leading-tight">{system.nome.replace('SISTEMA:', '').trim()}</h4>
+                    <p className="text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-widest">{system.items.length} itens pendentes</p>
                   </div>
                 </div>
                 <svg className={`w-6 h-6 text-slate-300 transition-transform duration-300 ${expandedSystems.includes(system.id) ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -469,9 +469,9 @@ const ConsolidatedBacklogView = ({
               </button>
 
               {expandedSystems.includes(system.id) && (
-                <div className="p-8 pt-0 space-y-3 animate-in slide-in-from-top-4 duration-300">
+                <div className="p-6 md:p-8 pt-0 space-y-3 animate-in slide-in-from-top-4 duration-300">
                   {system.items.map(item => (
-                    <div key={item.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-between group/item">
+                    <div key={item.id} className="p-4 bg-slate-50 border border-slate-100 rounded-xl md:rounded-2xl flex items-center justify-between group/item gap-3">
                       <div className="flex items-center gap-4">
                         <button
                           onClick={() => onUpdateWorkItem(item.id, { concluido: true, data_conclusao: new Date().toISOString() })}
@@ -479,7 +479,7 @@ const ConsolidatedBacklogView = ({
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                         </button>
-                        <span className="text-sm font-bold text-slate-700">{item.descricao}</span>
+                        <span className="text-xs md:text-sm font-bold text-slate-700 leading-tight">{item.descricao}</span>
                       </div>
                       <button
                         onClick={() => { if (window.confirm("Excluir item?")) onDeleteWorkItem(item.id); }}
@@ -531,6 +531,7 @@ const DayView = ({
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
   };
   const [resizing, setResizing] = useState<{ id: string, type: 'top' | 'bottom', startY: number, startMin: number } | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [dragging, setDragging] = useState<{ id: string, startY: number, startMin: number } | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -717,7 +718,7 @@ const DayView = ({
   }, [resizing, dragging]);
 
   return (
-    <div className="flex flex-col h-[600px] overflow-hidden bg-slate-50 border-t border-slate-100">
+    <div className="flex flex-col h-[600px] overflow-hidden bg-slate-50 border-t border-slate-100 relative">
       {/* All Day Events Header */}
       {allDayEvents.length > 0 && (
         <div className="flex-shrink-0 bg-white border-b border-slate-100 flex items-center min-h-[40px] px-4 py-2 gap-4">
@@ -738,6 +739,14 @@ const DayView = ({
       )}
 
       <div className="flex flex-1 overflow-hidden relative">
+        {/* Floating Action Button for Mobile Allocation */}
+        <button
+          onClick={() => setIsSidebarOpen(true)}
+          className="md:hidden fixed bottom-24 right-6 z-[60] w-14 h-14 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center animate-bounce"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
+        </button>
+
         <div className="flex-1 overflow-y-auto custom-scrollbar relative">
           <div
             className="relative w-full"
@@ -864,7 +873,7 @@ const DayView = ({
 
         <div
           ref={sidebarRef}
-          className="hidden md:block w-64 bg-slate-50 border-l border-slate-200 p-6 overflow-y-auto custom-scrollbar"
+          className={`${isSidebarOpen ? 'fixed inset-0 z-[100] bg-white' : 'hidden'} md:relative md:block md:w-64 bg-slate-50 border-l border-slate-200 p-6 overflow-y-auto custom-scrollbar animate-in slide-in-from-right duration-300`}
           onDragOver={e => e.preventDefault()}
           onDrop={(e) => {
             const taskId = e.dataTransfer.getData('task-id');
@@ -873,14 +882,34 @@ const DayView = ({
             }
           }}
         >
-          <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6">Aguardando Alocação</h4>
+          <div className="flex items-center justify-between mb-8">
+            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Aguardando Alocação</h4>
+            <button onClick={() => setIsSidebarOpen(false)} className="md:hidden p-2 bg-slate-200 rounded-full">
+               <svg className="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+
           <div className="space-y-3">
             {dayTasks.filter(t => !t.horario_inicio).map(task => (
               <div
                 key={task.id}
                 draggable
                 onDragStart={(e) => e.dataTransfer.setData('task-id', task.id)}
-                className="bg-white p-4 rounded-none md:rounded-2xl border border-slate-200 shadow-sm hover:border-blue-400 hover:shadow-md transition-all cursor-grab active:cursor-grabbing"
+                onClick={() => {
+                  if (window.innerWidth < 768) {
+                    // Mobile: Allocate to current hour by default if clicked
+                    const now = new Date();
+                    const hour = now.getHours();
+                    onTaskUpdate(task.id, {
+                      horario_inicio: `${hour.toString().padStart(2, '0')}:00`,
+                      horario_fim: `${(hour + 1).toString().padStart(2, '0')}:00`,
+                      data_inicio: dayStr
+                    });
+                    setIsSidebarOpen(false);
+                    showToast("Alocado para agora!", "success");
+                  }
+                }}
+                className="bg-white p-4 rounded-none md:rounded-2xl border border-slate-200 shadow-sm hover:border-blue-400 hover:shadow-md transition-all cursor-pointer md:cursor-grab active:cursor-grabbing"
               >
                 <div className="text-[10px] font-bold text-slate-700 leading-tight mb-2">{task.titulo}</div>
                 <div className="flex items-center gap-2">
@@ -889,6 +918,7 @@ const DayView = ({
                     <span className="text-[8px] font-black px-1.5 py-0.5 rounded uppercase bg-amber-100 text-amber-700">Sem Prazo</span>
                   )}
                 </div>
+                <p className="md:hidden mt-3 text-[8px] font-black text-blue-600 uppercase tracking-widest">Toque para alocar agora</p>
               </div>
             ))}
             {dayTasks.filter(t => !t.horario_inicio).length === 0 && (
@@ -2888,6 +2918,25 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState(task.titulo);
 
+  const applyFormatting = (symbol: string) => {
+    const textarea = document.getElementById('diary-input') as HTMLTextAreaElement;
+    if (!textarea) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = newFollowUp;
+    const selectedText = text.substring(start, end);
+    const before = text.substring(0, start);
+    const after = text.substring(end);
+    const newText = `${before}${symbol}${selectedText}${symbol}${after}`;
+    setNewFollowUp(newText);
+
+    // Devolve o foco e ajusta seleção
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + symbol.length, end + symbol.length);
+    }, 0);
+  };
+
   useEffect(() => {
     setEditedTitle(task.titulo);
   }, [task.titulo]);
@@ -3851,19 +3900,60 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
                   )}
                 </div>
 
-                <textarea
-                  value={newFollowUp}
-                  onChange={e => setNewFollowUp(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleAddFollowUp();
-                    }
-                  }}
-                  placeholder="Anotação..."
-                  className={`w-full bg-transparent border-none outline-none text-xs md:text-sm py-3 min-h-[44px] focus:min-h-[120px] max-h-48 resize-none custom-scrollbar transition-all duration-300 ${isTimerRunning ? 'text-white placeholder:text-white/20' : 'text-slate-800 placeholder:text-slate-400'}`}
-                  rows={1}
-                />
+                <div className="flex-1 flex flex-col min-w-0">
+                  {newFollowUp.trim() && (
+                    <div className={`mb-2 p-3 rounded-xl border text-xs animate-in fade-in slide-in-from-bottom-2 ${isTimerRunning ? 'bg-white/5 border-white/10 text-white/60' : 'bg-blue-50/50 border-blue-100 text-slate-500'}`}>
+                      <span className="text-[8px] font-black uppercase tracking-widest block mb-1 opacity-50">Preview:</span>
+                      <div className="whatsapp-preview">
+                        {formatWhatsAppText(newFollowUp)}
+                      </div>
+                    </div>
+                  )}
+                  <textarea
+                    id="diary-input"
+                    value={newFollowUp}
+                    onChange={e => setNewFollowUp(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleAddFollowUp();
+                      }
+                    }}
+                    placeholder="Anotação..."
+                    className={`w-full bg-transparent border-none outline-none text-xs md:text-sm py-3 min-h-[44px] focus:min-h-[80px] max-h-48 resize-none custom-scrollbar transition-all duration-300 ${isTimerRunning ? 'text-white placeholder:text-white/20' : 'text-slate-800 placeholder:text-slate-400'}`}
+                    rows={1}
+                  />
+                  <div className={`flex items-center gap-1 mt-1 pt-2 border-t ${isTimerRunning ? 'border-white/10' : 'border-slate-100'}`}>
+                    <button
+                      onClick={() => applyFormatting('*')}
+                      className={`p-1.5 rounded hover:bg-black/10 text-[10px] font-black w-8 h-8 flex items-center justify-center ${isTimerRunning ? 'text-white/40' : 'text-slate-400'}`}
+                      title="Negrito (*text*)"
+                    >
+                      B
+                    </button>
+                    <button
+                      onClick={() => applyFormatting('_')}
+                      className={`p-1.5 rounded hover:bg-black/10 text-[10px] italic w-8 h-8 flex items-center justify-center ${isTimerRunning ? 'text-white/40' : 'text-slate-400'}`}
+                      title="Itálico (_text_)"
+                    >
+                      I
+                    </button>
+                    <button
+                      onClick={() => applyFormatting('~')}
+                      className={`p-1.5 rounded hover:bg-black/10 text-[10px] line-through w-8 h-8 flex items-center justify-center ${isTimerRunning ? 'text-white/40' : 'text-slate-400'}`}
+                      title="Tachado (~text~)"
+                    >
+                      S
+                    </button>
+                    <button
+                      onClick={() => applyFormatting('`')}
+                      className={`p-1.5 rounded hover:bg-black/10 text-[10px] font-mono w-8 h-8 flex items-center justify-center ${isTimerRunning ? 'text-white/40' : 'text-slate-400'}`}
+                      title="Código (`text`)"
+                    >
+                      &lt;/&gt;
+                    </button>
+                  </div>
+                </div>
 
                 <button
                   onClick={handleAddFollowUp}
@@ -4756,9 +4846,10 @@ const QuickNoteModal = ({ isOpen, onClose, onAddIdea }: { isOpen: boolean, onClo
                 }
               }}
               disabled={!textInput.trim()}
-              className="flex-1 bg-blue-600 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all disabled:opacity-50"
+              className="flex-1 bg-slate-900 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              Salvar Nota
+              <svg className="w-4 h-4 md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+              <span className="hidden md:inline">Salvar Ideia</span>
             </button>
           </div>
         </div>
@@ -4806,12 +4897,16 @@ const App: React.FC = () => {
   const [editingResource, setEditingResource] = useState<{ field: string, label: string, value: string } | null>(null);
 
   const [newLogText, setNewLogText] = useState('');
-  const [newLogTipo, setNewLogTipo] = useState<'desenvolvimento' | 'ajuste'>('desenvolvimento');
+  const [newLogTipo, setNewLogTipo] = useState<'desenvolvimento' | 'ajuste' | 'geral'>('geral');
   const [newLogAttachments, setNewLogAttachments] = useState<PoolItem[]>([]);
   const [editingWorkItem, setEditingWorkItem] = useState<WorkItem | null>(null);
   const [editingWorkItemText, setEditingWorkItemText] = useState('');
   const [editingWorkItemAttachments, setEditingWorkItemAttachments] = useState<PoolItem[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isRecordingLog, setIsRecordingLog] = useState(false);
+  const [isProcessingLog, setIsProcessingLog] = useState(false);
+  const logMediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const logAudioChunksRef = useRef<Blob[]>([]);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isQuickNoteModalOpen, setIsQuickNoteModalOpen] = useState(false);
@@ -4860,6 +4955,60 @@ const App: React.FC = () => {
       showToast("Sessão encerrada.", "info");
     } catch (error) {
       console.error("Erro ao fazer logout:", error);
+    }
+  };
+
+  const startLogRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      logMediaRecorderRef.current = mediaRecorder;
+      logAudioChunksRef.current = [];
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) logAudioChunksRef.current.push(event.data);
+      };
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(logAudioChunksRef.current, { type: 'audio/m4a' });
+        await handleProcessLogAudio(audioBlob);
+        stream.getTracks().forEach(track => track.stop());
+      };
+      mediaRecorder.start();
+      setIsRecordingLog(true);
+    } catch (err) {
+      console.error("Erro ao acessar microfone:", err);
+      showToast("Permissão de microfone negada ou não disponível.", "error");
+    }
+  };
+
+  const stopLogRecording = () => {
+    if (logMediaRecorderRef.current && isRecordingLog) {
+      logMediaRecorderRef.current.stop();
+      setIsRecordingLog(false);
+    }
+  };
+
+  const handleProcessLogAudio = async (audioBlob: Blob) => {
+    setIsProcessingLog(true);
+    try {
+      const reader = new FileReader();
+      reader.readAsDataURL(audioBlob);
+      reader.onloadend = async () => {
+        try {
+          const base64String = (reader.result as string).split(',')[1];
+          const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
+          const response = await transcribeFunc({ audioBase64: base64String });
+          const data = response.data as { raw: string, refined: string };
+          if (data.refined) setNewLogText(prev => prev ? prev + '\n' + data.refined : data.refined);
+        } catch (error) {
+          console.error("Erro ao transcrever:", error);
+          showToast("Erro ao processar áudio via Hermes AI.", "error");
+        } finally {
+          setIsProcessingLog(false);
+        }
+      };
+    } catch (error) {
+      console.error("Erro ao ler áudio:", error);
+      setIsProcessingLog(false);
     }
   };
 
@@ -5042,7 +5191,26 @@ const App: React.FC = () => {
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     const id = Math.random().toString(36).substring(2, 9);
-    setToasts(prev => [...prev, { id, message, type }]);
+    setToasts(prev => {
+      // Evitar duplicatas exatas de mensagens ativas
+      if (prev.some(t => t.message === message)) return prev;
+
+      // Consolidar fluxo: se a nova mensagem for muito similar à última, substitui
+      // Ex: "Enviando arquivo A...", "Enviando arquivo B..."
+      if (prev.length > 0) {
+        const last = prev[prev.length - 1];
+        const lastPrefix = last.message.split(' ')[0];
+        const newPrefix = message.split(' ')[0];
+        if (lastPrefix === newPrefix && last.type === type && message.length > 10) {
+           return [...prev.slice(0, -1), { id, message, type }];
+        }
+      }
+
+      // Limitar a no máximo 2 toasts simultâneos para não poluir a tela
+      const base = prev.length >= 2 ? prev.slice(1) : prev;
+      return [...base, { id, message, type }];
+    });
+
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 5000);
@@ -7444,24 +7612,13 @@ const App: React.FC = () => {
                      if (files.length > 0 && appSettings.googleDriveFolderId) {
                         try {
                            showToast("Enviando arquivos para o Drive...", "info");
-                           // Logic to upload to drive would go here.
-                           // For now, we simulate or store metadata, or call a cloud function if available.
-                           // Since I cannot implement direct Drive upload here without access token flow in frontend easily,
-                           // I will assume the user might copy links or we store file names for now.
-                           // Ideally this calls a backend endpoint.
-                           
-                           // Placeholder for drive upload success
-                           poolItems = files.map(f => ({
-                              id: Math.random().toString(36).substr(2, 9),
-                              tipo: 'arquivo',
-                              valor: '#', // The future link
-                              nome: f.name,
-                              data_criacao: new Date().toISOString()
-                           }));
-                           showToast("Arquivos indexados. O upload real requer backend.", "info");
+                           for (const file of files) {
+                              const item = await handleFileUploadToDrive(file);
+                              if (item) poolItems.push(item);
+                           }
                         } catch (e) {
                            console.error(e);
-                           showToast("Erro no upload.", "error");
+                           showToast("Erro no upload de um ou mais arquivos.", "error");
                         }
                      }
 
@@ -7586,31 +7743,28 @@ const App: React.FC = () => {
                   ) : !selectedSystemId ? (
                     /* VISÃO GERAL - LISTA DE SISTEMAS */
                     <>
-                      <div className="hidden md:flex bg-white border border-slate-200 rounded-none md:rounded-[2rem] p-8 shadow-sm items-center justify-between mb-8">
+                      <div className="flex flex-col md:flex-row bg-white border border-slate-200 rounded-none md:rounded-[2rem] p-6 md:p-8 shadow-sm md:items-center justify-between mb-0 md:mb-8">
                         <div>
-                          <h2 className="text-3xl font-black text-slate-900 tracking-tight">Sistemas em Desenvolvimento</h2>
-                          <p className="text-slate-500 font-bold mt-1">Gestão do Ciclo de Vida de Software</p>
+                          <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">Sistemas em Desenvolvimento</h2>
+                          <p className="text-slate-500 font-bold mt-1 text-xs md:text-base">Gestão do Ciclo de Vida de Software</p>
                         </div>
-                        <div className="flex items-center gap-4">
-                          <div className="bg-violet-100 text-violet-700 px-4 py-2 rounded-lg md:rounded-xl text-sm font-black uppercase tracking-widest">
-                            {unidades.filter(u => u.nome.startsWith('SISTEMA:')).length} Sistemas
-                          </div>
+                        <div className="flex items-center gap-3 md:gap-4 mt-6 md:mt-0">
                           <button
                             onClick={() => setShowConsolidatedBacklog(true)}
-                            className="bg-violet-600 text-white px-6 py-3 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-violet-700 transition-all flex items-center gap-3"
+                            className="flex-1 md:flex-none bg-violet-600 text-white px-4 md:px-6 py-3 rounded-lg md:rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-violet-700 transition-all flex items-center justify-center gap-2 md:gap-3"
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
-                            Backlog Consolidado
+                            Backlog <span className="hidden md:inline">Consolidado</span>
                           </button>
                           <button
                             onClick={() => {
                               setSettingsTab('sistemas');
                               setIsSettingsModalOpen(true);
                             }}
-                            className="bg-slate-900 text-white px-6 py-3 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center gap-3"
+                            className="flex-1 md:flex-none bg-slate-900 text-white px-4 md:px-6 py-3 rounded-lg md:rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center justify-center gap-2 md:gap-3"
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
-                            Novo Sistema
+                            Novo <span className="hidden md:inline">Sistema</span>
                           </button>
                         </div>
                       </div>
@@ -7918,27 +8072,37 @@ const App: React.FC = () => {
                                       </div>
 
                                       <div className="flex flex-col gap-4">
-                                        <div className="flex bg-white p-1 rounded-lg md:rounded-xl border border-slate-200 w-fit self-end">
-                                          <button
-                                            onClick={() => setNewLogTipo('desenvolvimento')}
-                                            className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${newLogTipo === 'desenvolvimento' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
-                                          >
-                                            Desenvolvimento
-                                          </button>
-                                          <button
-                                            onClick={() => setNewLogTipo('ajuste')}
-                                            className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${newLogTipo === 'ajuste' ? 'bg-amber-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
-                                          >
-                                            Ajuste
-                                          </button>
+                                        <div className="relative">
+                                          <textarea
+                                            value={newLogText}
+                                            onChange={(e) => setNewLogText(e.target.value)}
+                                            placeholder="O que foi feito no sistema?"
+                                            rows={4}
+                                            className="w-full bg-white border border-slate-200 rounded-none md:rounded-2xl px-6 py-4 pr-16 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-violet-500 outline-none transition-all resize-none shadow-sm"
+                                          />
+                                          <div className="absolute right-4 top-4 flex flex-col gap-2">
+                                            <button
+                                              onClick={isRecordingLog ? stopLogRecording : startLogRecording}
+                                              disabled={isProcessingLog}
+                                              className={`p-3 rounded-xl transition-all ${
+                                                isRecordingLog
+                                                  ? 'bg-rose-600 text-white animate-pulse shadow-lg'
+                                                  : isProcessingLog
+                                                    ? 'bg-violet-100 text-violet-600 cursor-wait'
+                                                    : 'bg-slate-100 text-slate-400 hover:text-violet-600'
+                                              }`}
+                                              title="Transcrever áudio"
+                                            >
+                                              {isProcessingLog ? (
+                                                <div className="w-5 h-5 border-2 border-violet-600 border-t-transparent rounded-full animate-spin"></div>
+                                              ) : isRecordingLog ? (
+                                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
+                                              ) : (
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                                              )}
+                                            </button>
+                                          </div>
                                         </div>
-                                        <textarea
-                                          value={newLogText}
-                                          onChange={(e) => setNewLogText(e.target.value)}
-                                          placeholder="O que foi feito ou o que precisa ser ajustado?"
-                                          rows={4}
-                                          className="w-full bg-white border border-slate-200 rounded-none md:rounded-2xl px-6 py-4 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-violet-500 outline-none transition-all resize-none shadow-sm"
-                                        />
                                         <div className="flex flex-wrap gap-2">
                                           {newLogAttachments.map((at, i) => (
                                             <div key={i} className="relative group/at">
@@ -7996,7 +8160,7 @@ const App: React.FC = () => {
                                           <div className="flex items-start justify-between gap-6">
                                             <div className="flex-1 space-y-2">
                                               <div className="flex items-center gap-3">
-                                                <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-wider ${log.tipo === 'desenvolvimento' ? 'bg-violet-100 text-violet-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-wider ${log.tipo === 'desenvolvimento' ? 'bg-violet-100 text-violet-700' : log.tipo === 'ajuste' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
                                                   {log.tipo}
                                                 </span>
                                                 <span className="text-[8px] font-black text-slate-300 uppercase">{new Date(log.data_criacao).toLocaleDateString('pt-BR')}</span>
@@ -8191,7 +8355,7 @@ const App: React.FC = () => {
                                             <div className="flex items-start justify-between gap-6">
                                               <div className="flex-1 space-y-3">
                                                 <div className="flex items-center gap-3">
-                                                  <span className={`text-[8px] font-black px-2 py-1 rounded uppercase tracking-widest ${log.tipo === 'desenvolvimento' ? 'bg-violet-100 text-violet-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                  <span className={`text-[8px] font-black px-2 py-1 rounded uppercase tracking-widest ${log.tipo === 'desenvolvimento' ? 'bg-violet-100 text-violet-700' : log.tipo === 'ajuste' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
                                                     {log.tipo}
                                                   </span>
                                                   <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">{new Date(log.data_criacao).toLocaleDateString('pt-BR')}</span>
@@ -8319,21 +8483,6 @@ const App: React.FC = () => {
                                   </div>
                                   <div className="p-8 space-y-6">
                                     <div className="space-y-4">
-                                      <div className="flex bg-slate-100 p-1 rounded-xl w-fit">
-                                        <button
-                                          onClick={() => setEditingWorkItem({ ...editingWorkItem, tipo: 'desenvolvimento' })}
-                                          className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${editingWorkItem.tipo === 'desenvolvimento' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
-                                        >
-                                          Desenvolvimento
-                                        </button>
-                                        <button
-                                          onClick={() => setEditingWorkItem({ ...editingWorkItem, tipo: 'ajuste' })}
-                                          className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${editingWorkItem.tipo === 'ajuste' ? 'bg-amber-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
-                                        >
-                                          Ajuste
-                                        </button>
-                                      </div>
-                                      
                                       <div className="space-y-2">
                                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Descrição</label>
                                         <textarea

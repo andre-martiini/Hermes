@@ -330,7 +330,7 @@ export interface WorkItemAudit {
 export interface WorkItem {
     id: string;
     sistema_id: string;
-    tipo: 'desenvolvimento' | 'ajuste';
+    tipo: 'desenvolvimento' | 'ajuste' | 'log';
     descricao: string;
     concluido: boolean;
     data_criacao: string;
