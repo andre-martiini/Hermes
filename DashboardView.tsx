@@ -231,7 +231,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
         return (
             <div className="flex items-center gap-6">
-                <svg viewBox="0 0 100 100" className="w-24 h-24 transform -rotate-90">
+                <svg viewBox="0 0 100 100" className="w-32 h-32 transform -rotate-90">
                     {data.map((item, i) => {
                         const angle = (item[1] / total) * 360;
                         const x1 = 50 + 40 * Math.cos((currentAngle * Math.PI) / 180);
@@ -261,10 +261,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         );
     };
 
-    const BarChart = ({ data, color, maxHeight = 60 }: { data: number[], color: string, maxHeight?: number }) => {
+    const BarChart = ({ data, color, maxHeight = 80 }: { data: number[], color: string, maxHeight?: number }) => {
         const max = Math.max(...data, 1);
         return (
-            <div className="flex items-end gap-0.5 h-[60px] w-full bg-slate-50/50 rounded-lg px-2">
+            <div className="flex items-end gap-0.5 h-[80px] w-full bg-slate-50/50 rounded-lg px-2">
                 {data.map((v, i) => (
                     <div
                         key={i}
@@ -307,8 +307,16 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     };
 
     return (
-        <div className="animate-in fade-in duration-700 space-y-6 md:space-y-10 pb-12">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="animate-in fade-in duration-700 space-y-8 md:space-y-12 pb-20">
+            <div className="max-w-6xl mx-auto px-4 md:px-0 text-center md:text-left">
+                <h2 className="text-3xl md:text-5xl font-black text-slate-900 tracking-tighter uppercase mb-2">Painel de Controle</h2>
+                <div className="flex items-center justify-center md:justify-start gap-3">
+                    <span className="w-12 h-1 bg-blue-600 rounded-full"></span>
+                    <p className="text-slate-400 text-[10px] md:text-xs font-black uppercase tracking-[0.2em]">Visão Geral • André Martini</p>
+                </div>
+            </div>
+            
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 max-w-6xl mx-auto">
 
                 {/* CARD: AÇÕES */}
                 <DashboardCard
