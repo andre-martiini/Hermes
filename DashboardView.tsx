@@ -309,17 +309,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     };
 
     return (
-        <div className="animate-in fade-in duration-700 space-y-8 md:space-y-12 pb-20">
-            <div className="max-w-6xl mx-auto px-4 md:px-0 flex flex-col md:flex-row items-center justify-between gap-6">
-                <div className="text-center md:text-left">
-                    <h2 className="text-3xl md:text-5xl font-black text-slate-900 tracking-tighter uppercase mb-2">Painel de Controle</h2>
-                    <div className="flex items-center justify-center md:justify-start gap-3">
-                        <span className="w-12 h-1 bg-blue-600 rounded-full"></span>
-                        <p className="text-slate-400 text-[10px] md:text-xs font-black uppercase tracking-[0.2em]">Visão Geral • André Martini</p>
-                    </div>
-                </div>
-
-            </div>
+        <div className="animate-in fade-in duration-700 space-y-8 md:space-y-12 pb-20 pt-8">
             
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 max-w-6xl mx-auto">
 

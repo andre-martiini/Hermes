@@ -5292,6 +5292,9 @@ const App: React.FC = () => {
   const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude'>('dashboard');
   const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'finance' | 'saude' | 'ferramentas' | 'sistemas-dev' | 'knowledge'>('dashboard');
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
+  const [isSidebarRetracted, setIsSidebarRetracted] = useState(false);
+  const [financeActiveTab, setFinanceActiveTab] = useState<'dashboard' | 'fixed'>('dashboard');
+  const [isFinanceSettingsOpen, setIsFinanceSettingsOpen] = useState(false);
 
   // Modal Mode State
   const [taskModalMode, setTaskModalMode] = useState<'default' | 'edit' | 'execute'>('default');
@@ -5960,6 +5963,66 @@ const App: React.FC = () => {
       };
       await setDoc(doc(db, 'conhecimento', item.id), knowledgeItem);
       showToast("Arquivo enviado e indexação iniciada.", "success");
+    }
+  };
+
+  const handleProcessarIA = async (itemId: string) => {
+    try {
+      const processarIA = httpsCallable(functions, 'processarArquivoIA');
+      // No front-end limpamos os campos para dar feedback visual imediato se quisermos, 
+      // mas o backend já faz isso. O importante é o feedback de "Solicitando..."
+      showToast("Solicitando processamento à IA...", "info");
+      
+      const result = await processarIA({ itemId });
+      const data = result.data as any;
+      
+      if (data.success) {
+        showToast("Arquivo processado com sucesso!", "success");
+      } else {
+        showToast("Erro ao processar: " + (data.error || "Erro desconhecido"), "error");
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("Falha na comunicação com a IA.", "error");
+    }
+  };
+
+  const handleNavigateToOrigin = (modulo: string, id: string) => {
+    switch (modulo) {
+      case 'tarefas':
+        const task = tarefas.find(t => t.id === id);
+        if (task) {
+          setSelectedTask(task);
+          if (task.categoria === 'CLC') setViewMode('licitacoes');
+          else if (task.categoria === 'ASSISTÊNCIA') setViewMode('assistencia');
+          else setViewMode('gallery');
+          setActiveModule('acoes');
+        } else {
+          showToast("Ação não encontrada.", "error");
+        }
+        break;
+      case 'sistemas':
+        const workItem = workItems.find(w => w.id === id);
+        if (workItem) {
+          setSelectedSystemId(workItem.sistema_id);
+          setViewMode('sistemas-dev');
+          setActiveModule('acoes');
+          // setIsLogsModalOpen(true); // Opcional: abrir modal se existir
+        } else {
+          showToast("Log de sistema não encontrado.", "error");
+        }
+        break;
+      case 'saude':
+        const exam = exams.find(e => e.id === id);
+        if (exam) {
+          setViewMode('saude');
+          setActiveModule('saude');
+        } else {
+          showToast("Exame não encontrado.", "error");
+        }
+        break;
+      default:
+        showToast("Módulo não mapeado para navegação.", "info");
     }
   };
 
@@ -6820,14 +6883,19 @@ const App: React.FC = () => {
       )}
 
       {/* Sidebar Desktop */}
-      <aside className="hidden md:flex w-72 bg-slate-900 text-white flex-col h-screen sticky top-0 overflow-y-auto shrink-0 z-50 shadow-2xl">
-        <div className="p-8 flex flex-col h-full gap-10">
-          <div className="flex items-center gap-4">
-            <img src="/logo.png" alt="Hermes" className="w-12 h-12 object-contain" />
-            <div>
-              <h1 className="text-2xl font-black tracking-tighter">HERMES</h1>
-              <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Management System</p>
-            </div>
+      <aside className={`hidden md:flex ${isSidebarRetracted ? 'w-24' : 'w-72'} bg-slate-900 text-white flex-col h-screen sticky top-0 overflow-y-auto shrink-0 z-50 shadow-2xl transition-all duration-300`}>
+        <div className={`p-8 flex flex-col h-full ${isSidebarRetracted ? 'gap-8 items-center pt-10' : 'gap-10'}`}>
+          <div 
+            className={`flex items-center gap-4 cursor-pointer hover:opacity-80 transition-opacity ${isSidebarRetracted ? 'flex-col' : ''}`}
+            onClick={() => setIsSidebarRetracted(!isSidebarRetracted)}
+          >
+            <img src="/logo.png" alt="Hermes" className={`${isSidebarRetracted ? 'w-14 h-14' : 'w-12 h-12'} object-contain`} />
+            {!isSidebarRetracted && (
+              <div>
+                <h1 className="text-2xl font-black tracking-tighter">HERMES</h1>
+                <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Management System</p>
+              </div>
+            )}
           </div>
 
           <nav className="flex flex-col gap-2">
@@ -6843,34 +6911,63 @@ const App: React.FC = () => {
               <button
                 key={item.id}
                 onClick={item.onClick}
-                className={`flex items-center gap-4 px-6 py-4 rounded-2xl transition-all duration-300 group ${item.active ? 'bg-white text-slate-900 shadow-xl' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+                className={`flex items-center gap-4 px-6 py-4 rounded-2xl transition-all duration-300 group ${item.active ? 'bg-white text-slate-900 shadow-xl' : 'text-slate-400 hover:text-white hover:bg-white/5'} ${isSidebarRetracted ? 'justify-center' : ''}`}
+                title={isSidebarRetracted ? item.label : ''}
               >
                 <div className={`${item.active ? 'text-slate-900' : 'group-hover:scale-110 transition-transform duration-300'}`}>
                   {item.icon}
                 </div>
-                <span className="text-[11px] font-black uppercase tracking-widest">{item.label}</span>
+                {!isSidebarRetracted && <span className="text-[11px] font-black uppercase tracking-widest">{item.label}</span>}
               </button>
             ))}
           </nav>
 
           <div className="mt-auto flex flex-col gap-6">
-            <div className="flex items-center gap-3 bg-white/5 p-4 rounded-2xl border border-white/5">
-              {user?.photoURL && (
-                <img src={user.photoURL} alt="Profile" className="w-10 h-10 rounded-xl shadow-sm border border-white/10" />
+            <div className={`flex items-center gap-3 bg-white/5 p-4 rounded-2xl border border-white/5 ${isSidebarRetracted ? 'flex-col gap-4' : ''}`}>
+              {isSidebarRetracted ? (
+                <>
+                  <div 
+                    className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center font-black text-[10px] text-white border border-white/10 shadow-lg"
+                    title={user?.displayName || "Usuário"}
+                  >
+                    {user?.displayName ? user.displayName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'A'}
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    className="p-2 text-slate-500 hover:text-rose-400 transition-colors"
+                    title="Sair do Sistema"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    </svg>
+                  </button>
+                </>
+              ) : (
+                <>
+                  {user?.photoURL ? (
+                    <img src={user.photoURL} alt="Profile" className="w-10 h-10 rounded-xl shadow-sm border border-white/10" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center font-black text-xs text-white border border-white/10">
+                      {user?.displayName ? user.displayName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'A'}
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-black uppercase tracking-tight text-white truncate">{user?.displayName}</p>
+                    <button
+                      onClick={handleLogout}
+                      className="text-[8px] font-black text-slate-500 hover:text-rose-400 uppercase tracking-widest transition-colors"
+                    >
+                      Sair do Sistema
+                    </button>
+                  </div>
+                </>
               )}
-              <div className="flex-1 min-w-0">
-                <p className="text-[10px] font-black uppercase tracking-tight text-white truncate">{user?.displayName}</p>
-                <button
-                  onClick={handleLogout}
-                  className="text-[8px] font-black text-slate-500 hover:text-rose-400 uppercase tracking-widest transition-colors"
-                >
-                  Sair do Sistema
-                </button>
-              </div>
             </div>
-            <p className="text-center text-[8px] font-black text-slate-700 uppercase tracking-widest">
-              Hermes v2.5.0 • 2024
-            </p>
+            {!isSidebarRetracted && (
+              <p className="text-center text-[8px] font-black text-slate-700 uppercase tracking-widest">
+                Hermes v2.5.0 • 2024
+              </p>
+            )}
           </div>
         </div>
       </aside>
@@ -6957,7 +7054,20 @@ const App: React.FC = () => {
                       onNavigate={handleNotificationNavigate}
                     />
                   </div>
-                  {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && (
+                  <div className="relative">
+                    <button
+                      onClick={handleSync}
+                      className="p-1.5 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors text-slate-700 relative"
+                      aria-label="Sincronizar"
+                      title={isSyncing ? 'Monitorar Sync' : 'Sync Google'}
+                    >
+                      <svg className={`w-5 h-5 ${isSyncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                      {isSyncing && (
+                        <span className="absolute top-2.5 right-2.5 w-2.5 h-2.5 bg-blue-500 border-2 border-white rounded-full animate-ping"></span>
+                      )}
+                    </button>
+                  </div>
+                  {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && (
                     <button
                       onClick={() => setIsCreateModalOpen(true)}
                       className="bg-slate-900 text-white p-1.5 rounded-lg md:rounded-xl shadow-lg hover:bg-slate-800 transition-all active:scale-95"
@@ -6978,10 +7088,18 @@ const App: React.FC = () => {
                       onClick={() => { setActiveModule('dashboard'); setViewMode('dashboard'); }}
                       className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
                     >
-                      <h1 className="text-xl font-black tracking-tighter text-slate-900 uppercase">{activeModule === 'dashboard' ? 'Painel de Controle' : activeModule === 'acoes' ? 'Gestão de Ações' : activeModule === 'financeiro' ? 'Financeiro' : activeModule === 'saude' ? 'Saúde' : 'Hermes'}</h1>
+                      <h1 className="text-xl font-black tracking-tighter text-slate-900 uppercase">
+                        {viewMode === 'knowledge' ? 'Conhecimento' : 
+                         viewMode === 'sistemas-dev' ? 'Sistemas' :
+                         viewMode === 'ferramentas' ? 'Ferramentas' :
+                         activeModule === 'dashboard' ? 'Dashboard' : 
+                         activeModule === 'acoes' ? 'Ações' : 
+                         activeModule === 'financeiro' ? 'Financeiro' : 
+                         activeModule === 'saude' ? 'Saúde' : 'Hermes'}
+                      </h1>
                     </div>
                   </div>
-                  {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
+                  {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
                     <nav className="flex bg-slate-100 p-1 rounded-lg md:rounded-xl border border-slate-200">
                       <button
                         onClick={() => {
@@ -6993,73 +7111,100 @@ const App: React.FC = () => {
                         Ações
                       </button>
                       <button onClick={() => setViewMode('pgc')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pgc' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>PGC</button>
-                      <button onClick={() => setViewMode('knowledge')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'knowledge' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>Docs</button>
                     </nav>
                   )}
                 </div>
 
-                {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && (
+                {viewMode === 'sistemas-dev' && !selectedSystemId && (
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setShowConsolidatedBacklog(true)}
+                      className="bg-violet-600 text-white px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-violet-700 transition-all flex items-center gap-3"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                      Backlog <span className="hidden lg:inline">Consolidado</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSettingsTab('sistemas');
+                        setIsSettingsModalOpen(true);
+                      }}
+                      className="bg-slate-900 text-white px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+                      Novo <span className="hidden lg:inline">Sistema</span>
+                    </button>
+                  </div>
+                )}
+
+
+                {/* Finance Controls */}
+                {viewMode === 'finance' && (
                   <div className="flex items-center gap-4">
-                    <div className="relative">
-                      <button
-                        onClick={() => {
-                          setIsQuickNoteModalOpen(true);
-                        }}
-                        className="bg-white border border-slate-200 text-amber-500 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
-                        aria-label="Notas Rápidas"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-                      </button>
-                    </div>
-                    <div className="relative">
-                      <button
-                        onClick={() => {
-                          setActiveModule('acoes');
-                          setViewMode('sistemas-dev');
-                          setShowConsolidatedBacklog(true);
-                        }}
-                        className="bg-white border border-slate-200 text-violet-600 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
-                        aria-label="Backlog Geral"
-                        title="Backlog Geral de Ajustes"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
-                      </button>
-                    </div>
-                    <div className="relative">
-                      <button
-                        onClick={() => setIsNotificationCenterOpen(!isNotificationCenterOpen)}
-                        className="bg-white border border-slate-200 text-slate-700 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative notification-trigger"
-                        aria-label="Notificações"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-                        {notifications.some(n => !n.isRead) && (
-                          <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-rose-500 border-2 border-white rounded-full"></span>
-                        )}
-                      </button>
-                      <NotificationCenter
-                        notifications={notifications}
-                        onMarkAsRead={handleMarkNotificationRead}
-                        onDismiss={handleDismissNotification}
-                        isOpen={isNotificationCenterOpen}
-                        onClose={() => setIsNotificationCenterOpen(false)}
-                        onUpdateOverdue={handleUpdateOverdueTasks}
-                        onNavigate={handleNotificationNavigate}
-                      />
-                    </div>
+                     <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+                        <button
+                          onClick={() => setFinanceActiveTab('dashboard')}
+                          className={`px-4 py-1.5 text-[10px] uppercase font-black rounded-lg transition-all ${financeActiveTab === 'dashboard' ? 'bg-white shadow-sm text-slate-900 border border-slate-100' : 'text-slate-400 hover:text-slate-600'}`}
+                        >
+                          Visão Geral
+                        </button>
+                        <button
+                          onClick={() => setFinanceActiveTab('fixed')}
+                          className={`px-4 py-1.5 text-[10px] uppercase font-black rounded-lg transition-all ${financeActiveTab === 'fixed' ? 'bg-white shadow-sm text-slate-900 border border-slate-100' : 'text-slate-400 hover:text-slate-600'}`}
+                        >
+                          Rendas e Obrigações
+                        </button>
+                     </div>
+
+                     <div className="flex items-center bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                        <button
+                          onClick={() => {
+                            const newMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+                            const newYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+                            setCurrentMonth(newMonth);
+                            setCurrentYear(newYear);
+                          }}
+                          className="p-2 hover:bg-slate-50 text-slate-400 hover:text-slate-900 transition-all border-r border-slate-100"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 19l-7-7 7-7" /></svg>
+                        </button>
+                        <div className="px-3 text-center min-w-[100px]">
+                            <div className="text-[10px] font-black text-slate-900 capitalize leading-none tracking-tight">
+                                {new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(new Date(currentYear, currentMonth))}
+                            </div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            const newMonth = currentMonth === 11 ? 0 : currentMonth + 1;
+                            const newYear = currentMonth === 11 ? currentYear + 1 : currentYear;
+                            setCurrentMonth(newMonth);
+                            setCurrentYear(newYear);
+                          }}
+                          className="p-2 hover:bg-slate-50 text-slate-400 hover:text-slate-900 transition-all border-l border-slate-100"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
+                        </button>
+                     </div>
+
+                     <button
+                        onClick={() => setIsFinanceSettingsOpen(!isFinanceSettingsOpen)}
+                        className={`p-2 rounded-xl transition-all border ${isFinanceSettingsOpen ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-50 hover:text-slate-900 shadow-sm'}`}
+                        title="Configurações Financeiras"
+                     >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                     </button>
+                  </div>
+                )}
+
+                {/* Standard Action Buttons (Search, Sync, Create) */}
+                {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && (
+                  <div className="flex items-center gap-4">
                     {activeModule !== 'dashboard' && (
                       <div className="hidden lg:flex items-center bg-slate-50 border border-slate-200 rounded-lg md:rounded-xl px-4 py-2 w-64 group focus-within:ring-2 focus-within:ring-blue-500 focus-within:bg-white transition-all">
                         <svg className="w-4 h-4 text-slate-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                         <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none outline-none text-xs font-bold text-slate-900 w-full" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                       </div>
                     )}
-                    <button
-                      onClick={handleSync}
-                      className={`bg-white border border-slate-200 text-slate-700 px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-3 shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative`}
-                    >
-                      <svg className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                      {isSyncing ? 'Monitorar Sync' : 'Sync Google'}
-                      {isSyncing && <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full animate-ping"></span>}
-                    </button>
                     <button
                       onClick={() => setIsCreateModalOpen(true)}
                       className="bg-slate-900 text-white px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg hover:bg-slate-800 transition-all active:scale-95"
@@ -7069,6 +7214,66 @@ const App: React.FC = () => {
                     </button>
                   </div>
                 )}
+                {/* Global Header Actions (Notes, Backlog, Notifs, Sync) - Persistent at Right */}
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <button
+                      onClick={() => setIsQuickNoteModalOpen(true)}
+                      className="bg-white border border-slate-200 text-amber-500 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
+                      aria-label="Notas Rápidas"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <button
+                      onClick={() => {
+                        setActiveModule('acoes');
+                        setViewMode('sistemas-dev');
+                        setShowConsolidatedBacklog(true);
+                      }}
+                      className="bg-white border border-slate-200 text-violet-600 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
+                      aria-label="Backlog Geral"
+                      title="Backlog Geral de Ajustes"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <button
+                      onClick={() => setIsNotificationCenterOpen(!isNotificationCenterOpen)}
+                      className="bg-white border border-slate-200 text-slate-700 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative notification-trigger"
+                      aria-label="Notificações"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+                      {notifications.some(n => !n.isRead) && (
+                        <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-rose-500 border-2 border-white rounded-full"></span>
+                      )}
+                    </button>
+                    <NotificationCenter
+                      notifications={notifications}
+                      onMarkAsRead={handleMarkNotificationRead}
+                      onDismiss={handleDismissNotification}
+                      isOpen={isNotificationCenterOpen}
+                      onClose={() => setIsNotificationCenterOpen(false)}
+                      onUpdateOverdue={handleUpdateOverdueTasks}
+                      onNavigate={handleNotificationNavigate}
+                    />
+                  </div>
+                  <div className="relative">
+                    <button
+                      onClick={handleSync}
+                      className="bg-white border border-slate-200 text-slate-700 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
+                      aria-label="Sincronizar"
+                      title={isSyncing ? 'Monitorar Sync' : 'Sync Google'}
+                    >
+                      <svg className={`w-5 h-5 ${isSyncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                      {isSyncing && (
+                        <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-blue-500 border-2 border-white rounded-full animate-ping"></span>
+                      )}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -7683,13 +7888,21 @@ const App: React.FC = () => {
                   onAddTransaction={async (t) => { await addDoc(collection(db, 'finance_transactions'), { ...t, status: 'active' }); }}
                   onUpdateTransaction={async (t) => { await updateDoc(doc(db, 'finance_transactions', t.id), t as any); }}
                   onDeleteTransaction={async (id) => { await updateDoc(doc(db, 'finance_transactions', id), { status: 'deleted' }); }}
+                  activeTab={financeActiveTab}
+                  setActiveTab={setFinanceActiveTab}
+                  isSettingsOpen={isFinanceSettingsOpen}
+                  setIsSettingsOpen={setIsFinanceSettingsOpen}
                 />
 
               ) : viewMode === 'knowledge' ? (
                 <KnowledgeView
                   items={knowledgeItems}
-                  onDeleteItem={handleDeleteKnowledgeItem}
+                  onDeleteItem={async (id) => { await deleteDoc(doc(db, 'conhecimento', id)); }}
                   onUploadFile={handleUploadKnowledgeFile}
+                  onProcessWithAI={handleProcessarIA}
+                  onNavigateToOrigin={handleNavigateToOrigin}
+                  allTasks={tarefas}
+                  allWorkItems={workItems}
                 />
               ) : viewMode === 'sistemas-dev' ? (
                 <div className="space-y-8 animate-in fade-in duration-500 pb-20">
@@ -7704,33 +7917,7 @@ const App: React.FC = () => {
                   ) : !selectedSystemId ? (
                     /* VISÃO GERAL - LISTA DE SISTEMAS */
                     <>
-                      <div className="flex flex-col md:flex-row bg-white border border-slate-200 rounded-none md:rounded-[2rem] p-6 md:p-8 shadow-sm md:items-center justify-between mb-0 md:mb-8">
-                        <div>
-                          <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">Sistemas em Desenvolvimento</h2>
-                          <p className="text-slate-500 font-bold mt-1 text-xs md:text-base">Gestão do Ciclo de Vida de Software</p>
-                        </div>
-                        <div className="flex items-center gap-3 md:gap-4 mt-6 md:mt-0">
-                          <button
-                            onClick={() => setShowConsolidatedBacklog(true)}
-                            className="flex-1 md:flex-none bg-violet-600 text-white px-4 md:px-6 py-3 rounded-lg md:rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-violet-700 transition-all flex items-center justify-center gap-2 md:gap-3"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
-                            Backlog <span className="hidden md:inline">Consolidado</span>
-                          </button>
-                          <button
-                            onClick={() => {
-                              setSettingsTab('sistemas');
-                              setIsSettingsModalOpen(true);
-                            }}
-                            className="flex-1 md:flex-none bg-slate-900 text-white px-4 md:px-6 py-3 rounded-lg md:rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center justify-center gap-2 md:gap-3"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
-                            Novo <span className="hidden md:inline">Sistema</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-0 md:gap-8 px-0">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-0 md:gap-8 px-0 pt-8">
                         {unidades.filter(u => u.nome.startsWith('SISTEMA:')).map(unit => {
                           const sysDetails = sistemasDetalhes.find(s => s.id === unit.id) || {
                             id: unit.id,

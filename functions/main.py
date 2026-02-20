@@ -611,7 +611,7 @@ def on_vectorize_requested(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishe
     except Exception as e:
         print(f"Erro ao processar mensagem PubSub: {e}")
 
-@https_fn.on_call()
+@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=540)
 def vectorize_process_docs_callable(req: https_fn.CallableRequest):
     """Versão callable para o frontend ou testes manuais"""
     task_id = req.data.get('taskId')
@@ -762,20 +762,8 @@ def transcreverAudio(req: https_fn.CallableRequest):
             except:
                 pass
 
-@firestore_fn.on_document_created(document="conhecimento/{itemId}")
-def on_arquivo_adicionado(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]):
-    """
-    Trigger disparado quando um novo arquivo é adicionado à coleção de conhecimento.
-    Usa Gemini para indexação inteligente.
-    """
-    if not event.data: return
-    item_data = event.data.to_dict()
-    item_id = event.params["itemId"]
-
-    # Previne re-processamento
-    if item_data.get('tags') and item_data.get('resumo_tldr'):
-        return
-
+def start_file_indexing(item_id, item_data):
+    """Lógica central de indexação com Gemini"""
     url_drive = item_data.get('url_drive')
     if not url_drive: return
 
@@ -798,7 +786,7 @@ def on_arquivo_adicionado(event: firestore_fn.Event[firestore_fn.DocumentSnapsho
         import json
 
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        model = genai.GenerativeModel("gemini-2.5-flash-lite") # Usando modelo preferencial do André
 
         service = get_drive_service()
         file_metadata = service.files().get(fileId=file_id, fields='mimeType, name').execute()
@@ -844,7 +832,7 @@ def on_arquivo_adicionado(event: firestore_fn.Event[firestore_fn.DocumentSnapsho
             4. texto_bruto: O próprio texto.
 
             CONTEÚDO:
-            {text_content[:10000]}
+            {text_content[:100000]}
             """
             parts = [prompt]
 
@@ -866,7 +854,45 @@ def on_arquivo_adicionado(event: firestore_fn.Event[firestore_fn.DocumentSnapsho
                 updates['texto_bruto'] = data.get('texto_bruto') or item_data.get('titulo')
 
             db.collection('conhecimento').document(item_id).set(updates, merge=True)
-            print(f"Arquivo {item_id} indexado com sucesso.")
+            return {'success': True, 'item_id': item_id}
+        return {'success': False, 'error': 'Não foi possível gerar metadados JSON'}
 
     except Exception as e:
         print(f"Erro ao processar arquivo {item_id}: {str(e)}")
+        return {'success': False, 'error': str(e)}
+
+@firestore_fn.on_document_created(document="conhecimento/{itemId}")
+def on_arquivo_adicionado(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]):
+    """Trigger disparado quando um novo arquivo é adicionado"""
+    if not event.data: return
+    item_data = event.data.to_dict()
+    item_id = event.params["itemId"]
+
+    if item_data.get('tags') and item_data.get('resumo_tldr'):
+        return
+
+    start_file_indexing(item_id, item_data)
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.GB_2,
+    timeout_sec=540
+)
+def processarArquivoIA(req: https_fn.CallableRequest):
+    """Callable para disparar processamento manual"""
+    item_id = req.data.get('itemId')
+    if not item_id:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="ID do item é obrigatório")
+    
+    db = get_db()
+    doc = db.collection('conhecimento').document(item_id).get()
+    if not doc.exists:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.NOT_FOUND, message="Arquivo não encontrado")
+    
+    # Limpa campos antigos para mostrar o loader no front se necessário e garantir re-processamento
+    db.collection('conhecimento').document(item_id).update({
+        'resumo_tldr': None,
+        'tags': None
+    })
+
+    return start_file_indexing(item_id, doc.to_dict())
