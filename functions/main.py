@@ -599,3 +599,112 @@ def transcreverAudio(req: https_fn.CallableRequest):
                 os.remove(temp_filename)
             except:
                 pass
+
+@firestore_fn.on_document_created(document="conhecimento/{itemId}")
+def on_arquivo_adicionado(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]):
+    """
+    Trigger disparado quando um novo arquivo é adicionado à coleção de conhecimento.
+    Usa Gemini para indexação inteligente.
+    """
+    if not event.data: return
+    item_data = event.data.to_dict()
+    item_id = event.params["itemId"]
+
+    # Previne re-processamento
+    if item_data.get('tags') and item_data.get('resumo_tldr'):
+        return
+
+    url_drive = item_data.get('url_drive')
+    if not url_drive: return
+
+    import re
+    def extract_file_id(url):
+        match = re.search(r'[-\w]{25,}', url)
+        return match.group(0) if match else None
+
+    file_id = extract_file_id(url_drive)
+    if not file_id: return
+
+    try:
+        db = get_db()
+        keys_doc = db.collection('system').document('api_keys').get()
+        if not keys_doc.exists: return
+        GEMINI_API_KEY = keys_doc.to_dict().get('gemini_api_key')
+        if not GEMINI_API_KEY: return
+
+        import google.generativeai as genai
+        import json
+
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel("gemini-3-flash-preview")
+
+        service = get_drive_service()
+        file_metadata = service.files().get(fileId=file_id, fields='mimeType, name').execute()
+        mime_type = file_metadata.get('mimeType')
+
+        request = service.files().get_media(fileId=file_id)
+        content = request.execute()
+
+        prompt = ""
+        parts = []
+
+        if mime_type.startswith('image/'):
+            prompt = """
+            Analise esta imagem e retorne em JSON:
+            1. ocr: Todo o texto escrito na imagem.
+            2. descricao: Descrição semântica detalhada.
+            3. resumo_tldr: Resumo de até 3 linhas.
+            4. tags: Lista de 5-10 palavras-chave.
+            5. categoria: Uma única palavra de classificação.
+            """
+            parts = [{"mime_type": mime_type, "data": content}, prompt]
+        elif mime_type == 'application/pdf':
+            prompt = """
+            Analise este PDF e retorne em JSON:
+            1. texto_bruto: Conteúdo principal extraído.
+            2. resumo_tldr: Resumo de até 3 linhas.
+            3. tags: Lista de 5-10 palavras-chave.
+            4. categoria: Uma única palavra de classificação.
+            """
+            parts = [{"mime_type": mime_type, "data": content}, prompt]
+        else:
+            text_content = ""
+            try:
+                text_content = content.decode('utf-8')
+            except:
+                text_content = "[Binário]"
+
+            prompt = f"""
+            Analise este conteúdo e retorne em JSON:
+            1. resumo_tldr: Resumo de até 3 linhas.
+            2. tags: Lista de 5-10 palavras-chave.
+            3. categoria: Uma única palavra de classificação.
+            4. texto_bruto: O próprio texto.
+
+            CONTEÚDO:
+            {text_content[:10000]}
+            """
+            parts = [prompt]
+
+        response = model.generate_content(parts)
+        res_text = response.text
+
+        json_match = re.search(r'\{.*\}', res_text, re.DOTALL)
+        if json_match:
+            data = json.loads(json_match.group(0))
+            updates = {
+                'resumo_tldr': data.get('resumo_tldr'),
+                'tags': data.get('tags'),
+                'categoria': data.get('categoria', 'Geral').upper()
+            }
+
+            if mime_type.startswith('image/'):
+                updates['texto_bruto'] = f"OCR: {data.get('ocr')}\n\nDESCRIÇÃO: {data.get('descricao')}"
+            else:
+                updates['texto_bruto'] = data.get('texto_bruto') or item_data.get('titulo')
+
+            db.collection('conhecimento').document(item_id).set(updates, merge=True)
+            print(f"Arquivo {item_id} indexado com sucesso.")
+
+    except Exception as e:
+        print(f"Erro ao processar arquivo {item_id}: {str(e)}")

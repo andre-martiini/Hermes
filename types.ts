@@ -343,3 +343,20 @@ export interface GoogleCalendarEvent {
     data_fim: string;
     last_sync: string;
 }
+
+export interface ConhecimentoItem {
+    id: string;
+    titulo: string;
+    tipo_arquivo: string; // pdf, imagem, doc, etc
+    url_drive: string;
+    tamanho: number;
+    data_criacao: string;
+    texto_bruto?: string;
+    resumo_tldr?: string;
+    tags?: string[];
+    categoria?: string;
+    origem?: {
+        modulo: string;
+        id_origem: string;
+    } | null;
+}

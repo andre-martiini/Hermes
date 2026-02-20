@@ -9,7 +9,7 @@ import {
   DailyHabits, HealthSettings, HermesNotification, AppSettings,
   formatDate, formatDateLocalISO, Sistema, SistemaStatus, WorkItem, WorkItemPhase,
   WorkItemPriority, QualityLog, WorkItemAudit, GoogleCalendarEvent,
-  PoolItem, CustomNotification, HealthExam
+  PoolItem, CustomNotification, HealthExam, ConhecimentoItem
 } from './types';
 import HealthView from './HealthView';
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
@@ -21,6 +21,7 @@ import { httpsCallable } from 'firebase/functions';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import FinanceView from './FinanceView';
 import DashboardView from './DashboardView';
+import KnowledgeView from './KnowledgeView';
 
 
 type SortOption = 'date-asc' | 'date-desc' | 'priority-high' | 'priority-low';
@@ -3036,6 +3037,20 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
         acompanhamento: [...(currentTaskData.acompanhamento || []), ...newEntries]
       });
 
+      // Mirror to Knowledge base
+      for (const item of uploadedItems) {
+        const knowledgeItem: ConhecimentoItem = {
+          id: item.id,
+          titulo: item.nome || 'Sem título',
+          tipo_arquivo: item.nome?.split('.').pop()?.toLowerCase() || 'unknown',
+          url_drive: item.valor,
+          tamanho: 0,
+          data_criacao: item.data_criacao,
+          origem: { modulo: 'tarefas', id_origem: task.id }
+        };
+        setDoc(doc(db, 'conhecimento', item.id), knowledgeItem).catch(console.error);
+      }
+
       showToast(`${uploadedItems.length} arquivo(s) carregado(s) com sucesso.`, "success");
       return uploadedItems;
     } catch (err) {
@@ -4704,6 +4719,9 @@ const App: React.FC = () => {
   const [unidades, setUnidades] = useState<{ id: string, nome: string }[]>([]);
   const [sistemasAtivos, setSistemasAtivos] = useState<string[]>([]);
 
+  // Knowledge State
+  const [knowledgeItems, setKnowledgeItems] = useState<ConhecimentoItem[]>([]);
+
   const [isImportPlanOpen, setIsImportPlanOpen] = useState(false);
   const [isCompletedTasksOpen, setIsCompletedTasksOpen] = useState(false);
   const [brainstormIdeas, setBrainstormIdeas] = useState<BrainstormIdea[]>([]);
@@ -4977,7 +4995,7 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude'>('home');
-  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'finance' | 'saude' | 'ferramentas' | 'sistemas-dev'>('gallery');
+  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'finance' | 'saude' | 'ferramentas' | 'sistemas-dev' | 'knowledge'>('gallery');
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
 
   // Modal Mode State
@@ -5553,6 +5571,32 @@ const App: React.FC = () => {
     }
   };
 
+  const handleDeleteKnowledgeItem = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'conhecimento', id));
+      showToast("Arquivo removido do repositório.", "info");
+    } catch (e) {
+      showToast("Erro ao remover arquivo.", "error");
+    }
+  };
+
+  const handleUploadKnowledgeFile = async (file: File) => {
+    const item = await handleFileUploadToDrive(file);
+    if (item) {
+      const knowledgeItem: ConhecimentoItem = {
+        id: item.id,
+        titulo: item.nome || 'Sem título',
+        tipo_arquivo: item.nome?.split('.').pop()?.toLowerCase() || 'unknown',
+        url_drive: item.valor,
+        tamanho: 0,
+        data_criacao: item.data_criacao,
+        origem: null // Upload direto
+      };
+      await setDoc(doc(db, 'conhecimento', item.id), knowledgeItem);
+      showToast("Arquivo enviado e indexação iniciada.", "success");
+    }
+  };
+
   const handleFinalizeIdeaConversion = async (sistemaId: string) => {
     if (!convertingIdea) return;
     const unit = unidades.find(u => u.id === sistemaId);
@@ -5586,7 +5630,7 @@ const App: React.FC = () => {
   const handleCreateWorkItem = async (sistemaId: string, tipo: 'desenvolvimento' | 'ajuste', descricao: string, attachments: PoolItem[] = []) => {
     try {
       if (!descricao.trim()) return;
-      await addDoc(collection(db, 'sistemas_work_items'), {
+      const docRef = await addDoc(collection(db, 'sistemas_work_items'), {
         sistema_id: sistemaId,
         tipo,
         descricao,
@@ -5594,6 +5638,23 @@ const App: React.FC = () => {
         data_criacao: new Date().toISOString(),
         pool_dados: attachments
       });
+
+      // Mirror to Knowledge base
+      if (attachments.length > 0) {
+        for (const item of attachments) {
+          const knowledgeItem: ConhecimentoItem = {
+            id: item.id,
+            titulo: item.nome || 'Sem título',
+            tipo_arquivo: item.nome?.split('.').pop()?.toLowerCase() || 'unknown',
+            url_drive: item.valor,
+            tamanho: 0,
+            data_criacao: item.data_criacao,
+            origem: { modulo: 'sistemas', id_origem: docRef.id }
+          };
+          setDoc(doc(db, 'conhecimento', item.id), knowledgeItem).catch(console.error);
+        }
+      }
+
       showToast(`${tipo === 'desenvolvimento' ? 'Desenvolvimento' : 'Ajuste'} registrado!`, "success");
     } catch (err) {
       console.error(err);
@@ -5842,7 +5903,16 @@ const App: React.FC = () => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BrainstormIdea));
       setBrainstormIdeas(data.sort((a, b) => b.timestamp.localeCompare(a.timestamp)));
     });
-    return () => unsubscribeBrainstorm();
+
+    const unsubscribeKnowledge = onSnapshot(collection(db, 'conhecimento'), (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ConhecimentoItem));
+      setKnowledgeItems(data);
+    });
+
+    return () => {
+      unsubscribeBrainstorm();
+      unsubscribeKnowledge();
+    };
   }, []);
 
 
@@ -6426,7 +6496,7 @@ const App: React.FC = () => {
 
             {/* Cards dos Módulos */}
             {/* Cards dos Módulos */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-0 md:gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-0 md:gap-6">
 
               {/* Card Dashboard */}
               <button
@@ -6553,6 +6623,32 @@ const App: React.FC = () => {
                   <h2 className="text-lg md:text-xl font-black text-slate-900 mb-2 group-hover:text-amber-600 transition-colors">Ferramentas</h2>
                   <p className="text-slate-500 text-xs font-medium leading-relaxed">Notas Rápidas e IA</p>
                   <div className="mt-6 flex items-center gap-2 text-amber-600 font-black text-xs uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span>Acessar</span>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
+                </div>
+              </button>
+
+              {/* Card Conhecimento */}
+              <button
+                onClick={() => {
+                  setActiveModule('acoes');
+                  setViewMode('knowledge');
+                }}
+                className="group bg-white border border-slate-200 md:border-2 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-sky-500 hover:z-10 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden -ml-px -mt-px md:m-0"
+              >
+                <div className="absolute top-0 right-0 w-32 h-32 bg-sky-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
+                <div className="relative z-10">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-sky-600 rounded-lg md:rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300 text-white font-black">
+                    <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                    </svg>
+                  </div>
+                  <h2 className="text-lg md:text-xl font-black text-slate-900 mb-2 group-hover:text-sky-600 transition-colors">Conhecimento</h2>
+                  <p className="text-slate-500 text-xs font-medium leading-relaxed">Repositório de docs e IA</p>
+                  <div className="mt-6 flex items-center gap-2 text-sky-600 font-black text-xs uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
                     <span>Acessar</span>
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" />
@@ -6715,6 +6811,7 @@ const App: React.FC = () => {
                         Ações
                       </button>
                       <button onClick={() => setViewMode('pgc')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pgc' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>PGC</button>
+                      <button onClick={() => setViewMode('knowledge')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'knowledge' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>Docs</button>
                     </nav>
                   )}
                 </div>
@@ -6803,6 +6900,15 @@ const App: React.FC = () => {
                         className={`px-4 py-3 rounded-lg md:rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'pgc' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
                       >
                         📈 PGC
+                      </button>
+                      <button
+                        onClick={() => {
+                          setViewMode('knowledge');
+                          setIsMobileMenuOpen(false);
+                        }}
+                        className={`px-4 py-3 rounded-lg md:rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'knowledge' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
+                      >
+                        📂 Documentos
                       </button>
                     </>
                   )}
@@ -7356,6 +7462,12 @@ const App: React.FC = () => {
                   onDeleteTransaction={async (id) => { await updateDoc(doc(db, 'finance_transactions', id), { status: 'deleted' }); }}
                 />
 
+              ) : viewMode === 'knowledge' ? (
+                <KnowledgeView
+                  items={knowledgeItems}
+                  onDeleteItem={handleDeleteKnowledgeItem}
+                  onUploadFile={handleUploadKnowledgeFile}
+                />
               ) : viewMode === 'sistemas-dev' ? (
                 <div className="space-y-8 animate-in fade-in duration-500 pb-20">
                   {showConsolidatedBacklog ? (
