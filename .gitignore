@@ -31,3 +31,10 @@ firebase_service_account_key.json
 token.json
 
 credentials.json
+
+# Firebase
+.firebase/
+
+# Python
+__pycache__/
+*.pyc
