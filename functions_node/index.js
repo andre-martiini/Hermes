@@ -1,5 +1,6 @@
 const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
+const { FieldValue } = require('firebase-admin/firestore');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const iconv = require('iconv-lite');
@@ -15,7 +16,7 @@ const db = admin.firestore();
 const pubsub = new PubSub();
 
 async function getGoogleAuth() {
-    const credsDoc = await db.collection('system').document('google_credentials').get();
+    const credsDoc = await db.collection('system').doc('google_credentials').get();
     if (!credsDoc.exists) {
         throw new Error("Credenciais do Google não encontradas no Firestore.");
     }
@@ -237,8 +238,23 @@ async function runScraper(data) {
 
         await db.collection('tarefas').doc(taskId).update({
             sync_status: 'concluido',
-            pool_dados: admin.firestore.FieldValue.arrayUnion(...poolItems)
+            pool_dados: FieldValue.arrayUnion(...poolItems)
         });
+
+        // Mirror to Knowledge base
+        for (const item of poolItems) {
+            const knowledgeItem = {
+                id: item.id,
+                titulo: item.nome || 'Sem título',
+                tipo_arquivo: item.nome?.split('.').pop()?.toLowerCase() || 'unknown',
+                url_drive: item.valor,
+                tamanho: 0,
+                data_criacao: item.data_criacao,
+                origem: { modulo: 'tarefas', id_origem: taskId },
+                categoria: 'Ações'
+            };
+            await db.collection('conhecimento').doc(item.id).set(knowledgeItem);
+        }
 
         // Notifica vetorização via PubSub
         const topicName = 'vectorize-process';

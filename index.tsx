@@ -5790,6 +5790,24 @@ const App: React.FC = () => {
         ...updates,
         data_atualizacao: new Date().toISOString()
       });
+
+      // Mirror to Knowledge base
+      if (updates.pool_dados && updates.pool_dados.length > 0) {
+        for (const item of updates.pool_dados) {
+          const knowledgeItem: ConhecimentoItem = {
+            id: item.id,
+            titulo: item.nome || 'Sem título',
+            tipo_arquivo: item.nome?.split('.').pop()?.toLowerCase() || 'unknown',
+            url_drive: item.valor,
+            tamanho: 0,
+            data_criacao: item.data_criacao,
+            origem: { modulo: 'tarefas', id_origem: id },
+            categoria: 'Ações'
+          };
+          setDoc(doc(db, 'conhecimento', item.id), knowledgeItem).catch(console.error);
+        }
+      }
+
       if (!suppressToast) showToast("Tarefa atualizada!", 'success');
     } catch (err) {
       console.error("Erro ao atualizar tarefa:", err);
@@ -5940,6 +5958,23 @@ const App: React.FC = () => {
       await updateDoc(doc(db, 'sistemas_work_items', id), {
         ...updates
       } as any);
+
+      // Mirror to Knowledge base
+      if (updates.pool_dados && updates.pool_dados.length > 0) {
+        for (const item of updates.pool_dados) {
+          const knowledgeItem: ConhecimentoItem = {
+            id: item.id,
+            titulo: item.nome || 'Sem título',
+            tipo_arquivo: item.nome?.split('.').pop()?.toLowerCase() || 'unknown',
+            url_drive: item.valor,
+            tamanho: 0,
+            data_criacao: item.data_criacao,
+            origem: { modulo: 'sistemas', id_origem: id },
+            categoria: 'Sistemas'
+          };
+          setDoc(doc(db, 'conhecimento', item.id), knowledgeItem).catch(console.error);
+        }
+      }
       showToast("Item de trabalho atualizado!", "success");
     } catch (err) {
       console.error(err);
@@ -7622,13 +7657,31 @@ const App: React.FC = () => {
                         }
                      }
 
-                     await addDoc(collection(db, 'exames'), {
-                        ...exam,
-                        pool_dados: poolItems,
-                        data_criacao: new Date().toISOString()
-                     });
-                     showToast("Registro de saúde adicionado e indexado ao Drive.", "success");
-                  }}
+                      const examDoc = await addDoc(collection(db, 'exames'), {
+                         ...exam,
+                         pool_dados: poolItems,
+                         data_criacao: new Date().toISOString()
+                      });
+
+                      // Mirror to Knowledge base
+                      if (poolItems.length > 0) {
+                         for (const item of poolItems) {
+                            const knowledgeItem: ConhecimentoItem = {
+                               id: item.id,
+                               titulo: item.nome || 'Sem título',
+                               tipo_arquivo: item.nome?.split('.').pop()?.toLowerCase() || 'unknown',
+                               url_drive: item.valor,
+                               tamanho: 0,
+                               data_criacao: item.data_criacao,
+                               origem: { modulo: 'saude', id_origem: examDoc.id },
+                               categoria: 'Saúde'
+                            };
+                            await setDoc(doc(db, 'conhecimento', item.id), knowledgeItem);
+                         }
+                      }
+
+                      showToast("Registro de saúde adicionado e indexado ao Drive.", "success");
+                   }}
                   onDeleteExam={async (id) => {
                      if (window.confirm("Remover este registro?")) {
                         await deleteDoc(doc(db, 'exames', id));
