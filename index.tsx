@@ -7,7 +7,7 @@ import {
   BrainstormIdea, FinanceTransaction, FinanceGoal, FinanceSettings,
   FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight,
   DailyHabits, HealthSettings, HermesNotification, AppSettings,
-  formatDate, Sistema, SistemaStatus, WorkItem, WorkItemPhase,
+  formatDate, formatDateLocalISO, Sistema, SistemaStatus, WorkItem, WorkItemPhase,
   WorkItemPriority, QualityLog, WorkItemAudit, GoogleCalendarEvent,
   PoolItem, CustomNotification, HealthExam
 } from './types';
@@ -326,11 +326,26 @@ const DayView = ({
   const hourHeight = 60;
   const currentTimeTop = (currentMinutes / 60) * hourHeight;
   // Make sure we only show line if current day is today
-  const isToday = currentDate.toISOString().split('T')[0] === new Date().toISOString().split('T')[0];
+  const isToday = formatDateLocalISO(currentDate) === formatDateLocalISO(new Date());
 
-  const dayStr = currentDate.toISOString().split('T')[0];
+  const dayStr = formatDateLocalISO(currentDate);
   const { allDayEvents, timedEvents } = useMemo(() => {
-    const dayEvents = googleEvents.filter(e => e.data_inicio.split('T')[0] === dayStr);
+    const dayEvents = googleEvents.filter(e => {
+      const startStr = e.data_inicio.split('T')[0];
+      const endStr = e.data_fim.split('T')[0];
+
+      const isTimed = e.data_inicio.includes('T');
+      // Se o início coincide
+      if (startStr === dayStr) return true;
+
+      // Se o evento dura múltiplos dias, verificamos se o dia atual está no intervalo
+      if (startStr !== endStr) {
+        return isTimed ? (dayStr >= startStr && dayStr <= endStr) : (dayStr >= startStr && dayStr < endStr);
+      }
+
+      return false;
+    });
+
     return {
       allDayEvents: dayEvents.filter(e => !e.data_inicio.includes('T')),
       timedEvents: dayEvents.filter(e => e.data_inicio.includes('T'))
@@ -693,8 +708,9 @@ const CalendarView = ({
       let current = new Date(startStr + 'T12:00:00Z');
       const end = new Date(endStr + 'T12:00:00Z');
 
+      const isTimed = e.data_inicio.includes('T');
       let iterations = 0;
-      while (current <= end) {
+      while (isTimed ? (current <= end) : (current < end)) {
         if (iterations > 62) break;
         iterations++;
         const dateStr = current.toISOString().split('T')[0];
@@ -822,8 +838,8 @@ const CalendarView = ({
 
           <div className="grid grid-cols-7 auto-rows-fr bg-slate-200 gap-px border-b border-slate-200">
             {days.map((day, i) => {
-              const dayStr = day.toISOString().split('T')[0];
-              const isToday = new Date().toISOString().split('T')[0] === dayStr;
+              const dayStr = formatDateLocalISO(day);
+              const isToday = formatDateLocalISO(new Date()) === dayStr;
               const isCurrentMonth = day.getMonth() === currentDate.getMonth();
               const dayTasks = tasksByDay[dayStr] || [];
               const dayGoogleEvents = googleEventsByDay[dayStr] || [];
@@ -1050,10 +1066,7 @@ const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask }: { tasks:
   const color = isCLC ? 'blue' : 'emerald';
   const title = isCLC ? 'Licitações' : 'Assistência Estudantil';
 
-  const now = new Date();
-  const offset = now.getTimezoneOffset() * 60000;
-  const localDate = new Date(now.getTime() - offset);
-  const todayStr = localDate.toISOString().split('T')[0];
+  const todayStr = formatDateLocalISO(new Date());
 
   const pendentes = tasks.filter(t => t.categoria === categoria && normalizeStatus(t.status) !== 'concluido' && t.status !== 'excluído' as any);
 
@@ -2053,7 +2066,7 @@ const DailyHabitsModal = ({
   onUpdateHabits: (date: string, updates: Partial<DailyHabits>) => void,
   onClose: () => void
 }) => {
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = formatDateLocalISO(new Date());
 
   const handleHabitToggle = (habitKey: keyof DailyHabits) => {
     if (habitKey === 'id') return;
@@ -2139,7 +2152,7 @@ const detectAreaFromTitle = (titulo: string): Categoria => {
   const tituloLower = titulo.toLowerCase();
 
   // Palavras-chave para CLC
-  const clcKeywords = ['licitação', 'licitacao', 'pregão', 'pregao', 'contrato', 'dispensa', 'inexigibilidade', 'compra', 'aquisição', 'aquisicao'];
+  const clcKeywords = ['licitação', 'licitacao', 'pregão', 'pregao', 'contrato', 'dispensa', 'inexigibilidade', 'compra', 'aquisição', 'aquisicao', 'processo'];
 
   // Palavras-chave para Assistência Estudantil
   const assistenciaKeywords = ['assistência', 'assistencia', 'estudantil', 'aluno', 'bolsa', 'auxílio', 'auxilio', 'permanência', 'permanencia'];
@@ -2163,7 +2176,7 @@ const detectAreaFromTitle = (titulo: string): Categoria => {
 const TaskCreateModal = ({ unidades, onSave, onClose }: { unidades: { id: string, nome: string }[], onSave: (data: Partial<Tarefa>) => void, onClose: () => void }) => {
   const [formData, setFormData] = useState({
     titulo: '',
-    data_inicio: new Date().toISOString().split('T')[0],
+    data_inicio: formatDateLocalISO(new Date()),
     data_limite: '',
     data_criacao: new Date().toISOString(), // Actual creation timestamp
     status: 'em andamento' as Status,
@@ -2577,7 +2590,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose }: { ta
 
   const nextTask = useMemo(() => {
     const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
+    const todayStr = formatDateLocalISO(now);
     const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
 
     const todayTasks = tarefas
@@ -4314,7 +4327,7 @@ const App: React.FC = () => {
               if (normalizeStatus(task.status) !== 'concluido') {
                 await updateDoc(doc(db, 'tarefas', task.id), {
                   status: 'concluído',
-                  data_conclusao: new Date().toISOString().split('T')[0]
+                  data_conclusao: formatDateLocalISO(new Date())
                 });
                 showToast(`Gasto processado: R$ ${amount.toLocaleString('pt-BR')}`, 'success');
               }
@@ -4608,7 +4621,7 @@ const App: React.FC = () => {
   };
 
   const handleUpdateOverdueTasks = async () => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = formatDateLocalISO(new Date());
     const overdue = tarefas.filter(t =>
       normalizeStatus(t.status) !== 'concluido' &&
       t.status !== 'excluído' as any &&
@@ -4673,9 +4686,7 @@ const App: React.FC = () => {
       const current_time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
       // Calculate local date string (YYYY-MM-DD) to match local time configuration
-      const offset = now.getTimezoneOffset() * 60000;
-      const localDate = new Date(now.getTime() - offset);
-      const todayStr = localDate.toISOString().split('T')[0];
+      const todayStr = formatDateLocalISO(now);
 
       // 1. Habits Reminder
       if (appSettings.notifications.habitsReminder.enabled && current_time === appSettings.notifications.habitsReminder.time) {
@@ -4782,7 +4793,7 @@ const App: React.FC = () => {
 
   // Data-driven Notifications (Budget, Overdue, PGC)
   useEffect(() => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = formatDateLocalISO(new Date());
 
     // 1. Overdue Tasks (Once a day check)
     if (appSettings.notifications.overdueTasks.enabled && localStorage.getItem('lastOverdueCheckDate') !== todayStr) {
@@ -5378,9 +5389,7 @@ const App: React.FC = () => {
 
   const prioridadesHoje = useMemo(() => {
     const now = new Date();
-    const offset = now.getTimezoneOffset() * 60000;
-    const localDate = new Date(now.getTime() - offset);
-    const todayStr = localDate.toISOString().split('T')[0];
+    const todayStr = formatDateLocalISO(now);
 
     return tarefas.filter(t => {
       if (normalizeStatus(t.status) === 'concluido' || t.status === 'excluído' as any) return false;
@@ -5648,7 +5657,7 @@ const App: React.FC = () => {
       // Ignorar dias futuros
       if (day > now) return;
 
-      const dayStr = day.toISOString().split('T')[0];
+      const dayStr = formatDateLocalISO(day);
 
       const hasActivity = atividadesPGC.some(a => {
         const start = a.data_inicio.split('T')[0];
@@ -6744,7 +6753,7 @@ const App: React.FC = () => {
                                 <div>
                                   <h3 className="text-xl font-black text-slate-900 mb-1 group-hover:text-violet-700 transition-colors">{systemName}</h3>
                                   <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                                    Atualizado em {formatDate(sysDetails.data_atualizacao?.split('T')[0] || new Date().toISOString().split('T')[0])}
+                                    Atualizado em {formatDate(sysDetails.data_atualizacao?.split('T')[0] || formatDateLocalISO(new Date()))}
                                   </p>
                                 </div>
                                 <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
@@ -7812,8 +7821,8 @@ const App: React.FC = () => {
       {
         isHabitsReminderOpen && (
           <DailyHabitsModal
-            habits={healthDailyHabits.find(h => h.id === new Date().toISOString().split('T')[0]) || {
-              id: new Date().toISOString().split('T')[0],
+            habits={healthDailyHabits.find(h => h.id === formatDateLocalISO(new Date())) || {
+              id: formatDateLocalISO(new Date()),
               noSugar: false,
               noAlcohol: false,
               noSnacks: false,
