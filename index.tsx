@@ -5267,8 +5267,8 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude'>('home');
-  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'finance' | 'saude' | 'ferramentas' | 'sistemas-dev' | 'knowledge'>('gallery');
+  const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude'>('dashboard');
+  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'finance' | 'saude' | 'ferramentas' | 'sistemas-dev'>('dashboard');
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
 
   // Modal Mode State
@@ -5306,18 +5306,17 @@ const App: React.FC = () => {
   const [exams, setExams] = useState<HealthExam[]>([]);
   const [lastBackPress, setLastBackPress] = useState(0);
 
-  // Sync state changes with history to enable back button
-  useEffect(() => {
-    // Only push if we are NOT at home/gallery (root)
-    if (activeModule !== 'home' || viewMode !== 'gallery' || selectedSystemId || isLogsModalOpen || activeFerramenta) {
-      window.history.pushState({ activeModule, viewMode, selectedSystemId, isLogsModalOpen, activeFerramenta }, "", window.location.pathname);
-    }
-  }, [activeModule, viewMode, selectedSystemId, isLogsModalOpen, activeFerramenta]);
+  const handleDashboardNavigate = (view: 'gallery' | 'finance' | 'saude' | 'sistemas-dev') => {
+    setViewMode(view);
+    if (view === 'gallery' || view === 'sistemas-dev') setActiveModule('acoes');
+    else if (view === 'finance') setActiveModule('financeiro');
+    else if (view === 'saude') setActiveModule('saude');
+  };
 
   // Sync state changes with history to enable back button
   useEffect(() => {
-    // Only push if we are NOT at home/gallery (root)
-    if (activeModule !== 'home' || viewMode !== 'gallery' || selectedSystemId || isLogsModalOpen || activeFerramenta) {
+    // Only push if we are NOT at dashboard (root)
+    if (activeModule !== 'dashboard' || viewMode !== 'dashboard' || selectedSystemId || isLogsModalOpen || activeFerramenta) {
       window.history.pushState({ activeModule, viewMode, selectedSystemId, isLogsModalOpen, activeFerramenta }, "", window.location.pathname);
     }
   }, [activeModule, viewMode, selectedSystemId, isLogsModalOpen, activeFerramenta]);
@@ -5334,11 +5333,9 @@ const App: React.FC = () => {
       } else if (activeFerramenta) {
         setActiveFerramenta(null);
         e.preventDefault();
-      } else if (viewMode !== 'gallery') {
-        setViewMode('gallery');
-        e.preventDefault();
-      } else if (activeModule !== 'home') {
-        setActiveModule('home');
+      } else if (viewMode !== 'dashboard') {
+        setActiveModule('dashboard');
+        setViewMode('dashboard');
         e.preventDefault();
       } else {
         const now = Date.now();
@@ -6684,7 +6681,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] flex flex-col relative">
+    <div className="min-h-screen bg-[#F8FAFC] flex flex-col md:flex-row relative">
 
       {/* Pop-up de Notificação */}
       {activePopup && (
@@ -6727,298 +6724,87 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Menu Inicial (Home) */}
-      {activeModule === 'home' && (
-        <div className="min-h-screen flex flex-col items-center justify-center p-0 md:p-8">
-          <div className="max-w-6xl w-full px-0 md:px-4">
-            {/* Logo e Título */}
-            <div className="flex justify-end p-4 md:absolute md:top-12 md:right-12 gap-3">
-              <div className="flex items-center gap-2 bg-white/50 backdrop-blur-sm p-1 pr-3 rounded-none md:rounded-2xl border border-slate-200/50 shadow-sm mr-2">
-                {user?.photoURL && (
-                  <img src={user.photoURL} alt="Profile" className="w-8 h-8 rounded-lg md:rounded-xl shadow-sm" />
-                )}
-                <div className="text-right hidden sm:block">
-                  <p className="text-[9px] font-black text-slate-900 uppercase tracking-tight leading-none">{user?.displayName}</p>
-                </div>
-                <button
-                  onClick={handleLogout}
-                  className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
-                  title="Sair"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                  </svg>
-                </button>
-              </div>
-
-              <div className="relative">
-                <button
-                  onClick={() => setIsQuickNoteModalOpen(true)}
-                  className="text-amber-500 p-3 hover:bg-amber-50 rounded-xl transition-all active:scale-95 group"
-                  aria-label="Notas Rápidas"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-                </button>
-              </div>
-
-              <div className="relative">
-                <button
-                  onClick={() => setIsSettingsModalOpen(true)}
-                  className="text-slate-500 p-3 hover:bg-slate-100 rounded-xl transition-all active:scale-95 group"
-                  aria-label="Configurações"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                </button>
-              </div>
-
-              <div className="relative">
-                <button
-                  onClick={() => setIsNotificationCenterOpen(!isNotificationCenterOpen)}
-                  className="text-slate-500 p-3 hover:bg-slate-100 rounded-xl transition-all active:scale-95 group relative notification-trigger"
-                  aria-label="Notificações"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-                  {notifications.some(n => !n.isRead) && (
-                    <span className="absolute top-4 right-4 w-3.5 h-3.5 bg-rose-500 border-4 border-white rounded-full"></span>
-                  )}
-                </button>
-                <NotificationCenter
-                  notifications={notifications}
-                  onMarkAsRead={handleMarkNotificationRead}
-                  onDismiss={handleDismissNotification}
-                  isOpen={isNotificationCenterOpen}
-                  onClose={() => setIsNotificationCenterOpen(false)}
-                  onUpdateOverdue={handleUpdateOverdueTasks}
-                  onNavigate={handleNotificationNavigate}
-                />
-              </div>
-            </div>
-
-            <div className="text-center mb-12 md:mb-16">
-              <div className="flex items-center justify-center gap-4 mb-4">
-                <img src="/logo.png" alt="Hermes" className="w-16 h-16 md:w-20 md:h-20 object-contain" />
-                <h1 className="text-4xl md:text-6xl font-black tracking-tighter text-slate-900">HERMES</h1>
-              </div>
-
-            </div>
-
-            {/* Cards dos Módulos */}
-            {/* Cards dos Módulos */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-0 md:gap-6">
-
-              {/* Card Dashboard */}
-              <button
-                onClick={() => {
-                  setActiveModule('dashboard');
-                  setViewMode('dashboard');
-                }}
-                className="group bg-white border border-slate-200 md:border-2 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-indigo-500 hover:z-10 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden -ml-px -mt-px md:m-0"
-              >
-                <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
-                <div className="relative z-10">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-indigo-600 rounded-lg md:rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300 text-white font-black">
-                    <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                  </div>
-                  <h2 className="text-lg md:text-xl font-black text-slate-900 mb-2 group-hover:text-indigo-600 transition-colors">Dashboard</h2>
-                  <p className="text-slate-500 text-xs font-medium leading-relaxed">Visão geral de todos os módulos</p>
-                  <div className="mt-6 flex items-center gap-2 text-indigo-600 font-black text-xs uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
-                    <span>Acessar</span>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </div>
-                </div>
-              </button>
-
-              {/* Card Ações */}
-              <button
-                onClick={() => {
-                  setActiveModule('acoes');
-                  setViewMode('gallery');
-                }}
-                className="group bg-white border border-slate-200 md:border-2 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-blue-500 hover:z-10 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden -ml-px -mt-px md:m-0"
-              >
-                <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
-                <div className="relative z-10">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-500 rounded-lg md:rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-                    <svg className="w-5 h-5 md:w-6 md:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 14l2 2 4-4" />
-                    </svg>
-                  </div>
-                  <h2 className="text-lg md:text-xl font-black text-slate-900 mb-2 group-hover:text-blue-600 transition-colors">Ações</h2>
-                  <p className="text-slate-500 text-xs font-medium leading-relaxed">Tarefas, PGC e Plano de Trabalho</p>
-                  <div className="mt-6 flex items-center gap-2 text-blue-600 font-black text-xs uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
-                    <span>Acessar</span>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </div>
-                </div>
-              </button>
-
-              {/* Card Financeiro */}
-              <button
-                onClick={() => {
-                  setActiveModule('financeiro');
-                  setViewMode('finance');
-                }}
-                className="group bg-white border border-slate-200 md:border-2 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-emerald-500 hover:z-10 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden -ml-px -mt-px md:m-0"
-              >
-                <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
-                <div className="relative z-10">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-emerald-500 rounded-lg md:rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-                    <svg className="w-5 h-5 md:w-6 md:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </div>
-                  <h2 className="text-lg md:text-xl font-black text-slate-900 mb-2 group-hover:text-emerald-600 transition-colors">Financeiro</h2>
-                  <p className="text-slate-500 text-xs font-medium leading-relaxed">Gestão financeira e orçamentária</p>
-                  <div className="mt-6 flex items-center gap-2 text-emerald-600 font-black text-xs uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
-                    <span>Acessar</span>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </div>
-                </div>
-              </button>
-
-              {/* Card Saúde */}
-              <button
-                onClick={() => {
-                  setActiveModule('saude');
-                  setViewMode('saude');
-                }}
-                className="group bg-white border border-slate-200 md:border-2 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-rose-500 hover:z-10 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden -ml-px -mt-px md:m-0"
-              >
-                <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
-                <div className="relative z-10">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-rose-500 rounded-lg md:rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-                    <svg className="w-5 h-5 md:w-6 md:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-                    </svg>
-                  </div>
-                  <h2 className="text-lg md:text-xl font-black text-slate-900 mb-2 group-hover:text-rose-600 transition-colors">Saúde</h2>
-                  <p className="text-slate-500 text-xs font-medium leading-relaxed">Acompanhamento e bem-estar</p>
-                  <div className="mt-6 flex items-center gap-2 text-rose-600 font-black text-xs uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
-                    <span>Acessar</span>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </div>
-                </div>
-              </button>
-
-              {/* Card Ferramentas */}
-              <button
-                onClick={() => {
-                  setActiveModule('acoes');
-                  setViewMode('ferramentas');
-                  setActiveFerramenta(null);
-                }}
-                className="group bg-white border border-slate-200 md:border-2 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-amber-500 hover:z-10 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden -ml-px -mt-px md:m-0"
-              >
-                <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
-                <div className="relative z-10">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-amber-500 rounded-lg md:rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-                    <svg className="w-5 h-5 md:w-6 md:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                  </div>
-                  <h2 className="text-lg md:text-xl font-black text-slate-900 mb-2 group-hover:text-amber-600 transition-colors">Ferramentas</h2>
-                  <p className="text-slate-500 text-xs font-medium leading-relaxed">Notas Rápidas e IA</p>
-                  <div className="mt-6 flex items-center gap-2 text-amber-600 font-black text-xs uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
-                    <span>Acessar</span>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </div>
-                </div>
-              </button>
-
-              {/* Card Conhecimento */}
-              <button
-                onClick={() => {
-                  setActiveModule('acoes');
-                  setViewMode('knowledge');
-                }}
-                className="group bg-white border border-slate-200 md:border-2 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-sky-500 hover:z-10 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden -ml-px -mt-px md:m-0"
-              >
-                <div className="absolute top-0 right-0 w-32 h-32 bg-sky-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
-                <div className="relative z-10">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-sky-600 rounded-lg md:rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300 text-white font-black">
-                    <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
-                    </svg>
-                  </div>
-                  <h2 className="text-lg md:text-xl font-black text-slate-900 mb-2 group-hover:text-sky-600 transition-colors">Conhecimento</h2>
-                  <p className="text-slate-500 text-xs font-medium leading-relaxed">Repositório de docs e IA</p>
-                  <div className="mt-6 flex items-center gap-2 text-sky-600 font-black text-xs uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
-                    <span>Acessar</span>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </div>
-                </div>
-              </button>
-
-              {/* Card Sistemas */}
-              <button
-                onClick={() => {
-                  setActiveModule('acoes');
-                  setViewMode('sistemas-dev');
-                }}
-                className="group bg-white border border-slate-200 md:border-2 rounded-none md:rounded-[2rem] p-4 md:p-6 hover:border-violet-500 hover:z-10 hover:shadow-xl transition-all duration-300 active:scale-95 text-left relative overflow-hidden -ml-px -mt-px md:m-0"
-              >
-                <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
-                <div className="relative z-10">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-violet-500 rounded-lg md:rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-                    <svg className="w-5 h-5 md:w-6 md:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                    </svg>
-                  </div>
-                  <h2 className="text-lg md:text-xl font-black text-slate-900 mb-2 group-hover:text-violet-600 transition-colors">Sistemas</h2>
-                  <p className="text-slate-500 text-xs font-medium leading-relaxed">Ciclo de vida de software</p>
-                  <div className="mt-6 flex items-center gap-2 text-violet-600 font-black text-xs uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
-                    <span>Acessar</span>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </div>
-                </div>
-              </button>
-
+      {/* Sidebar Desktop */}
+      <aside className="hidden md:flex w-72 bg-slate-900 text-white flex-col h-screen sticky top-0 overflow-y-auto shrink-0 z-50 shadow-2xl">
+        <div className="p-8 flex flex-col h-full gap-10">
+          <div className="flex items-center gap-4">
+            <img src="/logo.png" alt="Hermes" className="w-12 h-12 object-contain" />
+            <div>
+              <h1 className="text-2xl font-black tracking-tighter">HERMES</h1>
+              <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Management System</p>
             </div>
           </div>
-        </div>
-      )}
 
-      {/* Header e Conteúdo (apenas quando não está no home) */}
-      {activeModule !== 'home' && (
+          <nav className="flex flex-col gap-2">
+            {[
+              { id: 'dashboard', label: 'Dashboard', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>, active: viewMode === 'dashboard', onClick: () => { setActiveModule('dashboard'); setViewMode('dashboard'); } },
+              { id: 'acoes', label: 'Ações', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>, active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'pgc' || viewMode === 'licitacoes' || viewMode === 'assistencia'), onClick: () => { setActiveModule('acoes'); setViewMode('gallery'); } },
+              { id: 'finance', label: 'Financeiro', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>, active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
+              { id: 'saude', label: 'Saúde', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>, active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
+              { id: 'sistemas', label: 'Sistemas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>, active: viewMode === 'sistemas-dev', onClick: () => { setActiveModule('acoes'); setViewMode('sistemas-dev'); } },
+              { id: 'ferramentas', label: 'Ferramentas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>, active: viewMode === 'ferramentas', onClick: () => { setActiveModule('acoes'); setViewMode('ferramentas'); setActiveFerramenta(null); } },
+            ].map(item => (
+              <button
+                key={item.id}
+                onClick={item.onClick}
+                className={`flex items-center gap-4 px-6 py-4 rounded-2xl transition-all duration-300 group ${item.active ? 'bg-white text-slate-900 shadow-xl' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+              >
+                <div className={`${item.active ? 'text-slate-900' : 'group-hover:scale-110 transition-transform duration-300'}`}>
+                  {item.icon}
+                </div>
+                <span className="text-[11px] font-black uppercase tracking-widest">{item.label}</span>
+              </button>
+            ))}
+          </nav>
+
+          <div className="mt-auto flex flex-col gap-6">
+            <div className="flex items-center gap-3 bg-white/5 p-4 rounded-2xl border border-white/5">
+              {user?.photoURL && (
+                <img src={user.photoURL} alt="Profile" className="w-10 h-10 rounded-xl shadow-sm border border-white/10" />
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-tight text-white truncate">{user?.displayName}</p>
+                <button
+                  onClick={handleLogout}
+                  className="text-[8px] font-black text-slate-500 hover:text-rose-400 uppercase tracking-widest transition-colors"
+                >
+                  Sair do Sistema
+                </button>
+              </div>
+            </div>
+            <p className="text-center text-[8px] font-black text-slate-700 uppercase tracking-widest">
+              Hermes v2.5.0 • 2024
+            </p>
+          </div>
+        </div>
+      </aside>
+
+      {/* Conteúdo Principal */}
+      <div className="flex-1 flex flex-col relative min-h-screen">
         <>
           <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
             <div className="max-w-[1400px] mx-auto px-4 md:px-8 py-3 md:py-4">
               {/* Mobile Header */}
               <div className="flex md:hidden items-center justify-between">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-4">
                   <button
-                    onClick={() => setActiveModule('home')}
-                    className="p-1.5 md:p-2 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors"
-                    aria-label="Voltar ao Menu"
+                    onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                    className="p-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-all active:scale-95"
+                    aria-label="Menu"
                   >
-                    <svg className="w-5 h-5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" />
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      {isMobileMenuOpen ? (
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+                      ) : (
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" />
+                      )}
                     </svg>
                   </button>
                   <div 
-                    onClick={() => setActiveModule('home')}
-                    className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
+                    onClick={() => { setActiveModule('dashboard'); setViewMode('dashboard'); }}
+                    className="flex items-center cursor-pointer hover:opacity-80 transition-opacity"
                   >
-                    <img src="/logo.png" alt="Hermes" className="w-8 h-8 md:w-10 md:h-10 object-contain" />
-                    <h1 className="text-base md:text-lg font-black tracking-tighter text-slate-900">HERMES</h1>
+                    <img src="/logo.png" alt="Hermes" className="w-9 h-9 object-contain" />
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -7070,19 +6856,6 @@ const App: React.FC = () => {
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
                     </button>
                   )}
-                  <button
-                    onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                    className="p-1.5 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors"
-                    aria-label="Menu"
-                  >
-                    <svg className="w-5 h-5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      {isMobileMenuOpen ? (
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
-                      ) : (
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" />
-                      )}
-                    </svg>
-                  </button>
                 </div>
               </div>
 
@@ -7090,21 +6863,12 @@ const App: React.FC = () => {
               <div className="hidden md:flex items-center justify-between gap-4">
                 <div className="flex items-center gap-6">
                   <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => setActiveModule('home')}
-                      className="p-2 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors"
-                      aria-label="Voltar ao Menu"
-                    >
-                      <svg className="w-5 h-5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" />
-                      </svg>
-                    </button>
+                    {/* Botão de voltar removido pois agora temos sidebar */}
                     <div 
-                      onClick={() => setActiveModule('home')}
+                      onClick={() => { setActiveModule('dashboard'); setViewMode('dashboard'); }}
                       className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
                     >
-                      <img src="/logo.png" alt="Hermes" className="w-9 h-9 object-contain" />
-                      <h1 className="text-xl font-black tracking-tighter text-slate-900">HERMES</h1>
+                      <h1 className="text-xl font-black tracking-tighter text-slate-900 uppercase">{activeModule === 'dashboard' ? 'Painel de Controle' : activeModule === 'acoes' ? 'Gestão de Ações' : activeModule === 'financeiro' ? 'Financeiro' : activeModule === 'saude' ? 'Saúde' : 'Hermes'}</h1>
                     </div>
                   </div>
                   {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
@@ -7186,51 +6950,55 @@ const App: React.FC = () => {
 
             {/* Mobile Menu Drawer */}
             {isMobileMenuOpen && (
-              <div className="md:hidden border-t border-slate-200 bg-white">
-                <nav className="flex flex-col p-4 space-y-2">
-                  {viewMode !== 'ferramentas' && activeModule !== 'dashboard' && (
-                    <>
-                      <button
-                        onClick={() => {
-                          setViewMode('gallery');
-                          setSearchTerm('');
-                          setIsMobileMenuOpen(false);
-                        }}
-                        className={`px-4 py-3 rounded-lg md:rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'gallery' && !searchTerm ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
-                      >
-                        📊 Ações
-                      </button>
-                      <button
-                        onClick={() => {
-                          setViewMode('pgc');
-                          setIsMobileMenuOpen(false);
-                        }}
-                        className={`px-4 py-3 rounded-lg md:rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'pgc' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
-                      >
-                        📈 PGC
-                      </button>
-                      <button
-                        onClick={() => {
-                          setViewMode('knowledge');
-                          setIsMobileMenuOpen(false);
-                        }}
-                        className={`px-4 py-3 rounded-lg md:rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left ${viewMode === 'knowledge' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
-                      >
-                        📂 Documentos
-                      </button>
-                    </>
-                  )}
+              <div className="md:hidden border-t border-slate-200 bg-white shadow-2xl animate-in slide-in-from-top-4 duration-300">
+                <nav className="flex flex-col p-4 gap-2">
+                  {[
+                    { label: '🏠 Dashboard', active: viewMode === 'dashboard', onClick: () => { setActiveModule('dashboard'); setViewMode('dashboard'); } },
+                    { label: '📊 Ações', active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'pgc' || viewMode === 'licitacoes' || viewMode === 'assistencia'), onClick: () => { setActiveModule('acoes'); setViewMode('gallery'); } },
+                    { label: '💰 Financeiro', active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
+                    { label: '❤️ Saúde', active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
+                    { label: '💻 Sistemas', active: viewMode === 'sistemas-dev', onClick: () => { setActiveModule('acoes'); setViewMode('sistemas-dev'); } },
+                    { label: '🛠️ Ferramentas', active: viewMode === 'ferramentas', onClick: () => { setActiveModule('acoes'); setViewMode('ferramentas'); setActiveFerramenta(null); } },
+                  ].map((item, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        item.onClick();
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className={`px-6 py-4 rounded-2xl text-sm font-black uppercase tracking-widest transition-all ${item.active ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-50 text-slate-600'}`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
 
-                  <div className="pt-4 border-t border-slate-200 mt-2">
+                  <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-slate-100">
                     <button
                       onClick={() => {
                         handleSync();
                         setIsMobileMenuOpen(false);
                       }}
-                      className={`w-full px-4 py-3 rounded-lg md:rounded-xl text-sm font-black uppercase tracking-wide transition-all text-left bg-blue-50 text-blue-700 hover:bg-blue-100 relative`}
+                      className="px-4 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest bg-blue-50 text-blue-700 flex items-center justify-center gap-2"
                     >
-                      🔄 {isSyncing ? 'Monitorar Sincronização...' : 'Sync Google'}
-                      {isSyncing && <span className="absolute top-4 right-4 w-2 h-2 bg-blue-500 rounded-full animate-ping"></span>}
+                      <svg className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                      {isSyncing ? 'Sync...' : 'Sync'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsSettingsModalOpen(true);
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className="px-4 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest bg-slate-100 text-slate-600 flex items-center justify-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                      Config
+                    </button>
+                    <button
+                      onClick={handleLogout}
+                      className="col-span-2 px-4 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest bg-rose-50 text-rose-600 flex items-center justify-center gap-2 mt-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                      Sair da Conta
                     </button>
                   </div>
                 </nav>
@@ -7256,7 +7024,7 @@ const App: React.FC = () => {
                   workItems={workItems}
                   currentMonth={currentMonth}
                   currentYear={currentYear}
-                  onNavigate={setViewMode}
+                  onNavigate={handleDashboardNavigate}
                 />
               ) : viewMode === 'gallery' ? (
                 <>
@@ -8795,7 +8563,7 @@ const App: React.FC = () => {
             </main>
           </div>
         </>
-      )}
+      </div>
 
       <ToastContainer toasts={toasts} removeToast={removeToast} />
 
