@@ -352,24 +352,39 @@ def push_google_tasks(db, log_list=None, sync_ref=None):
         if not tasklist_id:
             log("ERRO: Lista destino não encontrada.")
             return
-        g_results = service.tasks().list(tasklist=tasklist_id, showCompleted=True, showHidden=True, maxResults=100).execute()
-        g_tasks_map = {item['id']: item for item in g_results.get('items', [])}
+        # Pega todas as tarefas do Google (com paginação) para o mapa
+        g_tasks_map = {}
+        next_page_token = None
+        while True:
+            g_results = service.tasks().list(tasklist=tasklist_id, showCompleted=True, showHidden=True, maxResults=100, pageToken=next_page_token).execute()
+            for item in g_results.get('items', []):
+                g_tasks_map[item['id']] = item
+            next_page_token = g_results.get('nextPageToken')
+            if not next_page_token or len(g_tasks_map) >= 500: break
+
         tasks = db.collection('tarefas').stream()
         count = 0
         for doc in tasks:
             t = doc.to_dict()
             g_id = t.get('google_id')
             h_status = t.get('status')
+            
             if h_status == 'excluído':
                 if g_id:
-                    try: service.tasks().delete(tasklist=tasklist_id, task=g_id).execute()
-                    except: pass
-                    log(f"[X] REMOVIDA: {t['titulo']}")
+                    try: 
+                        service.tasks().delete(tasklist=tasklist_id, task=g_id).execute()
+                        log(f"[X] REMOVIDA DO GOOGLE: {t['titulo']}")
+                    except HttpError as e:
+                        if e.resp.status == 404:
+                            log(f"[!] Task {g_id} já não existia no Google.")
+                        else:
+                            log(f"[!] Erro ao deletar no Google: {e}")
                 doc.reference.delete()
                 continue
+
             due_date = f"{t['data_limite']}T00:00:00Z" if t.get('data_limite') and t.get('data_limite') != '-' else None
             
-            # Se houver horário de início, tentamos enviar no due (mesmo que o Google descarte a hora na maioria das views)
+            # Se houver horário de início, tentamos enviar no due
             if t.get('horario_inicio') and due_date:
                 due_date = f"{t['data_limite']}T{t['horario_inicio']}:00Z"
 
@@ -377,7 +392,6 @@ def push_google_tasks(db, log_list=None, sync_ref=None):
             
             # Atualiza as notas com o horário para garantir a sincronia de volta
             h_inicio, h_fim = t.get('horario_inicio'), t.get('horario_fim')
-            # Se não houver fim mas houver início, assume-se 1h de duração (conforme pedido)
             if h_inicio and not h_fim:
                 try:
                     h, m = map(int, h_inicio.split(':'))
@@ -389,16 +403,29 @@ def push_google_tasks(db, log_list=None, sync_ref=None):
             if not g_id:
                 body = {'title': t['titulo'], 'notes': updated_notes, 'status': g_status, 'due': due_date}
                 new_task = service.tasks().insert(tasklist=tasklist_id, body=body).execute()
-                doc.reference.update({'google_id': new_task['id'], 'data_atualizacao': new_task.get('updated'), 'notas': updated_notes, 'horario_fim': h_fim if not t.get('horario_fim') else t.get('horario_fim')})
+                doc.reference.update({
+                    'google_id': new_task['id'], 
+                    'data_atualizacao': new_task.get('updated'), 
+                    'notas': updated_notes, 
+                    'horario_fim': h_fim if not t.get('horario_fim') else t.get('horario_fim')
+                })
                 log(f"[+] ENVIADA: {t['titulo']}"); count += 1
                 continue
+
             g_task = g_tasks_map.get(g_id)
             if g_task and t.get('data_atualizacao', '') > g_task.get('updated', ''):
                 body = {'id': g_id, 'title': t['titulo'], 'notes': updated_notes, 'status': g_status, 'due': due_date}
-                service.tasks().update(tasklist=tasklist_id, task=g_id, body=body).execute()
-                log(f"[^] ATUALIZADA NO GOOGLE: {t['titulo']}"); count += 1
-                if updated_notes != t.get('notas', ''):
-                    doc.reference.update({'notas': updated_notes})
+                try:
+                    service.tasks().update(tasklist=tasklist_id, task=g_id, body=body).execute()
+                    log(f"[^] ATUALIZADA NO GOOGLE: {t['titulo']}"); count += 1
+                    if updated_notes != t.get('notas', ''):
+                        doc.reference.update({'notas': updated_notes})
+                except HttpError as e:
+                    if e.resp.status == 404:
+                        log(f"[!] Task {g_id} não encontrada no Google - Limpando ID para re-envio.")
+                        doc.reference.update({'google_id': None})
+                    else:
+                        raise e
         log(f"PUSH FINALIZADO: {count} atualizações.", force_ui=True)
     except Exception as e:
         log(f"ERRO PUSH: {e}", force_ui=True)

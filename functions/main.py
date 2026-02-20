@@ -189,6 +189,8 @@ def sync_google_tasks_pull(service, sync_ref, logs):
     except Exception as e:
         log_to_firestore(sync_ref, logs, f"ERRO PULL: {e}")
 
+from googleapiclient.errors import HttpError
+
 def sync_google_tasks_push(service, sync_ref, logs):
     db = get_db()
     try:
@@ -196,8 +198,15 @@ def sync_google_tasks_push(service, sync_ref, logs):
         tasklist_id = next((item['id'] for item in results.get('items', []) if 'tarefa' in item['title'].lower()), None)
         if not tasklist_id: return
         
-        g_results = service.tasks().list(tasklist=tasklist_id, showCompleted=True, showHidden=True, maxResults=100).execute()
-        g_tasks_map = {item['id']: item for item in g_results.get('items', [])}
+        # Pega todas as tarefas do Google (com paginação) para o mapa
+        g_tasks_map = {}
+        next_page_token = None
+        while True:
+            g_results = service.tasks().list(tasklist=tasklist_id, showCompleted=True, showHidden=True, maxResults=100, pageToken=next_page_token).execute()
+            for item in g_results.get('items', []):
+                g_tasks_map[item['id']] = item
+            next_page_token = g_results.get('nextPageToken')
+            if not next_page_token or len(g_tasks_map) >= 500: break
         
         for doc in db.collection('tarefas').stream():
             t = doc.to_dict()
@@ -206,7 +215,13 @@ def sync_google_tasks_push(service, sync_ref, logs):
 
             g_id, title = t.get('google_id'), t.get('titulo')
             if t.get('status') == 'excluído':
-                if g_id: service.tasks().delete(tasklist=tasklist_id, task=g_id).execute()
+                if g_id:
+                    try: 
+                        service.tasks().delete(tasklist=tasklist_id, task=g_id).execute()
+                        log_to_firestore(sync_ref, logs, f"[X] REMOVIDA DO GOOGLE: {title}")
+                    except HttpError as e:
+                        if e.resp.status == 404:
+                            log_to_firestore(sync_ref, logs, f"[!] Task {g_id} já não existia no Google.")
                 doc.reference.delete()
                 continue
             
@@ -237,10 +252,17 @@ def sync_google_tasks_push(service, sync_ref, logs):
             elif g_id in g_tasks_map and t.get('data_atualizacao', '') > g_tasks_map[g_id].get('updated', ''):
                 body = {'id': g_id, 'title': title, 'notes': updated_notes, 'status': g_status}
                 if g_due: body['due'] = g_due
-                service.tasks().update(tasklist=tasklist_id, task=g_id, body=body).execute()
-                log_to_firestore(sync_ref, logs, f"[^] ATUALIZADA NO GOOGLE: {title}")
-                if updated_notes != t.get('notas', ''):
-                    doc.reference.update({'notas': updated_notes})
+                try:
+                    service.tasks().update(tasklist=tasklist_id, task=g_id, body=body).execute()
+                    log_to_firestore(sync_ref, logs, f"[^] ATUALIZADA NO GOOGLE: {title}")
+                    if updated_notes != t.get('notas', ''):
+                        doc.reference.update({'notas': updated_notes})
+                except HttpError as e:
+                    if e.resp.status == 404:
+                        log_to_firestore(sync_ref, logs, f"[!] Task {g_id} não encontrada no Google - Limpando ID local.")
+                        doc.reference.update({'google_id': None})
+                    else:
+                        raise e
     except Exception as e:
         log_to_firestore(sync_ref, logs, f"ERRO PUSH: {e}")
 

@@ -2988,50 +2988,56 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
     setModalConfig({ type: 'file_upload', isOpen: true });
   };
 
-  const handleFileUpload = async (file: File, customName: string) => {
+  const handleFileUpload = async (files: File | FileList, customName?: string) => {
     setIsUploading(true);
     const uploadFunc = httpsCallable(functions, 'upload_to_drive');
+    const filesToUpload = files instanceof FileList ? Array.from(files) : [files];
+    const uploadedItems: PoolItem[] = [];
 
     try {
-      // Convert file to base64
-      const reader = new FileReader();
-      const fileContentB64 = await new Promise<string>((resolve, reject) => {
-        reader.onload = () => {
-          const result = reader.result as string;
-          resolve(result.split(',')[1]);
+      for (const file of filesToUpload) {
+        // Convert file to base64
+        const reader = new FileReader();
+        const fileContentB64 = await new Promise<string>((resolve, reject) => {
+          reader.onload = () => {
+            const result = reader.result as string;
+            resolve(result.split(',')[1]);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+        const result = await uploadFunc({
+          fileName: customName || file.name,
+          fileContent: fileContentB64,
+          mimeType: file.type,
+          folderId: appSettings.googleDriveFolderId
+        });
+
+        const data = result.data as any;
+
+        const newItem: PoolItem = {
+          id: Math.random().toString(36).substr(2, 9),
+          tipo: 'arquivo',
+          valor: data.webViewLink,
+          nome: customName || file.name,
+          data_criacao: new Date().toISOString()
         };
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
+        uploadedItems.push(newItem);
+      }
 
-      const result = await uploadFunc({
-        fileName: customName || file.name,
-        fileContent: fileContentB64,
-        mimeType: file.type,
-        folderId: appSettings.googleDriveFolderId
-      });
-
-      const data = result.data as any;
-
-      const newItem: PoolItem = {
-        id: Math.random().toString(36).substr(2, 9),
-        tipo: 'arquivo',
-        valor: data.webViewLink,
-        nome: customName || file.name,
-        data_criacao: new Date().toISOString()
-      };
-
-      const newEntry = {
+      const newEntries = uploadedItems.map(item => ({
         data: new Date().toISOString(),
-        nota: `FILE::${newItem.nome}::${newItem.valor}`
-      };
+        nota: `FILE::${item.nome}::${item.valor}`
+      }));
 
       onSave(task.id, {
-        pool_dados: [...(currentTaskData.pool_dados || []), newItem],
-        acompanhamento: [...(currentTaskData.acompanhamento || []), newEntry]
+        pool_dados: [...(currentTaskData.pool_dados || []), ...uploadedItems],
+        acompanhamento: [...(currentTaskData.acompanhamento || []), ...newEntries]
       });
-      showToast("Arquivo carregado com sucesso.", "success");
-      return [newItem];
+
+      showToast(`${uploadedItems.length} arquivo(s) carregado(s) com sucesso.`, "success");
+      return uploadedItems;
     } catch (err) {
       console.error(err);
       showToast("Erro ao carregar arquivo para o Google Drive.", "error");
@@ -3680,16 +3686,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
                   e.currentTarget.classList.remove('bg-blue-500/10', 'border-blue-500/50');
                   const files = e.dataTransfer.files;
                   if (files && files.length > 0) {
-                    const uploadedItems = await handleFileUpload(files);
-                    if (uploadedItems && uploadedItems.length > 0) {
-                      const newEntries = uploadedItems.map(item => ({
-                        data: new Date().toISOString(),
-                        nota: `FILE::${item.nome}::${item.valor}`
-                      }));
-                      onSave(task.id, {
-                        acompanhamento: [...(currentTaskData.acompanhamento || []), ...newEntries]
-                      });
-                    }
+                    await handleFileUpload(files);
                   }
                 }}
                 className={`relative border rounded-none md:rounded-2xl flex items-end gap-2 p-2 transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200 focus-within:bg-white focus-within:border-blue-300'}`}
@@ -3850,34 +3847,50 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
               {modalConfig.type === 'edit_diary' && 'Editar Anotação'}
               {modalConfig.type === 'confirm_delete' && 'Confirmar Exclusão'}
               {modalConfig.type === 'reset_timer' && 'Reiniciar Cronômetro'}
+              {modalConfig.type === 'file_upload' && 'Carregar Arquivo'}
             </h3>
 
-            {(modalConfig.type === 'link' || modalConfig.type === 'contact') && (
+            {(modalConfig.type === 'link' || modalConfig.type === 'contact' || modalConfig.type === 'file_upload') && (
               <div className="flex flex-col gap-4">
                 <div>
-                  <label className={`text-[10px] uppercase font-bold tracking-widest opacity-50 mb-1.5 block ${isTimerRunning ? 'text-white' : 'text-slate-500'}`}>Nome (Opcional)</label>
+                  <label className={`text-[10px] uppercase font-bold tracking-widest opacity-50 mb-1.5 block ${isTimerRunning ? 'text-white' : 'text-slate-500'}`}>
+                    {modalConfig.type === 'file_upload' ? 'Nome do Arquivo' : 'Nome (Opcional)'}
+                  </label>
                   <input
                     type="text"
                     value={modalInputName}
                     onChange={e => setModalInputName(e.target.value)}
                     className={`w-full p-3 rounded-lg md:rounded-xl outline-none text-sm font-medium transition-all ${isTimerRunning ? 'bg-white/5 border border-white/10 focus:border-white/30 text-white' : 'bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800'}`}
-                    placeholder={modalConfig.type === 'link' ? "Ex: Documento Google" : "Ex: João Silva"}
+                    placeholder={modalConfig.type === 'link' ? "Ex: Documento Google" : modalConfig.type === 'file_upload' ? "Nome do arquivo..." : "Ex: João Silva"}
                     autoFocus
                   />
                 </div>
-                <div>
-                  <label className={`text-[10px] uppercase font-bold tracking-widest opacity-50 mb-1.5 block ${isTimerRunning ? 'text-white' : 'text-slate-500'}`}>
-                    {modalConfig.type === 'link' ? 'URL' : 'Número / Contato'}
-                  </label>
-                  <input
-                    type="text"
-                    value={modalInputValue}
-                    onChange={e => setModalInputValue(e.target.value)}
-                    className={`w-full p-3 rounded-lg md:rounded-xl outline-none text-sm font-medium transition-all ${isTimerRunning ? 'bg-white/5 border border-white/10 focus:border-white/30 text-white' : 'bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800'}`}
-                    placeholder={modalConfig.type === 'link' ? 'https://...' : '(11) 9...'}
-                    onKeyDown={e => e.key === 'Enter' && handleModalConfirm()}
-                  />
-                </div>
+                {modalConfig.type !== 'file_upload' && (
+                  <div>
+                    <label className={`text-[10px] uppercase font-bold tracking-widest opacity-50 mb-1.5 block ${isTimerRunning ? 'text-white' : 'text-slate-500'}`}>
+                      {modalConfig.type === 'link' ? 'URL' : 'Número / Contato'}
+                    </label>
+                    <input
+                      type="text"
+                      value={modalInputValue}
+                      onChange={e => setModalInputValue(e.target.value)}
+                      className={`w-full p-3 rounded-lg md:rounded-xl outline-none text-sm font-medium transition-all ${isTimerRunning ? 'bg-white/5 border border-white/10 focus:border-white/30 text-white' : 'bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800'}`}
+                      placeholder={modalConfig.type === 'link' ? 'https://...' : '(11) 9...'}
+                      onKeyDown={e => e.key === 'Enter' && handleModalConfirm()}
+                    />
+                  </div>
+                )}
+                {modalConfig.type === 'file_upload' && pendingFile && (
+                  <div className={`p-4 rounded-xl border flex items-center gap-3 ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-100'}`}>
+                    <div className="w-10 h-10 bg-blue-500/10 text-blue-500 rounded-lg flex items-center justify-center">
+                       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-[10px] font-black uppercase tracking-widest opacity-40 ${isTimerRunning ? 'text-white' : 'text-slate-900'}`}>Deseja carregar este arquivo?</p>
+                      <p className={`text-xs font-bold truncate ${isTimerRunning ? 'text-white' : 'text-slate-700'}`}>{pendingFile.name}</p>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
