@@ -2613,10 +2613,12 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
     categoria: task.categoria || 'NÃO CLASSIFICADA',
     notas: task.notas || '',
     is_single_day: !!task.is_single_day,
-    entregas_relacionadas: task.entregas_relacionadas || []
+    entregas_relacionadas: task.entregas_relacionadas || [],
+    processo_sei: task.processo_sei || ''
   });
 
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-0 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
@@ -2705,22 +2707,72 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
               </select>
             </div>
 
-            {/* Opção de Vínculo com PGC */}
+            {/* Opção de Vínculo com PGC e Processo SEI */}
             {(formData.categoria === 'CLC' || formData.categoria === 'ASSISTÊNCIA' || formData.categoria === 'ASSISTÊNCIA ESTUDANTIL') && (
-              <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
-                <label className="text-[10px] font-black text-blue-600 uppercase tracking-widest pl-1">Vincular ação ao PGC</label>
-                <select
-                  value={formData.entregas_relacionadas[0] || ''}
-                  onChange={e => setFormData({ ...formData, entregas_relacionadas: e.target.value ? [e.target.value] : [] })}
-                  className="w-full bg-blue-50 border-blue-100 rounded-none md:rounded-2xl px-6 py-4 text-xs font-bold text-blue-900 focus:ring-2 focus:ring-blue-500 transition-all"
-                >
-                  <option value="">Não vinculado ao PGC</option>
-                  {pgcEntregas.map(e => (
-                    <option key={e.id} value={e.id}>{e.entrega}</option>
-                  ))}
-                </select>
-                <p className="text-[9px] font-medium text-blue-400 pl-1 uppercase tracking-wider">Selecione a entrega institucional correspondente</p>
-              </div>
+              <>
+                <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                  <label className="text-[10px] font-black text-blue-600 uppercase tracking-widest pl-1">Vincular ação ao PGC</label>
+                  <select
+                    value={formData.entregas_relacionadas[0] || ''}
+                    onChange={e => setFormData({ ...formData, entregas_relacionadas: e.target.value ? [e.target.value] : [] })}
+                    className="w-full bg-blue-50 border-blue-100 rounded-none md:rounded-2xl px-6 py-4 text-xs font-bold text-blue-900 focus:ring-2 focus:ring-blue-500 transition-all"
+                  >
+                    <option value="">Não vinculado ao PGC</option>
+                    {pgcEntregas.map(e => (
+                      <option key={e.id} value={e.id}>{e.entrega}</option>
+                    ))}
+                  </select>
+                  <p className="text-[9px] font-medium text-blue-400 pl-1 uppercase tracking-wider">Selecione a entrega institucional correspondente</p>
+                </div>
+
+                {formData.categoria === 'CLC' && (
+                  <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-blue-600 uppercase tracking-widest pl-1">Número do Processo (SIPAC)</label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={formData.processo_sei}
+                          onChange={e => setFormData({ ...formData, processo_sei: e.target.value })}
+                          placeholder="23083.XXXXXX/202X-XX"
+                          className="flex-1 bg-white border-2 border-blue-50 rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-blue-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                        />
+                        <button
+                          onClick={async () => {
+                            if (!formData.processo_sei) return;
+                            setIsSyncing(true);
+                            try {
+                              const scrapeSipac = httpsCallable(functions, 'scrapeSipac');
+                              await scrapeSipac({ taskId: task.id, processoSei: formData.processo_sei });
+                              alert("Sincronização iniciada com sucesso!");
+                            } catch (e) {
+                              console.error(e);
+                              alert("Erro ao iniciar sincronização.");
+                            } finally {
+                              setIsSyncing(false);
+                            }
+                          }}
+                          disabled={isSyncing || !formData.processo_sei}
+                          className="px-6 bg-blue-600 text-white rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all disabled:opacity-50"
+                        >
+                          {isSyncing ? 'Sincronizando...' : 'Sincronizar SIPAC'}
+                        </button>
+                      </div>
+                      <div className="flex items-center justify-between px-1">
+                        <p className="text-[9px] font-medium text-blue-400 uppercase tracking-wider">Número radical.numero/ano-dv</p>
+                        {task.sync_status && (
+                          <span className={`text-[9px] font-black uppercase tracking-widest ${
+                            task.sync_status === 'concluido' ? 'text-emerald-500' :
+                            task.sync_status === 'erro' ? 'text-rose-500' : 'text-amber-500 animate-pulse'
+                          }`}>
+                            Status: {task.sync_status}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -3333,21 +3385,51 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
 
               {task.categoria === 'CLC' && (
                 <div className="flex-1 animate-in fade-in slide-in-from-top-2">
-                  <h4 className="text-[10px] md:text-xs font-black uppercase tracking-widest leading-none opacity-70 mb-3">Processo SEI</h4>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      placeholder="Nº do Processo..."
-                      value={processoSei}
-                      onChange={e => setProcessoSei(e.target.value)}
-                      className="w-full bg-black/20 border border-white/10 rounded-none md:rounded-2xl px-4 py-3 text-xs font-medium focus:ring-2 focus:ring-white/30 outline-none text-white placeholder:text-white/20 transition-all"
-                    />
-                    {processoSei !== (task.processo_sei || '') && (
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-[10px] md:text-xs font-black uppercase tracking-widest leading-none opacity-70">Processo SEI</h4>
+                    {task.sync_status && (
+                      <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${
+                        task.sync_status === 'concluido' ? 'bg-emerald-500/20 text-emerald-400' :
+                        task.sync_status === 'erro' ? 'bg-rose-500/20 text-rose-400' :
+                        'bg-amber-500/20 text-amber-400 animate-pulse'
+                      }`}>
+                        {task.sync_status}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        placeholder="Nº do Processo..."
+                        value={processoSei}
+                        onChange={e => setProcessoSei(e.target.value)}
+                        className="w-full bg-black/20 border border-white/10 rounded-none md:rounded-2xl px-4 py-3 text-xs font-medium focus:ring-2 focus:ring-white/30 outline-none text-white placeholder:text-white/20 transition-all"
+                      />
+                      {processoSei !== (task.processo_sei || '') && (
+                        <button
+                          onClick={handleSaveProcessoSei}
+                          className="absolute right-1 top-1 bottom-1 bg-blue-500 text-white px-3 rounded-lg md:rounded-xl text-[8px] font-black uppercase shadow-lg hover:bg-blue-600 transition-colors"
+                        >
+                          Salvar
+                        </button>
+                      )}
+                    </div>
+                    {task.processo_sei && (
                       <button
-                        onClick={handleSaveProcessoSei}
-                        className="absolute right-1 top-1 bottom-1 bg-blue-500 text-white px-3 rounded-lg md:rounded-xl text-[8px] font-black uppercase shadow-lg hover:bg-blue-600 transition-colors"
+                        onClick={async () => {
+                          try {
+                            const scrapeSipac = httpsCallable(functions, 'scrapeSipac');
+                            await scrapeSipac({ taskId: task.id, processoSei: task.processo_sei });
+                            showToast("Sincronização iniciada.", "info");
+                          } catch (e) {
+                            showToast("Erro na sincronização.", "error");
+                          }
+                        }}
+                        className="bg-white/10 hover:bg-white/20 text-white p-3 rounded-none md:rounded-2xl transition-all border border-white/5"
+                        title="Sincronizar SIPAC agora"
                       >
-                        Salvar
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                       </button>
                     )}
                   </div>

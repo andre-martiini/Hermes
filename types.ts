@@ -15,6 +15,7 @@ export interface PoolItem {
     valor: string; // O link, o telefone ou o ID/Link do arquivo no Drive
     nome?: string; // Nome do arquivo ou rótulo do link
     data_criacao: string;
+    drive_file_id?: string;
 }
 
 export interface Tarefa {
@@ -38,7 +39,7 @@ export interface Tarefa {
     chat_gemini_url?: string;
     processo_sei?: string;
     tempo_total_segundos?: number;
-    sync_status?: 'new' | 'updated' | 'synced' | null;
+    sync_status?: 'new' | 'updated' | 'synced' | 'pendente' | 'processando' | 'concluido' | 'erro' | null;
     last_sync_date?: string;
     horario_inicio?: string; // format "HH:mm"
     horario_fim?: string;    // format "HH:mm"
@@ -86,6 +87,16 @@ export interface PlanoTrabalho {
     mes_ano: string;
     itens: PlanoTrabalhoItem[];
     data_atualizacao: string;
+}
+
+export interface ProcessoConhecimento {
+    id: string;
+    task_id: string;
+    file_id: string;
+    nome: string;
+    texto: string;
+    embedding: number[];
+    data_vetorizacao: string;
 }
 
 export interface BrainstormIdea {

@@ -1,5 +1,5 @@
 
-from firebase_functions import firestore_fn, scheduler_fn, options, https_fn
+from firebase_functions import firestore_fn, scheduler_fn, options, https_fn, pubsub_fn
 from firebase_admin import initialize_app, firestore, messaging
 
 # Inicializa o Firebase Admin apenas uma vez no escopo global
@@ -516,6 +516,127 @@ def upload_to_drive(req: https_fn.CallableRequest):
     except Exception as e:
         print(f"Erro no upload para o Drive: {str(e)}")
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=str(e))
+
+@firestore_fn.on_document_updated(document="tarefas/{taskId}")
+def on_processo_updated(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot]]):
+    """Trigger disparado quando uma tarefa é atualizada, para monitorar processo_sei"""
+    if not event.data.after.exists: return
+
+    before = event.data.before.to_dict() or {}
+    after = event.data.after.to_dict() or {}
+
+    # Condição: Se categoria == 'CLC' e o campo processo_sei for alterado/inserido.
+    if after.get('categoria') == 'CLC' and after.get('processo_sei'):
+        if before.get('processo_sei') != after.get('processo_sei'):
+            taskId = event.params['taskId']
+            db = get_db()
+            db.collection('tarefas').document(taskId).update({'sync_status': 'processando'})
+
+            # Dispara via PubSub para o Node.js
+            from google.cloud import pubsub_v1
+            import json
+            import os
+
+            try:
+                publisher = pubsub_v1.PublisherClient()
+                topic_path = publisher.topic_path(os.environ.get('GCLOUD_PROJECT'), 'scrape-sipac')
+
+                message_data = {
+                    "taskId": taskId,
+                    "processoSei": after.get('processo_sei'),
+                    "folderId": db.collection('system').document('config').get().to_dict().get('googleDriveFolderId')
+                }
+
+                publisher.publish(topic_path, json.dumps(message_data).encode('utf-8'))
+                print(f"Mensagem enviada para tópico scrape-sipac: {taskId}")
+            except Exception as e:
+                print(f"Erro ao publicar no PubSub: {e}")
+
+@pubsub_fn.on_message_published(topic="vectorize-process")
+def on_vectorize_requested(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedData]):
+    """Trigger disparado via PubSub para vetorizar documentos"""
+    import json
+    try:
+        message_text = event.data.message.text
+        if not message_text:
+             # Em algumas versões, pode estar em event.data.message.data (base64)
+             import base64
+             message_text = base64.b64decode(event.data.message.data).decode('utf-8')
+
+        data = json.loads(message_text)
+        task_id = data.get('taskId')
+        if task_id:
+            process_vectorization(task_id)
+    except Exception as e:
+        print(f"Erro ao processar mensagem PubSub: {e}")
+
+@https_fn.on_call()
+def vectorize_process_docs_callable(req: https_fn.CallableRequest):
+    """Versão callable para o frontend ou testes manuais"""
+    task_id = req.data.get('taskId')
+    if not task_id: return {'success': False, 'error': 'taskId faltante'}
+    return process_vectorization(task_id)
+
+def process_vectorization(task_id):
+    """Lógica central de extração e vetorização"""
+    import google.generativeai as genai
+    db = get_db()
+    task_doc = db.collection('tarefas').document(task_id).get()
+    if not task_doc.exists: return {'success': False, 'error': 'Tarefa não encontrada'}
+
+    task_data = task_doc.to_dict()
+    pool_dados = task_data.get('pool_dados', [])
+
+    # Buscar chave do Gemini
+    keys_doc = db.collection('system').document('api_keys').get()
+    GEMINI_API_KEY = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+    if not GEMINI_API_KEY: return {'success': False, 'error': 'Chave Gemini não configurada'}
+
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel("gemini-1.5-flash")
+
+    count = 0
+    for item in pool_dados:
+        if item.get('tipo') == 'arquivo' and item.get('drive_file_id'):
+            file_id = item['drive_file_id']
+            # Verifica se já foi vetorizado
+            existing = db.collection('processos_conhecimento').where('file_id', '==', file_id).get()
+            if not existing:
+                try:
+                    # Download do Drive
+                    service = get_drive_service()
+                    request = service.files().get_media(fileId=file_id)
+                    file_content = request.execute()
+
+                    # Determinar MIME type
+                    mime_type = "application/pdf" if item.get('nome', '').lower().endswith('.pdf') else "text/html"
+
+                    # Extração de texto via Gemini 1.5 Flash
+                    response = model.generate_content([
+                        "Extraia todo o texto relevante deste documento para indexação. Se for HTML, ignore tags. Se for PDF, faça OCR se necessário.",
+                        {"mime_type": mime_type, "data": file_content}
+                    ])
+                    text_content = response.text if response.text else f"Conteúdo de {item.get('nome')}"
+
+                    embedding = genai.embed_content(
+                        model="models/text-embedding-004",
+                        content=text_content,
+                        task_type="retrieval_document"
+                    )
+
+                    db.collection('processos_conhecimento').add({
+                        'task_id': task_id,
+                        'file_id': file_id,
+                        'nome': item.get('nome'),
+                        'texto': text_content,
+                        'embedding': embedding['embedding'],
+                        'data_vetorizacao': firestore.SERVER_TIMESTAMP
+                    })
+                    count += 1
+                except Exception as e:
+                    print(f"Erro ao vetorizar {file_id}: {e}")
+
+    return {'success': True, 'vectorized_count': count}
 
 @https_fn.on_call()
 def transcreverAudio(req: https_fn.CallableRequest):
