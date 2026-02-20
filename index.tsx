@@ -386,6 +386,17 @@ const DayView = ({
   onTaskUpdate: (id: string, updates: Partial<Tarefa>, suppressToast?: boolean) => void,
   onExecuteTask: (t: Tarefa) => void
 }) => {
+  const timeToMinutes = (time: string) => {
+    if (!time) return 0;
+    const [h, m] = time.split(':').map(Number);
+    return h * 60 + m;
+  };
+
+  const minutesToTime = (minutes: number) => {
+    const h = Math.max(0, Math.min(23, Math.floor(minutes / 60)));
+    const m = Math.max(0, Math.min(59, Math.floor(minutes % 60)));
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+  };
   const [resizing, setResizing] = useState<{ id: string, type: 'top' | 'bottom', startY: number, startMin: number } | null>(null);
   const [dragging, setDragging] = useState<{ id: string, startY: number, startMin: number } | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -497,17 +508,6 @@ const DayView = ({
     });
   }, [timedEvents, dayTasks]);
 
-  const timeToMinutes = (time: string) => {
-    if (!time) return 0;
-    const [h, m] = time.split(':').map(Number);
-    return h * 60 + m;
-  };
-
-  const minutesToTime = (minutes: number) => {
-    const h = Math.max(0, Math.min(23, Math.floor(minutes / 60)));
-    const m = Math.max(0, Math.min(59, Math.floor(minutes % 60)));
-    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
-  };
 
   const handleMouseMove = (e: MouseEvent) => {
     if (resizing) {
