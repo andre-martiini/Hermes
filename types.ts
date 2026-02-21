@@ -398,6 +398,9 @@ export interface WysiwygEditorProps {
     onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
     placeholder?: string;
     className?: string;
+    id?: string;
+}
+
 export type StatusConvocacao = 'Em regularização' | 'Ativo(a)' | 'Concluído(a)' | 'Desligado(a)';
 
 export interface Bolsista {

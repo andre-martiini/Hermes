@@ -1116,7 +1116,7 @@ const HermesModal = ({ isOpen, title, message, type, onConfirm, onCancel, confir
   );
 };
 
-const WysiwygEditor = ({ value, onChange, onKeyDown, placeholder, className }: WysiwygEditorProps) => {
+const WysiwygEditor = ({ value, onChange, onKeyDown, placeholder, className, id }: WysiwygEditorProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -1127,29 +1127,64 @@ const WysiwygEditor = ({ value, onChange, onKeyDown, placeholder, className }: W
   const renderFormattedText = (text: string) => {
     if (!text) return <span className="text-slate-400">{placeholder}</span>;
 
-    return (
-      <div className="whitespace-pre-wrap break-words leading-relaxed">
-        {text.split('\n').map((line, i) => (
-          <div key={i} className="min-h-[1.5em]">
-            {line.split(/(\*[^*]+\*|_[^_]+_|~[^~]+~|`[^`]+`)/g).map((part, j) => {
-              if (part.startsWith('*') && part.endsWith('*')) {
-                return <span key={j} className="font-bold text-current"><span className="opacity-20">*</span>{part.slice(1, -1)}<span className="opacity-20">*</span></span>;
-              }
-              if (part.startsWith('_') && part.endsWith('_')) {
-                return <span key={j} className="italic"><span className="opacity-20">_</span>{part.slice(1, -1)}<span className="opacity-20">_</span></span>;
-              }
-              if (part.startsWith('~') && part.endsWith('~')) {
-                return <span key={j} className="line-through opacity-60"><span className="opacity-20">~</span>{part.slice(1, -1)}<span className="opacity-20">~</span></span>;
-              }
-              if (part.startsWith('`') && part.endsWith('`')) {
-                return <span key={j} className="font-mono bg-slate-100 px-1 rounded text-pink-600"><span className="opacity-20">`</span>{part.slice(1, -1)}<span className="opacity-20">`</span></span>;
-              }
-              return part;
-            })}
-          </div>
-        ))}
-      </div>
-    );
+    const lines = text.split('\n');
+    const processedLines: React.JSX.Element[] = [];
+    let currentList: React.JSX.Element[] = [];
+
+    const flushList = () => {
+      if (currentList.length > 0) {
+        processedLines.push(<ul key={`list-${processedLines.length}`} className="list-disc ml-6 my-1 space-y-0 shadow-none border-none bg-transparent">{currentList}</ul>);
+        currentList = [];
+      }
+    };
+
+    const formatInline = (text: string) => {
+      return (
+        <>
+          {text.split(/(```[\s\S]+?```|`[^`]+`|\*[^*]+\*|_[^_]+_|~[^~]+~)/g).map((part, j) => {
+            if (part.startsWith('```') && part.endsWith('```')) {
+              return <pre key={j} className="bg-slate-100/80 p-2 rounded-lg font-mono text-[11px] my-1 overflow-x-auto border border-slate-200 text-slate-800">{part.slice(3, -3)}</pre>;
+            }
+            if (part.startsWith('*') && part.endsWith('*')) {
+              return <span key={j} className="font-bold text-current"><span className="opacity-20">*</span>{part.slice(1, -1)}<span className="opacity-20">*</span></span>;
+            }
+            if (part.startsWith('_') && part.endsWith('_')) {
+              return <span key={j} className="italic"><span className="opacity-20">_</span>{part.slice(1, -1)}<span className="opacity-20">_</span></span>;
+            }
+            if (part.startsWith('~') && part.endsWith('~')) {
+              return <span key={j} className="line-through opacity-60"><span className="opacity-20">~</span>{part.slice(1, -1)}<span className="opacity-20">~</span></span>;
+            }
+            if (part.startsWith('`') && part.endsWith('`')) {
+              return <span key={j} className="font-mono bg-slate-100 px-1 rounded text-pink-600 border border-slate-200"><span className="opacity-20">`</span>{part.slice(1, -1)}<span className="opacity-20">`</span></span>;
+            }
+            return part;
+          })}
+        </>
+      );
+    };
+
+    lines.forEach((line, index) => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+        currentList.push(<li key={index} className="pl-1 text-sm">{formatInline(line.substring(line.indexOf(trimmed.startsWith('- ') ? '- ' : '* ') + 2))}</li>);
+      } else {
+        flushList();
+        if (trimmed.startsWith('>')) {
+          processedLines.push(
+            <blockquote key={index} className="border-l-4 border-slate-300 pl-4 py-1 my-1 italic text-slate-500 bg-slate-50/50 rounded-r-lg">
+              {formatInline(line.substring(line.indexOf('>') + 1).trim())}
+            </blockquote>
+          );
+        } else if (line === '') {
+          processedLines.push(<div key={index} className="h-1.5"></div>);
+        } else {
+          processedLines.push(<div key={index} className="min-h-[1.5em]">{formatInline(line)}</div>);
+        }
+      }
+    });
+    flushList();
+
+    return <div className="whitespace-pre-wrap break-words">{processedLines}</div>;
   };
 
   return (
@@ -1159,6 +1194,7 @@ const WysiwygEditor = ({ value, onChange, onKeyDown, placeholder, className }: W
       </div>
       <textarea
         ref={textareaRef}
+        id={id}
         value={value}
         onChange={handleInput}
         onKeyDown={onKeyDown}
@@ -3158,6 +3194,73 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState(task.titulo);
 
+  // Transcription states
+  const [isRecording, setIsRecording] = useState(false);
+  const [isProcessingTranscription, setIsProcessingTranscription] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/m4a' });
+        await handleProcessAudio(audioBlob);
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Erro ao acessar microfone:", err);
+      showToast("Erro ao acessar microfone.", "error");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const handleProcessAudio = async (audioBlob: Blob) => {
+    setIsProcessingTranscription(true);
+    try {
+      const reader = new FileReader();
+      reader.readAsDataURL(audioBlob);
+      reader.onloadend = async () => {
+        try {
+          const base64String = (reader.result as string).split(',')[1];
+          const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
+          const response = await transcribeFunc({ audioBase64: base64String });
+          const data = response.data as { raw: string; refined: string };
+          if (data.refined) {
+            setNewFollowUp(prev => prev + (prev ? '\n' : '') + data.refined);
+          }
+        } catch (error) {
+          console.error("Erro ao transcrever:", error);
+          showToast("Erro ao processar áudio.", "error");
+        } finally {
+          setIsProcessingTranscription(false);
+        }
+      };
+    } catch (error) {
+      console.error("Erro ao ler áudio:", error);
+      setIsProcessingTranscription(false);
+    }
+  };
+
   const applyFormatting = (symbol: string) => {
     const textarea = document.getElementById('diary-input') as HTMLTextAreaElement;
     if (!textarea) return;
@@ -4141,18 +4244,45 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
                 </div>
 
                 <div className="flex-1 flex flex-col min-w-0">
-                  <WysiwygEditor
-                    value={newFollowUp}
-                    onChange={setNewFollowUp}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleAddFollowUp();
-                      }
-                    }}
-                    placeholder="Anotação..."
-                    className={isTimerRunning ? 'text-white' : 'text-slate-800'}
-                  />
+                  <div className="relative group">
+                    <WysiwygEditor
+                      id="diary-input"
+                      value={newFollowUp}
+                      onChange={setNewFollowUp}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleAddFollowUp();
+                        }
+                      }}
+                      placeholder="Anotação..."
+                      className={isTimerRunning ? 'text-white' : 'text-slate-800'}
+                    />
+                    
+                    <button
+                      onClick={isRecording ? stopRecording : startRecording}
+                      disabled={isProcessingTranscription}
+                      className={`absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-xl transition-all z-20 ${
+                        isRecording 
+                          ? 'bg-rose-600 text-white animate-pulse shadow-lg' 
+                          : isProcessingTranscription
+                            ? (isTimerRunning ? 'bg-white/10 text-white/40' : 'bg-blue-100 text-blue-600')
+                            : (isTimerRunning ? 'text-white/40 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50')
+                      }`}
+                      title={isRecording ? "Parar Gravação" : "Gravar Anotação"}
+                    >
+                      {isProcessingTranscription ? (
+                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                      ) : isRecording ? (
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
+                      ) : (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                      )}
+                    </button>
+                  </div>
                   <div className={`flex items-center gap-1 mt-1 pt-2 border-t ${isTimerRunning ? 'border-white/10' : 'border-slate-100'}`}>
                     <button
                       onClick={() => applyFormatting('*')}
