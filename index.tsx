@@ -4199,17 +4199,177 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
   );
 };
 
-const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, onUpdateIdea, onConvertToLog, activeTool, setActiveTool, isAddingText, setIsAddingText }: {
+const SlidesTool = ({ onBack, showToast }: { onBack: () => void, showToast: (msg: string, type: 'success' | 'error' | 'info') => void }) => {
+  const [rascunho, setRascunho] = useState('');
+  const [qtdSlides, setQtdSlides] = useState(5);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [presentation, setPresentation] = useState<any>(null);
+
+  const handleGenerate = async () => {
+    if (!rascunho.trim()) {
+      showToast("Insira o texto bruto para começar.", "info");
+      return;
+    }
+    setIsGenerating(true);
+    setPresentation(null);
+    try {
+      if (import.meta.env.DEV) {
+        const response = await fetch('/proxy-functions/gerarSlidesIA', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: { rascunho, qtdSlides } })
+        });
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const result = await response.json();
+        setPresentation(result.result || result.data); // Firebase SDK wraps in result.data, proxy might return result.result
+      } else {
+        const gerarSlidesFn = httpsCallable(functions, 'gerarSlidesIA');
+        const result = await gerarSlidesFn({ rascunho, qtdSlides });
+        setPresentation(result.data);
+      }
+      showToast("Apresentação gerada com sucesso!", "success");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao gerar slides.", "error");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  return (
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8 pb-32">
+      <div className="flex items-center gap-6 mb-12">
+        <button 
+          onClick={onBack}
+          className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-400 hover:text-slate-900 border border-slate-200 hover:border-slate-900 transition-all shadow-sm"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
+        </button>
+        <div>
+          <h2 className="text-3xl font-black text-slate-900 tracking-tighter">Gerador de Slides IA</h2>
+          <p className="text-slate-500 font-medium">Transforme textos complexos em apresentações profissionais.</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="space-y-6">
+          <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-xl space-y-6">
+            <div>
+              <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 ml-1">Conteúdo Base (Texto Bruto)</label>
+              <textarea 
+                className="w-full bg-slate-50 border border-slate-100 rounded-[1.5rem] p-6 text-slate-800 font-bold leading-relaxed outline-none focus:ring-4 focus:ring-orange-100 transition-all min-h-[300px] resize-none"
+                placeholder="Cole aqui o texto, atas de reunião, artigos ou tópicos que deseja transformar em slides..."
+                value={rascunho}
+                onChange={e => setRascunho(e.target.value)}
+              />
+            </div>
+            
+            <div className="flex items-end gap-6">
+              <div className="flex-1">
+                <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 ml-1">Quantidade de Slides</label>
+                <input 
+                  type="number" 
+                  min="1" 
+                  max="20"
+                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-slate-800 font-black outline-none focus:ring-4 focus:ring-orange-100 transition-all"
+                  value={qtdSlides}
+                  onChange={e => setQtdSlides(parseInt(e.target.value))}
+                />
+              </div>
+              <button 
+                onClick={handleGenerate}
+                disabled={isGenerating}
+                className={`flex-[2] h-14 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-3 shadow-xl transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:grayscale ${isGenerating ? 'animate-pulse' : ''}`}
+              >
+                {isGenerating ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Processando...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                    Gerar Apresentação
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-8 h-[700px] overflow-y-auto pr-4 custom-scrollbar">
+          {presentation ? (
+            presentation.slides.map((slide: any, idx: number) => (
+              <div key={idx} className="bg-slate-900 rounded-[2.5rem] p-10 min-h-[400px] flex flex-col justify-between shadow-2xl relative overflow-hidden group border border-white/5">
+                <div className="absolute -top-10 -right-10 w-40 h-40 bg-white/5 rounded-full blur-3xl group-hover:bg-white/10 transition-all duration-700"></div>
+                <div className="absolute -bottom-10 -left-10 w-60 h-60 bg-orange-500/10 rounded-full blur-3xl group-hover:bg-orange-500/20 transition-all duration-700"></div>
+                
+                <div className="relative z-10 flex-1">
+                  <div className="flex justify-between items-start mb-10">
+                    <span className="text-[10px] font-black text-white/30 uppercase tracking-[0.3em]">Slide {slide.numero} • {slide.layout}</span>
+                    <button 
+                      onClick={() => {
+                        const text = `${slide.titulo}\n${slide.topicos.join('\n')}`;
+                        navigator.clipboard.writeText(text);
+                        showToast("Conteúdo copiado!", "success");
+                      }}
+                      className="text-white/20 hover:text-white transition-colors"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                    </button>
+                  </div>
+                  
+                  <h3 className={`font-black text-white tracking-tight leading-tight mb-8 ${slide.layout === 'capa' ? 'text-5xl' : 'text-3xl'}`}>{slide.titulo}</h3>
+                  <ul className="space-y-4">
+                    {Array.isArray(slide.topicos) && slide.topicos.map((t: any, tIdx: number) => (
+                      <li key={tIdx} className="flex gap-4 items-start text-white/80 text-lg font-medium leading-relaxed">
+                        <span className="w-2 h-2 bg-orange-500 rounded-full mt-2.5 flex-shrink-0"></span>
+                        {typeof t === 'string' ? t : (typeof t === 'object' ? JSON.stringify(t) : String(t))}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {slide.prompt_imagem && (
+                  <div className="relative z-10 mt-10 pt-8 border-t border-white/10">
+                    <div className="flex items-center gap-2 text-white/40 mb-3">
+                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                       <span className="text-[10px] font-black uppercase tracking-widest">IA Image Prompt</span>
+                    </div>
+                    <p className="text-xs text-white/40 italic leading-relaxed">{slide.prompt_imagem}</p>
+                  </div>
+                )}
+              </div>
+            ))
+          ) : isGenerating ? (
+            <div className="h-full flex flex-col items-center justify-center space-y-4 animate-pulse">
+              <div className="w-16 h-16 bg-slate-100 rounded-full"></div>
+              <p className="text-slate-300 font-black uppercase tracking-widest">Arquitetando Slides...</p>
+            </div>
+          ) : (
+            <div className="h-full flex flex-col items-center justify-center space-y-6 text-slate-200">
+               <svg className="w-24 h-24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+               <p className="font-bold text-center">Nenhuma apresentação gerada.<br/><span className="text-sm font-medium opacity-60">Seus slides aparecerão aqui.</span></p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, onUpdateIdea, onConvertToLog, activeTool, setActiveTool, isAddingText, setIsAddingText, showToast }: {
   ideas: BrainstormIdea[],
   onDeleteIdea: (id: string) => void,
   onArchiveIdea: (id: string) => void,
   onAddTextIdea: (text: string) => void,
   onUpdateIdea: (id: string, text: string) => void,
   onConvertToLog: (idea: BrainstormIdea) => void,
-  activeTool: 'brainstorming' | null,
-  setActiveTool: (tool: 'brainstorming' | null) => void,
+  activeTool: 'brainstorming' | 'slides' | null,
+  setActiveTool: (tool: 'brainstorming' | 'slides' | null) => void,
   isAddingText: boolean,
-  setIsAddingText: (val: boolean) => void
+  setIsAddingText: (val: boolean) => void,
+  showToast: (msg: string, type: 'success' | 'error' | 'info') => void
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [textInput, setTextInput] = useState('');
@@ -4254,6 +4414,10 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
     });
   };
 
+  if (activeTool === 'slides') {
+    return <SlidesTool onBack={() => setActiveTool(null)} showToast={showToast} />;
+  }
+
   if (!activeTool) {
     return (
       <div className="animate-in grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-0 md:gap-8 pb-20 px-0">
@@ -4271,16 +4435,15 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
         </button>
 
         <button
-          disabled
-          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-100 shadow-none md:shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden -ml-px -mt-px md:m-0"
+          onClick={() => setActiveTool('slides')}
+          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-200 shadow-none md:shadow-xl hover:shadow-none md:hover:shadow-2xl transition-all group text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 -ml-px -mt-px md:m-0"
         >
-          <div className="absolute top-2 right-2 md:top-4 md:right-4 bg-slate-100 text-slate-400 text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Em Breve</div>
-          <div className="w-12 h-12 md:w-16 md:h-16 bg-slate-50 rounded-none md:rounded-2xl flex items-center justify-center text-slate-400 flex-shrink-0">
+          <div className="w-12 h-12 md:w-16 md:h-16 bg-orange-50 rounded-none md:rounded-2xl flex items-center justify-center text-orange-600 group-hover:bg-orange-600 group-hover:text-white transition-all flex-shrink-0">
             <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
           </div>
           <div>
-            <h3 className="text-lg md:text-2xl font-black text-slate-400 tracking-tighter mb-1 md:mb-2">Criação de DFD</h3>
-            <p className="text-slate-400 font-medium leading-relaxed italic text-xs md:text-sm">Documento de Formalização.</p>
+            <h3 className="text-lg md:text-2xl font-black text-slate-900 tracking-tighter mb-1 md:mb-2">Gerador de Slides</h3>
+            <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Crie apresentações profissionais com IA de forma rápida.</p>
           </div>
         </button>
 
@@ -4976,7 +5139,7 @@ const App: React.FC = () => {
   const [isImportPlanOpen, setIsImportPlanOpen] = useState(false);
   const [isCompletedTasksOpen, setIsCompletedTasksOpen] = useState(false);
   const [brainstormIdeas, setBrainstormIdeas] = useState<BrainstormIdea[]>([]);
-  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | null>(null);
+  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | null>(null);
   const [isBrainstormingAddingText, setIsBrainstormingAddingText] = useState(false);
   const [convertingIdea, setConvertingIdea] = useState<BrainstormIdea | null>(null);
   const [isSystemSelectorOpen, setIsSystemSelectorOpen] = useState(false);
@@ -7869,6 +8032,7 @@ const App: React.FC = () => {
                   setActiveTool={setActiveFerramenta}
                   isAddingText={isBrainstormingAddingText}
                   setIsAddingText={setIsBrainstormingAddingText}
+                  showToast={showToast}
                 />
               ) : viewMode === 'projects' ? (
                 <ProjectsView />

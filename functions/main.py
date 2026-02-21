@@ -896,3 +896,69 @@ def processarArquivoIA(req: https_fn.CallableRequest):
     })
 
     return start_file_indexing(item_id, doc.to_dict())
+@https_fn.on_call(memory=options.MemoryOption.GB_1)
+def gerarSlidesIA(req: https_fn.CallableRequest):
+    """
+    Gera conteúdo para slides a partir de um texto bruto.
+    """
+    import google.generativeai as genai
+    import json
+
+    data = req.data
+    rascunho = data.get('rascunho')
+    qtd_slides = data.get('qtdSlides', 5)
+
+    if not rascunho:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="Texto bruto não fornecido.")
+
+    try:
+        db = get_db()
+        keys_doc = db.collection('system').document('api_keys').get()
+        if not keys_doc.exists:
+            raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION, message="Configuração de API pendente.")
+        
+        GEMINI_API_KEY = keys_doc.to_dict().get('gemini_api_key')
+        if not GEMINI_API_KEY:
+            raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION, message="Chave Gemini não configurada.")
+
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel("gemini-2.5-flash-lite") # Usando o modelo solicitado no slides-ia e preferido do André
+
+        system_instruction = f"""
+        Atue como Especialista em Design de Apresentações Profissionais.
+        Sua tarefa é transformar o texto bruto fornecido em uma estrutura de apresentação de slides premium.
+        
+        Regras de Negócio:
+        1. Gere EXATAMENTE {qtd_slides} slides.
+        2. Use layouts variados: 'capa' (apenas no primeiro), 'titulo_e_conteudo', 'somente_titulo'. (EVITE outros layouts complexos por enquanto).
+        3. Tópicos: Use frases curtas, impactantes e diretas. No máximo 4 tópicos por slide. 
+        4. IMPORTANTE: O campo 'topicos' deve ser SEMPRE uma lista de strings simples. Nunca use objetos ou dicionários dentro desta lista.
+        5. Prompt de Imagem: Forneça um prompt em INGLÊS detalhado para cada slide, focado em imagens corporativas, modernas e de alta qualidade (minimalista, 4k, profissional).
+        6. Tom de voz: Profissional, executivo e inspirador.
+
+        Retorne APENAS um objeto JSON seguindo este esquema:
+        {{
+          "slides": [
+            {{
+              "numero": 1,
+              "layout": "capa",
+              "titulo": "Título Principal",
+              "topicos": ["Subtítulo ou frase de impacto"],
+              "prompt_imagem": "Professional corporate background..."
+            }}
+          ]
+        }}
+        """
+
+        response = model.generate_content([
+            system_instruction,
+            f"Texto Bruto para Processar:\n{rascunho}"
+        ], generation_config={"response_mime_type": "application/json"})
+
+        # Limpeza básica caso venha com markdown
+        text_response = response.text.replace('```json', '').replace('```', '').strip()
+        return json.loads(text_response)
+
+    except Exception as e:
+        print(f"Erro ao gerar slides: {str(e)}")
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=str(e))
