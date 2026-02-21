@@ -1,18 +1,50 @@
 import React, { useState, useMemo } from 'react';
-import { ConhecimentoItem, formatDate } from './types';
+import { ConhecimentoItem, formatDate, Tarefa, WorkItem } from './types';
 
 interface KnowledgeViewProps {
     items: ConhecimentoItem[];
     onUploadFile: (file: File) => void;
     onDeleteItem: (id: string) => void;
-    showConfirm: (title: string, message: string, onConfirm: () => void) => void;
+    onProcessWithAI: (id: string) => Promise<void>;
+    onNavigateToOrigin: (modulo: string, id: string) => void;
+    allTasks: Tarefa[];
+    allWorkItems: WorkItem[];
 }
 
-const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onDeleteItem, showConfirm }) => {
+const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onDeleteItem, onProcessWithAI, onNavigateToOrigin, allTasks, allWorkItems }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
     const [selectedItem, setSelectedItem] = useState<ConhecimentoItem | null>(null);
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+    const [isProcessingAI, setIsProcessingAI] = useState(false);
+    const [isOcrExpanded, setIsOcrExpanded] = useState(false);
+
+    const currentItem = useMemo(() => {
+        if (!selectedItem) return null;
+        return items.find(i => i.id === selectedItem.id) || selectedItem;
+    }, [items, selectedItem]);
+
+    const handleCopyToClipboard = (text: string) => {
+        navigator.clipboard.writeText(text);
+        // showToast is not available here, but we could pass it or just assume it works.
+        // For now, let's just do the copy.
+        alert("Texto copiado para a área de transferência!");
+    };
+
+    const getOriginInfo = (origem: ConhecimentoItem['origem']) => {
+        if (!origem) return { label: 'Upload Direto', title: 'Manual' };
+        
+        switch (origem.modulo) {
+            case 'tarefas':
+                const task = allTasks.find(t => t.id === origem.id_origem);
+                return { label: 'Ação / Tarefa', title: task?.titulo || `Tarefa #${origem.id_origem}` };
+            case 'sistemas':
+                const workItem = allWorkItems.find(w => w.id === origem.id_origem);
+                return { label: 'Log de Sistema', title: workItem?.descricao || `Log #${origem.id_origem}` };
+            default:
+                return { label: origem.modulo, title: origem.id_origem };
+        }
+    };
 
     const categories = useMemo(() => {
         const cats = new Set<string>();
@@ -34,6 +66,15 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onDe
             return matchesSearch && matchesCategory;
         }).sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime());
     }, [items, searchTerm, selectedCategory]);
+
+    const handleAIProcess = async (id: string) => {
+        setIsProcessingAI(true);
+        try {
+            await onProcessWithAI(id);
+        } finally {
+            setIsProcessingAI(false);
+        }
+    };
 
     const getFileIcon = (type: string) => {
         const t = type.toLowerCase();
@@ -201,12 +242,25 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onDe
                                                 {formatDate(item.data_criacao?.split('T')[0])}
                                             </td>
                                             <td className="px-8 py-4 text-right">
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); onDeleteItem(item.id); }}
-                                                    className="p-2 text-slate-300 hover:text-rose-500 transition-colors"
-                                                >
-                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                </button>
+                                                <div className="flex items-center justify-end gap-2">
+                                                    <a
+                                                        href={`https://drive.google.com/uc?export=download&id=${item.id}`}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        className="p-2 text-slate-300 hover:text-emerald-500 transition-colors"
+                                                        title="Download"
+                                                    >
+                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                                    </a>
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); if(window.confirm("Excluir item?")) onDeleteItem(item.id); }}
+                                                        className="p-2 text-slate-300 hover:text-rose-500 transition-colors"
+                                                        title="Excluir"
+                                                    >
+                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}
@@ -228,18 +282,18 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onDe
             </main>
 
             {/* Slide-over Preview */}
-            {selectedItem && (
+            {currentItem && (
                 <div className="fixed inset-0 z-[200] flex justify-end animate-in fade-in duration-300">
                     <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setSelectedItem(null)}></div>
                     <div className="relative w-full max-w-2xl bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right-full duration-500">
                         <header className="p-8 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
                             <div className="flex items-center gap-4">
                                 <div className="p-3 bg-slate-100 rounded-2xl">
-                                    {getFileIcon(selectedItem.tipo_arquivo)}
+                                    {getFileIcon(currentItem.tipo_arquivo)}
                                 </div>
                                 <div>
-                                    <h3 className="text-xl font-black text-slate-900 tracking-tight leading-tight">{selectedItem.titulo}</h3>
-                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1">{selectedItem.categoria || 'Geral'}</p>
+                                    <h3 className="text-xl font-black text-slate-900 tracking-tight leading-tight">{currentItem.titulo}</h3>
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1">{currentItem.categoria || 'Geral'}</p>
                                 </div>
                             </div>
                             <button onClick={() => setSelectedItem(null)} className="p-3 hover:bg-slate-100 rounded-full transition-all">
@@ -252,15 +306,35 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onDe
                             <section>
                                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 border-l-4 border-blue-500 pl-4">Resumo Executivo (TL;DR)</h4>
                                 <div className="bg-blue-50/50 p-6 rounded-[2rem] border border-blue-100 text-sm text-blue-900 font-medium leading-relaxed italic">
-                                    {selectedItem.resumo_tldr || "Processando resumo inteligente..."}
+                                    {currentItem.resumo_tldr || "Processando resumo inteligente..."}
                                 </div>
                             </section>
 
                             {/* Conteúdo Extraído */}
                             <section>
-                                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 border-l-4 border-slate-900 pl-4">Texto Extraído / OCR</h4>
-                                <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-200 text-xs font-medium text-slate-700 leading-relaxed whitespace-pre-wrap font-mono">
-                                    {selectedItem.texto_bruto || "Nenhum texto extraído ainda."}
+                                <div className="flex items-center justify-between mb-4 border-l-4 border-slate-900 pl-4">
+                                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Texto Extraído / OCR</h4>
+                                    <div className="flex gap-2">
+                                        <button 
+                                            onClick={() => handleCopyToClipboard(currentItem.texto_bruto || '')}
+                                            className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-all"
+                                            title="Copiar texto"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
+                                        </button>
+                                        <button 
+                                            onClick={() => setIsOcrExpanded(!isOcrExpanded)}
+                                            className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-all font-black text-[9px] uppercase tracking-widest"
+                                        >
+                                            {isOcrExpanded ? 'Recolher' : 'Expandir'}
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className={`bg-slate-50 p-6 rounded-[2rem] border border-slate-200 text-xs font-medium text-slate-700 leading-relaxed whitespace-pre-wrap font-mono relative overflow-hidden transition-all duration-500 ${isOcrExpanded ? 'max-h-none' : 'max-h-40'}`}>
+                                    {currentItem.texto_bruto || "Nenhum texto extraído ainda."}
+                                    {!isOcrExpanded && currentItem.texto_bruto && (
+                                        <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-slate-50 to-transparent pointer-events-none"></div>
+                                    )}
                                 </div>
                             </section>
 
@@ -268,12 +342,12 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onDe
                             <section>
                                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Tags Identificadas</h4>
                                 <div className="flex flex-wrap gap-2">
-                                    {(selectedItem.tags || []).map(tag => (
+                                    {(currentItem.tags || []).map(tag => (
                                         <span key={tag} className="bg-slate-100 text-slate-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-slate-200">
                                             #{tag}
                                         </span>
                                     ))}
-                                    {(selectedItem.tags || []).length === 0 && <p className="text-xs italic text-slate-400">Nenhuma tag gerada.</p>}
+                                    {(currentItem.tags || []).length === 0 && <p className="text-xs italic text-slate-400">Nenhuma tag gerada.</p>}
                                 </div>
                             </section>
 
@@ -281,29 +355,66 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onDe
                             <section className="pt-10 border-t border-slate-100 grid grid-cols-2 gap-8">
                                 <div>
                                     <h5 className="text-[9px] font-black text-slate-400 uppercase mb-1">Data de Criação</h5>
-                                    <p className="text-xs font-bold text-slate-900">{formatDate(selectedItem.data_criacao?.split('T')[0])}</p>
+                                    <p className="text-xs font-bold text-slate-900">{formatDate(currentItem.data_criacao?.split('T')[0])}</p>
                                 </div>
                                 <div>
                                     <h5 className="text-[9px] font-black text-slate-400 uppercase mb-1">Origem</h5>
-                                    <p className="text-xs font-bold text-slate-900 uppercase">
-                                        {selectedItem.origem ? `${selectedItem.origem.modulo} #${selectedItem.origem.id_origem}` : 'Upload Direto'}
-                                    </p>
+                                    <button 
+                                        disabled={!currentItem.origem}
+                                        onClick={() => currentItem.origem && onNavigateToOrigin(currentItem.origem.modulo, currentItem.origem.id_origem)}
+                                        className={`text-xs font-bold text-left transition-all ${currentItem.origem ? 'text-blue-600 hover:text-blue-800 hover:underline' : 'text-slate-900'}`}
+                                    >
+                                        <div className="text-[8px] opacity-60 uppercase mb-0.5">{getOriginInfo(currentItem.origem).label}</div>
+                                        {getOriginInfo(currentItem.origem).title}
+                                    </button>
                                 </div>
                             </section>
                         </div>
 
                         <footer className="p-8 border-t border-slate-100 bg-slate-50 flex gap-4">
+                            {/* Botão de Processamento IA - Só aparece se não tiver resumo ou se for solicitado re-processamento */}
+                            {(!currentItem.resumo_tldr || !currentItem.tags) && (
+                                <button
+                                    onClick={() => handleAIProcess(currentItem.id)}
+                                    disabled={isProcessingAI}
+                                    className={`flex-1 bg-blue-600 text-white py-5 rounded-3xl text-[10px] font-black uppercase tracking-[0.2em] text-center shadow-lg hover:bg-blue-700 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed`}
+                                >
+                                    {isProcessingAI ? (
+                                        <>
+                                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                            Processando...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                            Processar com IA
+                                        </>
+                                    )}
+                                </button>
+                            )}
+
                             <a
-                                href={selectedItem.url_drive}
+                                href={`https://drive.google.com/uc?export=download&id=${currentItem.id}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="flex-1 bg-emerald-600 text-white py-5 rounded-3xl text-[10px] font-black uppercase tracking-[0.2em] text-center shadow-lg hover:bg-emerald-700 transition-all flex items-center justify-center gap-3"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                Download
+                            </a>
+
+                            <a
+                                href={currentItem.url_drive}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="flex-1 bg-slate-900 text-white py-5 rounded-3xl text-[10px] font-black uppercase tracking-[0.2em] text-center shadow-lg hover:bg-slate-800 transition-all flex items-center justify-center gap-3"
                             >
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                                Abrir no Google Drive
+                                Abrir no Drive
                             </a>
                             <button
-                                onClick={() => { showConfirm("Excluir", "Deseja excluir este item?", () => { onDeleteItem(selectedItem.id); setSelectedItem(null); }); }}
+                                title="Excluir"
+                                onClick={() => { if(window.confirm("Excluir item?")) { onDeleteItem(currentItem.id); setSelectedItem(null); } }}
                                 className="px-6 bg-white border border-rose-100 text-rose-500 rounded-3xl hover:bg-rose-50 transition-all"
                             >
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>

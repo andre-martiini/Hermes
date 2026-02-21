@@ -17,6 +17,7 @@ interface DashboardViewProps {
     currentMonth: number;
     currentYear: number;
     onNavigate: (view: 'gallery' | 'finance' | 'saude' | 'sistemas-dev') => void;
+    onOpenBacklog: () => void;
 }
 
 const DashboardCard = ({ title, iconColor, onRedirect, children }: { title: string, iconColor: string, onRedirect: () => void, children: React.ReactNode }) => {
@@ -58,7 +59,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     workItems,
     currentMonth,
     currentYear,
-    onNavigate
+    onNavigate,
+    onOpenBacklog
 }) => {
     const todayStr = new Date().toISOString().split('T')[0];
     const tomorrow = new Date();
@@ -307,14 +309,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     };
 
     return (
-        <div className="animate-in fade-in duration-700 space-y-8 md:space-y-12 pb-20">
-            <div className="max-w-6xl mx-auto px-4 md:px-0 text-center md:text-left">
-                <h2 className="text-3xl md:text-5xl font-black text-slate-900 tracking-tighter uppercase mb-2">Painel de Controle</h2>
-                <div className="flex items-center justify-center md:justify-start gap-3">
-                    <span className="w-12 h-1 bg-blue-600 rounded-full"></span>
-                    <p className="text-slate-400 text-[10px] md:text-xs font-black uppercase tracking-[0.2em]">Visão Geral • André Martini</p>
-                </div>
-            </div>
+        <div className="animate-in fade-in duration-700 space-y-8 md:space-y-12 pb-20 pt-8">
             
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 max-w-6xl mx-auto">
 

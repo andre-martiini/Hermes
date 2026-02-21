@@ -22,6 +22,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import FinanceView from './FinanceView';
 import DashboardView from './DashboardView';
 import KnowledgeView from './KnowledgeView';
+import ProjectsView from './ProjectsView';
 
 
 type SortOption = 'date-asc' | 'date-desc' | 'priority-high' | 'priority-low';
@@ -31,6 +32,7 @@ interface Toast {
   id: string;
   message: string;
   type: 'success' | 'error' | 'info';
+  action?: { label: string, onClick: () => void };
 }
 
 const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[], removeToast: (id: string) => void }) => {
@@ -39,9 +41,9 @@ const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[], removeToast:
       {toasts.map(toast => (
         <div
           key={toast.id}
-          className={`pointer-events-auto px-8 py-5 rounded-lg sm:rounded-lg md:rounded-[1.25rem] shadow-[0_20px_50px_rgba(0,0,0,0.2)] flex items-center gap-4 animate-in slide-in-from-bottom-12 sm:slide-in-from-right-12 fade-in duration-500 min-w-[320px] backdrop-blur-md ${toast.type === 'success' ? 'bg-emerald-500/95 text-white' :
-            toast.type === 'error' ? 'bg-rose-500/95 text-white' :
-              'bg-slate-900/95 text-white'
+          className={`pointer-events-auto px-6 py-4 rounded-lg sm:rounded-lg md:rounded-[1.25rem] shadow-[0_20px_50px_rgba(0,0,0,0.2)] flex items-center gap-4 animate-in slide-in-from-bottom-12 sm:slide-in-from-right-12 fade-in duration-500 min-w-[320px] ${toast.type === 'success' ? 'bg-emerald-600 text-white' :
+            toast.type === 'error' ? 'bg-rose-600 text-white' :
+              'bg-slate-900 text-white'
             }`}
         >
           <div className="flex-shrink-0">
@@ -53,6 +55,17 @@ const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[], removeToast:
             <span className="text-[10px] font-black uppercase tracking-[0.15em] leading-none opacity-80 block mb-0.5">{toast.type}</span>
             <span className="text-sm font-bold tracking-tight">{toast.message}</span>
           </div>
+          {toast.action && (
+            <button
+              onClick={() => {
+                toast.action?.onClick();
+                removeToast(toast.id);
+              }}
+              className="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-widest transition-colors mr-2"
+            >
+              {toast.action.label}
+            </button>
+          )}
           <button onClick={() => removeToast(toast.id)} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
@@ -510,14 +523,18 @@ const DayView = ({
   currentDate,
   onTaskClick,
   onTaskUpdate,
-  onExecuteTask
+  onExecuteTask,
+  onReorderTasks,
+  showToast
 }: {
   tasks: Tarefa[],
   googleEvents?: GoogleCalendarEvent[],
   currentDate: Date,
   onTaskClick: (t: Tarefa) => void,
   onTaskUpdate: (id: string, updates: Partial<Tarefa>, suppressToast?: boolean) => void,
-  onExecuteTask: (t: Tarefa) => void
+  onExecuteTask: (t: Tarefa) => void,
+  onReorderTasks?: (taskId: string, targetTaskId: string, label?: string) => void,
+  showToast?: (message: string, type: 'success' | 'error' | 'info') => void
 }) => {
   const timeToMinutes = (time: string) => {
     if (!time) return 0;
@@ -534,7 +551,10 @@ const DayView = ({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [dragging, setDragging] = useState<{ id: string, startY: number, startMin: number } | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, task: Tarefa } | null>(null);
+  const [editingTimeTask, setEditingTimeTask] = useState<Tarefa | null>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const dragStartRef = useRef<{ x: number, y: number } | null>(null);
 
   const [confirmAction, setConfirmAction] = useState<{ taskId: string, newStatus: 'em andamento' | 'concluído' } | null>(null);
 
@@ -561,7 +581,9 @@ const DayView = ({
 
   const dayStr = formatDateLocalISO(currentDate);
   const { allDayEvents, timedEvents } = useMemo(() => {
+    if (!googleEvents) return { allDayEvents: [], timedEvents: [] };
     const dayEvents = googleEvents.filter(e => {
+      if (!e.data_inicio || !e.data_fim) return false;
       const startStr = e.data_inicio.split('T')[0];
       const endStr = e.data_fim.split('T')[0];
 
@@ -578,16 +600,22 @@ const DayView = ({
     });
 
     return {
-      allDayEvents: dayEvents.filter(e => !e.data_inicio.includes('T')),
-      timedEvents: dayEvents.filter(e => e.data_inicio.includes('T'))
+      allDayEvents: dayEvents.filter(e => !e.data_inicio?.includes('T')),
+      timedEvents: dayEvents.filter(e => e.data_inicio?.includes('T'))
     };
   }, [googleEvents, dayStr]);
 
   const dayTasks = useMemo(() => tasks.filter(t => {
     if (t.status === 'excluído' as any) return false;
 
+    const isConcluido = normalizeStatus(t.status) === 'concluido';
+
     // Se a tarefa já tem horário definido (está alocada), respeitamos estritamente a data definida
     if (t.horario_inicio && t.data_inicio) {
+      // Se não está concluída e é do passado, permitimos aparecer no sidebar de hoje (rollover)
+      if (!isConcluido && t.data_inicio < dayStr && dayStr === formatDateLocalISO(new Date())) {
+        return true;
+      }
       return t.data_inicio === dayStr;
     }
 
@@ -597,24 +625,28 @@ const DayView = ({
     // Se não tem prazo, aparece sempre no sidebar para alocação (Critério: ações sem data definida)
     if (!hasDeadline) return true;
 
+    // Se já está concluída e o prazo passou, não deve aparecer hoje (a menos que estejamos vendo o dia em que ela venceu)
+    if (isConcluido && end < dayStr) return false;
+
     // Critérios únicos para o campo aguardando alocação:
     // - As ações que são daquele dia (dayStr === end)
     // - As ações que são dos dias anteriores àquele dia (dayStr > end)
     // Ou seja: dayStr >= end
     return dayStr >= end;
-  }), [tasks, dayStr]);
+  }).sort((a, b) => (a.ordem || 0) - (b.ordem || 0)), [tasks, dayStr]);
 
   const positionedEvents = useMemo(() => {
+    if (!timedEvents || !dayTasks) return [];
     const allItems = [
       ...timedEvents.map(e => ({
         id: e.id,
         title: e.titulo,
-        start: timeToMinutes(e.data_inicio.includes('T') ? e.data_inicio.split('T')[1].substring(0, 5) : '00:00'),
-        end: timeToMinutes(e.data_fim.includes('T') ? e.data_fim.split('T')[1].substring(0, 5) : '23:59'),
+        start: timeToMinutes(e.data_inicio?.includes('T') ? e.data_inicio.split('T')[1].substring(0, 5) : '00:00'),
+        end: timeToMinutes(e.data_fim?.includes('T') ? e.data_fim.split('T')[1].substring(0, 5) : '23:59'),
         type: 'google' as const,
         data: e
       })),
-      ...dayTasks.filter(t => t.horario_inicio).map(t => ({
+      ...dayTasks.filter(t => t.horario_inicio && t.data_inicio === dayStr).map(t => ({
         id: t.id,
         title: t.titulo,
         start: timeToMinutes(t.horario_inicio || '00:00'),
@@ -822,7 +854,15 @@ const DayView = ({
                     onMouseDown={(e) => {
                       const target = e.target as HTMLElement;
                       if (target.classList.contains('resize-handle')) return;
+                      dragStartRef.current = { x: e.clientX, y: e.clientY };
                       setDragging({ id: task.id, startY: e.clientY, startMin });
+                    }}
+                    onClick={(e) => {
+                      if (dragStartRef.current && Math.abs(e.clientX - dragStartRef.current.x) < 5 && Math.abs(e.clientY - dragStartRef.current.y) < 5) {
+                         e.stopPropagation();
+                         setContextMenu({ x: e.clientX, y: e.clientY, task });
+                      }
+                      dragStartRef.current = null;
                     }}
                   >
                     <div className="flex justify-between items-start gap-2">
@@ -890,11 +930,20 @@ const DayView = ({
           </div>
 
           <div className="space-y-3">
-            {dayTasks.filter(t => !t.horario_inicio).map(task => (
+            {dayTasks.filter(t => !t.horario_inicio || (t.data_inicio && t.data_inicio < dayStr)).map(task => (
               <div
                 key={task.id}
                 draggable
                 onDragStart={(e) => e.dataTransfer.setData('task-id', task.id)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const draggedId = e.dataTransfer.getData('task-id');
+                  if (draggedId && draggedId !== task.id && onReorderTasks) {
+                    onReorderTasks(draggedId, task.id);
+                  }
+                }}
                 onClick={() => {
                   if (window.innerWidth < 768) {
                     // Mobile: Allocate to current hour by default if clicked
@@ -906,7 +955,7 @@ const DayView = ({
                       data_inicio: dayStr
                     });
                     setIsSidebarOpen(false);
-                    showToast("Alocado para agora!", "success");
+                    if (showToast) showToast("Alocado para agora!", "success");
                   }
                 }}
                 className="bg-white p-4 rounded-none md:rounded-2xl border border-slate-200 shadow-sm hover:border-blue-400 hover:shadow-md transition-all cursor-pointer md:cursor-grab active:cursor-grabbing"
@@ -929,6 +978,93 @@ const DayView = ({
           </div>
         </div>
       </div>
+
+      {contextMenu && (
+        <>
+          <div className="fixed inset-0 z-[150]" onClick={() => setContextMenu(null)}></div>
+          <div
+            className="absolute z-[160] bg-white rounded-xl shadow-2xl border border-slate-100 py-2 w-48 animate-in fade-in zoom-in-95"
+            style={{ top: Math.min(contextMenu.y, window.innerHeight - 200), left: Math.min(contextMenu.x, window.innerWidth - 200) }}
+          >
+            <button
+              onClick={() => {
+                onTaskUpdate(contextMenu.task.id, { horario_inicio: null, horario_fim: null });
+                setContextMenu(null);
+                if (showToast) showToast("Movido para Aguardando Alocação", "info");
+              }}
+              className="w-full text-left px-4 py-3 hover:bg-slate-50 text-xs font-bold text-slate-700 flex items-center gap-2"
+            >
+              <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+              Aguardando Alocação
+            </button>
+            <button
+              onClick={() => {
+                setEditingTimeTask(contextMenu.task);
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-4 py-3 hover:bg-slate-50 text-xs font-bold text-slate-700 flex items-center gap-2"
+            >
+              <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              Alterar Horário
+            </button>
+            <div className="border-t border-slate-100 my-1"></div>
+            <button
+              onClick={() => {
+                onTaskClick(contextMenu.task);
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-4 py-3 hover:bg-slate-50 text-xs font-bold text-slate-700 flex items-center gap-2"
+            >
+              <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              Editar Detalhes
+            </button>
+          </div>
+        </>
+      )}
+
+      {editingTimeTask && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl animate-in zoom-in-95">
+            <h3 className="text-sm font-black text-slate-900 mb-4 uppercase tracking-widest">Alterar Horário</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase">Início</label>
+                <input
+                  type="time"
+                  defaultValue={editingTimeTask.horario_inicio || ''}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+                  id="edit-start-time"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase">Fim</label>
+                <input
+                  type="time"
+                  defaultValue={editingTimeTask.horario_fim || ''}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+                  id="edit-end-time"
+                />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button onClick={() => setEditingTimeTask(null)} className="flex-1 py-2 text-[10px] font-black uppercase text-slate-400 hover:bg-slate-50 rounded-xl">Cancelar</button>
+                <button
+                  onClick={() => {
+                    const start = (document.getElementById('edit-start-time') as HTMLInputElement).value;
+                    const end = (document.getElementById('edit-end-time') as HTMLInputElement).value;
+                    if (start && end) {
+                      onTaskUpdate(editingTimeTask.id, { horario_inicio: start, horario_fim: end }, true);
+                      setEditingTimeTask(null);
+                    }
+                  }}
+                  className="flex-1 bg-slate-900 text-white py-2 text-[10px] font-black uppercase rounded-xl shadow-lg"
+                >
+                  Salvar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirmAction && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
@@ -1043,7 +1179,9 @@ const CalendarView = ({
   onTaskClick,
   onViewModeChange,
   onTaskUpdate,
-  onExecuteTask
+  onExecuteTask,
+  onReorderTasks,
+  showToast
 }: {
   tasks: Tarefa[],
   googleEvents?: GoogleCalendarEvent[],
@@ -1053,7 +1191,9 @@ const CalendarView = ({
   onTaskClick: (t: Tarefa) => void,
   onViewModeChange: (m: 'month' | 'week' | 'day') => void,
   onTaskUpdate: (id: string, updates: Partial<Tarefa>, suppressToast?: boolean) => void,
-  onExecuteTask: (t: Tarefa) => void
+  onExecuteTask: (t: Tarefa) => void,
+  onReorderTasks?: (taskId: string, targetTaskId: string, label?: string) => void,
+  showToast?: (message: string, type: 'success' | 'error' | 'info') => void
 }) => {
   const [days, setDays] = React.useState<Date[]>([]);
 
@@ -1089,12 +1229,18 @@ const CalendarView = ({
 
   const googleEventsByDay = useMemo(() => {
     const map: Record<string, GoogleCalendarEvent[]> = {};
+    if (!googleEvents) return map;
+    
     googleEvents.forEach(e => {
+      if (!e.data_inicio || !e.data_fim) return;
+      
       const startStr = e.data_inicio.split('T')[0];
       const endStr = e.data_fim.split('T')[0];
 
       let current = new Date(startStr + 'T12:00:00Z');
       const end = new Date(endStr + 'T12:00:00Z');
+
+      if (isNaN(current.getTime()) || isNaN(end.getTime())) return;
 
       const isTimed = e.data_inicio.includes('T');
       let iterations = 0;
@@ -1114,6 +1260,8 @@ const CalendarView = ({
 
   const tasksByDay = useMemo(() => {
     const map: Record<string, Tarefa[]> = {};
+    if (!tasks) return map;
+
     tasks.forEach(t => {
       if (!t.data_limite || t.data_limite === '-' || t.data_limite === '0000-00-00') return;
 
@@ -1123,6 +1271,8 @@ const CalendarView = ({
       // Create dates using UTC to avoid timezone shifts
       let current = new Date(startStr + 'T12:00:00Z');
       const end = new Date(endStr + 'T12:00:00Z');
+
+      if (isNaN(current.getTime()) || isNaN(end.getTime())) return;
 
       // Sanity check: if start > end or range is too large (> 60 days), just show on end date to prevent freezes
       const diffTime = end.getTime() - current.getTime();
@@ -1166,9 +1316,17 @@ const CalendarView = ({
     onDateChange(d);
   };
 
-  const monthName = viewMode === 'day'
-    ? new Intl.DateTimeFormat('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' }).format(currentDate)
-    : new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(currentDate);
+  const monthName = useMemo(() => {
+    try {
+      if (!currentDate || isNaN(currentDate.getTime())) return "Data Inválida";
+      return viewMode === 'day'
+        ? new Intl.DateTimeFormat('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' }).format(currentDate)
+        : new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(currentDate);
+    } catch (e) {
+      console.error("Error formatting date:", e);
+      return "Erro na Data";
+    }
+  }, [currentDate, viewMode]);
 
   return (
     <div className="bg-white rounded-none md:rounded-[2rem] border border-slate-200 overflow-hidden shadow-sm animate-in fade-in">
@@ -1215,6 +1373,8 @@ const CalendarView = ({
           onTaskClick={onTaskClick}
           onTaskUpdate={onTaskUpdate}
           onExecuteTask={onExecuteTask}
+          onReorderTasks={onReorderTasks}
+          showToast={showToast}
         />
       ) : (
         <>
@@ -1311,12 +1471,13 @@ const CalendarView = ({
   );
 };
 
-const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit }: {
+const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, highlighted }: {
   task: Tarefa,
   onClick?: () => void,
   onToggle: (id: string, currentStatus: string) => void,
   onDelete: (id: string) => void,
-  onEdit: (t: Tarefa) => void
+  onEdit: (t: Tarefa) => void,
+  highlighted?: boolean
 }) => {
   const statusValue = normalizeStatus(task.status);
   const isCompleted = statusValue === 'concluido';
@@ -1363,7 +1524,7 @@ const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit }: {
         e.dataTransfer.effectAllowed = 'move';
       }}
       title={task.data_criacao ? `Criada em: ${formatDate(task.data_criacao.split('T')[0])}` : ''}
-      className={`group bg-white w-full px-4 md:px-6 py-4 md:py-3 border-b border-slate-100 hover:bg-slate-50/80 transition-all flex flex-col sm:flex-row sm:items-center gap-4 md:gap-6 animate-in cursor-pointer relative ${isCompleted ? 'opacity-60 grayscale-[0.5]' : ''}`}
+      className={`group w-full px-4 md:px-6 py-4 md:py-3 border-b border-slate-100 hover:bg-slate-50/80 transition-all flex flex-col sm:flex-row sm:items-center gap-4 md:gap-6 animate-in cursor-pointer relative ${isCompleted ? 'opacity-60 grayscale-[0.5]' : ''} ${highlighted ? 'bg-gradient-to-r from-blue-50 to-white border-l-4 border-l-blue-500 py-6 md:py-5 shadow-sm' : 'bg-white'}`}
     >
       {/* Esquerda: Checkbox + Título */}
       <div className="flex items-center gap-4 flex-1 min-w-0">
@@ -1377,7 +1538,7 @@ const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit }: {
           <svg className="w-4 h-4 sm:w-3.5 sm:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" /></svg>
         </button>
 
-        <div className={`text-sm md:text-base font-bold text-[#1a202c] leading-tight transition-colors ${isCompleted ? 'line-through text-slate-400' : 'group-hover:text-blue-600'} line-clamp-2 sm:line-clamp-1`}>
+        <div className={`${highlighted ? 'text-base md:text-lg font-black' : 'text-sm md:text-base font-bold'} text-[#1a202c] leading-tight transition-colors ${isCompleted ? 'line-through text-slate-400' : 'group-hover:text-blue-600'} line-clamp-2 sm:line-clamp-1`}>
           {task.titulo}
         </div>
       </div>
@@ -1402,7 +1563,7 @@ const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit }: {
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-1.5 text-slate-400 font-black uppercase text-[9px] md:text-[10px] tracking-widest min-w-[65px]">
             <svg className="w-3 h-3 md:w-3.5 md:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-            {dateDisplay}
+            {dateDisplay} {task.horario_inicio ? `• ${task.horario_inicio}` : ''}
           </div>
 
           {/* Ações: Sempre visíveis no mobile (sm:opacity-0), hover no desktop */}
@@ -4217,17 +4378,177 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
   );
 };
 
-const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, onUpdateIdea, onConvertToLog, activeTool, setActiveTool, isAddingText, setIsAddingText }: {
+const SlidesTool = ({ onBack, showToast }: { onBack: () => void, showToast: (msg: string, type: 'success' | 'error' | 'info') => void }) => {
+  const [rascunho, setRascunho] = useState('');
+  const [qtdSlides, setQtdSlides] = useState(5);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [presentation, setPresentation] = useState<any>(null);
+
+  const handleGenerate = async () => {
+    if (!rascunho.trim()) {
+      showToast("Insira o texto bruto para começar.", "info");
+      return;
+    }
+    setIsGenerating(true);
+    setPresentation(null);
+    try {
+      if (import.meta.env.DEV) {
+        const response = await fetch('/proxy-functions/gerarSlidesIA', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: { rascunho, qtdSlides } })
+        });
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const result = await response.json();
+        setPresentation(result.result || result.data); // Firebase SDK wraps in result.data, proxy might return result.result
+      } else {
+        const gerarSlidesFn = httpsCallable(functions, 'gerarSlidesIA');
+        const result = await gerarSlidesFn({ rascunho, qtdSlides });
+        setPresentation(result.data);
+      }
+      showToast("Apresentação gerada com sucesso!", "success");
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao gerar slides.", "error");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  return (
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8 pb-32">
+      <div className="flex items-center gap-6 mb-12">
+        <button 
+          onClick={onBack}
+          className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-400 hover:text-slate-900 border border-slate-200 hover:border-slate-900 transition-all shadow-sm"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
+        </button>
+        <div>
+          <h2 className="text-3xl font-black text-slate-900 tracking-tighter">Gerador de Slides IA</h2>
+          <p className="text-slate-500 font-medium">Transforme textos complexos em apresentações profissionais.</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="space-y-6">
+          <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-xl space-y-6">
+            <div>
+              <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 ml-1">Conteúdo Base (Texto Bruto)</label>
+              <textarea 
+                className="w-full bg-slate-50 border border-slate-100 rounded-[1.5rem] p-6 text-slate-800 font-bold leading-relaxed outline-none focus:ring-4 focus:ring-orange-100 transition-all min-h-[300px] resize-none"
+                placeholder="Cole aqui o texto, atas de reunião, artigos ou tópicos que deseja transformar em slides..."
+                value={rascunho}
+                onChange={e => setRascunho(e.target.value)}
+              />
+            </div>
+            
+            <div className="flex items-end gap-6">
+              <div className="flex-1">
+                <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 ml-1">Quantidade de Slides</label>
+                <input 
+                  type="number" 
+                  min="1" 
+                  max="20"
+                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-slate-800 font-black outline-none focus:ring-4 focus:ring-orange-100 transition-all"
+                  value={qtdSlides}
+                  onChange={e => setQtdSlides(parseInt(e.target.value))}
+                />
+              </div>
+              <button 
+                onClick={handleGenerate}
+                disabled={isGenerating}
+                className={`flex-[2] h-14 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-3 shadow-xl transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:grayscale ${isGenerating ? 'animate-pulse' : ''}`}
+              >
+                {isGenerating ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Processando...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                    Gerar Apresentação
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-8 h-[700px] overflow-y-auto pr-4 custom-scrollbar">
+          {presentation ? (
+            presentation.slides.map((slide: any, idx: number) => (
+              <div key={idx} className="bg-slate-900 rounded-[2.5rem] p-10 min-h-[400px] flex flex-col justify-between shadow-2xl relative overflow-hidden group border border-white/5">
+                <div className="absolute -top-10 -right-10 w-40 h-40 bg-white/5 rounded-full blur-3xl group-hover:bg-white/10 transition-all duration-700"></div>
+                <div className="absolute -bottom-10 -left-10 w-60 h-60 bg-orange-500/10 rounded-full blur-3xl group-hover:bg-orange-500/20 transition-all duration-700"></div>
+                
+                <div className="relative z-10 flex-1">
+                  <div className="flex justify-between items-start mb-10">
+                    <span className="text-[10px] font-black text-white/30 uppercase tracking-[0.3em]">Slide {slide.numero} • {slide.layout}</span>
+                    <button 
+                      onClick={() => {
+                        const text = `${slide.titulo}\n${slide.topicos.join('\n')}`;
+                        navigator.clipboard.writeText(text);
+                        showToast("Conteúdo copiado!", "success");
+                      }}
+                      className="text-white/20 hover:text-white transition-colors"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                    </button>
+                  </div>
+                  
+                  <h3 className={`font-black text-white tracking-tight leading-tight mb-8 ${slide.layout === 'capa' ? 'text-5xl' : 'text-3xl'}`}>{slide.titulo}</h3>
+                  <ul className="space-y-4">
+                    {Array.isArray(slide.topicos) && slide.topicos.map((t: any, tIdx: number) => (
+                      <li key={tIdx} className="flex gap-4 items-start text-white/80 text-lg font-medium leading-relaxed">
+                        <span className="w-2 h-2 bg-orange-500 rounded-full mt-2.5 flex-shrink-0"></span>
+                        {typeof t === 'string' ? t : (typeof t === 'object' ? JSON.stringify(t) : String(t))}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {slide.prompt_imagem && (
+                  <div className="relative z-10 mt-10 pt-8 border-t border-white/10">
+                    <div className="flex items-center gap-2 text-white/40 mb-3">
+                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                       <span className="text-[10px] font-black uppercase tracking-widest">IA Image Prompt</span>
+                    </div>
+                    <p className="text-xs text-white/40 italic leading-relaxed">{slide.prompt_imagem}</p>
+                  </div>
+                )}
+              </div>
+            ))
+          ) : isGenerating ? (
+            <div className="h-full flex flex-col items-center justify-center space-y-4 animate-pulse">
+              <div className="w-16 h-16 bg-slate-100 rounded-full"></div>
+              <p className="text-slate-300 font-black uppercase tracking-widest">Arquitetando Slides...</p>
+            </div>
+          ) : (
+            <div className="h-full flex flex-col items-center justify-center space-y-6 text-slate-200">
+               <svg className="w-24 h-24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+               <p className="font-bold text-center">Nenhuma apresentação gerada.<br/><span className="text-sm font-medium opacity-60">Seus slides aparecerão aqui.</span></p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, onUpdateIdea, onConvertToLog, activeTool, setActiveTool, isAddingText, setIsAddingText, showToast }: {
   ideas: BrainstormIdea[],
   onDeleteIdea: (id: string) => void,
   onArchiveIdea: (id: string) => void,
   onAddTextIdea: (text: string) => void,
   onUpdateIdea: (id: string, text: string) => void,
   onConvertToLog: (idea: BrainstormIdea) => void,
-  activeTool: 'brainstorming' | null,
-  setActiveTool: (tool: 'brainstorming' | null) => void,
+  activeTool: 'brainstorming' | 'slides' | null,
+  setActiveTool: (tool: 'brainstorming' | 'slides' | null) => void,
   isAddingText: boolean,
-  setIsAddingText: (val: boolean) => void
+  setIsAddingText: (val: boolean) => void,
+  showToast: (msg: string, type: 'success' | 'error' | 'info') => void
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [textInput, setTextInput] = useState('');
@@ -4272,6 +4593,10 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
     });
   };
 
+  if (activeTool === 'slides') {
+    return <SlidesTool onBack={() => setActiveTool(null)} showToast={showToast} />;
+  }
+
   if (!activeTool) {
     return (
       <div className="animate-in grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-0 md:gap-8 pb-20 px-0">
@@ -4289,16 +4614,15 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
         </button>
 
         <button
-          disabled
-          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-100 shadow-none md:shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden -ml-px -mt-px md:m-0"
+          onClick={() => setActiveTool('slides')}
+          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-200 shadow-none md:shadow-xl hover:shadow-none md:hover:shadow-2xl transition-all group text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 -ml-px -mt-px md:m-0"
         >
-          <div className="absolute top-2 right-2 md:top-4 md:right-4 bg-slate-100 text-slate-400 text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Em Breve</div>
-          <div className="w-12 h-12 md:w-16 md:h-16 bg-slate-50 rounded-none md:rounded-2xl flex items-center justify-center text-slate-400 flex-shrink-0">
+          <div className="w-12 h-12 md:w-16 md:h-16 bg-orange-50 rounded-none md:rounded-2xl flex items-center justify-center text-orange-600 group-hover:bg-orange-600 group-hover:text-white transition-all flex-shrink-0">
             <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
           </div>
           <div>
-            <h3 className="text-lg md:text-2xl font-black text-slate-400 tracking-tighter mb-1 md:mb-2">Criação de DFD</h3>
-            <p className="text-slate-400 font-medium leading-relaxed italic text-xs md:text-sm">Documento de Formalização.</p>
+            <h3 className="text-lg md:text-2xl font-black text-slate-900 tracking-tighter mb-1 md:mb-2">Gerador de Slides</h3>
+            <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Crie apresentações profissionais com IA de forma rápida.</p>
           </div>
         </button>
 
@@ -4915,10 +5239,172 @@ const QuickNoteModal = ({ isOpen, onClose, onAddIdea }: { isOpen: boolean, onClo
                 }
               }}
               disabled={!textInput.trim()}
-              className="flex-1 bg-slate-900 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              className="flex-none w-16 md:w-auto md:flex-1 bg-slate-900 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              <svg className="w-4 h-4 md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+              <svg className="w-5 h-5 md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
               <span className="hidden md:inline">Salvar Ideia</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const QuickLogModal = ({ isOpen, onClose, onAddLog, unidades }: { isOpen: boolean, onClose: () => void, onAddLog: (text: string, systemId: string) => void, unidades: { id: string, nome: string }[] }) => {
+  const [textInput, setTextInput] = useState('');
+  const [selectedSystem, setSelectedSystem] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  const systems = useMemo(() => unidades.filter(u => u.nome.startsWith('SISTEMA:')), [unidades]);
+
+  useEffect(() => {
+    if (systems.length > 0 && !selectedSystem) {
+        setSelectedSystem(systems[0].id);
+    }
+  }, [systems, selectedSystem]);
+
+  if (!isOpen) return null;
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/m4a' });
+        await handleProcessAudio(audioBlob);
+        stream.getTracks().forEach(track => track.stop());
+      };
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Erro ao acessar microfone:", err);
+      alert("Permissão de microfone negada ou não disponível.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const handleProcessAudio = async (audioBlob: Blob) => {
+    setIsProcessing(true);
+    try {
+      const reader = new FileReader();
+      reader.readAsDataURL(audioBlob);
+      reader.onloadend = async () => {
+        try {
+          const base64String = (reader.result as string).split(',')[1];
+          const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
+          const response = await transcribeFunc({ audioBase64: base64String });
+          const data = response.data as { raw: string, refined: string };
+          if (data.refined) {
+             const newText = textInput ? textInput + '\n' + data.refined : data.refined;
+             setTextInput(newText);
+          }
+        } catch (error) {
+          console.error("Erro ao transcrever:", error);
+          alert("Erro ao processar áudio via Hermes AI.");
+        } finally {
+          setIsProcessing(false);
+        }
+      };
+    } catch (error) {
+      console.error("Erro ao ler áudio:", error);
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white w-full max-w-2xl rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95">
+        <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+          <div>
+            <h3 className="text-2xl font-black text-slate-900 tracking-tight">Log Rápido</h3>
+            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">Registro de Sistema</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+            <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <div className="p-8 space-y-6">
+          <div className="space-y-2">
+             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Sistema</label>
+             <select
+               value={selectedSystem}
+               onChange={(e) => setSelectedSystem(e.target.value)}
+               className="w-full bg-slate-50 border border-slate-200 rounded-lg md:rounded-xl px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-violet-500"
+             >
+                <option value="" disabled>Selecione um sistema</option>
+                {systems.map(s => (
+                    <option key={s.id} value={s.id}>{s.nome.replace('SISTEMA:', '').trim()}</option>
+                ))}
+             </select>
+          </div>
+
+          <div className="bg-slate-50 p-2 rounded-none md:rounded-2xl border-2 border-slate-100 flex items-center gap-4 focus-within:border-violet-500 transition-all">
+            <button
+              onClick={isRecording ? stopRecording : startRecording}
+              disabled={isProcessing}
+              className={`p-4 rounded-none md:rounded-xl transition-all flex-shrink-0 ${
+                isRecording
+                  ? 'bg-rose-600 text-white animate-pulse shadow-lg'
+                  : isProcessing
+                    ? 'bg-violet-100 text-violet-600 cursor-wait'
+                    : 'bg-white border border-slate-200 text-slate-400 hover:text-violet-600'
+              }`}
+            >
+              {isProcessing ? (
+                <div className="w-5 h-5 border-2 border-violet-600 border-t-transparent rounded-full animate-spin"></div>
+              ) : isRecording ? (
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+              )}
+            </button>
+            <input
+              autoFocus
+              type="text"
+              disabled={isRecording || isProcessing}
+              placeholder={isRecording ? "Gravando..." : isProcessing ? "Processando..." : "Descreva o ajuste..."}
+              className="flex-1 bg-transparent border-none outline-none py-4 text-base font-bold text-slate-800 placeholder:text-slate-300"
+              value={textInput}
+              onChange={e => setTextInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && textInput.trim() && selectedSystem) {
+                  onAddLog(textInput, selectedSystem);
+                  setTextInput('');
+                  onClose();
+                }
+              }}
+            />
+          </div>
+          <div className="flex gap-4">
+            <button onClick={onClose} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-none md:rounded-2xl transition-all">Cancelar</button>
+            <button
+              onClick={() => {
+                if (textInput.trim() && selectedSystem) {
+                  onAddLog(textInput, selectedSystem);
+                  setTextInput('');
+                  onClose();
+                }
+              }}
+              disabled={!textInput.trim() || !selectedSystem}
+              className="flex-none w-16 md:w-auto md:flex-1 bg-slate-900 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5 md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+              <span className="hidden md:inline">Registrar Log</span>
             </button>
           </div>
         </div>
@@ -4971,6 +5457,7 @@ const App: React.FC = () => {
   const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
   const [selectedWorkItem, setSelectedWorkItem] = useState<WorkItem | null>(null);
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
+  const [isQuickLogModalOpen, setIsQuickLogModalOpen] = useState(false);
   const [editingResource, setEditingResource] = useState<{ field: string, label: string, value: string } | null>(null);
 
   const [newLogText, setNewLogText] = useState('');
@@ -5002,7 +5489,7 @@ const App: React.FC = () => {
   const [isImportPlanOpen, setIsImportPlanOpen] = useState(false);
   const [isCompletedTasksOpen, setIsCompletedTasksOpen] = useState(false);
   const [brainstormIdeas, setBrainstormIdeas] = useState<BrainstormIdea[]>([]);
-  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | null>(null);
+  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | null>(null);
   const [isBrainstormingAddingText, setIsBrainstormingAddingText] = useState(false);
   const [convertingIdea, setConvertingIdea] = useState<BrainstormIdea | null>(null);
   const [isSystemSelectorOpen, setIsSystemSelectorOpen] = useState(false);
@@ -5329,7 +5816,7 @@ const App: React.FC = () => {
   }, [tarefas, financeTransactions]); // Adicionado financeTransactions para garantir consistência
 
 
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success', action?: { label: string, onClick: () => void }) => {
     const id = Math.random().toString(36).substring(2, 9);
     setToasts(prev => {
       // Evitar duplicatas exatas de mensagens ativas
@@ -5342,13 +5829,13 @@ const App: React.FC = () => {
         const lastPrefix = last.message.split(' ')[0];
         const newPrefix = message.split(' ')[0];
         if (lastPrefix === newPrefix && last.type === type && message.length > 10) {
-           return [...prev.slice(0, -1), { id, message, type }];
+           return [...prev.slice(0, -1), { id, message, type, action }];
         }
       }
 
       // Limitar a no máximo 2 toasts simultâneos para não poluir a tela
       const base = prev.length >= 2 ? prev.slice(1) : prev;
-      return [...base, { id, message, type }];
+      return [...base, { id, message, type, action }];
     });
 
     setTimeout(() => {
@@ -5407,9 +5894,12 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude'>('dashboard');
-  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'finance' | 'saude' | 'ferramentas' | 'sistemas-dev'>('dashboard');
+  const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude' | 'projetos'>('dashboard');
+  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'finance' | 'saude' | 'ferramentas' | 'sistemas-dev' | 'knowledge' | 'projects'>('dashboard');
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
+  const [isSidebarRetracted, setIsSidebarRetracted] = useState(false);
+  const [financeActiveTab, setFinanceActiveTab] = useState<'dashboard' | 'fixed'>('dashboard');
+  const [isFinanceSettingsOpen, setIsFinanceSettingsOpen] = useState(false);
 
   // Modal Mode State
   const [taskModalMode, setTaskModalMode] = useState<'default' | 'edit' | 'execute'>('default');
@@ -5952,6 +6442,62 @@ const App: React.FC = () => {
     }
   };
 
+  const handleReorderTasks = async (taskId: string, targetTaskId: string, label?: string) => {
+    let currentLabel = label;
+    if (!currentLabel) {
+      // Encontra em qual bucket o target está
+      for (const [l, ts] of Object.entries(tarefasAgrupadas)) {
+        if (ts.some(t => t.id === targetTaskId)) {
+          currentLabel = l;
+          break;
+        }
+      }
+    }
+    if (!currentLabel) return;
+
+    const tasksInBucket = [...(tarefasAgrupadas[currentLabel] || [])];
+    if (tasksInBucket.length === 0) return;
+
+    const oldIndex = tasksInBucket.findIndex(t => t.id === taskId);
+    const newIndex = tasksInBucket.findIndex(t => t.id === targetTaskId);
+
+    // Se estiver movendo dentro do mesmo bucket
+    if (oldIndex !== -1) {
+      if (oldIndex === newIndex) return;
+      const [removed] = tasksInBucket.splice(oldIndex, 1);
+      tasksInBucket.splice(newIndex, 0, removed);
+    } else {
+      // Movendo de outro bucket para este
+      const draggedTask = tarefas.find(t => t.id === taskId);
+      if (!draggedTask) return;
+      const targetTask = tasksInBucket[newIndex];
+
+      // Atualiza a data da tarefa arrastada para coincidir com o bucket de destino
+      const newDate = targetTask.data_limite || formatDateLocalISO(new Date());
+      await updateDoc(doc(db, 'tarefas', taskId), {
+        data_limite: newDate,
+        data_inicio: draggedTask.horario_inicio ? newDate : (draggedTask.data_inicio || newDate),
+        data_atualizacao: new Date().toISOString()
+      });
+
+      // Insere na posição correta para o remapeamento de ordem
+      tasksInBucket.splice(newIndex, 0, { ...draggedTask, data_limite: newDate });
+    }
+
+    // Reatribui ordens
+    const promises = tasksInBucket.map((t, i) => {
+      if (t.ordem !== i) {
+        return updateDoc(doc(db, 'tarefas', t.id), { ordem: i, data_atualizacao: new Date().toISOString() });
+      }
+      return null;
+    }).filter(Boolean);
+
+    if (promises.length > 0) {
+      await Promise.all(promises);
+      showToast("Ordem atualizada!", "success");
+    }
+  };
+
   const handleToggleTarefaStatus = async (id: string, currentStatus: string) => {
     const tarefa = tarefas.find(t => t.id === id);
     if (!tarefa) return;
@@ -6047,6 +6593,66 @@ const App: React.FC = () => {
       };
       await setDoc(doc(db, 'conhecimento', item.id), knowledgeItem);
       showToast("Arquivo enviado e indexação iniciada.", "success");
+    }
+  };
+
+  const handleProcessarIA = async (itemId: string) => {
+    try {
+      const processarIA = httpsCallable(functions, 'processarArquivoIA');
+      // No front-end limpamos os campos para dar feedback visual imediato se quisermos, 
+      // mas o backend já faz isso. O importante é o feedback de "Solicitando..."
+      showToast("Solicitando processamento à IA...", "info");
+      
+      const result = await processarIA({ itemId });
+      const data = result.data as any;
+      
+      if (data.success) {
+        showToast("Arquivo processado com sucesso!", "success");
+      } else {
+        showToast("Erro ao processar: " + (data.error || "Erro desconhecido"), "error");
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("Falha na comunicação com a IA.", "error");
+    }
+  };
+
+  const handleNavigateToOrigin = (modulo: string, id: string) => {
+    switch (modulo) {
+      case 'tarefas':
+        const task = tarefas.find(t => t.id === id);
+        if (task) {
+          setSelectedTask(task);
+          if (task.categoria === 'CLC') setViewMode('licitacoes');
+          else if (task.categoria === 'ASSISTÊNCIA') setViewMode('assistencia');
+          else setViewMode('gallery');
+          setActiveModule('acoes');
+        } else {
+          showToast("Ação não encontrada.", "error");
+        }
+        break;
+      case 'sistemas':
+        const workItem = workItems.find(w => w.id === id);
+        if (workItem) {
+          setSelectedSystemId(workItem.sistema_id);
+          setViewMode('sistemas-dev');
+          setActiveModule('acoes');
+          // setIsLogsModalOpen(true); // Opcional: abrir modal se existir
+        } else {
+          showToast("Log de sistema não encontrado.", "error");
+        }
+        break;
+      case 'saude':
+        const exam = exams.find(e => e.id === id);
+        if (exam) {
+          setViewMode('saude');
+          setActiveModule('saude');
+        } else {
+          showToast("Exame não encontrado.", "error");
+        }
+        break;
+      default:
+        showToast("Módulo não mapeado para navegação.", "info");
     }
   };
 
@@ -6235,10 +6841,34 @@ const App: React.FC = () => {
         timestamp: new Date().toISOString(),
         status: 'active'
       });
-      showToast("Nota registrada!", "success");
+      showToast("Nota registrada!", "success", {
+        label: "Ver a nota",
+        onClick: () => {
+          setActiveModule('acoes');
+          setViewMode('ferramentas');
+          setActiveFerramenta('brainstorm');
+        }
+      });
     } catch (err) {
       console.error(err);
       showToast("Erro ao salvar nota.", "error");
+    }
+  };
+
+  const handleAddQuickLog = async (text: string, systemId: string) => {
+    try {
+      await handleCreateWorkItem(systemId, 'geral', text, []);
+      showToast("Log registrado!", "success", {
+        label: "Ver sistema",
+        onClick: () => {
+          setActiveModule('acoes');
+          setViewMode('sistemas-dev');
+          setSelectedSystemId(systemId);
+        }
+      });
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao registrar log.", "error");
     }
   };
 
@@ -6568,8 +7198,25 @@ const App: React.FC = () => {
 
     result.sort((a, b) => {
       const dVal = (t: Tarefa) => (!t.data_limite || t.data_limite === "-" || t.data_limite.trim() === "") ? (sortOption === 'date-asc' ? Infinity : -Infinity) : new Date(t.data_limite).getTime();
-      if (sortOption === 'date-asc') return dVal(a) - dVal(b);
-      if (sortOption === 'date-desc') return dVal(b) - dVal(a);
+      const dateCompare = sortOption === 'date-asc' ? dVal(a) - dVal(b) : dVal(b) - dVal(a);
+      if (dateCompare !== 0) return dateCompare;
+
+      // Se as datas são iguais, usamos a ordem manual se existir
+      if (a.ordem !== undefined && b.ordem !== undefined) return a.ordem - b.ordem;
+      if (a.ordem !== undefined) return -1;
+      if (b.ordem !== undefined) return 1;
+
+      // Se não houver ordem manual, usamos prioridade
+      const priorityOrder = { 'alta': 3, 'média': 2, 'baixa': 1 };
+      const pA = priorityOrder[a.prioridade] || 0;
+      const pB = priorityOrder[b.prioridade] || 0;
+      if (pA !== pB) return pB - pA;
+
+      // Se ainda empatar, usamos o horário
+      if (a.horario_inicio && b.horario_inicio) return a.horario_inicio.localeCompare(b.horario_inicio);
+      if (a.horario_inicio) return -1;
+      if (b.horario_inicio) return 1;
+
       return 0;
     });
     return result;
@@ -6899,56 +7546,92 @@ const App: React.FC = () => {
       )}
 
       {/* Sidebar Desktop */}
-      <aside className="hidden md:flex w-72 bg-slate-900 text-white flex-col h-screen sticky top-0 overflow-y-auto shrink-0 z-50 shadow-2xl">
-        <div className="p-8 flex flex-col h-full gap-10">
-          <div className="flex items-center gap-4">
-            <img src="/logo.png" alt="Hermes" className="w-12 h-12 object-contain" />
-            <div>
-              <h1 className="text-2xl font-black tracking-tighter">HERMES</h1>
-              <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Management System</p>
-            </div>
+      <aside className={`hidden md:flex ${isSidebarRetracted ? 'w-24' : 'w-72'} bg-slate-900 text-white flex-col h-screen sticky top-0 overflow-y-auto shrink-0 z-50 shadow-2xl transition-all duration-300`}>
+        <div className={`p-8 flex flex-col h-full ${isSidebarRetracted ? 'gap-8 items-center pt-10' : 'gap-10'}`}>
+          <div 
+            className={`flex items-center gap-4 cursor-pointer hover:opacity-80 transition-opacity ${isSidebarRetracted ? 'flex-col' : ''}`}
+            onClick={() => setIsSidebarRetracted(!isSidebarRetracted)}
+          >
+            <img src="/logo.png" alt="Hermes" className={`${isSidebarRetracted ? 'w-14 h-14' : 'w-12 h-12'} object-contain`} />
+            {!isSidebarRetracted && (
+              <div>
+                <h1 className="text-2xl font-black tracking-tighter">HERMES</h1>
+                <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Management System</p>
+              </div>
+            )}
           </div>
 
           <nav className="flex flex-col gap-2">
             {[
               { id: 'dashboard', label: 'Dashboard', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>, active: viewMode === 'dashboard', onClick: () => { setActiveModule('dashboard'); setViewMode('dashboard'); } },
               { id: 'acoes', label: 'Ações', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>, active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'pgc' || viewMode === 'licitacoes' || viewMode === 'assistencia'), onClick: () => { setActiveModule('acoes'); setViewMode('gallery'); } },
+              { id: 'projetos', label: 'Projetos', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>, active: activeModule === 'projetos' && viewMode === 'projects', onClick: () => { setActiveModule('projetos'); setViewMode('projects'); } },
               { id: 'finance', label: 'Financeiro', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>, active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
               { id: 'saude', label: 'Saúde', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>, active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
               { id: 'sistemas', label: 'Sistemas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>, active: viewMode === 'sistemas-dev', onClick: () => { setActiveModule('acoes'); setViewMode('sistemas-dev'); } },
+              { id: 'conhecimento', label: 'Conhecimento', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>, active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
               { id: 'ferramentas', label: 'Ferramentas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>, active: viewMode === 'ferramentas', onClick: () => { setActiveModule('acoes'); setViewMode('ferramentas'); setActiveFerramenta(null); } },
             ].map(item => (
               <button
                 key={item.id}
                 onClick={item.onClick}
-                className={`flex items-center gap-4 px-6 py-4 rounded-2xl transition-all duration-300 group ${item.active ? 'bg-white text-slate-900 shadow-xl' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+                className={`flex items-center gap-4 px-6 py-4 rounded-2xl transition-all duration-300 group ${item.active ? 'bg-white text-slate-900 shadow-xl' : 'text-slate-400 hover:text-white hover:bg-white/5'} ${isSidebarRetracted ? 'justify-center' : ''}`}
+                title={isSidebarRetracted ? item.label : ''}
               >
                 <div className={`${item.active ? 'text-slate-900' : 'group-hover:scale-110 transition-transform duration-300'}`}>
                   {item.icon}
                 </div>
-                <span className="text-[11px] font-black uppercase tracking-widest">{item.label}</span>
+                {!isSidebarRetracted && <span className="text-[11px] font-black uppercase tracking-widest">{item.label}</span>}
               </button>
             ))}
           </nav>
 
           <div className="mt-auto flex flex-col gap-6">
-            <div className="flex items-center gap-3 bg-white/5 p-4 rounded-2xl border border-white/5">
-              {user?.photoURL && (
-                <img src={user.photoURL} alt="Profile" className="w-10 h-10 rounded-xl shadow-sm border border-white/10" />
+            <div className={`flex items-center gap-3 bg-white/5 p-4 rounded-2xl border border-white/5 ${isSidebarRetracted ? 'flex-col gap-4' : ''}`}>
+              {isSidebarRetracted ? (
+                <>
+                  <div 
+                    className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center font-black text-[10px] text-white border border-white/10 shadow-lg"
+                    title={user?.displayName || "Usuário"}
+                  >
+                    {user?.displayName ? user.displayName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'A'}
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    className="p-2 text-slate-500 hover:text-rose-400 transition-colors"
+                    title="Sair do Sistema"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    </svg>
+                  </button>
+                </>
+              ) : (
+                <>
+                  {user?.photoURL ? (
+                    <img src={user.photoURL} alt="Profile" className="w-10 h-10 rounded-xl shadow-sm border border-white/10" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center font-black text-xs text-white border border-white/10">
+                      {user?.displayName ? user.displayName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'A'}
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-black uppercase tracking-tight text-white truncate">{user?.displayName}</p>
+                    <button
+                      onClick={handleLogout}
+                      className="text-[8px] font-black text-slate-500 hover:text-rose-400 uppercase tracking-widest transition-colors"
+                    >
+                      Sair do Sistema
+                    </button>
+                  </div>
+                </>
               )}
-              <div className="flex-1 min-w-0">
-                <p className="text-[10px] font-black uppercase tracking-tight text-white truncate">{user?.displayName}</p>
-                <button
-                  onClick={handleLogout}
-                  className="text-[8px] font-black text-slate-500 hover:text-rose-400 uppercase tracking-widest transition-colors"
-                >
-                  Sair do Sistema
-                </button>
-              </div>
             </div>
-            <p className="text-center text-[8px] font-black text-slate-700 uppercase tracking-widest">
-              Hermes v2.5.0 • 2024
-            </p>
+            {!isSidebarRetracted && (
+              <p className="text-center text-[8px] font-black text-slate-700 uppercase tracking-widest">
+                Hermes v2.5.0 • 2024
+              </p>
+            )}
           </div>
         </div>
       </aside>
@@ -6993,6 +7676,18 @@ const App: React.FC = () => {
                   </div>
                   <div className="relative">
                     <button
+                      onClick={() => {
+                        setIsQuickLogModalOpen(true);
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className="p-1.5 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors text-violet-600"
+                      aria-label="Log Rápido de Sistema"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <button
                       onClick={() => setIsSettingsModalOpen(true)}
                       className="p-1.5 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors"
                       aria-label="Configurações"
@@ -7021,7 +7716,20 @@ const App: React.FC = () => {
                       onNavigate={handleNotificationNavigate}
                     />
                   </div>
-                  {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && (
+                  <div className="relative">
+                    <button
+                      onClick={handleSync}
+                      className="p-1.5 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors text-slate-700 relative"
+                      aria-label="Sincronizar"
+                      title={isSyncing ? 'Monitorar Sync' : 'Sync Google'}
+                    >
+                      <svg className={`w-5 h-5 ${isSyncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                      {isSyncing && (
+                        <span className="absolute top-2.5 right-2.5 w-2.5 h-2.5 bg-blue-500 border-2 border-white rounded-full animate-ping"></span>
+                      )}
+                    </button>
+                  </div>
+                  {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'projects' && (
                     <button
                       onClick={() => setIsCreateModalOpen(true)}
                       className="bg-slate-900 text-white p-1.5 rounded-lg md:rounded-xl shadow-lg hover:bg-slate-800 transition-all active:scale-95"
@@ -7042,10 +7750,34 @@ const App: React.FC = () => {
                       onClick={() => { setActiveModule('dashboard'); setViewMode('dashboard'); }}
                       className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
                     >
-                      <h1 className="text-xl font-black tracking-tighter text-slate-900 uppercase">{activeModule === 'dashboard' ? 'Painel de Controle' : activeModule === 'acoes' ? 'Gestão de Ações' : activeModule === 'financeiro' ? 'Financeiro' : activeModule === 'saude' ? 'Saúde' : 'Hermes'}</h1>
+                      <h1 className="text-xl font-black tracking-tighter text-slate-900 uppercase">
+                        {viewMode === 'projects' ? 'Projetos' :
+                         viewMode === 'knowledge' ? 'Conhecimento' : 
+                         viewMode === 'sistemas-dev' ? 'Sistemas' :
+                         viewMode === 'ferramentas' ? 'Ferramentas' :
+                         activeModule === 'dashboard' ? 'Dashboard' : 
+                         activeModule === 'acoes' ? 'Ações' : 
+                         activeModule === 'financeiro' ? 'Financeiro' : 
+                         activeModule === 'saude' ? 'Saúde' : 'Hermes'}
+                      </h1>
                     </div>
                   </div>
-                  {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
+                  {viewMode === 'projects' && (
+                    <div className="flex items-center gap-3 animate-in fade-in slide-in-from-left duration-500">
+                      <button 
+                        onClick={() => setIsCreateModalOpen(true)} 
+                        className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+                        title="Novo Projeto"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+                      </button>
+                      <button className="p-2 bg-white border border-slate-200 text-slate-400 rounded-xl hover:bg-slate-50 transition-all shadow-sm">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 4.5h18m-18 5h18m-18 5h18m-18 5h18" /></svg>
+                      </button>
+                    </div>
+                  )}
+
+                  {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'projects' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
                     <nav className="flex bg-slate-100 p-1 rounded-lg md:rounded-xl border border-slate-200">
                       <button
                         onClick={() => {
@@ -7057,59 +7789,100 @@ const App: React.FC = () => {
                         Ações
                       </button>
                       <button onClick={() => setViewMode('pgc')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pgc' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>PGC</button>
-                      <button onClick={() => setViewMode('knowledge')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'knowledge' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>Docs</button>
                     </nav>
                   )}
                 </div>
 
-                {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && (
+                {viewMode === 'sistemas-dev' && !selectedSystemId && (
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setShowConsolidatedBacklog(true)}
+                      className="bg-violet-600 text-white px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-violet-700 transition-all flex items-center gap-3"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                      Backlog <span className="hidden lg:inline">Consolidado</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSettingsTab('sistemas');
+                        setIsSettingsModalOpen(true);
+                      }}
+                      className="bg-slate-900 text-white px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+                      Novo <span className="hidden lg:inline">Sistema</span>
+                    </button>
+                  </div>
+                )}
+
+
+                {/* Finance Controls */}
+                {viewMode === 'finance' && (
                   <div className="flex items-center gap-4">
-                    <div className="relative">
-                      <button
-                        onClick={() => {
-                          setIsQuickNoteModalOpen(true);
-                        }}
-                        className="bg-white border border-slate-200 text-amber-500 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
-                        aria-label="Notas Rápidas"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-                      </button>
-                    </div>
-                    <div className="relative">
-                      <button
-                        onClick={() => setIsNotificationCenterOpen(!isNotificationCenterOpen)}
-                        className="bg-white border border-slate-200 text-slate-700 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative notification-trigger"
-                        aria-label="Notificações"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-                        {notifications.some(n => !n.isRead) && (
-                          <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-rose-500 border-2 border-white rounded-full"></span>
-                        )}
-                      </button>
-                      <NotificationCenter
-                        notifications={notifications}
-                        onMarkAsRead={handleMarkNotificationRead}
-                        onDismiss={handleDismissNotification}
-                        isOpen={isNotificationCenterOpen}
-                        onClose={() => setIsNotificationCenterOpen(false)}
-                        onUpdateOverdue={handleUpdateOverdueTasks}
-                        onNavigate={handleNotificationNavigate}
-                      />
-                    </div>
+                     <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+                        <button
+                          onClick={() => setFinanceActiveTab('dashboard')}
+                          className={`px-4 py-1.5 text-[10px] uppercase font-black rounded-lg transition-all ${financeActiveTab === 'dashboard' ? 'bg-white shadow-sm text-slate-900 border border-slate-100' : 'text-slate-400 hover:text-slate-600'}`}
+                        >
+                          Visão Geral
+                        </button>
+                        <button
+                          onClick={() => setFinanceActiveTab('fixed')}
+                          className={`px-4 py-1.5 text-[10px] uppercase font-black rounded-lg transition-all ${financeActiveTab === 'fixed' ? 'bg-white shadow-sm text-slate-900 border border-slate-100' : 'text-slate-400 hover:text-slate-600'}`}
+                        >
+                          Rendas e Obrigações
+                        </button>
+                     </div>
+
+                     <div className="flex items-center bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                        <button
+                          onClick={() => {
+                            const newMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+                            const newYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+                            setCurrentMonth(newMonth);
+                            setCurrentYear(newYear);
+                          }}
+                          className="p-2 hover:bg-slate-50 text-slate-400 hover:text-slate-900 transition-all border-r border-slate-100"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 19l-7-7 7-7" /></svg>
+                        </button>
+                        <div className="px-3 text-center min-w-[100px]">
+                            <div className="text-[10px] font-black text-slate-900 capitalize leading-none tracking-tight">
+                                {new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(new Date(currentYear, currentMonth))}
+                            </div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            const newMonth = currentMonth === 11 ? 0 : currentMonth + 1;
+                            const newYear = currentMonth === 11 ? currentYear + 1 : currentYear;
+                            setCurrentMonth(newMonth);
+                            setCurrentYear(newYear);
+                          }}
+                          className="p-2 hover:bg-slate-50 text-slate-400 hover:text-slate-900 transition-all border-l border-slate-100"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
+                        </button>
+                     </div>
+
+                     <button
+                        onClick={() => setIsFinanceSettingsOpen(!isFinanceSettingsOpen)}
+                        className={`p-2 rounded-xl transition-all border ${isFinanceSettingsOpen ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-50 hover:text-slate-900 shadow-sm'}`}
+                        title="Configurações Financeiras"
+                     >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                     </button>
+                  </div>
+                )}
+
+                {/* Standard Action Buttons (Search, Sync, Create) */}
+                {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'projects' && (
+                  <div className="flex items-center gap-4">
                     {activeModule !== 'dashboard' && (
                       <div className="hidden lg:flex items-center bg-slate-50 border border-slate-200 rounded-lg md:rounded-xl px-4 py-2 w-64 group focus-within:ring-2 focus-within:ring-blue-500 focus-within:bg-white transition-all">
                         <svg className="w-4 h-4 text-slate-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                         <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none outline-none text-xs font-bold text-slate-900 w-full" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                       </div>
                     )}
-                    <button
-                      onClick={handleSync}
-                      className={`bg-white border border-slate-200 text-slate-700 px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-3 shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative`}
-                    >
-                      <svg className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                      {isSyncing ? 'Monitorar Sync' : 'Sync Google'}
-                      {isSyncing && <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full animate-ping"></span>}
-                    </button>
                     <button
                       onClick={() => setIsCreateModalOpen(true)}
                       className="bg-slate-900 text-white px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg hover:bg-slate-800 transition-all active:scale-95"
@@ -7119,6 +7892,62 @@ const App: React.FC = () => {
                     </button>
                   </div>
                 )}
+                {/* Global Header Actions (Notes, Backlog, Notifs, Sync) - Persistent at Right */}
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <button
+                      onClick={() => setIsQuickNoteModalOpen(true)}
+                      className="bg-white border border-slate-200 text-amber-500 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
+                      aria-label="Notas Rápidas"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <button
+                      onClick={() => setIsQuickLogModalOpen(true)}
+                      className="bg-white border border-slate-200 text-violet-600 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
+                      aria-label="Log Rápido de Sistema"
+                      title="Registrar Ajuste em Sistema"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <button
+                      onClick={() => setIsNotificationCenterOpen(!isNotificationCenterOpen)}
+                      className="bg-white border border-slate-200 text-slate-700 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative notification-trigger"
+                      aria-label="Notificações"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+                      {notifications.some(n => !n.isRead) && (
+                        <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-rose-500 border-2 border-white rounded-full"></span>
+                      )}
+                    </button>
+                    <NotificationCenter
+                      notifications={notifications}
+                      onMarkAsRead={handleMarkNotificationRead}
+                      onDismiss={handleDismissNotification}
+                      isOpen={isNotificationCenterOpen}
+                      onClose={() => setIsNotificationCenterOpen(false)}
+                      onUpdateOverdue={handleUpdateOverdueTasks}
+                      onNavigate={handleNotificationNavigate}
+                    />
+                  </div>
+                  <div className="relative">
+                    <button
+                      onClick={handleSync}
+                      className="bg-white border border-slate-200 text-slate-700 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
+                      aria-label="Sincronizar"
+                      title={isSyncing ? 'Monitorar Sync' : 'Sync Google'}
+                    >
+                      <svg className={`w-5 h-5 ${isSyncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                      {isSyncing && (
+                        <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-blue-500 border-2 border-white rounded-full animate-ping"></span>
+                      )}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -7132,6 +7961,7 @@ const App: React.FC = () => {
                     { label: '💰 Financeiro', active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
                     { label: '❤️ Saúde', active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
                     { label: '💻 Sistemas', active: viewMode === 'sistemas-dev', onClick: () => { setActiveModule('acoes'); setViewMode('sistemas-dev'); } },
+                    { label: '📚 Conhecimento', active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
                     { label: '🛠️ Ferramentas', active: viewMode === 'ferramentas', onClick: () => { setActiveModule('acoes'); setViewMode('ferramentas'); setActiveFerramenta(null); } },
                   ].map((item, idx) => (
                     <button
@@ -7199,6 +8029,11 @@ const App: React.FC = () => {
                   currentMonth={currentMonth}
                   currentYear={currentYear}
                   onNavigate={handleDashboardNavigate}
+                  onOpenBacklog={() => {
+                    setActiveModule('acoes');
+                    setViewMode('sistemas-dev');
+                    setShowConsolidatedBacklog(true);
+                  }}
                 />
               ) : viewMode === 'gallery' ? (
                 <>
@@ -7290,6 +8125,8 @@ const App: React.FC = () => {
                       onViewModeChange={setCalendarViewMode}
                       onTaskUpdate={handleUpdateTarefa}
                       onExecuteTask={(t) => { setSelectedTask(t); setTaskModalMode('execute'); }}
+                      onReorderTasks={handleReorderTasks}
+                      showToast={showToast}
                     />
                   ) : (
                     <>
@@ -7467,9 +8304,19 @@ const App: React.FC = () => {
                                         onDragEnd={(e) => {
                                           e.currentTarget.style.opacity = '1';
                                         }}
+                                        onDragOver={(e) => e.preventDefault()}
+                                        onDrop={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          const draggedId = e.dataTransfer.getData('task-id');
+                                          if (draggedId && draggedId !== task.id) {
+                                            handleReorderTasks(draggedId, task.id, label);
+                                          }
+                                        }}
                                       >
                                         <RowCard
                                           task={task}
+                                          highlighted={label === 'Hoje' && tasks.filter(t => normalizeStatus(t.status) !== 'concluido')[0]?.id === task.id}
                                           onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
                                           onToggle={handleToggleTarefaStatus}
                                           onDelete={handleDeleteTarefa}
@@ -7650,7 +8497,10 @@ const App: React.FC = () => {
                   setActiveTool={setActiveFerramenta}
                   isAddingText={isBrainstormingAddingText}
                   setIsAddingText={setIsBrainstormingAddingText}
+                  showToast={showToast}
                 />
+              ) : viewMode === 'projects' ? (
+                <ProjectsView />
               ) : viewMode === 'finance' ? (
                 <FinanceView
                   transactions={financeTransactions}
@@ -7717,12 +8567,16 @@ const App: React.FC = () => {
                   onAddTransaction={async (t) => { await addDoc(collection(db, 'finance_transactions'), { ...t, status: 'active' }); }}
                   onUpdateTransaction={async (t) => { await updateDoc(doc(db, 'finance_transactions', t.id), t as any); }}
                   onDeleteTransaction={async (id) => { await updateDoc(doc(db, 'finance_transactions', id), { status: 'deleted' }); }}
+                  activeTab={financeActiveTab}
+                  setActiveTab={setFinanceActiveTab}
+                  isSettingsOpen={isFinanceSettingsOpen}
+                  setIsSettingsOpen={setIsFinanceSettingsOpen}
                 />
 
               ) : viewMode === 'knowledge' ? (
                 <KnowledgeView
                   items={knowledgeItems}
-                  onDeleteItem={handleDeleteKnowledgeItem}
+                  onDeleteItem={async (id) => { await deleteDoc(doc(db, 'conhecimento', id)); }}
                   onUploadFile={handleUploadKnowledgeFile}
                   showConfirm={showConfirm}
                 />
@@ -7740,33 +8594,7 @@ const App: React.FC = () => {
                   ) : !selectedSystemId ? (
                     /* VISÃO GERAL - LISTA DE SISTEMAS */
                     <>
-                      <div className="flex flex-col md:flex-row bg-white border border-slate-200 rounded-none md:rounded-[2rem] p-6 md:p-8 shadow-sm md:items-center justify-between mb-0 md:mb-8">
-                        <div>
-                          <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">Sistemas em Desenvolvimento</h2>
-                          <p className="text-slate-500 font-bold mt-1 text-xs md:text-base">Gestão do Ciclo de Vida de Software</p>
-                        </div>
-                        <div className="flex items-center gap-3 md:gap-4 mt-6 md:mt-0">
-                          <button
-                            onClick={() => setShowConsolidatedBacklog(true)}
-                            className="flex-1 md:flex-none bg-violet-600 text-white px-4 md:px-6 py-3 rounded-lg md:rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-violet-700 transition-all flex items-center justify-center gap-2 md:gap-3"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
-                            Backlog <span className="hidden md:inline">Consolidado</span>
-                          </button>
-                          <button
-                            onClick={() => {
-                              setSettingsTab('sistemas');
-                              setIsSettingsModalOpen(true);
-                            }}
-                            className="flex-1 md:flex-none bg-slate-900 text-white px-4 md:px-6 py-3 rounded-lg md:rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center justify-center gap-2 md:gap-3"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
-                            Novo <span className="hidden md:inline">Sistema</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-0 md:gap-8 px-0">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-0 md:gap-8 px-0 pt-8">
                         {unidades.filter(u => u.nome.startsWith('SISTEMA:')).map(unit => {
                           const sysDetails = sistemasDetalhes.find(s => s.id === unit.id) || {
                             id: unit.id,
@@ -8153,8 +8981,8 @@ const App: React.FC = () => {
                                       <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-violet-500 pl-3">Logs Ativos</h5>
                                       {systemWorkItems.filter(w => !w.concluido).sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime()).map(log => (
                                         <div key={log.id} className="group bg-slate-50 border border-slate-100 rounded-none md:rounded-3xl p-6 hover:border-violet-200 hover:bg-white transition-all">
-                                          <div className="flex items-start justify-between gap-6">
-                                            <div className="flex-1 space-y-2">
+                                          <div className="flex flex-col md:flex-row items-start justify-between gap-4 md:gap-6">
+                                            <div className="flex-1 space-y-2 w-full">
                                               <div className="flex items-center gap-3">
                                                 <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-wider ${log.tipo === 'desenvolvimento' ? 'bg-violet-100 text-violet-700' : log.tipo === 'ajuste' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
                                                   {log.tipo}
@@ -8217,8 +9045,8 @@ const App: React.FC = () => {
                                         <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-emerald-500 pl-3">Concluídos</h5>
                                         <div className="space-y-3 opacity-60">
                                           {systemWorkItems.filter(w => w.concluido).sort((a, b) => new Date(b.data_conclusao!).getTime() - new Date(a.data_conclusao!).getTime()).map(log => (
-                                            <div key={log.id} className="bg-white border border-slate-100 rounded-none md:rounded-2xl p-4 flex items-center justify-between gap-4">
-                                              <div className="flex-1 flex items-center gap-4">
+                                            <div key={log.id} className="bg-white border border-slate-100 rounded-none md:rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 md:gap-4">
+                                              <div className="flex-1 flex items-center gap-4 w-full">
                                                 <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
                                                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                                                 </div>
@@ -9021,6 +9849,15 @@ const App: React.FC = () => {
           isOpen={isQuickNoteModalOpen}
           onClose={() => setIsQuickNoteModalOpen(false)}
           onAddIdea={handleAddTextIdea}
+        />
+      )}
+
+      {isQuickLogModalOpen && (
+        <QuickLogModal
+          isOpen={isQuickLogModalOpen}
+          onClose={() => setIsQuickLogModalOpen(false)}
+          onAddLog={handleAddQuickLog}
+          unidades={unidades}
         />
       )}
     </div>

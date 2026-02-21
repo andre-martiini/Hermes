@@ -326,7 +326,7 @@ def sync_pix_emails(service, sync_ref, logs):
     try:
         log_to_firestore(sync_ref, logs, "Buscando emails de Pix a partir de 01/02/2026...")
         # Query: Assuntos de Pix + Data limite
-        query = 'after:2026/02/01 subject:(Pix recebido OR Pix realizado OR "Pix enviado" OR "transferência Pix" OR "Pix enviado")'
+        query = 'after:2026/02/01 subject:(Pix recebido OR Pix realizado OR "Pix enviado" OR "transferência Pix")'
         
         results = service.users().messages().list(userId='me', q=query, maxResults=50).execute()
         messages = results.get('messages', [])
@@ -337,19 +337,35 @@ def sync_pix_emails(service, sync_ref, logs):
         
         log_to_firestore(sync_ref, logs, f"Encontrados {len(messages)} e-mails potenciais de Pix. Analisando...")
 
-        # Cache de transações existentes para evitar duplicatas
+        # Cache de transações existentes para evitar duplicatas (Bloqueio de duplicidade financeira)
+        # Cada item: {'amount': float, 'date': datetime, 'pix_id': str, 'description': str}
         existing_transactions = []
         existing_income = []
         existing_google_ids = set()
 
+        def parse_iso_date(date_str):
+            if not date_str: return None
+            try: return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+            except: return None
+
         for t in db.collection('finance_transactions').stream():
             data = t.to_dict()
-            existing_transactions.append((data.get('description'), data.get('amount'), data.get('date')))
+            existing_transactions.append({
+                'description': data.get('description'),
+                'amount': data.get('amount'),
+                'date': parse_iso_date(data.get('date')),
+                'pix_id': data.get('pix_id')
+            })
             if data.get('google_message_id'): existing_google_ids.add(data['google_message_id'])
 
         for t in db.collection('finance_income').stream():
             data = t.to_dict()
-            existing_income.append((data.get('description'), data.get('amount'), data.get('date')))
+            existing_income.append({
+                'description': data.get('description'),
+                'amount': data.get('amount'),
+                'date': parse_iso_date(data.get('date')),
+                'pix_id': data.get('pix_id')
+            })
             if data.get('google_message_id'): existing_google_ids.add(data['google_message_id'])
 
         processed_emails_doc = db.collection('system').document('processed_emails').get()
@@ -369,37 +385,62 @@ def sync_pix_emails(service, sync_ref, logs):
             for header in details.get('payload', {}).get('headers', []):
                 if header['name'] == 'Subject': subject = header['value']; break
             
-            # Regex para capturar valor R$
-            value_match = re.search(r'R\$\s*(\d+(?:[\.,]\d+)?)', f"{subject} {snippet}")
+            # Regex para capturar valor R$ e ID do Pix (E2E ID)
+            content = f"{subject} {snippet}"
+            value_match = re.search(r'R\$\s*(\d+(?:[\.,]\d+)?)', content)
+            pix_id_match = re.search(r'\b(E[A-Z0-9]{31})\b', content)
+            pix_id = pix_id_match.group(1) if pix_id_match else None
+
             if value_match:
                 val_str = value_match.group(1).replace('.', '').replace(',', '.')
                 amount = float(val_str)
-                is_income = any(word in subject.lower() or word in snippet.lower() for word in ['recebido', 'recebeu', 'recebida'])
+                # Classificação aprimorada de renda vs despesa
+                is_income = any(word in content.lower() for word in ['recebido', 'recebeu', 'recebida', 'recebimento', 'creditado', 'entrada'])
                 description = f"Pix: {subject}"
                 iso_date = dt.isoformat()
                 
-                # Verificação de redundância adicional
-                record = (description, amount, iso_date)
+                # Verificação de redundância aprimorada para evitar duplicatas de diferentes instituições
+                is_duplicate = False
+                target_cache = existing_income if is_income else existing_transactions
+
+                for item in target_cache:
+                    # 1. Por ID do Pix (E2E ID)
+                    if pix_id and item.get('pix_id') == pix_id:
+                        is_duplicate = True; break
+
+                    # 2. Por Valor e Proximidade Temporal (janela de 5 minutos)
+                    if item.get('amount') == amount and item.get('date'):
+                        diff = abs((item['date'] - dt).total_seconds())
+                        if diff < 300: # 5 minutos
+                            is_duplicate = True; break
+
+                    # 3. Legado/Exata (Descrição e Valor)
+                    if item.get('description') == description and item.get('amount') == amount:
+                        is_duplicate = True; break
+
+                if is_duplicate:
+                    new_processed_ids.append(msg_id)
+                    continue
+
+                new_record = {
+                    'description': description, 'amount': amount, 'date': iso_date,
+                    'google_message_id': msg_id, 'pix_id': pix_id, 'status': 'active'
+                }
+
                 if is_income:
-                    if record in existing_income:
-                        new_processed_ids.append(msg_id)
-                        continue
-                    db.collection('finance_income').add({
-                        'description': description, 'amount': amount, 'day': dt.day,
-                        'month': dt.month - 1, 'year': dt.year,
-                        'category': 'Renda Extra', 'isReceived': True, 'date': iso_date,
-                        'google_message_id': msg_id, 'status': 'active'
+                    new_record.update({
+                        'day': dt.day, 'month': dt.month - 1, 'year': dt.year,
+                        'category': 'Renda Extra', 'isReceived': True
                     })
+                    db.collection('finance_income').add(new_record)
+                    existing_income.append({'amount': amount, 'date': dt, 'pix_id': pix_id, 'description': description})
                 else:
-                    if record in existing_transactions:
-                        new_processed_ids.append(msg_id)
-                        continue
                     sprint = 1 if dt.day < 8 else 2 if dt.day < 15 else 3 if dt.day < 22 else 4
-                    db.collection('finance_transactions').add({
-                        'description': description, 'amount': amount, 'date': iso_date,
-                        'sprint': sprint, 'category': 'Alimentação',
-                        'google_message_id': msg_id, 'status': 'active'
+                    new_record.update({
+                        'sprint': sprint, 'category': 'Alimentação'
                     })
+                    db.collection('finance_transactions').add(new_record)
+                    existing_transactions.append({'amount': amount, 'date': dt, 'pix_id': pix_id, 'description': description})
                 new_processed_ids.append(msg_id)
                 log_to_firestore(sync_ref, logs, f"[PIX] {subject} (R$ {amount:.2f})")
 
@@ -570,7 +611,7 @@ def on_vectorize_requested(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishe
     except Exception as e:
         print(f"Erro ao processar mensagem PubSub: {e}")
 
-@https_fn.on_call()
+@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=540)
 def vectorize_process_docs_callable(req: https_fn.CallableRequest):
     """Versão callable para o frontend ou testes manuais"""
     task_id = req.data.get('taskId')
@@ -721,20 +762,8 @@ def transcreverAudio(req: https_fn.CallableRequest):
             except:
                 pass
 
-@firestore_fn.on_document_created(document="conhecimento/{itemId}")
-def on_arquivo_adicionado(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]):
-    """
-    Trigger disparado quando um novo arquivo é adicionado à coleção de conhecimento.
-    Usa Gemini para indexação inteligente.
-    """
-    if not event.data: return
-    item_data = event.data.to_dict()
-    item_id = event.params["itemId"]
-
-    # Previne re-processamento
-    if item_data.get('tags') and item_data.get('resumo_tldr'):
-        return
-
+def start_file_indexing(item_id, item_data):
+    """Lógica central de indexação com Gemini"""
     url_drive = item_data.get('url_drive')
     if not url_drive: return
 
@@ -757,7 +786,7 @@ def on_arquivo_adicionado(event: firestore_fn.Event[firestore_fn.DocumentSnapsho
         import json
 
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        model = genai.GenerativeModel("gemini-2.5-flash-lite") # Usando modelo preferencial do André
 
         service = get_drive_service()
         file_metadata = service.files().get(fileId=file_id, fields='mimeType, name').execute()
@@ -803,7 +832,7 @@ def on_arquivo_adicionado(event: firestore_fn.Event[firestore_fn.DocumentSnapsho
             4. texto_bruto: O próprio texto.
 
             CONTEÚDO:
-            {text_content[:10000]}
+            {text_content[:100000]}
             """
             parts = [prompt]
 
@@ -825,7 +854,111 @@ def on_arquivo_adicionado(event: firestore_fn.Event[firestore_fn.DocumentSnapsho
                 updates['texto_bruto'] = data.get('texto_bruto') or item_data.get('titulo')
 
             db.collection('conhecimento').document(item_id).set(updates, merge=True)
-            print(f"Arquivo {item_id} indexado com sucesso.")
+            return {'success': True, 'item_id': item_id}
+        return {'success': False, 'error': 'Não foi possível gerar metadados JSON'}
 
     except Exception as e:
         print(f"Erro ao processar arquivo {item_id}: {str(e)}")
+        return {'success': False, 'error': str(e)}
+
+@firestore_fn.on_document_created(document="conhecimento/{itemId}")
+def on_arquivo_adicionado(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]):
+    """Trigger disparado quando um novo arquivo é adicionado"""
+    if not event.data: return
+    item_data = event.data.to_dict()
+    item_id = event.params["itemId"]
+
+    if item_data.get('tags') and item_data.get('resumo_tldr'):
+        return
+
+    start_file_indexing(item_id, item_data)
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.GB_2,
+    timeout_sec=540
+)
+def processarArquivoIA(req: https_fn.CallableRequest):
+    """Callable para disparar processamento manual"""
+    item_id = req.data.get('itemId')
+    if not item_id:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="ID do item é obrigatório")
+    
+    db = get_db()
+    doc = db.collection('conhecimento').document(item_id).get()
+    if not doc.exists:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.NOT_FOUND, message="Arquivo não encontrado")
+    
+    # Limpa campos antigos para mostrar o loader no front se necessário e garantir re-processamento
+    db.collection('conhecimento').document(item_id).update({
+        'resumo_tldr': None,
+        'tags': None
+    })
+
+    return start_file_indexing(item_id, doc.to_dict())
+@https_fn.on_call(memory=options.MemoryOption.GB_1)
+def gerarSlidesIA(req: https_fn.CallableRequest):
+    """
+    Gera conteúdo para slides a partir de um texto bruto.
+    """
+    import google.generativeai as genai
+    import json
+
+    data = req.data
+    rascunho = data.get('rascunho')
+    qtd_slides = data.get('qtdSlides', 5)
+
+    if not rascunho:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="Texto bruto não fornecido.")
+
+    try:
+        db = get_db()
+        keys_doc = db.collection('system').document('api_keys').get()
+        if not keys_doc.exists:
+            raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION, message="Configuração de API pendente.")
+        
+        GEMINI_API_KEY = keys_doc.to_dict().get('gemini_api_key')
+        if not GEMINI_API_KEY:
+            raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION, message="Chave Gemini não configurada.")
+
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel("gemini-2.5-flash-lite") # Usando o modelo solicitado no slides-ia e preferido do André
+
+        system_instruction = f"""
+        Atue como Especialista em Design de Apresentações Profissionais.
+        Sua tarefa é transformar o texto bruto fornecido em uma estrutura de apresentação de slides premium.
+        
+        Regras de Negócio:
+        1. Gere EXATAMENTE {qtd_slides} slides.
+        2. Use layouts variados: 'capa' (apenas no primeiro), 'titulo_e_conteudo', 'somente_titulo'. (EVITE outros layouts complexos por enquanto).
+        3. Tópicos: Use frases curtas, impactantes e diretas. No máximo 4 tópicos por slide. 
+        4. IMPORTANTE: O campo 'topicos' deve ser SEMPRE uma lista de strings simples. Nunca use objetos ou dicionários dentro desta lista.
+        5. Prompt de Imagem: Forneça um prompt em INGLÊS detalhado para cada slide, focado em imagens corporativas, modernas e de alta qualidade (minimalista, 4k, profissional).
+        6. Tom de voz: Profissional, executivo e inspirador.
+
+        Retorne APENAS um objeto JSON seguindo este esquema:
+        {{
+          "slides": [
+            {{
+              "numero": 1,
+              "layout": "capa",
+              "titulo": "Título Principal",
+              "topicos": ["Subtítulo ou frase de impacto"],
+              "prompt_imagem": "Professional corporate background..."
+            }}
+          ]
+        }}
+        """
+
+        response = model.generate_content([
+            system_instruction,
+            f"Texto Bruto para Processar:\n{rascunho}"
+        ], generation_config={"response_mime_type": "application/json"})
+
+        # Limpeza básica caso venha com markdown
+        text_response = response.text.replace('```json', '').replace('```', '').strip()
+        return json.loads(text_response)
+
+    except Exception as e:
+        print(f"Erro ao gerar slides: {str(e)}")
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=str(e))
