@@ -510,7 +510,9 @@ const DayView = ({
   currentDate,
   onTaskClick,
   onTaskUpdate,
-  onExecuteTask
+  onExecuteTask,
+  onReorderTasks,
+  showToast
 }: {
   tasks: Tarefa[],
   googleEvents?: GoogleCalendarEvent[],
@@ -518,7 +520,8 @@ const DayView = ({
   onTaskClick: (t: Tarefa) => void,
   onTaskUpdate: (id: string, updates: Partial<Tarefa>, suppressToast?: boolean) => void,
   onExecuteTask: (t: Tarefa) => void,
-  onReorderTasks?: (taskId: string, targetTaskId: string, label?: string) => void
+  onReorderTasks?: (taskId: string, targetTaskId: string, label?: string) => void,
+  showToast?: (message: string, type: 'success' | 'error' | 'info') => void
 }) => {
   const timeToMinutes = (time: string) => {
     if (!time) return 0;
@@ -562,7 +565,9 @@ const DayView = ({
 
   const dayStr = formatDateLocalISO(currentDate);
   const { allDayEvents, timedEvents } = useMemo(() => {
+    if (!googleEvents) return { allDayEvents: [], timedEvents: [] };
     const dayEvents = googleEvents.filter(e => {
+      if (!e.data_inicio || !e.data_fim) return false;
       const startStr = e.data_inicio.split('T')[0];
       const endStr = e.data_fim.split('T')[0];
 
@@ -579,8 +584,8 @@ const DayView = ({
     });
 
     return {
-      allDayEvents: dayEvents.filter(e => !e.data_inicio.includes('T')),
-      timedEvents: dayEvents.filter(e => e.data_inicio.includes('T'))
+      allDayEvents: dayEvents.filter(e => !e.data_inicio?.includes('T')),
+      timedEvents: dayEvents.filter(e => e.data_inicio?.includes('T'))
     };
   }, [googleEvents, dayStr]);
 
@@ -615,12 +620,13 @@ const DayView = ({
   }).sort((a, b) => (a.ordem || 0) - (b.ordem || 0)), [tasks, dayStr]);
 
   const positionedEvents = useMemo(() => {
+    if (!timedEvents || !dayTasks) return [];
     const allItems = [
       ...timedEvents.map(e => ({
         id: e.id,
         title: e.titulo,
-        start: timeToMinutes(e.data_inicio.includes('T') ? e.data_inicio.split('T')[1].substring(0, 5) : '00:00'),
-        end: timeToMinutes(e.data_fim.includes('T') ? e.data_fim.split('T')[1].substring(0, 5) : '23:59'),
+        start: timeToMinutes(e.data_inicio?.includes('T') ? e.data_inicio.split('T')[1].substring(0, 5) : '00:00'),
+        end: timeToMinutes(e.data_fim?.includes('T') ? e.data_fim.split('T')[1].substring(0, 5) : '23:59'),
         type: 'google' as const,
         data: e
       })),
@@ -925,7 +931,7 @@ const DayView = ({
                       data_inicio: dayStr
                     });
                     setIsSidebarOpen(false);
-                    showToast("Alocado para agora!", "success");
+                    if (showToast) showToast("Alocado para agora!", "success");
                   }
                 }}
                 className="bg-white p-4 rounded-none md:rounded-2xl border border-slate-200 shadow-sm hover:border-blue-400 hover:shadow-md transition-all cursor-pointer md:cursor-grab active:cursor-grabbing"
@@ -975,7 +981,9 @@ const CalendarView = ({
   onTaskClick,
   onViewModeChange,
   onTaskUpdate,
-  onExecuteTask
+  onExecuteTask,
+  onReorderTasks,
+  showToast
 }: {
   tasks: Tarefa[],
   googleEvents?: GoogleCalendarEvent[],
@@ -986,7 +994,8 @@ const CalendarView = ({
   onViewModeChange: (m: 'month' | 'week' | 'day') => void,
   onTaskUpdate: (id: string, updates: Partial<Tarefa>, suppressToast?: boolean) => void,
   onExecuteTask: (t: Tarefa) => void,
-  onReorderTasks?: (taskId: string, targetTaskId: string, label?: string) => void
+  onReorderTasks?: (taskId: string, targetTaskId: string, label?: string) => void,
+  showToast?: (message: string, type: 'success' | 'error' | 'info') => void
 }) => {
   const [days, setDays] = React.useState<Date[]>([]);
 
@@ -1022,12 +1031,18 @@ const CalendarView = ({
 
   const googleEventsByDay = useMemo(() => {
     const map: Record<string, GoogleCalendarEvent[]> = {};
+    if (!googleEvents) return map;
+    
     googleEvents.forEach(e => {
+      if (!e.data_inicio || !e.data_fim) return;
+      
       const startStr = e.data_inicio.split('T')[0];
       const endStr = e.data_fim.split('T')[0];
 
       let current = new Date(startStr + 'T12:00:00Z');
       const end = new Date(endStr + 'T12:00:00Z');
+
+      if (isNaN(current.getTime()) || isNaN(end.getTime())) return;
 
       const isTimed = e.data_inicio.includes('T');
       let iterations = 0;
@@ -1047,6 +1062,8 @@ const CalendarView = ({
 
   const tasksByDay = useMemo(() => {
     const map: Record<string, Tarefa[]> = {};
+    if (!tasks) return map;
+
     tasks.forEach(t => {
       if (!t.data_limite || t.data_limite === '-' || t.data_limite === '0000-00-00') return;
 
@@ -1056,6 +1073,8 @@ const CalendarView = ({
       // Create dates using UTC to avoid timezone shifts
       let current = new Date(startStr + 'T12:00:00Z');
       const end = new Date(endStr + 'T12:00:00Z');
+
+      if (isNaN(current.getTime()) || isNaN(end.getTime())) return;
 
       // Sanity check: if start > end or range is too large (> 60 days), just show on end date to prevent freezes
       const diffTime = end.getTime() - current.getTime();
@@ -1099,9 +1118,17 @@ const CalendarView = ({
     onDateChange(d);
   };
 
-  const monthName = viewMode === 'day'
-    ? new Intl.DateTimeFormat('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' }).format(currentDate)
-    : new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(currentDate);
+  const monthName = useMemo(() => {
+    try {
+      if (!currentDate || isNaN(currentDate.getTime())) return "Data Inválida";
+      return viewMode === 'day'
+        ? new Intl.DateTimeFormat('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' }).format(currentDate)
+        : new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(currentDate);
+    } catch (e) {
+      console.error("Error formatting date:", e);
+      return "Erro na Data";
+    }
+  }, [currentDate, viewMode]);
 
   return (
     <div className="bg-white rounded-none md:rounded-[2rem] border border-slate-200 overflow-hidden shadow-sm animate-in fade-in">
@@ -1149,6 +1176,7 @@ const CalendarView = ({
           onTaskUpdate={onTaskUpdate}
           onExecuteTask={onExecuteTask}
           onReorderTasks={onReorderTasks}
+          showToast={showToast}
         />
       ) : (
         <>
@@ -7287,6 +7315,7 @@ const App: React.FC = () => {
                     { label: '💰 Financeiro', active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
                     { label: '❤️ Saúde', active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
                     { label: '💻 Sistemas', active: viewMode === 'sistemas-dev', onClick: () => { setActiveModule('acoes'); setViewMode('sistemas-dev'); } },
+                    { label: '📚 Conhecimento', active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
                     { label: '🛠️ Ferramentas', active: viewMode === 'ferramentas', onClick: () => { setActiveModule('acoes'); setViewMode('ferramentas'); setActiveFerramenta(null); } },
                   ].map((item, idx) => (
                     <button
@@ -7451,6 +7480,7 @@ const App: React.FC = () => {
                       onTaskUpdate={handleUpdateTarefa}
                       onExecuteTask={(t) => { setSelectedTask(t); setTaskModalMode('execute'); }}
                       onReorderTasks={handleReorderTasks}
+                      showToast={showToast}
                     />
                   ) : (
                     <>
