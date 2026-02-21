@@ -22,6 +22,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import FinanceView from './FinanceView';
 import DashboardView from './DashboardView';
 import KnowledgeView from './KnowledgeView';
+import ProjectsView from './ProjectsView';
 
 
 type SortOption = 'date-asc' | 'date-desc' | 'priority-high' | 'priority-low';
@@ -5317,8 +5318,8 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude'>('dashboard');
-  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'finance' | 'saude' | 'ferramentas' | 'sistemas-dev' | 'knowledge'>('dashboard');
+  const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude' | 'projetos'>('dashboard');
+  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'finance' | 'saude' | 'ferramentas' | 'sistemas-dev' | 'knowledge' | 'projects'>('dashboard');
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
   const [isSidebarRetracted, setIsSidebarRetracted] = useState(false);
   const [financeActiveTab, setFinanceActiveTab] = useState<'dashboard' | 'fixed'>('dashboard');
@@ -6930,6 +6931,7 @@ const App: React.FC = () => {
             {[
               { id: 'dashboard', label: 'Dashboard', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>, active: viewMode === 'dashboard', onClick: () => { setActiveModule('dashboard'); setViewMode('dashboard'); } },
               { id: 'acoes', label: 'Ações', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>, active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'pgc' || viewMode === 'licitacoes' || viewMode === 'assistencia'), onClick: () => { setActiveModule('acoes'); setViewMode('gallery'); } },
+              { id: 'projetos', label: 'Projetos', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>, active: activeModule === 'projetos' && viewMode === 'projects', onClick: () => { setActiveModule('projetos'); setViewMode('projects'); } },
               { id: 'finance', label: 'Financeiro', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>, active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
               { id: 'saude', label: 'Saúde', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>, active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
               { id: 'sistemas', label: 'Sistemas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>, active: viewMode === 'sistemas-dev', onClick: () => { setActiveModule('acoes'); setViewMode('sistemas-dev'); } },
@@ -7852,6 +7854,8 @@ const App: React.FC = () => {
                   isAddingText={isBrainstormingAddingText}
                   setIsAddingText={setIsBrainstormingAddingText}
                 />
+              ) : viewMode === 'projects' ? (
+                <ProjectsView />
               ) : viewMode === 'finance' ? (
                 <FinanceView
                   transactions={financeTransactions}
