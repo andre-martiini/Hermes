@@ -7097,7 +7097,7 @@ const App: React.FC = () => {
                       )}
                     </button>
                   </div>
-                  {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && (
+                  {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'projects' && (
                     <button
                       onClick={() => setIsCreateModalOpen(true)}
                       className="bg-slate-900 text-white p-1.5 rounded-lg md:rounded-xl shadow-lg hover:bg-slate-800 transition-all active:scale-95"
@@ -7119,7 +7119,8 @@ const App: React.FC = () => {
                       className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
                     >
                       <h1 className="text-xl font-black tracking-tighter text-slate-900 uppercase">
-                        {viewMode === 'knowledge' ? 'Conhecimento' : 
+                        {viewMode === 'projects' ? 'Projetos' :
+                         viewMode === 'knowledge' ? 'Conhecimento' : 
                          viewMode === 'sistemas-dev' ? 'Sistemas' :
                          viewMode === 'ferramentas' ? 'Ferramentas' :
                          activeModule === 'dashboard' ? 'Dashboard' : 
@@ -7129,7 +7130,22 @@ const App: React.FC = () => {
                       </h1>
                     </div>
                   </div>
-                  {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
+                  {viewMode === 'projects' && (
+                    <div className="flex items-center gap-3 animate-in fade-in slide-in-from-left duration-500">
+                      <button 
+                        onClick={() => setIsCreateModalOpen(true)} 
+                        className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+                        title="Novo Projeto"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+                      </button>
+                      <button className="p-2 bg-white border border-slate-200 text-slate-400 rounded-xl hover:bg-slate-50 transition-all shadow-sm">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 4.5h18m-18 5h18m-18 5h18m-18 5h18" /></svg>
+                      </button>
+                    </div>
+                  )}
+
+                  {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'projects' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
                     <nav className="flex bg-slate-100 p-1 rounded-lg md:rounded-xl border border-slate-200">
                       <button
                         onClick={() => {
@@ -7227,7 +7243,7 @@ const App: React.FC = () => {
                 )}
 
                 {/* Standard Action Buttons (Search, Sync, Create) */}
-                {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && (
+                {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'projects' && (
                   <div className="flex items-center gap-4">
                     {activeModule !== 'dashboard' && (
                       <div className="hidden lg:flex items-center bg-slate-50 border border-slate-200 rounded-lg md:rounded-xl px-4 py-2 w-64 group focus-within:ring-2 focus-within:ring-blue-500 focus-within:bg-white transition-all">
