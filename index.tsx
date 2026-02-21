@@ -32,6 +32,7 @@ interface Toast {
   id: string;
   message: string;
   type: 'success' | 'error' | 'info';
+  action?: { label: string, onClick: () => void };
 }
 
 const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[], removeToast: (id: string) => void }) => {
@@ -40,9 +41,9 @@ const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[], removeToast:
       {toasts.map(toast => (
         <div
           key={toast.id}
-          className={`pointer-events-auto px-8 py-5 rounded-lg sm:rounded-lg md:rounded-[1.25rem] shadow-[0_20px_50px_rgba(0,0,0,0.2)] flex items-center gap-4 animate-in slide-in-from-bottom-12 sm:slide-in-from-right-12 fade-in duration-500 min-w-[320px] backdrop-blur-md ${toast.type === 'success' ? 'bg-emerald-500/95 text-white' :
-            toast.type === 'error' ? 'bg-rose-500/95 text-white' :
-              'bg-slate-900/95 text-white'
+          className={`pointer-events-auto px-6 py-4 rounded-lg sm:rounded-lg md:rounded-[1.25rem] shadow-[0_20px_50px_rgba(0,0,0,0.2)] flex items-center gap-4 animate-in slide-in-from-bottom-12 sm:slide-in-from-right-12 fade-in duration-500 min-w-[320px] ${toast.type === 'success' ? 'bg-emerald-600 text-white' :
+            toast.type === 'error' ? 'bg-rose-600 text-white' :
+              'bg-slate-900 text-white'
             }`}
         >
           <div className="flex-shrink-0">
@@ -54,6 +55,17 @@ const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[], removeToast:
             <span className="text-[10px] font-black uppercase tracking-[0.15em] leading-none opacity-80 block mb-0.5">{toast.type}</span>
             <span className="text-sm font-bold tracking-tight">{toast.message}</span>
           </div>
+          {toast.action && (
+            <button
+              onClick={() => {
+                toast.action?.onClick();
+                removeToast(toast.id);
+              }}
+              className="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-widest transition-colors mr-2"
+            >
+              {toast.action.label}
+            </button>
+          )}
           <button onClick={() => removeToast(toast.id)} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
@@ -539,7 +551,10 @@ const DayView = ({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [dragging, setDragging] = useState<{ id: string, startY: number, startMin: number } | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, task: Tarefa } | null>(null);
+  const [editingTimeTask, setEditingTimeTask] = useState<Tarefa | null>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const dragStartRef = useRef<{ x: number, y: number } | null>(null);
 
   const [confirmAction, setConfirmAction] = useState<{ taskId: string, newStatus: 'em andamento' | 'concluído' } | null>(null);
 
@@ -839,7 +854,15 @@ const DayView = ({
                     onMouseDown={(e) => {
                       const target = e.target as HTMLElement;
                       if (target.classList.contains('resize-handle')) return;
+                      dragStartRef.current = { x: e.clientX, y: e.clientY };
                       setDragging({ id: task.id, startY: e.clientY, startMin });
+                    }}
+                    onClick={(e) => {
+                      if (dragStartRef.current && Math.abs(e.clientX - dragStartRef.current.x) < 5 && Math.abs(e.clientY - dragStartRef.current.y) < 5) {
+                         e.stopPropagation();
+                         setContextMenu({ x: e.clientX, y: e.clientY, task });
+                      }
+                      dragStartRef.current = null;
                     }}
                   >
                     <div className="flex justify-between items-start gap-2">
@@ -955,6 +978,93 @@ const DayView = ({
           </div>
         </div>
       </div>
+
+      {contextMenu && (
+        <>
+          <div className="fixed inset-0 z-[150]" onClick={() => setContextMenu(null)}></div>
+          <div
+            className="absolute z-[160] bg-white rounded-xl shadow-2xl border border-slate-100 py-2 w-48 animate-in fade-in zoom-in-95"
+            style={{ top: Math.min(contextMenu.y, window.innerHeight - 200), left: Math.min(contextMenu.x, window.innerWidth - 200) }}
+          >
+            <button
+              onClick={() => {
+                onTaskUpdate(contextMenu.task.id, { horario_inicio: null, horario_fim: null });
+                setContextMenu(null);
+                if (showToast) showToast("Movido para Aguardando Alocação", "info");
+              }}
+              className="w-full text-left px-4 py-3 hover:bg-slate-50 text-xs font-bold text-slate-700 flex items-center gap-2"
+            >
+              <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+              Aguardando Alocação
+            </button>
+            <button
+              onClick={() => {
+                setEditingTimeTask(contextMenu.task);
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-4 py-3 hover:bg-slate-50 text-xs font-bold text-slate-700 flex items-center gap-2"
+            >
+              <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              Alterar Horário
+            </button>
+            <div className="border-t border-slate-100 my-1"></div>
+            <button
+              onClick={() => {
+                onTaskClick(contextMenu.task);
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-4 py-3 hover:bg-slate-50 text-xs font-bold text-slate-700 flex items-center gap-2"
+            >
+              <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              Editar Detalhes
+            </button>
+          </div>
+        </>
+      )}
+
+      {editingTimeTask && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl p-6 max-w-xs w-full shadow-2xl animate-in zoom-in-95">
+            <h3 className="text-sm font-black text-slate-900 mb-4 uppercase tracking-widest">Alterar Horário</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase">Início</label>
+                <input
+                  type="time"
+                  defaultValue={editingTimeTask.horario_inicio || ''}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+                  id="edit-start-time"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase">Fim</label>
+                <input
+                  type="time"
+                  defaultValue={editingTimeTask.horario_fim || ''}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+                  id="edit-end-time"
+                />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button onClick={() => setEditingTimeTask(null)} className="flex-1 py-2 text-[10px] font-black uppercase text-slate-400 hover:bg-slate-50 rounded-xl">Cancelar</button>
+                <button
+                  onClick={() => {
+                    const start = (document.getElementById('edit-start-time') as HTMLInputElement).value;
+                    const end = (document.getElementById('edit-end-time') as HTMLInputElement).value;
+                    if (start && end) {
+                      onTaskUpdate(editingTimeTask.id, { horario_inicio: start, horario_fim: end }, true);
+                      setEditingTimeTask(null);
+                    }
+                  }}
+                  className="flex-1 bg-slate-900 text-white py-2 text-[10px] font-black uppercase rounded-xl shadow-lg"
+                >
+                  Salvar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirmAction && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
@@ -5060,10 +5170,172 @@ const QuickNoteModal = ({ isOpen, onClose, onAddIdea }: { isOpen: boolean, onClo
                 }
               }}
               disabled={!textInput.trim()}
-              className="flex-1 bg-slate-900 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              className="flex-none w-16 md:w-auto md:flex-1 bg-slate-900 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              <svg className="w-4 h-4 md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+              <svg className="w-5 h-5 md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
               <span className="hidden md:inline">Salvar Ideia</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const QuickLogModal = ({ isOpen, onClose, onAddLog, unidades }: { isOpen: boolean, onClose: () => void, onAddLog: (text: string, systemId: string) => void, unidades: { id: string, nome: string }[] }) => {
+  const [textInput, setTextInput] = useState('');
+  const [selectedSystem, setSelectedSystem] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  const systems = useMemo(() => unidades.filter(u => u.nome.startsWith('SISTEMA:')), [unidades]);
+
+  useEffect(() => {
+    if (systems.length > 0 && !selectedSystem) {
+        setSelectedSystem(systems[0].id);
+    }
+  }, [systems, selectedSystem]);
+
+  if (!isOpen) return null;
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/m4a' });
+        await handleProcessAudio(audioBlob);
+        stream.getTracks().forEach(track => track.stop());
+      };
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Erro ao acessar microfone:", err);
+      alert("Permissão de microfone negada ou não disponível.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const handleProcessAudio = async (audioBlob: Blob) => {
+    setIsProcessing(true);
+    try {
+      const reader = new FileReader();
+      reader.readAsDataURL(audioBlob);
+      reader.onloadend = async () => {
+        try {
+          const base64String = (reader.result as string).split(',')[1];
+          const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
+          const response = await transcribeFunc({ audioBase64: base64String });
+          const data = response.data as { raw: string, refined: string };
+          if (data.refined) {
+             const newText = textInput ? textInput + '\n' + data.refined : data.refined;
+             setTextInput(newText);
+          }
+        } catch (error) {
+          console.error("Erro ao transcrever:", error);
+          alert("Erro ao processar áudio via Hermes AI.");
+        } finally {
+          setIsProcessing(false);
+        }
+      };
+    } catch (error) {
+      console.error("Erro ao ler áudio:", error);
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white w-full max-w-2xl rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95">
+        <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+          <div>
+            <h3 className="text-2xl font-black text-slate-900 tracking-tight">Log Rápido</h3>
+            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">Registro de Sistema</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+            <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <div className="p-8 space-y-6">
+          <div className="space-y-2">
+             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Sistema</label>
+             <select
+               value={selectedSystem}
+               onChange={(e) => setSelectedSystem(e.target.value)}
+               className="w-full bg-slate-50 border border-slate-200 rounded-lg md:rounded-xl px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-violet-500"
+             >
+                <option value="" disabled>Selecione um sistema</option>
+                {systems.map(s => (
+                    <option key={s.id} value={s.id}>{s.nome.replace('SISTEMA:', '').trim()}</option>
+                ))}
+             </select>
+          </div>
+
+          <div className="bg-slate-50 p-2 rounded-none md:rounded-2xl border-2 border-slate-100 flex items-center gap-4 focus-within:border-violet-500 transition-all">
+            <button
+              onClick={isRecording ? stopRecording : startRecording}
+              disabled={isProcessing}
+              className={`p-4 rounded-none md:rounded-xl transition-all flex-shrink-0 ${
+                isRecording
+                  ? 'bg-rose-600 text-white animate-pulse shadow-lg'
+                  : isProcessing
+                    ? 'bg-violet-100 text-violet-600 cursor-wait'
+                    : 'bg-white border border-slate-200 text-slate-400 hover:text-violet-600'
+              }`}
+            >
+              {isProcessing ? (
+                <div className="w-5 h-5 border-2 border-violet-600 border-t-transparent rounded-full animate-spin"></div>
+              ) : isRecording ? (
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+              )}
+            </button>
+            <input
+              autoFocus
+              type="text"
+              disabled={isRecording || isProcessing}
+              placeholder={isRecording ? "Gravando..." : isProcessing ? "Processando..." : "Descreva o ajuste..."}
+              className="flex-1 bg-transparent border-none outline-none py-4 text-base font-bold text-slate-800 placeholder:text-slate-300"
+              value={textInput}
+              onChange={e => setTextInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && textInput.trim() && selectedSystem) {
+                  onAddLog(textInput, selectedSystem);
+                  setTextInput('');
+                  onClose();
+                }
+              }}
+            />
+          </div>
+          <div className="flex gap-4">
+            <button onClick={onClose} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-none md:rounded-2xl transition-all">Cancelar</button>
+            <button
+              onClick={() => {
+                if (textInput.trim() && selectedSystem) {
+                  onAddLog(textInput, selectedSystem);
+                  setTextInput('');
+                  onClose();
+                }
+              }}
+              disabled={!textInput.trim() || !selectedSystem}
+              className="flex-none w-16 md:w-auto md:flex-1 bg-slate-900 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5 md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+              <span className="hidden md:inline">Registrar Log</span>
             </button>
           </div>
         </div>
@@ -5108,6 +5380,7 @@ const App: React.FC = () => {
   const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
   const [selectedWorkItem, setSelectedWorkItem] = useState<WorkItem | null>(null);
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
+  const [isQuickLogModalOpen, setIsQuickLogModalOpen] = useState(false);
   const [editingResource, setEditingResource] = useState<{ field: string, label: string, value: string } | null>(null);
 
   const [newLogText, setNewLogText] = useState('');
@@ -5403,7 +5676,7 @@ const App: React.FC = () => {
   }, [tarefas, financeTransactions]); // Adicionado financeTransactions para garantir consistência
 
 
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success', action?: { label: string, onClick: () => void }) => {
     const id = Math.random().toString(36).substring(2, 9);
     setToasts(prev => {
       // Evitar duplicatas exatas de mensagens ativas
@@ -5416,13 +5689,13 @@ const App: React.FC = () => {
         const lastPrefix = last.message.split(' ')[0];
         const newPrefix = message.split(' ')[0];
         if (lastPrefix === newPrefix && last.type === type && message.length > 10) {
-           return [...prev.slice(0, -1), { id, message, type }];
+           return [...prev.slice(0, -1), { id, message, type, action }];
         }
       }
 
       // Limitar a no máximo 2 toasts simultâneos para não poluir a tela
       const base = prev.length >= 2 ? prev.slice(1) : prev;
-      return [...base, { id, message, type }];
+      return [...base, { id, message, type, action }];
     });
 
     setTimeout(() => {
@@ -6394,10 +6667,34 @@ const App: React.FC = () => {
         timestamp: new Date().toISOString(),
         status: 'active'
       });
-      showToast("Nota registrada!", "success");
+      showToast("Nota registrada!", "success", {
+        label: "Ver a nota",
+        onClick: () => {
+          setActiveModule('acoes');
+          setViewMode('ferramentas');
+          setActiveFerramenta('brainstorm');
+        }
+      });
     } catch (err) {
       console.error(err);
       showToast("Erro ao salvar nota.", "error");
+    }
+  };
+
+  const handleAddQuickLog = async (text: string, systemId: string) => {
+    try {
+      await handleCreateWorkItem(systemId, 'geral', text, []);
+      showToast("Log registrado!", "success", {
+        label: "Ver sistema",
+        onClick: () => {
+          setActiveModule('acoes');
+          setViewMode('sistemas-dev');
+          setSelectedSystemId(systemId);
+        }
+      });
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao registrar log.", "error");
     }
   };
 
@@ -7206,13 +7503,11 @@ const App: React.FC = () => {
                   <div className="relative">
                     <button
                       onClick={() => {
-                        setActiveModule('acoes');
-                        setViewMode('sistemas-dev');
-                        setShowConsolidatedBacklog(true);
+                        setIsQuickLogModalOpen(true);
                         setIsMobileMenuOpen(false);
                       }}
                       className="p-1.5 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors text-violet-600"
-                      aria-label="Backlog Geral"
+                      aria-label="Log Rápido de Sistema"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
                     </button>
@@ -7436,14 +7731,10 @@ const App: React.FC = () => {
                   </div>
                   <div className="relative">
                     <button
-                      onClick={() => {
-                        setActiveModule('acoes');
-                        setViewMode('sistemas-dev');
-                        setShowConsolidatedBacklog(true);
-                      }}
+                      onClick={() => setIsQuickLogModalOpen(true)}
                       className="bg-white border border-slate-200 text-violet-600 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
-                      aria-label="Backlog Geral"
-                      title="Backlog Geral de Ajustes"
+                      aria-label="Log Rápido de Sistema"
+                      title="Registrar Ajuste em Sistema"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
                     </button>
@@ -8519,8 +8810,8 @@ const App: React.FC = () => {
                                       <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-violet-500 pl-3">Logs Ativos</h5>
                                       {systemWorkItems.filter(w => !w.concluido).sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime()).map(log => (
                                         <div key={log.id} className="group bg-slate-50 border border-slate-100 rounded-none md:rounded-3xl p-6 hover:border-violet-200 hover:bg-white transition-all">
-                                          <div className="flex items-start justify-between gap-6">
-                                            <div className="flex-1 space-y-2">
+                                          <div className="flex flex-col md:flex-row items-start justify-between gap-4 md:gap-6">
+                                            <div className="flex-1 space-y-2 w-full">
                                               <div className="flex items-center gap-3">
                                                 <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-wider ${log.tipo === 'desenvolvimento' ? 'bg-violet-100 text-violet-700' : log.tipo === 'ajuste' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
                                                   {log.tipo}
@@ -8583,8 +8874,8 @@ const App: React.FC = () => {
                                         <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-emerald-500 pl-3">Concluídos</h5>
                                         <div className="space-y-3 opacity-60">
                                           {systemWorkItems.filter(w => w.concluido).sort((a, b) => new Date(b.data_conclusao!).getTime() - new Date(a.data_conclusao!).getTime()).map(log => (
-                                            <div key={log.id} className="bg-white border border-slate-100 rounded-none md:rounded-2xl p-4 flex items-center justify-between gap-4">
-                                              <div className="flex-1 flex items-center gap-4">
+                                            <div key={log.id} className="bg-white border border-slate-100 rounded-none md:rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 md:gap-4">
+                                              <div className="flex-1 flex items-center gap-4 w-full">
                                                 <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
                                                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                                                 </div>
@@ -9384,6 +9675,15 @@ const App: React.FC = () => {
           isOpen={isQuickNoteModalOpen}
           onClose={() => setIsQuickNoteModalOpen(false)}
           onAddIdea={handleAddTextIdea}
+        />
+      )}
+
+      {isQuickLogModalOpen && (
+        <QuickLogModal
+          isOpen={isQuickLogModalOpen}
+          onClose={() => setIsQuickLogModalOpen(false)}
+          onAddLog={handleAddQuickLog}
+          unidades={unidades}
         />
       )}
     </div>
