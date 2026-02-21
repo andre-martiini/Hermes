@@ -373,3 +373,37 @@ export interface ConhecimentoItem {
         id_origem: string;
     } | null;
 }
+
+export type StatusConvocacao = 'Em regularização' | 'Ativo(a)' | 'Concluído(a)' | 'Desligado(a)';
+
+export interface Bolsista {
+  id?: string;
+  nome: string;
+  status: StatusConvocacao;
+  dataInicio: string;
+  dataConclusao: string;
+  intersticio: number;
+  funcao: string;
+  modalidadeBolsa: string;
+  cpf: string;
+  rg: string;
+  endereco: string;
+  telefone: string;
+  email: string;
+  campus?: string;
+  cursoIfes?: string;
+  agenciaBanestes: string;
+  contaBanestes: string;
+  curriculoLattes?: string;
+  termoResponsabilidadeUrl?: string;
+  termoComodatoUrl?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface Projeto {
+    id: string;
+    nome: string;
+    descricao?: string;
+    data_criacao: string;
+}
