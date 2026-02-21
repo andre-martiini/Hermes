@@ -5,9 +5,10 @@ interface KnowledgeViewProps {
     items: ConhecimentoItem[];
     onUploadFile: (file: File) => void;
     onDeleteItem: (id: string) => void;
+    showConfirm: (title: string, message: string, onConfirm: () => void) => void;
 }
 
-const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onDeleteItem }) => {
+const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onDeleteItem, showConfirm }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
     const [selectedItem, setSelectedItem] = useState<ConhecimentoItem | null>(null);
@@ -302,7 +303,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onDe
                                 Abrir no Google Drive
                             </a>
                             <button
-                                onClick={() => { if(window.confirm("Excluir item?")) { onDeleteItem(selectedItem.id); setSelectedItem(null); } }}
+                                onClick={() => { showConfirm("Excluir", "Deseja excluir este item?", () => { onDeleteItem(selectedItem.id); setSelectedItem(null); }); }}
                                 className="px-6 bg-white border border-rose-100 text-rose-500 rounded-3xl hover:bg-rose-50 transition-all"
                             >
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>

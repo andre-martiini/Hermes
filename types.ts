@@ -372,3 +372,29 @@ export interface ConhecimentoItem {
         id_origem: string;
     } | null;
 }
+
+export interface UndoAction {
+    id: string;
+    label: string;
+    undo: () => Promise<void> | void;
+    timestamp: number;
+}
+
+export interface HermesModalProps {
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type: 'alert' | 'confirm';
+    onConfirm: () => void;
+    onCancel?: () => void;
+    confirmLabel?: string;
+    cancelLabel?: string;
+}
+
+export interface WysiwygEditorProps {
+    value: string;
+    onChange: (value: string) => void;
+    onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+    placeholder?: string;
+    className?: string;
+}
