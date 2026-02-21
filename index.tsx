@@ -495,7 +495,7 @@ const ConsolidatedBacklogView = ({
                         <span className="text-xs md:text-sm font-bold text-slate-700 leading-tight">{item.descricao}</span>
                       </div>
                       <button
-                        onClick={() => { if (window.confirm("Excluir item?")) onDeleteWorkItem(item.id); }}
+                        onClick={() => { showConfirm("Excluir Item", "Deseja excluir este item?", () => onDeleteWorkItem(item.id)); }}
                         className="opacity-0 group-hover/item:opacity-100 p-2 text-slate-300 hover:text-rose-500 transition-all"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
@@ -1079,6 +1079,93 @@ const DayView = ({
         </div>
       )}
 
+    </div>
+  );
+};
+
+const HermesModal = ({ isOpen, title, message, type, onConfirm, onCancel, confirmLabel, cancelLabel }: HermesModalProps) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+        <div className="p-8 space-y-6">
+          <div className="space-y-2">
+            <h3 className="text-xl font-black text-slate-900 tracking-tight">{title}</h3>
+            <p className="text-sm font-medium text-slate-500 leading-relaxed">{message}</p>
+          </div>
+          <div className="flex gap-3">
+            {type === 'confirm' && (
+              <button
+                onClick={onCancel}
+                className="flex-1 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 transition-colors"
+              >
+                {cancelLabel || 'Cancelar'}
+              </button>
+            )}
+            <button
+              onClick={onConfirm}
+              className="flex-1 bg-slate-900 text-white py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-slate-200 hover:bg-slate-800 transition-all active:scale-95"
+            >
+              {confirmLabel || (type === 'alert' ? 'OK' : 'Confirmar')}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const WysiwygEditor = ({ value, onChange, onKeyDown, placeholder, className }: WysiwygEditorProps) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    onChange(e.target.value);
+  };
+
+  const renderFormattedText = (text: string) => {
+    if (!text) return <span className="text-slate-400">{placeholder}</span>;
+
+    return (
+      <div className="whitespace-pre-wrap break-words leading-relaxed">
+        {text.split('\n').map((line, i) => (
+          <div key={i} className="min-h-[1.5em]">
+            {line.split(/(\*[^*]+\*|_[^_]+_|~[^~]+~|`[^`]+`)/g).map((part, j) => {
+              if (part.startsWith('*') && part.endsWith('*')) {
+                return <span key={j} className="font-bold text-current"><span className="opacity-20">*</span>{part.slice(1, -1)}<span className="opacity-20">*</span></span>;
+              }
+              if (part.startsWith('_') && part.endsWith('_')) {
+                return <span key={j} className="italic"><span className="opacity-20">_</span>{part.slice(1, -1)}<span className="opacity-20">_</span></span>;
+              }
+              if (part.startsWith('~') && part.endsWith('~')) {
+                return <span key={j} className="line-through opacity-60"><span className="opacity-20">~</span>{part.slice(1, -1)}<span className="opacity-20">~</span></span>;
+              }
+              if (part.startsWith('`') && part.endsWith('`')) {
+                return <span key={j} className="font-mono bg-slate-100 px-1 rounded text-pink-600"><span className="opacity-20">`</span>{part.slice(1, -1)}<span className="opacity-20">`</span></span>;
+              }
+              return part;
+            })}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <div className={`relative min-h-[44px] group ${className}`} ref={containerRef}>
+      <div className="absolute inset-0 p-4 pointer-events-none overflow-hidden text-sm">
+        {renderFormattedText(value)}
+      </div>
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={handleInput}
+        onKeyDown={onKeyDown}
+        placeholder={placeholder}
+        className="w-full min-h-[44px] bg-transparent border border-slate-200 rounded-2xl px-4 py-4 text-sm font-medium text-transparent caret-current focus:ring-2 focus:ring-blue-500 outline-none transition-all resize-none overflow-y-auto"
+        spellCheck={false}
+      />
     </div>
   );
 };
@@ -2635,7 +2722,7 @@ const detectAreaFromTitle = (titulo: string): Categoria => {
 
 // WorkItem modals removed in favor of inline logs
 
-const TaskCreateModal = ({ unidades, onSave, onClose }: { unidades: { id: string, nome: string }[], onSave: (data: Partial<Tarefa>) => void, onClose: () => void }) => {
+const TaskCreateModal = ({ unidades, onSave, onClose, showAlert }: { unidades: { id: string, nome: string }[], onSave: (data: Partial<Tarefa>) => void, onClose: () => void, showAlert: (title: string, message: string) => void }) => {
   const [formData, setFormData] = useState({
     titulo: '',
     data_inicio: formatDateLocalISO(new Date()),
@@ -2772,12 +2859,11 @@ const TaskCreateModal = ({ unidades, onSave, onClose }: { unidades: { id: string
 
           <div className="space-y-2">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Notas / Observações</label>
-            <textarea
-              rows={3}
+            <WysiwygEditor
               value={formData.notas}
-              onChange={e => setFormData({ ...formData, notas: e.target.value })}
-              className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-slate-900 transition-all resize-none"
+              onChange={val => setFormData({ ...formData, notas: val })}
               placeholder="Detalhes da ação..."
+              className="bg-slate-100 min-h-[150px]"
             />
           </div>
         </div>
@@ -2787,13 +2873,13 @@ const TaskCreateModal = ({ unidades, onSave, onClose }: { unidades: { id: string
           <button
             onClick={() => {
               if (!formData.titulo || !formData.data_limite) {
-                alert("Preencha o título e o prazo final.");
+                showAlert("Atenção", "Preencha o título e o prazo final.");
                 return;
               }
 
               // Validation
               if (!formData.is_single_day && formData.data_inicio > formData.data_limite) {
-                alert("A data de início deve ser anterior ou igual ao prazo final.");
+                showAlert("Atenção", "A data de início deve ser anterior ou igual ao prazo final.");
                 return;
               }
 
@@ -2820,7 +2906,7 @@ const TaskCreateModal = ({ unidades, onSave, onClose }: { unidades: { id: string
   );
 };
 
-const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas = [] }: { unidades: { id: string, nome: string }[], task: Tarefa, onSave: (id: string, updates: Partial<Tarefa>) => void, onDelete: (id: string) => void, onClose: () => void, pgcEntregas?: EntregaInstitucional[] }) => {
+const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showAlert, showConfirm, pgcEntregas = [] }: { unidades: { id: string, nome: string }[], task: Tarefa, onSave: (id: string, updates: Partial<Tarefa>) => void, onDelete: (id: string) => void, onClose: () => void, showAlert: (title: string, message: string) => void, showConfirm: (title: string, message: string, onConfirm: () => void) => void, pgcEntregas?: EntregaInstitucional[] }) => {
   const [formData, setFormData] = useState({
     titulo: task.titulo,
     data_inicio: task.data_inicio || (task.data_criacao ? task.data_criacao.split('T')[0] : ''),
@@ -2850,11 +2936,10 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
         <div className="p-8 space-y-6 overflow-y-auto custom-scrollbar flex-1">
           <div className="space-y-2">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Título da Tarefa</label>
-            <textarea
+            <WysiwygEditor
               value={formData.titulo}
-              onChange={e => setFormData({ ...formData, titulo: e.target.value })}
-              className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all resize-none min-h-[100px]"
-              rows={3}
+              onChange={val => setFormData({ ...formData, titulo: val })}
+              className="bg-slate-100"
             />
           </div>
 
@@ -2960,10 +3045,10 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
                             setIsSyncing(true);
                             try {
                               await callScrapeSipac(task.id, formData.processo_sei);
-                              alert("Sincronização iniciada com sucesso!");
+                              showAlert("Sucesso", "Sincronização iniciada com sucesso!");
                             } catch (e) {
                               console.error(e);
-                              alert("Erro ao iniciar sincronização.");
+                              showAlert("Erro", "Erro ao iniciar sincronização.");
                             } finally {
                               setIsSyncing(false);
                             }
@@ -2997,11 +3082,11 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
           <button
             onClick={() => {
               if (!formData.titulo || !formData.data_limite) {
-                alert("Preencha o título e o prazo final.");
+                showAlert("Atenção", "Preencha o título e o prazo final.");
                 return;
               }
               if (!formData.is_single_day && formData.data_inicio > formData.data_limite) {
-                alert("A data de início deve ser anterior ou igual ao prazo final.");
+                showAlert("Atenção", "A data de início deve ser anterior ou igual ao prazo final.");
                 return;
               }
               onSave(task.id, formData);
@@ -3015,20 +3100,14 @@ const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, pgcEntregas 
           <div className="flex gap-3 order-2 w-full md:w-auto">
             <button
               onClick={() => {
-                if (!isConfirmingDelete) {
-                  setIsConfirmingDelete(true);
-                } else {
-                  onDelete(task.id);
-                  onClose();
-                }
+                showConfirm("Confirmar Exclusão", "Deseja realmente excluir esta tarefa?", () => {
+                   onDelete(task.id);
+                   onClose();
+                });
               }}
-              onMouseLeave={() => setIsConfirmingDelete(false)}
-              className={`flex-1 md:flex-none px-6 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border flex items-center justify-center gap-2 ${isConfirmingDelete
-                ? 'bg-rose-600 text-white border-rose-600 shadow-lg shadow-rose-200 animate-in zoom-in-95'
-                : 'text-rose-600 hover:bg-rose-50 border-rose-100'
-                }`}
+              className="flex-1 md:flex-none px-6 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border flex items-center justify-center gap-2 text-rose-600 hover:bg-rose-50 border-rose-100"
             >
-              {isConfirmingDelete ? 'Confirmar?' : 'Excluir'}
+              Excluir
             </button>
             <button
               onClick={onClose}
@@ -4062,18 +4141,9 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
                 </div>
 
                 <div className="flex-1 flex flex-col min-w-0">
-                  {newFollowUp.trim() && (
-                    <div className={`mb-2 p-3 rounded-xl border text-xs animate-in fade-in slide-in-from-bottom-2 ${isTimerRunning ? 'bg-white/5 border-white/10 text-white/60' : 'bg-blue-50/50 border-blue-100 text-slate-500'}`}>
-                      <span className="text-[8px] font-black uppercase tracking-widest block mb-1 opacity-50">Preview:</span>
-                      <div className="whatsapp-preview">
-                        {formatWhatsAppText(newFollowUp)}
-                      </div>
-                    </div>
-                  )}
-                  <textarea
-                    id="diary-input"
+                  <WysiwygEditor
                     value={newFollowUp}
-                    onChange={e => setNewFollowUp(e.target.value)}
+                    onChange={setNewFollowUp}
                     onKeyDown={e => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
@@ -4081,8 +4151,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
                       }
                     }}
                     placeholder="Anotação..."
-                    className={`w-full bg-transparent border-none outline-none text-xs md:text-sm py-3 min-h-[44px] focus:min-h-[80px] max-h-48 resize-none custom-scrollbar transition-all duration-300 ${isTimerRunning ? 'text-white placeholder:text-white/20' : 'text-slate-800 placeholder:text-slate-400'}`}
-                    rows={1}
+                    className={isTimerRunning ? 'text-white' : 'text-slate-800'}
                   />
                   <div className={`flex items-center gap-1 mt-1 pt-2 border-t ${isTimerRunning ? 'border-white/10' : 'border-slate-100'}`}>
                     <button
@@ -4613,7 +4682,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
       setIsRecording(true);
     } catch (err) {
       console.error("Erro ao acessar microfone:", err);
-      alert("Permissão de microfone negada ou não disponível.");
+      showAlert("Erro", "Permissão de microfone negada ou não disponível.");
     }
   };
 
@@ -4645,7 +4714,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
           }
         } catch (error) {
           console.error("Erro ao transcrever:", error);
-          alert("Erro ao processar áudio via Hermes AI.");
+          showAlert("Erro", "Erro ao processar áudio via Hermes AI.");
         } finally {
           setIsProcessing(false);
         }
@@ -5073,7 +5142,7 @@ const QuickNoteModal = ({ isOpen, onClose, onAddIdea }: { isOpen: boolean, onClo
       setIsRecording(true);
     } catch (err) {
       console.error("Erro ao acessar microfone:", err);
-      alert("Permissão de microfone negada ou não disponível.");
+      showAlert("Erro", "Permissão de microfone negada ou não disponível.");
     }
   };
 
@@ -5098,7 +5167,7 @@ const QuickNoteModal = ({ isOpen, onClose, onAddIdea }: { isOpen: boolean, onClo
           if (data.refined) onAddIdea(data.refined);
         } catch (error) {
           console.error("Erro ao transcrever:", error);
-          alert("Erro ao processar áudio via Hermes AI.");
+          showAlert("Erro", "Erro ao processar áudio via Hermes AI.");
         } finally {
           setIsProcessing(false);
         }
@@ -5349,6 +5418,14 @@ const App: React.FC = () => {
   const [authLoading, setAuthLoading] = useState(true);
   const [rememberMe, setRememberMe] = useState(true);
   const [tarefas, setTarefas] = useState<Tarefa[]>([]);
+  const [undoStack, setUndoStack] = useState<UndoAction[]>([]);
+  const [modalState, setModalState] = useState<HermesModalProps>({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'alert',
+    onConfirm: () => { }
+  });
   const [googleCalendarEvents, setGoogleCalendarEvents] = useState<GoogleCalendarEvent[]>([]);
   const [entregas, setEntregas] = useState<EntregaInstitucional[]>([]);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
@@ -5445,6 +5522,69 @@ const App: React.FC = () => {
     }
   };
 
+  const showAlert = (title: string, message: string, onConfirm?: () => void) => {
+    setModalState({
+      isOpen: true,
+      title,
+      message,
+      type: 'alert',
+      onConfirm: () => {
+        setModalState(prev => ({ ...prev, isOpen: false }));
+        if (onConfirm) onConfirm();
+      }
+    });
+  };
+
+  const showConfirm = (title: string, message: string, onConfirm: () => void, onCancel?: () => void) => {
+    setModalState({
+      isOpen: true,
+      title,
+      message,
+      type: 'confirm',
+      onConfirm: () => {
+        setModalState(prev => ({ ...prev, isOpen: false }));
+        onConfirm();
+      },
+      onCancel: () => {
+        setModalState(prev => ({ ...prev, isOpen: false }));
+        if (onCancel) onCancel();
+      }
+    });
+  };
+
+  const pushToUndoStack = (label: string, undo: () => Promise<void> | void) => {
+    const action: UndoAction = {
+      id: Math.random().toString(36).substr(2, 9),
+      label,
+      undo,
+      timestamp: Date.now()
+    };
+    setUndoStack(prev => [action, ...prev].slice(0, 10));
+  };
+
+  const handleUndo = async () => {
+    if (undoStack.length === 0) return;
+    const [action, ...rest] = undoStack;
+    await action.undo();
+    setUndoStack(rest);
+    showToast(`Desfeito: ${action.label}`, "info");
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        const target = e.target as HTMLElement;
+        const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+        if (!isInput) {
+          e.preventDefault();
+          handleUndo();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undoStack]);
+
   const startLogRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -5463,7 +5603,7 @@ const App: React.FC = () => {
       setIsRecordingLog(true);
     } catch (err) {
       console.error("Erro ao acessar microfone:", err);
-      showToast("Permissão de microfone negada ou não disponível.", "error");
+      showAlert("Erro", "Permissão de microfone negada ou não disponível.");
     }
   };
 
@@ -5947,7 +6087,7 @@ const App: React.FC = () => {
     } catch (err) {
       console.error("Erro ao persistir notificação:", err);
       // Feedback visual do erro para o usuário (agora que estamos validando)
-      alert(`Erro no sistema de notificação: ${err}`);
+      showAlert("Erro", `Erro no sistema de notificação: ${err}`);
     }
   };
 
@@ -6359,6 +6499,11 @@ const App: React.FC = () => {
   };
 
   const handleToggleTarefaStatus = async (id: string, currentStatus: string) => {
+    const tarefa = tarefas.find(t => t.id === id);
+    if (!tarefa) return;
+    const oldStatus = tarefa.status;
+    const oldDataConclusao = tarefa.data_conclusao || null;
+
     try {
       const isConcluido = normalizeStatus(currentStatus) === 'concluido';
       const newStatus = isConcluido ? 'em andamento' : 'concluído';
@@ -6369,6 +6514,15 @@ const App: React.FC = () => {
         data_conclusao: !isConcluido ? now : null,
         data_atualizacao: now
       });
+
+      pushToUndoStack(isConcluido ? "Alterar Status" : "Concluir Tarefa", async () => {
+        await updateDoc(doc(db, 'tarefas', id), {
+          status: oldStatus,
+          data_conclusao: oldDataConclusao,
+          data_atualizacao: new Date().toISOString()
+        });
+      });
+
       showToast(isConcluido ? "Tarefa reaberta!" : "Tarefa concluída!", 'success');
     } catch (err) {
       console.error(err);
@@ -6377,6 +6531,9 @@ const App: React.FC = () => {
   };
 
   const handleDeleteTarefa = async (id: string) => {
+    const tarefa = tarefas.find(t => t.id === id);
+    if (!tarefa) return;
+
     try {
       setLoading(true);
       const docRef = doc(db, 'tarefas', id);
@@ -6385,6 +6542,14 @@ const App: React.FC = () => {
         status: 'excluído' as any,
         data_atualizacao: new Date().toISOString()
       });
+
+      pushToUndoStack("Excluir Tarefa", async () => {
+        await updateDoc(docRef, {
+          status: tarefa.status,
+          data_atualizacao: new Date().toISOString()
+        });
+      });
+
       showToast('Tarefa excluída!', 'success');
     } catch (err) {
       console.error("Erro ao excluir tarefa:", err);
@@ -6635,8 +6800,17 @@ const App: React.FC = () => {
   }, []);
 
   const handleDeleteWorkItem = async (id: string) => {
+    const item = workItems.find(w => w.id === id);
+    if (!item) return;
+
     try {
       await deleteDoc(doc(db, 'sistemas_work_items', id));
+
+      pushToUndoStack("Excluir Log", async () => {
+        const { id: _, ...data } = item;
+        await setDoc(doc(db, 'sistemas_work_items', id), data);
+      });
+
       showToast("Item de trabalho removido.", "info");
     } catch (err) {
       console.error(err);
@@ -8298,10 +8472,10 @@ const App: React.FC = () => {
                       showToast("Registro de saúde adicionado e indexado ao Drive.", "success");
                    }}
                   onDeleteExam={async (id) => {
-                     if (window.confirm("Remover este registro?")) {
-                        await deleteDoc(doc(db, 'exames', id));
-                        showToast("Registro removido.", "info");
-                     }
+                    showConfirm("Confirmar Exclusão", "Deseja realmente remover este registro de saúde?", async () => {
+                      await deleteDoc(doc(db, 'exames', id));
+                      showToast("Registro removido.", "info");
+                    });
                   }}
                   onUpdateExam={async (id, updates) => {
                      await updateDoc(doc(db, 'exames', id), updates);
@@ -8404,10 +8578,7 @@ const App: React.FC = () => {
                   items={knowledgeItems}
                   onDeleteItem={async (id) => { await deleteDoc(doc(db, 'conhecimento', id)); }}
                   onUploadFile={handleUploadKnowledgeFile}
-                  onProcessWithAI={handleProcessarIA}
-                  onNavigateToOrigin={handleNavigateToOrigin}
-                  allTasks={tarefas}
-                  allWorkItems={workItems}
+                  showConfirm={showConfirm}
                 />
               ) : viewMode === 'sistemas-dev' ? (
                 <div className="space-y-8 animate-in fade-in duration-500 pb-20">
@@ -8418,6 +8589,7 @@ const App: React.FC = () => {
                       onClose={() => setShowConsolidatedBacklog(false)}
                       onUpdateWorkItem={handleUpdateWorkItem}
                       onDeleteWorkItem={handleDeleteWorkItem}
+                      showConfirm={showConfirm}
                     />
                   ) : !selectedSystemId ? (
                     /* VISÃO GERAL - LISTA DE SISTEMAS */
@@ -8726,12 +8898,11 @@ const App: React.FC = () => {
 
                                       <div className="flex flex-col gap-4">
                                         <div className="relative">
-                                          <textarea
+                                          <WysiwygEditor
                                             value={newLogText}
-                                            onChange={(e) => setNewLogText(e.target.value)}
+                                            onChange={setNewLogText}
                                             placeholder="O que foi feito no sistema?"
-                                            rows={4}
-                                            className="w-full bg-white border border-slate-200 rounded-none md:rounded-2xl px-6 py-4 pr-16 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-violet-500 outline-none transition-all resize-none shadow-sm"
+                                            className="bg-white min-h-[120px]"
                                           />
                                           <div className="absolute right-4 top-4 flex flex-col gap-2">
                                             <button
@@ -8843,9 +9014,9 @@ const App: React.FC = () => {
                                               </button>
                                               <button
                                                 onClick={() => {
-                                                  if (window.confirm("Excluir este log permanentemente?")) {
+                                                  showConfirm("Excluir Log", "Excluir este log permanentemente?", () => {
                                                     handleDeleteWorkItem(log.id);
-                                                  }
+                                                  });
                                                 }}
                                                 className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
                                                 title="Excluir"
@@ -8903,9 +9074,9 @@ const App: React.FC = () => {
                                                   </button>
                                                   <button
                                                     onClick={() => {
-                                                      if (window.confirm("Excluir este log permanentemente?")) {
+                                                      showConfirm("Excluir Log", "Excluir este log permanentemente?", () => {
                                                         handleDeleteWorkItem(log.id);
-                                                      }
+                                                      });
                                                     }}
                                                     className="p-1.5 text-slate-300 hover:text-rose-600 rounded-lg transition-all"
                                                     title="Excluir"
@@ -9038,9 +9209,9 @@ const App: React.FC = () => {
                                                   </button>
                                                   <button
                                                     onClick={() => {
-                                                      if (window.confirm("Excluir este log permanentemente?")) {
+                                                      showConfirm("Excluir Log", "Excluir este log permanentemente?", () => {
                                                         handleDeleteWorkItem(log.id);
-                                                      }
+                                                      });
                                                     }}
                                                     className="p-3 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
                                                     title="Excluir"
@@ -9094,9 +9265,9 @@ const App: React.FC = () => {
                                                   </button>
                                                   <button
                                                     onClick={() => {
-                                                      if (window.confirm("Excluir este log permanentemente?")) {
+                                                      showConfirm("Excluir Log", "Excluir este log permanentemente?", () => {
                                                         handleDeleteWorkItem(log.id);
-                                                      }
+                                                      });
                                                     }}
                                                     className="p-2 text-slate-400 hover:text-rose-600 rounded-lg transition-all"
                                                     title="Excluir"
@@ -9138,11 +9309,10 @@ const App: React.FC = () => {
                                     <div className="space-y-4">
                                       <div className="space-y-2">
                                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Descrição</label>
-                                        <textarea
+                                        <WysiwygEditor
                                           value={editingWorkItemText}
-                                          onChange={(e) => setEditingWorkItemText(e.target.value)}
-                                          rows={6}
-                                          className="w-full bg-slate-50 border border-slate-200 rounded-none md:rounded-3xl px-8 py-6 text-base font-medium text-slate-700 outline-none focus:ring-2 focus:ring-violet-500 transition-all resize-none"
+                                          onChange={setEditingWorkItemText}
+                                          className="bg-slate-50 min-h-[120px]"
                                         />
                                       </div>
 
@@ -9398,6 +9568,7 @@ const App: React.FC = () => {
       </div>
 
       <ToastContainer toasts={toasts} removeToast={removeToast} />
+      <HermesModal {...modalState} />
 
       {
         isCreateModalOpen && (
@@ -9405,6 +9576,7 @@ const App: React.FC = () => {
             unidades={unidades}
             onSave={handleCreateTarefa}
             onClose={() => setIsCreateModalOpen(false)}
+            showAlert={showAlert}
           />
         )
       }
@@ -9429,6 +9601,8 @@ const App: React.FC = () => {
               onSave={handleUpdateTarefa}
               onDelete={handleDeleteTarefa}
               onClose={() => setSelectedTask(null)}
+              showAlert={showAlert}
+              showConfirm={showConfirm}
               pgcEntregas={pgcEntregas}
             />
           )
@@ -9625,9 +9799,9 @@ const App: React.FC = () => {
                       });
 
                       setIsImportPlanOpen(false);
-                      alert(`Sucesso! ${items.length} entregas importadas para o plano ${docId}.`);
+                      showAlert("Sucesso", `Sucesso! ${items.length} entregas importadas para o plano ${docId}.`);
                     } catch (err: any) {
-                      alert("Erro ao processar dados: " + err.message);
+                      showAlert("Erro", "Erro ao processar dados: " + err.message);
                     }
                   }}
                   className="flex-1 bg-blue-600 text-white px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
