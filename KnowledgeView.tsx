@@ -5,13 +5,14 @@ interface KnowledgeViewProps {
     items: ConhecimentoItem[];
     onUploadFile: (file: File) => void;
     onDeleteItem: (id: string) => void;
-    onProcessWithAI: (id: string) => Promise<void>;
-    onNavigateToOrigin: (modulo: string, id: string) => void;
-    allTasks: Tarefa[];
-    allWorkItems: WorkItem[];
+    onProcessWithAI?: (id: string) => Promise<void>;
+    onNavigateToOrigin?: (modulo: string, id: string) => void;
+    allTasks?: Tarefa[];
+    allWorkItems?: WorkItem[];
+    showConfirm?: (title: string, message: string, onConfirm: () => void) => void;
 }
 
-const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onDeleteItem, onProcessWithAI, onNavigateToOrigin, allTasks, allWorkItems }) => {
+const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onDeleteItem, onProcessWithAI, onNavigateToOrigin, allTasks = [], allWorkItems = [], showConfirm }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
     const [selectedItem, setSelectedItem] = useState<ConhecimentoItem | null>(null);
@@ -70,7 +71,11 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onDe
     const handleAIProcess = async (id: string) => {
         setIsProcessingAI(true);
         try {
-            await onProcessWithAI(id);
+            if (onProcessWithAI) {
+                await onProcessWithAI(id);
+            } else {
+                alert("Processamento com IA não configurado nesta tela.");
+            }
         } finally {
             setIsProcessingAI(false);
         }
@@ -360,8 +365,8 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onDe
                                 <div>
                                     <h5 className="text-[9px] font-black text-slate-400 uppercase mb-1">Origem</h5>
                                     <button 
-                                        disabled={!currentItem.origem}
-                                        onClick={() => currentItem.origem && onNavigateToOrigin(currentItem.origem.modulo, currentItem.origem.id_origem)}
+                                        disabled={!currentItem.origem || !onNavigateToOrigin}
+                                        onClick={() => currentItem.origem && onNavigateToOrigin && onNavigateToOrigin(currentItem.origem.modulo, currentItem.origem.id_origem)}
                                         className={`text-xs font-bold text-left transition-all ${currentItem.origem ? 'text-blue-600 hover:text-blue-800 hover:underline' : 'text-slate-900'}`}
                                     >
                                         <div className="text-[8px] opacity-60 uppercase mb-0.5">{getOriginInfo(currentItem.origem).label}</div>
