@@ -403,6 +403,9 @@ export interface WysiwygEditorProps {
 
 export type StatusConvocacao = 'Em regularização' | 'Ativo(a)' | 'Concluído(a)' | 'Desligado(a)';
 
+/**
+ * @deprecated Use PerfilPessoa and VinculoProjeto instead. Kept for migration.
+ */
 export interface Bolsista {
   id?: string;
   nome: string;
@@ -428,9 +431,115 @@ export interface Bolsista {
   updatedAt: number;
 }
 
+// --- New Project Module Types ---
+
+// 1. Separation of Entities
+
+export interface PerfilPessoa {
+    id: string;
+    nome: string;
+    cpf: string;
+    rg: string;
+    dados_bancarios: {
+        banco: string;
+        agencia: string;
+        conta: string;
+        chave_pix?: string;
+    };
+    lattes?: string;
+    email: string;
+    telefone: string;
+    endereco: string;
+    campus?: string;
+    curso?: string;
+    data_criacao: string;
+    data_atualizacao: string;
+}
+
+export interface TipoBolsa {
+    id: string;
+    nome_modalidade: string;
+    valor_integral: number;
+    valor_parcial: number; // Ex: 60%
+    descricao?: string;
+}
+
+export interface VinculoProjeto {
+    id: string;
+    pessoa_id: string; // Refers to PerfilPessoa.id
+    projeto_id: string; // Refers to Projeto.id
+    data_inicio: string;
+    data_fim_prevista: string;
+    data_desligamento_real?: string;
+    tipo_bolsa_id: string; // Refers to TipoBolsa.id
+    percentual_recebimento: number; // 100 or 60
+    funcao?: string;
+    status: StatusConvocacao;
+    documentos?: {
+        termo_responsabilidade?: string;
+        termo_comodato?: string;
+    };
+    valor_bolsa_mensal_atual: number; // Snapshot of value at time of link
+}
+
 export interface Projeto {
     id: string;
     nome: string;
     descricao?: string;
     data_criacao: string;
+    orcamento?: OrcamentoProjeto;
+}
+
+// 2. Master Budget Structure
+
+export interface OrcamentoProjeto {
+    custeio: number;
+    capital: number;
+    bolsas: number;
+}
+
+export interface ItemOrcamento {
+    id: string;
+    nome: string;
+    rubrica: 'custeio' | 'capital' | 'bolsas';
+    quantidade: number;
+    valor_unitario_estimado: number;
+    descricao?: string;
+    status: 'planejado' | 'aprovado' | 'executado';
+}
+
+export interface RemanejamentoRecursos {
+    id: string;
+    projeto_id: string;
+    origem: 'custeio' | 'capital' | 'bolsas';
+    destino: 'custeio' | 'capital' | 'bolsas';
+    valor: number;
+    data: string;
+    justificativa: string;
+    usuario_responsavel: string;
+}
+
+// 3. Acquisitions & Expenses
+
+export interface Cotacao {
+    fornecedor?: string;
+    valor: number;
+    url?: string;
+    screenshot_path?: string;
+    data_cotacao: string;
+}
+
+export interface TransacaoProjeto {
+    id: string;
+    projeto_id: string;
+    item_orcamento_id: string; // Link to ItemOrcamento
+    descricao: string;
+    valor_real: number;
+    data_pagamento: string;
+    comprovante_url?: string;
+    nota_fiscal_url?: string;
+    exige_cotacao: boolean;
+    cotacoes?: Cotacao[];
+    status: 'pendente' | 'pago' | 'cancelado';
+    tipo: 'compra' | 'servico' | 'bolsa';
 }
