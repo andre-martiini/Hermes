@@ -416,106 +416,6 @@ const PgcAuditRow = ({
 
 // --- Components ---
 
-const ConsolidatedBacklogView = ({
-  unidades,
-  workItems,
-  onClose,
-  onUpdateWorkItem,
-  onDeleteWorkItem
-}: {
-  unidades: { id: string, nome: string }[],
-  workItems: WorkItem[],
-  onClose: () => void,
-  onUpdateWorkItem: (id: string, updates: Partial<WorkItem>) => void,
-  onDeleteWorkItem: (id: string) => void
-}) => {
-  const [expandedSystems, setExpandedSystems] = useState<string[]>([]);
-
-  const systemsWithItems = useMemo(() => {
-    return unidades
-      .filter(u => u.nome.startsWith('SISTEMA:'))
-      .map(u => ({
-        ...u,
-        items: workItems.filter(w => w.sistema_id === u.id && !w.concluido)
-      }))
-      .filter(s => s.items.length > 0);
-  }, [unidades, workItems]);
-
-  const toggleSystem = (id: string) => {
-    setExpandedSystems(prev =>
-      prev.includes(id) ? prev.filter(sysId => sysId !== id) : [...prev, id]
-    );
-  };
-
-  return (
-    <div className="animate-in fade-in slide-in-from-bottom-8 duration-500">
-      <div className="bg-white border border-slate-200 rounded-none md:rounded-[2.5rem] overflow-hidden shadow-xl">
-        <div className="p-6 md:p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
-          <div>
-            <h3 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight">Painel Geral de Demandas</h3>
-            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Backlog Consolidado por Sistema</p>
-          </div>
-          <button onClick={onClose} className="p-2 md:p-3 bg-white border border-slate-200 rounded-full hover:bg-slate-50 transition-colors">
-            <svg className="w-5 h-5 md:w-6 md:h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-
-        <div className="divide-y divide-slate-100">
-          {systemsWithItems.map(system => (
-            <div key={system.id} className="bg-white">
-              <button
-                onClick={() => toggleSystem(system.id)}
-                className="w-full p-6 md:p-8 flex items-center justify-between hover:bg-slate-50 transition-colors group"
-              >
-                <div className="flex items-center gap-3 md:gap-4">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-violet-100 text-violet-600 rounded-xl md:rounded-2xl flex items-center justify-center shrink-0">
-                    <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
-                  </div>
-                  <div className="text-left">
-                    <h4 className="text-base md:text-lg font-black text-slate-900 leading-tight">{system.nome.replace('SISTEMA:', '').trim()}</h4>
-                    <p className="text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-widest">{system.items.length} itens pendentes</p>
-                  </div>
-                </div>
-                <svg className={`w-6 h-6 text-slate-300 transition-transform duration-300 ${expandedSystems.includes(system.id) ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-
-              {expandedSystems.includes(system.id) && (
-                <div className="p-6 md:p-8 pt-0 space-y-3 animate-in slide-in-from-top-4 duration-300">
-                  {system.items.map(item => (
-                    <div key={item.id} className="p-4 bg-slate-50 border border-slate-100 rounded-xl md:rounded-2xl flex items-center justify-between group/item gap-3">
-                      <div className="flex items-center gap-4">
-                        <button
-                          onClick={() => onUpdateWorkItem(item.id, { concluido: true, data_conclusao: new Date().toISOString() })}
-                          className="w-6 h-6 rounded-lg border-2 border-slate-200 hover:border-emerald-500 hover:bg-emerald-50 transition-all flex items-center justify-center text-transparent hover:text-emerald-500"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                        </button>
-                        <span className="text-xs md:text-sm font-bold text-slate-700 leading-tight">{item.descricao}</span>
-                      </div>
-                      <button
-                        onClick={() => { showConfirm("Excluir Item", "Deseja excluir este item?", () => onDeleteWorkItem(item.id)); }}
-                        className="opacity-0 group-hover/item:opacity-100 p-2 text-slate-300 hover:text-rose-500 transition-all"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-          {systemsWithItems.length === 0 && (
-            <div className="p-20 text-center">
-              <p className="text-slate-300 font-black text-sm uppercase tracking-widest italic">Nenhuma demanda pendente em nenhum sistema.</p>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
 
 const DayView = ({
   tasks,
@@ -5559,8 +5459,29 @@ const App: React.FC = () => {
   const [googleCalendarEvents, setGoogleCalendarEvents] = useState<GoogleCalendarEvent[]>([]);
   const [entregas, setEntregas] = useState<EntregaInstitucional[]>([]);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
-  const [showConsolidatedBacklog, setShowConsolidatedBacklog] = useState(false);
+  const [isCompletedLogsOpen, setIsCompletedLogsOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const handleCopyBacklog = async () => {
+    const activeItems = workItems.filter(w => !w.concluido);
+    if (activeItems.length === 0) {
+      showToast("Nenhum item pendente para copiar.", "info");
+      return;
+    }
+
+    const text = activeItems.map(item => {
+      const systemName = unidades.find(u => u.id === item.sistema_id)?.nome.replace('SISTEMA:', '').trim() || 'Sistema Desconhecido';
+      return `[${systemName}] ${item.descricao}`;
+    }).join('\n');
+
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("Backlog copiado para a área de transferência!", "success");
+    } catch (err) {
+      console.error('Failed to copy: ', err);
+      showToast("Erro ao copiar.", "error");
+    }
+  };
 
   // Finance State
   const [financeTransactions, setFinanceTransactions] = useState<FinanceTransaction[]>([]);
@@ -7926,11 +7847,11 @@ const App: React.FC = () => {
                 {viewMode === 'sistemas-dev' && !selectedSystemId && (
                   <div className="flex items-center gap-3">
                     <button
-                      onClick={() => setShowConsolidatedBacklog(true)}
+                      onClick={handleCopyBacklog}
                       className="bg-violet-600 text-white px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-violet-700 transition-all flex items-center gap-3"
                     >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
-                      Backlog <span className="hidden lg:inline">Consolidado</span>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
+                      Copiar <span className="hidden lg:inline">Tudo</span>
                     </button>
                     <button
                       onClick={() => {
@@ -8159,11 +8080,7 @@ const App: React.FC = () => {
                   currentMonth={currentMonth}
                   currentYear={currentYear}
                   onNavigate={handleDashboardNavigate}
-                  onOpenBacklog={() => {
-                    setActiveModule('acoes');
-                    setViewMode('sistemas-dev');
-                    setShowConsolidatedBacklog(true);
-                  }}
+                  onOpenBacklog={handleCopyBacklog}
                 />
               ) : viewMode === 'gallery' ? (
                 <>
@@ -8712,16 +8629,7 @@ const App: React.FC = () => {
                 />
               ) : viewMode === 'sistemas-dev' ? (
                 <div className="space-y-8 animate-in fade-in duration-500 pb-20">
-                  {showConsolidatedBacklog ? (
-                    <ConsolidatedBacklogView
-                      unidades={unidades}
-                      workItems={workItems}
-                      onClose={() => setShowConsolidatedBacklog(false)}
-                      onUpdateWorkItem={handleUpdateWorkItem}
-                      onDeleteWorkItem={handleDeleteWorkItem}
-                      showConfirm={showConfirm}
-                    />
-                  ) : !selectedSystemId ? (
+                  {!selectedSystemId ? (
                     /* VISÃO GERAL - LISTA DE SISTEMAS */
                     <>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-0 md:gap-8 px-0 pt-8">
@@ -9172,57 +9080,66 @@ const App: React.FC = () => {
                                     {/* Concluídos */}
                                     {systemWorkItems.filter(w => w.concluido).length > 0 && (
                                       <div className="space-y-4 pt-8">
-                                        <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-emerald-500 pl-3">Concluídos</h5>
-                                        <div className="space-y-3 opacity-60">
-                                          {systemWorkItems.filter(w => w.concluido).sort((a, b) => new Date(b.data_conclusao!).getTime() - new Date(a.data_conclusao!).getTime()).map(log => (
-                                            <div key={log.id} className="bg-white border border-slate-100 rounded-none md:rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 md:gap-4">
-                                              <div className="flex-1 flex items-center gap-4 w-full">
-                                                <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
-                                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                        <button
+                                          onClick={() => setIsCompletedLogsOpen(!isCompletedLogsOpen)}
+                                          className="w-full flex items-center justify-between group cursor-pointer"
+                                        >
+                                          <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-emerald-500 pl-3">Concluídos ({systemWorkItems.filter(w => w.concluido).length})</h5>
+                                          <svg className={`w-4 h-4 text-slate-300 transition-transform ${isCompletedLogsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
+                                        </button>
+
+                                        {isCompletedLogsOpen && (
+                                          <div className="space-y-3 opacity-60 animate-in slide-in-from-top-4 duration-300">
+                                            {systemWorkItems.filter(w => w.concluido).sort((a, b) => new Date(b.data_conclusao!).getTime() - new Date(a.data_conclusao!).getTime()).map(log => (
+                                              <div key={log.id} className="bg-white border border-slate-100 rounded-none md:rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 md:gap-4">
+                                                <div className="flex-1 flex items-center gap-4 w-full">
+                                                  <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                  </div>
+                                                    <p className="text-xs font-medium text-slate-500 line-clamp-1">{log.descricao}</p>
+                                                    {log.pool_dados && log.pool_dados.length > 0 && (
+                                                      <div className="flex flex-wrap gap-1 mt-1">
+                                                        {log.pool_dados.map((at, i) => (
+                                                          <a key={i} href={at.valor} target="_blank" rel="noopener noreferrer" className="block">
+                                                            <img src={at.valor} alt="preview" className="w-8 h-8 object-cover rounded border border-slate-100 opacity-60 hover:opacity-100 transition-opacity" />
+                                                          </a>
+                                                        ))}
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                  <div className="flex gap-2 items-center">
+                                                    <button
+                                                      onClick={() => {
+                                                        setEditingWorkItem(log);
+                                                        setEditingWorkItemText(log.descricao);
+                                                      }}
+                                                      className="p-1.5 text-slate-300 hover:text-violet-600 rounded-lg transition-all"
+                                                      title="Editar"
+                                                    >
+                                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                                    </button>
+                                                    <button
+                                                      onClick={() => {
+                                                        showConfirm("Excluir Log", "Excluir este log permanentemente?", () => {
+                                                          handleDeleteWorkItem(log.id);
+                                                        });
+                                                      }}
+                                                      className="p-1.5 text-slate-300 hover:text-rose-600 rounded-lg transition-all"
+                                                      title="Excluir"
+                                                    >
+                                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                    </button>
+                                                    <button
+                                                      onClick={() => handleUpdateWorkItem(log.id, { concluido: false })}
+                                                      className="text-[9px] font-black text-slate-300 hover:text-violet-600 uppercase ml-2"
+                                                    >
+                                                      Reabrir
+                                                    </button>
+                                                  </div>
                                                 </div>
-                                                  <p className="text-xs font-medium text-slate-500 line-clamp-1">{log.descricao}</p>
-                                                  {log.pool_dados && log.pool_dados.length > 0 && (
-                                                    <div className="flex flex-wrap gap-1 mt-1">
-                                                      {log.pool_dados.map((at, i) => (
-                                                        <a key={i} href={at.valor} target="_blank" rel="noopener noreferrer" className="block">
-                                                          <img src={at.valor} alt="preview" className="w-8 h-8 object-cover rounded border border-slate-100 opacity-60 hover:opacity-100 transition-opacity" />
-                                                        </a>
-                                                      ))}
-                                                    </div>
-                                                  )}
-                                                </div>
-                                                <div className="flex gap-2 items-center">
-                                                  <button
-                                                    onClick={() => {
-                                                      setEditingWorkItem(log);
-                                                      setEditingWorkItemText(log.descricao);
-                                                    }}
-                                                    className="p-1.5 text-slate-300 hover:text-violet-600 rounded-lg transition-all"
-                                                    title="Editar"
-                                                  >
-                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                                  </button>
-                                                  <button
-                                                    onClick={() => {
-                                                      showConfirm("Excluir Log", "Excluir este log permanentemente?", () => {
-                                                        handleDeleteWorkItem(log.id);
-                                                      });
-                                                    }}
-                                                    className="p-1.5 text-slate-300 hover:text-rose-600 rounded-lg transition-all"
-                                                    title="Excluir"
-                                                  >
-                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                  </button>
-                                                  <button
-                                                    onClick={() => handleUpdateWorkItem(log.id, { concluido: false })}
-                                                    className="text-[9px] font-black text-slate-300 hover:text-violet-600 uppercase ml-2"
-                                                  >
-                                                    Reabrir
-                                                  </button>
-                                                </div>
-                                              </div>
-                                          ))}
-                                        </div>
+                                            ))}
+                                          </div>
+                                        )}
                                       </div>
                                     )}
                                   </div>

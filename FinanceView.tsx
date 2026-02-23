@@ -624,7 +624,7 @@ const FinanceView = ({
                                     {sortedGoals.length > 0 ? (
                                         <div className="space-y-4">
                                             {sortedGoals.map((goal, idx) => (
-                                                <div key={goal.id} className={`bg-white p-5 rounded-none md:rounded-[2rem] border-2 transition-all relative group ${idx === 0 ? 'border-slate-900 shadow-none md:shadow-xl' : 'border-slate-100 opacity-80 hover:opacity-100 shadow-none md:shadow-sm'}`}>
+                                                <div key={goal.id} className={`bg-white p-5 rounded-none md:rounded-[2rem] border transition-all relative group ${idx === 0 ? 'border-slate-300 shadow-none md:shadow-md' : 'border-slate-100 opacity-80 hover:opacity-100 shadow-none'}`}>
                                                     <div className="flex flex-col gap-4">
                                                         <div className="flex items-start justify-between gap-4">
                                                             <div className="flex items-start gap-4">
@@ -660,12 +660,12 @@ const FinanceView = ({
                                                                 <button onClick={() => onDeleteGoal(goal.id)} className="p-1 text-slate-300 hover:text-rose-500 transition-colors">
                                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                                                 </button>
-                                                                <div className="ml-2 bg-slate-900 text-white text-[8px] font-black px-2 py-1 rounded-lg uppercase tracking-widest shadow-lg shrink-0">P{idx + 1}</div>
+                                                                <div className="ml-2 bg-slate-100 text-slate-500 text-[8px] font-black px-2 py-1 rounded-lg uppercase tracking-widest shrink-0">P{idx + 1}</div>
                                                             </div>
                                                         </div>
-                                                        <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden shadow-inner w-full">
+                                                        <div className="h-2 bg-slate-50 rounded-full overflow-hidden w-full">
                                                             <div
-                                                                className={`h-full transition-all duration-1000 ${idx === 0 ? 'bg-slate-900' : 'bg-blue-500'}`}
+                                                                className={`h-full transition-all duration-1000 ${idx === 0 ? 'bg-slate-600' : 'bg-blue-400'}`}
                                                                 style={{ width: `${Math.min((goal.currentAmount / goal.targetAmount) * 100, 100)}%` }}
                                                             ></div>
                                                         </div>
