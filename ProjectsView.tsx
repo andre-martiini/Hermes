@@ -48,7 +48,7 @@ export const ProjectsView: React.FC = () => {
   if (selectedProjectId) {
     const project = projects.find(p => p.id === selectedProjectId);
     return (
-      <div className="animate-in fade-in slide-in-from-right duration-300 px-4 md:px-0">
+      <div className="px-4 md:px-0">
         <button
           onClick={() => setSelectedProjectId(null)}
           className="mb-6 flex items-center gap-2 text-slate-400 hover:text-indigo-600 font-black text-[10px] uppercase tracking-[0.2em] transition-all group"
@@ -118,7 +118,7 @@ export const ProjectsView: React.FC = () => {
 
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500 pb-20 px-4 md:px-0">
+    <div className="space-y-8 pb-20 px-4 md:px-0">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {/* Lista de Projetos */}
         {projects.map(project => (

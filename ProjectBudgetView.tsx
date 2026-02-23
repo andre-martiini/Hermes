@@ -136,49 +136,70 @@ export const ProjectBudgetView: React.FC<ProjectBudgetViewProps> = ({ projetoId 
         return { balances, spent, totalAllocated, totalProjectValue };
     };
 
-    // Reallocation State
-    const [reallocationForm, setReallocationForm] = useState({
-        origem: 'custeio' as 'custeio' | 'capital' | 'bolsas',
-        destino: 'capital' as 'custeio' | 'capital' | 'bolsas',
-        valor: 0,
-        justificativa: ''
-    });
+    // Simplified Reallocation State
+    const [simplifiedBudgetForm, setSimplifiedBudgetForm] = useState<OrcamentoProjeto>({ custeio: 0, capital: 0, bolsas: 0 });
+    const [reallocationJustification, setReallocationJustification] = useState('');
+
+    useEffect(() => {
+        if (project?.orcamento) {
+            setSimplifiedBudgetForm(totalAllocated);
+        }
+    }, [reallocations, project]);
 
     const handleReallocate = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (reallocationForm.origem === reallocationForm.destino) {
-            alert("Origem e destino devem ser diferentes.");
-            return;
-        }
-        if (reallocationForm.valor <= 0) {
-            alert("O valor deve ser maior que zero.");
+        
+        const newTotal = simplifiedBudgetForm.custeio + simplifiedBudgetForm.capital + simplifiedBudgetForm.bolsas;
+        if (Math.abs(newTotal - totalProjectValue) > 0.01) {
+            alert(`A soma dos valores (R$ ${newTotal.toLocaleString('pt-BR')}) deve ser igual ao valor total disponível do projeto (R$ ${totalProjectValue.toLocaleString('pt-BR')}). Diferença: R$ ${(newTotal - totalProjectValue).toFixed(2)}`);
             return;
         }
 
-        // Check balance (using the calculated balance from current render scope)
-        const currentBalanceOrigem = balances[reallocationForm.origem];
-        if (reallocationForm.valor > currentBalanceOrigem) {
-            alert(`Saldo insuficiente em ${reallocationForm.origem}. Disponível: ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(currentBalanceOrigem)}`);
+        if (!reallocationJustification.trim()) {
+            alert("Por favor, forneça uma justificativa para o remanejamento.");
             return;
         }
 
         try {
-            await addDoc(collection(db, 'projetos', projetoId, 'remanejamentos'), {
-                projeto_id: projetoId,
-                origem: reallocationForm.origem,
-                destino: reallocationForm.destino,
-                valor: Number(reallocationForm.valor),
-                data: new Date().toISOString(),
-                justificativa: reallocationForm.justificativa,
-                usuario_responsavel: 'Gestor'
+            const diffs = {
+                custeio: simplifiedBudgetForm.custeio - totalAllocated.custeio,
+                capital: simplifiedBudgetForm.capital - totalAllocated.capital,
+                bolsas: simplifiedBudgetForm.bolsas - totalAllocated.bolsas
+            };
+
+            const sources: { rubrica: 'custeio' | 'capital' | 'bolsas', valor: number }[] = [];
+            const targets: { rubrica: 'custeio' | 'capital' | 'bolsas', valor: number }[] = [];
+
+            (Object.keys(diffs) as ('custeio' | 'capital' | 'bolsas')[]).forEach(k => {
+                if (diffs[k] < -0.01) sources.push({ rubrica: k, valor: Math.abs(diffs[k]) });
+                else if (diffs[k] > 0.01) targets.push({ rubrica: k, valor: diffs[k] });
             });
-            setReallocationForm({
-                origem: 'custeio',
-                destino: 'capital',
-                valor: 0,
-                justificativa: ''
-            });
-            alert("Remanejamento realizado com sucesso!");
+
+            // Distribute sources to targets
+            for (const source of sources) {
+                let remainingSource = source.valor;
+                for (const target of targets) {
+                    if (target.valor <= 0) continue;
+                    const amountToTransfer = Math.min(remainingSource, target.valor);
+                    if (amountToTransfer > 0.01) {
+                        await addDoc(collection(db, 'projetos', projetoId, 'remanejamentos'), {
+                            projeto_id: projetoId,
+                            origem: source.rubrica,
+                            destino: target.rubrica,
+                            valor: amountToTransfer,
+                            data: new Date().toISOString(),
+                            justificativa: reallocationJustification,
+                            usuario_responsavel: 'Gestor'
+                        });
+                        remainingSource -= amountToTransfer;
+                        target.valor -= amountToTransfer;
+                    }
+                    if (remainingSource <= 0.01) break;
+                }
+            }
+
+            setReallocationJustification('');
+            alert("Remanejamento processado com sucesso!");
         } catch (error) {
             console.error("Error reallocating:", error);
             alert("Erro ao realizar remanejamento.");
@@ -500,64 +521,87 @@ export const ProjectBudgetView: React.FC<ProjectBudgetViewProps> = ({ projetoId 
            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Formulário */}
                 <div className="bg-white rounded-[2rem] border border-slate-200 p-8 shadow-sm">
-                    <h3 className="text-xl font-black text-slate-800 mb-6">Remanejar Recursos</h3>
-                    <form onSubmit={handleReallocate} className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">De (Origem)</label>
-                                <select
-                                    value={reallocationForm.origem}
-                                    onChange={e => setReallocationForm({...reallocationForm, origem: e.target.value as any})}
-                                    className="w-full mt-1 p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-medium text-slate-700 bg-white"
-                                >
-                                    <option value="custeio">Custeio</option>
-                                    <option value="capital">Capital</option>
-                                    <option value="bolsas">Bolsas</option>
-                                </select>
-                                <p className="text-[10px] font-bold text-slate-400 mt-1 text-right">
-                                    Disp: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(balances[reallocationForm.origem])}
-                                </p>
+                    <div className="flex items-center justify-between mb-6">
+                        <h3 className="text-xl font-black text-slate-800">Ajuste de Rubricas</h3>
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Disponível:</span>
+                            <span className="text-sm font-black text-indigo-600">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalProjectValue)}</span>
+                        </div>
+                    </div>
+                    
+                    <form onSubmit={handleReallocate} className="space-y-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Novo Custeio</label>
+                                    <div className="relative mt-1">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">R$</span>
+                                        <input
+                                            type="number"
+                                            value={simplifiedBudgetForm.custeio}
+                                            onChange={e => setSimplifiedBudgetForm({...simplifiedBudgetForm, custeio: Number(e.target.value)})}
+                                            className="w-full pl-10 p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-700"
+                                        />
+                                    </div>
+                                    <p className="text-[9px] text-slate-400 mt-1 ml-1 font-bold">Atual: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalAllocated.custeio)}</p>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Novo Capital</label>
+                                    <div className="relative mt-1">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">R$</span>
+                                        <input
+                                            type="number"
+                                            value={simplifiedBudgetForm.capital}
+                                            onChange={e => setSimplifiedBudgetForm({...simplifiedBudgetForm, capital: Number(e.target.value)})}
+                                            className="w-full pl-10 p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-700"
+                                        />
+                                    </div>
+                                    <p className="text-[9px] text-slate-400 mt-1 ml-1 font-bold">Atual: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalAllocated.capital)}</p>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Bolsas (Ajuste se necessário)</label>
+                                    <div className="relative mt-1">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">R$</span>
+                                        <input
+                                            type="number"
+                                            value={simplifiedBudgetForm.bolsas}
+                                            onChange={e => setSimplifiedBudgetForm({...simplifiedBudgetForm, bolsas: Number(e.target.value)})}
+                                            className="w-full pl-10 p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-700 bg-slate-50"
+                                        />
+                                    </div>
+                                    <p className="text-[9px] text-slate-400 mt-1 ml-1 font-bold">Atual: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalAllocated.bolsas)}</p>
+                                </div>
                             </div>
-                            <div>
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Para (Destino)</label>
-                                <select
-                                    value={reallocationForm.destino}
-                                    onChange={e => setReallocationForm({...reallocationForm, destino: e.target.value as any})}
-                                    className="w-full mt-1 p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-medium text-slate-700 bg-white"
-                                >
-                                    <option value="custeio">Custeio</option>
-                                    <option value="capital">Capital</option>
-                                    <option value="bolsas">Bolsas</option>
-                                </select>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Justificativa do Ajuste</label>
+                                    <textarea
+                                        value={reallocationJustification}
+                                        onChange={e => setReallocationJustification(e.target.value)}
+                                        className="w-full mt-1 p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-medium text-slate-600 h-40 resize-none"
+                                        placeholder="Descreva o motivo da alteração nos valores das rubricas..."
+                                        required
+                                    />
+                                </div>
+                                
+                                <div className={`p-4 rounded-xl border ${Math.abs((simplifiedBudgetForm.custeio + simplifiedBudgetForm.capital + simplifiedBudgetForm.bolsas) - totalProjectValue) < 0.01 ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'}`}>
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Nova Soma:</span>
+                                        <span className={`text-sm font-black ${Math.abs((simplifiedBudgetForm.custeio + simplifiedBudgetForm.capital + simplifiedBudgetForm.bolsas) - totalProjectValue) < 0.01 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(simplifiedBudgetForm.custeio + simplifiedBudgetForm.capital + simplifiedBudgetForm.bolsas)}
+                                        </span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                        <div>
-                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Valor a Transferir</label>
-                            <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">R$</span>
-                                <input
-                                    type="number"
-                                    value={reallocationForm.valor}
-                                    onChange={e => setReallocationForm({...reallocationForm, valor: Number(e.target.value)})}
-                                    className="w-full pl-10 p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-700"
-                                />
-                            </div>
-                        </div>
-                        <div>
-                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Justificativa</label>
-                            <textarea
-                                value={reallocationForm.justificativa}
-                                onChange={e => setReallocationForm({...reallocationForm, justificativa: e.target.value})}
-                                className="w-full mt-1 p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-medium text-slate-600 h-24 resize-none"
-                                placeholder="Motivo do remanejamento..."
-                                required
-                            />
-                        </div>
+
                         <button
                             type="submit"
-                            className="w-full bg-slate-900 text-white py-3 rounded-xl text-xs font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all"
+                            className="w-full bg-slate-900 text-white py-4 rounded-2xl text-xs font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled={Math.abs((simplifiedBudgetForm.custeio + simplifiedBudgetForm.capital + simplifiedBudgetForm.bolsas) - totalProjectValue) > 0.01}
                         >
-                            Confirmar Transferência
+                            Confirmar Atualização de Valores
                         </button>
                     </form>
                 </div>
