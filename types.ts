@@ -360,7 +360,7 @@ export interface GoogleCalendarEvent {
 export interface ConhecimentoItem {
     id: string;
     titulo: string;
-    tipo_arquivo: string; // pdf, imagem, doc, etc
+    tipo_arquivo: string; // pdf, imagem, doc, link, apresentacao
     url_drive: string;
     tamanho: number;
     data_criacao: string;
@@ -372,6 +372,7 @@ export interface ConhecimentoItem {
         modulo: string;
         id_origem: string;
     } | null;
+    slides_data?: any;
 }
 
 export interface UndoAction {

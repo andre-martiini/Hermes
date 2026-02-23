@@ -6906,6 +6906,63 @@ const App: React.FC = () => {
     }
   };
 
+  const handleAddKnowledgeLink = async (url: string, title: string) => {
+    try {
+      await addDoc(collection(db, 'conhecimento'), {
+        titulo: title,
+        tipo_arquivo: 'link',
+        url_drive: url,
+        tamanho: 0,
+        data_criacao: new Date().toISOString(),
+        origem: null
+      });
+      showToast("Link salvo com sucesso.", "success");
+    } catch (e) {
+      console.error(e);
+      showToast("Erro ao salvar link.", "error");
+    }
+  };
+
+  const handleSaveKnowledgeItem = async (item: Partial<ConhecimentoItem>) => {
+    try {
+      if (item.id) {
+        await updateDoc(doc(db, 'conhecimento', item.id), item);
+        showToast("Item atualizado.", "success");
+      } else {
+        await addDoc(collection(db, 'conhecimento'), {
+          ...item,
+          data_criacao: new Date().toISOString()
+        });
+        showToast("Item salvo.", "success");
+      }
+    } catch (e) {
+      console.error(e);
+      showToast("Erro ao salvar item.", "error");
+    }
+  };
+
+  const handleProcessWithAI = async (id: string) => {
+    const processarArquivoIA = httpsCallable(functions, 'processarArquivoIA');
+    try {
+      const result = await processarArquivoIA({ itemId: id });
+      return result.data;
+    } catch (error: any) {
+      console.error("Erro no processamento IA:", error);
+      return { success: false, error: error.message };
+    }
+  };
+
+  const handleGenerateSlides = async (text: string) => {
+    const gerarSlidesIA = httpsCallable(functions, 'gerarSlidesIA');
+    try {
+      const result = await gerarSlidesIA({ rascunho: text });
+      return result.data;
+    } catch (error: any) {
+      console.error("Erro ao gerar slides:", error);
+      throw error;
+    }
+  };
+
   const handleAddQuickLog = async (text: string, systemId: string) => {
     try {
       await handleCreateWorkItem(systemId, 'geral', text, []);
@@ -8625,6 +8682,10 @@ const App: React.FC = () => {
                   items={knowledgeItems}
                   onDeleteItem={async (id) => { await deleteDoc(doc(db, 'conhecimento', id)); }}
                   onUploadFile={handleUploadKnowledgeFile}
+                  onAddLink={handleAddKnowledgeLink}
+                  onSaveItem={handleSaveKnowledgeItem}
+                  onProcessWithAI={handleProcessWithAI}
+                  onGenerateSlides={handleGenerateSlides}
                   showConfirm={showConfirm}
                 />
               ) : viewMode === 'sistemas-dev' ? (
