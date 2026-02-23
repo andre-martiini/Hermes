@@ -150,7 +150,7 @@ export const PgcAuditRow = ({
         const tarefaId = e.dataTransfer.getData('tarefaId');
         if (tarefaId) onDrop(tarefaId);
       }}
-      className="group border-b border-slate-100 hover:bg-slate-50 transition-all p-8 flex flex-col gap-4"
+      className="group border-b border-slate-100 hover:bg-slate-50 transition-all p-4 md:p-8 flex flex-col gap-3 md:gap-4"
     >
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-3 mb-1">
