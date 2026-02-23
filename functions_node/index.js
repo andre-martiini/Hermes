@@ -297,3 +297,81 @@ async function runScraper(data) {
 //    }
 //    return { success: true, message: "Sincronização iniciada em segundo plano." };
 //});
+
+exports.getQuotes = functions.runWith({
+    timeoutSeconds: 60,
+    memory: '2GB'
+}).https.onCall(async (data, context) => {
+    const { searchTerm } = data;
+    if (!searchTerm) {
+        throw new functions.https.HttpsError('invalid-argument', 'The function must be called with "searchTerm".');
+    }
+
+    const browser = await puppeteer.launch({
+        headless: "new",
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+
+    try {
+        const page = await browser.newPage();
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+
+        // Search on Mercado Livre
+        const searchUrl = `https://lista.mercadolivre.com.br/${encodeURIComponent(searchTerm)}`;
+        await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
+
+        // Wait for results
+        await page.waitForSelector('.ui-search-layout__item', { timeout: 10000 });
+
+        // Click the first result to get details
+        const firstItem = await page.$('.ui-search-layout__item a');
+        if (!firstItem) throw new Error('No results found');
+
+        const itemUrl = await page.evaluate(el => el.href, firstItem);
+        await page.goto(itemUrl, { waitUntil: 'networkidle2' });
+
+        // Extract Data
+        const price = await page.evaluate(() => {
+            const priceElement = document.querySelector('.ui-pdp-price__second-line .andes-money-amount__fraction');
+            return priceElement ? parseFloat(priceElement.innerText.replace(/\./g, '').replace(',', '.')) : 0;
+        });
+
+        const title = await page.evaluate(() => {
+            const h1 = document.querySelector('h1.ui-pdp-title');
+            return h1 ? h1.innerText : '';
+        });
+
+        const vendor = await page.evaluate(() => {
+            const seller = document.querySelector('.ui-pdp-seller__link-trigger');
+            return seller ? seller.innerText : 'Mercado Livre';
+        });
+
+        // Screenshot
+        const screenshotBuffer = await page.screenshot({ fullPage: false });
+        const fileName = `quotes/${Date.now()}_${searchTerm.replace(/[^a-z0-9]/gi, '_')}.png`;
+
+        // Find folder ID from system/config or assume root (null)
+        // Ideally we should fetch 'googleDriveFolderId' from Firestore if needed, but for now root is fine or existing logic
+        let folderId = null;
+        try {
+             const configDoc = await db.collection('configuracoes').doc('geral').get();
+             if (configDoc.exists) folderId = configDoc.data().googleDriveFolderId;
+        } catch(e) {}
+
+        const fileData = await uploadToDrive(fileName, screenshotBuffer, 'image/png', folderId);
+
+        return {
+            price,
+            vendor,
+            title,
+            screenshotUrl: fileData.webViewLink,
+            date: new Date().toISOString()
+        };
+
+    } catch (error) {
+        console.error("Error in getQuotes:", error);
+        throw new functions.https.HttpsError('internal', error.message);
+    } finally {
+        await browser.close();
+    }
+});

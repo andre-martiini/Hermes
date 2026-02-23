@@ -1084,3 +1084,75 @@ def gerarSlidesIA(req: https_fn.CallableRequest):
     except Exception as e:
         print(f"Erro ao gerar slides: {str(e)}")
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=str(e))
+
+@https_fn.on_call(memory=options.MemoryOption.GB_1)
+def processInvoiceOCR(req: https_fn.CallableRequest):
+    """
+    Processa uma Nota Fiscal (PDF/Imagem) do Google Drive usando Gemini e extrai dados estruturados.
+    """
+    import google.generativeai as genai
+    import json
+    import re
+
+    file_id = req.data.get('fileId')
+    if not file_id:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="fileId é obrigatório.")
+
+    try:
+        db = get_db()
+        keys_doc = db.collection('system').document('api_keys').get()
+        GEMINI_API_KEY = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+
+        if not GEMINI_API_KEY:
+             raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION, message="Chave Gemini não configurada.")
+
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel("gemini-1.5-flash") # Using Flash for speed/cost
+
+        # Download from Drive
+        service = get_drive_service()
+        file_metadata = service.files().get(fileId=file_id, fields='mimeType, name').execute()
+        mime_type = file_metadata.get('mimeType')
+
+        request = service.files().get_media(fileId=file_id)
+        file_content = request.execute()
+
+        prompt = """
+        Analise este documento (Nota Fiscal ou Recibo) e extraia os seguintes dados em formato JSON estrito:
+        {
+            "fornecedor": "Nome da Empresa",
+            "cnpj": "XX.XXX.XXX/0001-XX",
+            "data_emissao": "YYYY-MM-DD",
+            "valor_total": 0.00,
+            "itens": [
+                {
+                    "descricao": "Nome do Produto",
+                    "quantidade": 1,
+                    "valor_unitario": 0.00,
+                    "valor_total": 0.00
+                }
+            ]
+        }
+        Se algum campo não for encontrado, retorne null ou lista vazia.
+        Normalize a data para ISO 8601.
+        Normalize valores numéricos para float (ponto flutuante).
+        """
+
+        parts = [{"mime_type": mime_type, "data": file_content}, prompt]
+
+        response = model.generate_content(parts)
+        res_text = response.text
+
+        # Clean Markdown code blocks if present
+        json_match = re.search(r'```json\s*(.*?)\s*```', res_text, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            json_str = res_text
+
+        data = json.loads(json_str)
+        return data
+
+    except Exception as e:
+        print(f"Erro no OCR de Nota Fiscal: {str(e)}")
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=str(e))
