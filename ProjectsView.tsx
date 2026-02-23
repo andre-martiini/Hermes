@@ -3,7 +3,7 @@ import { collection, onSnapshot, query, addDoc, orderBy } from 'firebase/firesto
 import { db } from './firebase';
 import { Projeto } from './types';
 import { BolsistasView } from './BolsistasView';
-import { AutoExpandingTextarea } from './src/components/ui/UIComponents';
+import { ProjectBudgetView } from './ProjectBudgetView';
 
 export const ProjectsView: React.FC = () => {
   const [projects, setProjects] = useState<Projeto[]>([]);
@@ -11,6 +11,7 @@ export const ProjectsView: React.FC = () => {
   const [isCreating, setIsCreating] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDesc, setNewProjectDesc] = useState('');
+  const [activeTab, setActiveTab] = useState<'bolsistas' | 'orcamento'>('bolsistas');
 
   useEffect(() => {
     const q = query(collection(db, 'projetos'), orderBy('data_criacao', 'desc'));
@@ -76,7 +77,30 @@ export const ProjectsView: React.FC = () => {
                   </div>
                 </div>
              </div>
-            <BolsistasView projetoId={selectedProjectId} />
+
+             {/* Abas de Navegação */}
+             <div className="px-10 border-b border-slate-100 flex gap-6">
+                <button
+                    onClick={() => setActiveTab('bolsistas')}
+                    className={`py-4 text-xs font-black uppercase tracking-widest border-b-2 transition-colors ${activeTab === 'bolsistas' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                >
+                    Gestão de Bolsistas
+                </button>
+                <button
+                    onClick={() => setActiveTab('orcamento')}
+                    className={`py-4 text-xs font-black uppercase tracking-widest border-b-2 transition-colors ${activeTab === 'orcamento' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                >
+                    Planejamento Orçamental
+                </button>
+             </div>
+
+             <div className="bg-white">
+                {activeTab === 'bolsistas' ? (
+                    <BolsistasView projetoId={selectedProjectId} />
+                ) : (
+                    <ProjectBudgetView projetoId={selectedProjectId} />
+                )}
+             </div>
         </div>
       </div>
     );
