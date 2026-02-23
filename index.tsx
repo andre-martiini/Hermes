@@ -42,6 +42,7 @@ import { DayView } from './src/views/DayView';
 import { CalendarView } from './src/views/CalendarView';
 import { CategoryView } from './src/views/CategoryView';
 import { TaskExecutionView } from './src/views/TaskExecutionView';
+import { PublicScholarshipRegistration } from './src/components/public/PublicScholarshipRegistration';
 
 
 type SortOption = 'date-asc' | 'date-desc' | 'priority-high' | 'priority-low';
@@ -1263,6 +1264,11 @@ const QuickLogModal = ({ isOpen, onClose, onAddLog, unidades }: { isOpen: boolea
 };
 
 const App: React.FC = () => {
+  // Public Route Interception
+  if (window.location.pathname.startsWith('/join/')) {
+    return <PublicScholarshipRegistration />;
+  }
+
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [rememberMe, setRememberMe] = useState(true);
