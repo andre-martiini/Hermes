@@ -32,7 +32,8 @@ interface Toast {
   id: string;
   message: string;
   type: 'success' | 'error' | 'info';
-  action?: { label: string, onClick: () => void };
+  action?: { label: string | React.ReactNode, onClick: () => void };
+  actions?: { label: string | React.ReactNode, onClick: () => void }[];
 }
 
 const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[], removeToast: (id: string) => void }) => {
@@ -55,7 +56,23 @@ const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[], removeToast:
             <span className="text-[10px] font-black uppercase tracking-[0.15em] leading-none opacity-80 block mb-0.5">{toast.type}</span>
             <span className="text-sm font-bold tracking-tight">{toast.message}</span>
           </div>
-          {toast.action && (
+          {toast.actions ? (
+            <div className="flex gap-2 mr-2">
+              {toast.actions.map((act, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => {
+                    act.onClick();
+                    removeToast(toast.id);
+                  }}
+                  className="bg-white/20 hover:bg-white/30 p-2 rounded-lg transition-colors flex items-center justify-center"
+                  title={typeof act.label === 'string' ? act.label : ''}
+                >
+                  {act.label}
+                </button>
+              ))}
+            </div>
+          ) : toast.action && (
             <button
               onClick={() => {
                 toast.action?.onClick();
@@ -1934,7 +1951,8 @@ const SettingsModal = ({
   onDeleteUnidade,
   onUpdateUnidade,
   onEmitNotification,
-  initialTab
+  initialTab,
+  showConfirm
 }: {
   settings: AppSettings,
   unidades: { id: string, nome: string, palavras_chave?: string[] }[],
@@ -1944,7 +1962,8 @@ const SettingsModal = ({
   onDeleteUnidade: (id: string) => void,
   onUpdateUnidade: (id: string, updates: any) => void,
   onEmitNotification: (title: string, message: string, type: 'info' | 'warning' | 'success' | 'error') => void,
-  initialTab?: 'notifications' | 'context' | 'sistemas' | 'google'
+  initialTab?: 'notifications' | 'context' | 'sistemas' | 'google',
+  showConfirm: (title: string, message: string, onConfirm: () => void) => void
 }) => {
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
   const [activeTab, setActiveTab] = useState<'notifications' | 'context' | 'sistemas' | 'google'>(initialTab || 'notifications');
@@ -2426,7 +2445,7 @@ const SettingsModal = ({
 
                         {!isProtected && (
                           <button
-                            onClick={() => onDeleteUnidade(u.id)}
+                            onClick={() => showConfirm("Excluir Área", "Tem certeza que deseja excluir esta área?", () => onDeleteUnidade(u.id))}
                             className="p-2 text-rose-300 hover:text-rose-600 hover:bg-rose-50 rounded-full transition-all"
                             title="Remover Área"
                           >
@@ -2524,7 +2543,7 @@ const SettingsModal = ({
                             </div>
                           </div>
                           <button
-                            onClick={() => onDeleteUnidade(sistema.id)}
+                            onClick={() => showConfirm("Excluir Sistema", "Tem certeza que deseja excluir este sistema?", () => onDeleteUnidade(sistema.id))}
                             className="opacity-0 group-hover:opacity-100 p-2 hover:bg-rose-100 rounded-lg md:rounded-xl transition-all text-rose-600"
                             title="Remover sistema"
                           >
@@ -4689,6 +4708,7 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
   const [sortOrder, setSortOrder] = useState<'date-desc' | 'date-asc'>('date-desc');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isArchivedIdeasOpen, setIsArchivedIdeasOpen] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   // Gravador
   const [isRecording, setIsRecording] = useState(false);
@@ -5023,11 +5043,23 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
                     <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
                   </button>
                   <button
-                    onClick={() => onDeleteIdea(idea.id)}
-                    className="text-slate-300 hover:text-rose-500 p-2 rounded-lg md:rounded-xl transition-colors"
+                    onClick={() => {
+                      if (confirmDeleteId === idea.id) {
+                        onDeleteIdea(idea.id);
+                        setConfirmDeleteId(null);
+                      } else {
+                        setConfirmDeleteId(idea.id);
+                        setTimeout(() => setConfirmDeleteId(null), 3000);
+                      }
+                    }}
+                    className={`p-2 rounded-lg md:rounded-xl transition-colors ${confirmDeleteId === idea.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-300 hover:text-rose-500'}`}
                     title="Excluir Permanentemente"
                   >
-                    <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    {confirmDeleteId === idea.id ? (
+                      <svg className="w-4 h-4 md:w-5 md:h-5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                    ) : (
+                      <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    )}
                   </button>
                 </div>
               </div>
@@ -5112,11 +5144,23 @@ const FerramentasView = ({ ideas, onDeleteIdea, onArchiveIdea, onAddTextIdea, on
                         <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
                       </button>
                       <button
-                        onClick={() => onDeleteIdea(idea.id)}
-                        className="text-slate-300 hover:text-rose-500 p-2 rounded-lg md:rounded-xl transition-colors"
+                        onClick={() => {
+                          if (confirmDeleteId === idea.id) {
+                            onDeleteIdea(idea.id);
+                            setConfirmDeleteId(null);
+                          } else {
+                            setConfirmDeleteId(idea.id);
+                            setTimeout(() => setConfirmDeleteId(null), 3000);
+                          }
+                        }}
+                        className={`p-2 rounded-lg md:rounded-xl transition-colors ${confirmDeleteId === idea.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-300 hover:text-rose-500'}`}
                         title="Excluir Permanentemente"
                       >
-                        <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        {confirmDeleteId === idea.id ? (
+                          <svg className="w-4 h-4 md:w-5 md:h-5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                        ) : (
+                          <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        )}
                       </button>
                     </div>
                   </div>
@@ -5309,7 +5353,7 @@ const QuickNoteModal = ({ isOpen, onClose, onAddIdea }: { isOpen: boolean, onClo
   };
 
   return (
-    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/60 animate-in fade-in">
       <div className="bg-white w-full max-w-2xl rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95">
         <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
           <div>
@@ -5369,7 +5413,7 @@ const QuickNoteModal = ({ isOpen, onClose, onAddIdea }: { isOpen: boolean, onClo
                 }
               }}
               disabled={!textInput.trim()}
-              className="flex-none w-16 md:w-auto md:flex-1 bg-slate-900 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              className="flex-none w-12 md:w-auto md:flex-1 bg-slate-900 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
             >
               <svg className="w-5 h-5 md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
               <span className="hidden md:inline">Salvar Ideia</span>
@@ -5621,6 +5665,7 @@ const App: React.FC = () => {
   const [brainstormIdeas, setBrainstormIdeas] = useState<BrainstormIdea[]>([]);
   const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | null>(null);
   const [isBrainstormingAddingText, setIsBrainstormingAddingText] = useState(false);
+  const [confirmDeleteLogId, setConfirmDeleteLogId] = useState<string | null>(null);
   const [convertingIdea, setConvertingIdea] = useState<BrainstormIdea | null>(null);
   const [isSystemSelectorOpen, setIsSystemSelectorOpen] = useState(false);
 
@@ -5946,7 +5991,7 @@ const App: React.FC = () => {
   }, [tarefas, financeTransactions]); // Adicionado financeTransactions para garantir consistência
 
 
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success', action?: { label: string, onClick: () => void }) => {
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success', action?: { label: string, onClick: () => void }, actions?: { label: string | React.ReactNode, onClick: () => void }[]) => {
     const id = Math.random().toString(36).substring(2, 9);
     setToasts(prev => {
       // Evitar duplicatas exatas de mensagens ativas
@@ -5959,13 +6004,13 @@ const App: React.FC = () => {
         const lastPrefix = last.message.split(' ')[0];
         const newPrefix = message.split(' ')[0];
         if (lastPrefix === newPrefix && last.type === type && message.length > 10) {
-           return [...prev.slice(0, -1), { id, message, type, action }];
+           return [...prev.slice(0, -1), { id, message, type, action, actions }];
         }
       }
 
       // Limitar a no máximo 2 toasts simultâneos para não poluir a tela
       const base = prev.length >= 2 ? prev.slice(1) : prev;
-      return [...base, { id, message, type, action }];
+      return [...base, { id, message, type, action, actions }];
     });
 
     setTimeout(() => {
@@ -6971,14 +7016,23 @@ const App: React.FC = () => {
         timestamp: new Date().toISOString(),
         status: 'active'
       });
-      showToast("Nota registrada!", "success", {
-        label: "Ver a nota",
-        onClick: () => {
-          setActiveModule('acoes');
-          setViewMode('ferramentas');
-          setActiveFerramenta('brainstorm');
+      showToast("Nota registrada!", "success", undefined, [
+        {
+          label: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>,
+          onClick: () => {
+            navigator.clipboard.writeText(text);
+            showToast("Conteúdo copiado!", "info");
+          }
+        },
+        {
+          label: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg>,
+          onClick: () => {
+            setActiveModule('acoes');
+            setViewMode('ferramentas');
+            setActiveFerramenta('brainstorm');
+          }
         }
-      });
+      ]);
     } catch (err) {
       console.error(err);
       showToast("Erro ao salvar nota.", "error");
@@ -8087,7 +8141,9 @@ const App: React.FC = () => {
                 <nav className="flex flex-col p-4 gap-2">
                   {[
                     { label: '🏠 Dashboard', active: viewMode === 'dashboard', onClick: () => { setActiveModule('dashboard'); setViewMode('dashboard'); } },
-                    { label: '📊 Ações', active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'pgc' || viewMode === 'licitacoes' || viewMode === 'assistencia'), onClick: () => { setActiveModule('acoes'); setViewMode('gallery'); } },
+                    { label: '📊 Ações', active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'licitacoes' || viewMode === 'assistencia'), onClick: () => { setActiveModule('acoes'); setViewMode('gallery'); } },
+                    { label: '🚀 Projetos', active: activeModule === 'projetos' && viewMode === 'projects', onClick: () => { setActiveModule('projetos'); setViewMode('projects'); } },
+                    { label: '📋 PGC', active: activeModule === 'acoes' && viewMode === 'pgc', onClick: () => { setActiveModule('acoes'); setViewMode('pgc'); } },
                     { label: '💰 Financeiro', active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
                     { label: '❤️ Saúde', active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
                     { label: '💻 Sistemas', active: viewMode === 'sistemas-dev', onClick: () => { setActiveModule('acoes'); setViewMode('sistemas-dev'); } },
@@ -9119,7 +9175,7 @@ const App: React.FC = () => {
                                                 </span>
                                                 <span className="text-[8px] font-black text-slate-300 uppercase">{new Date(log.data_criacao).toLocaleDateString('pt-BR')}</span>
                                               </div>
-                                              <p className="text-sm font-medium text-slate-700 leading-relaxed">{log.descricao}</p>
+                                              <p className="text-sm font-medium text-slate-700 leading-relaxed break-words">{log.descricao}</p>
                                               {log.pool_dados && log.pool_dados.length > 0 && (
                                                 <div className="flex flex-wrap gap-2 mt-3">
                                                   {log.pool_dados.map((at, i) => (
@@ -9144,14 +9200,22 @@ const App: React.FC = () => {
                                               </button>
                                               <button
                                                 onClick={() => {
-                                                  showConfirm("Excluir Log", "Excluir este log permanentemente?", () => {
+                                                  if (confirmDeleteLogId === log.id) {
                                                     handleDeleteWorkItem(log.id);
-                                                  });
+                                                    setConfirmDeleteLogId(null);
+                                                  } else {
+                                                    setConfirmDeleteLogId(log.id);
+                                                    setTimeout(() => setConfirmDeleteLogId(null), 3000);
+                                                  }
                                                 }}
-                                                className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                                                className={`p-2 rounded-lg transition-colors ${confirmDeleteLogId === log.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'}`}
                                                 title="Excluir"
                                               >
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                {confirmDeleteLogId === log.id ? (
+                                                  <svg className="w-4 h-4 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                ) : (
+                                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                )}
                                               </button>
                                               <button
                                                 onClick={() => handleUpdateWorkItem(log.id, { concluido: true, data_conclusao: new Date().toISOString() })}
@@ -9204,14 +9268,22 @@ const App: React.FC = () => {
                                                   </button>
                                                   <button
                                                     onClick={() => {
-                                                      showConfirm("Excluir Log", "Excluir este log permanentemente?", () => {
+                                                      if (confirmDeleteLogId === log.id) {
                                                         handleDeleteWorkItem(log.id);
-                                                      });
+                                                        setConfirmDeleteLogId(null);
+                                                      } else {
+                                                        setConfirmDeleteLogId(log.id);
+                                                        setTimeout(() => setConfirmDeleteLogId(null), 3000);
+                                                      }
                                                     }}
-                                                    className="p-1.5 text-slate-300 hover:text-rose-600 rounded-lg transition-all"
+                                                    className={`p-1.5 rounded-lg transition-colors ${confirmDeleteLogId === log.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-300 hover:text-rose-600'}`}
                                                     title="Excluir"
                                                   >
-                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                    {confirmDeleteLogId === log.id ? (
+                                                      <svg className="w-3.5 h-3.5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                    ) : (
+                                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                    )}
                                                   </button>
                                                   <button
                                                     onClick={() => handleUpdateWorkItem(log.id, { concluido: false })}
@@ -9339,14 +9411,22 @@ const App: React.FC = () => {
                                                   </button>
                                                   <button
                                                     onClick={() => {
-                                                      showConfirm("Excluir Log", "Excluir este log permanentemente?", () => {
+                                                      if (confirmDeleteLogId === log.id) {
                                                         handleDeleteWorkItem(log.id);
-                                                      });
+                                                        setConfirmDeleteLogId(null);
+                                                      } else {
+                                                        setConfirmDeleteLogId(log.id);
+                                                        setTimeout(() => setConfirmDeleteLogId(null), 3000);
+                                                      }
                                                     }}
-                                                    className="p-3 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
+                                                    className={`p-3 rounded-xl transition-colors ${confirmDeleteLogId === log.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'}`}
                                                     title="Excluir"
                                                   >
-                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                    {confirmDeleteLogId === log.id ? (
+                                                      <svg className="w-5 h-5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                    ) : (
+                                                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                    )}
                                                   </button>
                                                   <button
                                                     onClick={() => handleUpdateWorkItem(log.id, { concluido: true, data_conclusao: new Date().toISOString() })}
@@ -9395,14 +9475,22 @@ const App: React.FC = () => {
                                                   </button>
                                                   <button
                                                     onClick={() => {
-                                                      showConfirm("Excluir Log", "Excluir este log permanentemente?", () => {
+                                                      if (confirmDeleteLogId === log.id) {
                                                         handleDeleteWorkItem(log.id);
-                                                      });
+                                                        setConfirmDeleteLogId(null);
+                                                      } else {
+                                                        setConfirmDeleteLogId(log.id);
+                                                        setTimeout(() => setConfirmDeleteLogId(null), 3000);
+                                                      }
                                                     }}
-                                                    className="p-2 text-slate-400 hover:text-rose-600 rounded-lg transition-all"
+                                                    className={`p-2 rounded-lg transition-colors ${confirmDeleteLogId === log.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-400 hover:text-rose-600'}`}
                                                     title="Excluir"
                                                   >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                    {confirmDeleteLogId === log.id ? (
+                                                      <svg className="w-4 h-4 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                    ) : (
+                                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                    )}
                                                   </button>
                                                   <button
                                                     onClick={() => handleUpdateWorkItem(log.id, { concluido: false })}
@@ -9820,6 +9908,7 @@ const App: React.FC = () => {
             onDeleteUnidade={handleDeleteUnidade}
             onUpdateUnidade={handleUpdateUnidade}
             onEmitNotification={emitNotification}
+            showConfirm={showConfirm}
           />
         )
       }
