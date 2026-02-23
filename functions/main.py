@@ -765,7 +765,8 @@ def transcreverAudio(req: https_fn.CallableRequest):
 def start_file_indexing(item_id, item_data):
     """Lógica central de indexação com Gemini"""
     url_drive = item_data.get('url_drive')
-    if not url_drive: return
+    if not url_drive:
+        return {'success': False, 'error': 'URL não encontrada'}
 
     import re
     def extract_file_id(url):
@@ -773,14 +774,18 @@ def start_file_indexing(item_id, item_data):
         return match.group(0) if match else None
 
     file_id = extract_file_id(url_drive)
-    if not file_id: return
+    if not file_id:
+        return {'success': False, 'error': 'ID do arquivo não identificado na URL'}
 
     try:
         db = get_db()
         keys_doc = db.collection('system').document('api_keys').get()
-        if not keys_doc.exists: return
+        if not keys_doc.exists:
+            return {'success': False, 'error': 'Configuração de API não encontrada (system/api_keys)'}
+
         GEMINI_API_KEY = keys_doc.to_dict().get('gemini_api_key')
-        if not GEMINI_API_KEY: return
+        if not GEMINI_API_KEY:
+            return {'success': False, 'error': 'Chave de API Gemini não configurada'}
 
         import google.generativeai as genai
         import json
@@ -867,6 +872,10 @@ def on_arquivo_adicionado(event: firestore_fn.Event[firestore_fn.DocumentSnapsho
     if not event.data: return
     item_data = event.data.to_dict()
     item_id = event.params["itemId"]
+
+    # Ignora links diretos (sem processamento de IA/OCR)
+    if item_data.get('tipo_arquivo') == 'link':
+        return
 
     if item_data.get('tags') and item_data.get('resumo_tldr'):
         return
