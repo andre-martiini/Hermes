@@ -533,6 +533,65 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                     </button>
                                 </div>
                             </section>
+
+                            {/* Diário de Bordo / Contexto de Origem */}
+                            {currentItem.origem && (
+                                <section className="pt-10 border-t border-slate-100">
+                                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-violet-500"></span>
+                                        Diário de Bordo / Histórico
+                                    </h4>
+
+                                    <div className="space-y-4">
+                                        {currentItem.origem.modulo === 'tarefas' && (() => {
+                                            const task = allTasks.find(t => t.id === currentItem.origem?.id_origem);
+                                            if (!task || !task.acompanhamento || task.acompanhamento.length === 0) {
+                                                return <p className="text-xs text-slate-400 italic">Nenhum registro encontrado na tarefa de origem.</p>;
+                                            }
+                                            return task.acompanhamento.map((log, idx) => (
+                                                <div key={idx} className="bg-slate-50 border border-slate-100 p-4 rounded-2xl relative">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                                                            {new Date(log.data).toLocaleDateString('pt-BR')} {new Date(log.data).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-xs font-medium text-slate-600 leading-relaxed whitespace-pre-wrap">
+                                                        {log.nota.startsWith('LINK::') ? log.nota.split('::')[1] || log.nota.split('::')[2] : 
+                                                         log.nota.startsWith('FILE::') ? log.nota.split('::')[1] : 
+                                                         log.nota.startsWith('CONTACT::') ? log.nota.split('::')[1] : 
+                                                         log.nota}
+                                                    </p>
+                                                    {log.nota.includes('::') && (
+                                                        <div className="mt-2 text-[8px] font-black text-blue-500 uppercase tracking-widest">Anexo Registrado</div>
+                                                    )}
+                                                </div>
+                                            ));
+                                        })()}
+
+                                        {currentItem.origem.modulo === 'sistemas' && (() => {
+                                            const workItem = allWorkItems.find(w => w.id === currentItem.origem?.id_origem);
+                                            if (!workItem) return <p className="text-xs text-slate-400 italic">Nenhum registro encontrado no log de sistema.</p>;
+                                            return (
+                                                <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                                                            {new Date(workItem.data_criacao).toLocaleDateString('pt-BR')}
+                                                        </span>
+                                                        <span className="text-[8px] font-black px-2 py-0.5 rounded uppercase bg-violet-100 text-violet-700">
+                                                            {workItem.tipo}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-xs font-medium text-slate-600 leading-relaxed whitespace-pre-wrap">{workItem.descricao}</p>
+                                                </div>
+                                            );
+                                        })()}
+
+                                        {currentItem.origem.modulo === 'saude' && (
+                                            <p className="text-xs text-slate-400 italic">Este item faz parte de um registro de saúde (exame/consulta).</p>
+                                        )}
+                                    </div>
+                                </section>
+                            )}
                         </div>
 
                         <footer className="p-8 border-t border-slate-100 bg-slate-50 flex gap-4">
