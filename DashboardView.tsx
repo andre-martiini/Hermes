@@ -1,6 +1,8 @@
-
 import React, { useMemo } from 'react';
-import { Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry, HealthWeight, DailyHabits, HealthSettings, WorkItem, Sistema } from './types';
+import { 
+    Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry, 
+    HealthWeight, DailyHabits, HealthSettings, WorkItem, Sistema 
+} from './types';
 
 interface DashboardViewProps {
     tarefas: Tarefa[];
@@ -20,52 +22,146 @@ interface DashboardViewProps {
     onOpenBacklog: () => void;
 }
 
-const DashboardCard = ({ title, iconColor, onRedirect, children }: { title: string, iconColor: string, onRedirect: () => void, children: React.ReactNode }) => {
-    return (
-        <div className="bg-white p-6 md:p-8 !rounded-none md:rounded-[2.5rem] border-b border-slate-100 md:border md:border-slate-200 shadow-none md:shadow-lg h-full transition-all flex flex-col">
-            <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                    <span className={`w-2 h-8 ${iconColor} rounded-full`}></span>
-                    <h3 className="text-sm md:text-xl font-black text-slate-900 uppercase tracking-tight">{title}</h3>
-                </div>
-                <button
-                    onClick={onRedirect}
-                    className="p-2 hover:bg-slate-50 rounded-xl text-slate-400 hover:text-slate-900 transition-all group"
-                    title="Ir para o módulo"
-                >
-                    <svg className="w-5 h-5 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                    </svg>
-                </button>
+// --- SUBCOMPONENTES MOVIDOS PARA FORA (Evita remounts desnecessários) ---
+
+const DashboardCard = ({ title, iconColor, onRedirect, children }: { title: string, iconColor: string, onRedirect: () => void, children: React.ReactNode }) => (
+    <div className="bg-white p-6 md:p-8 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm md:shadow-lg h-full transition-all flex flex-col">
+        <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+                <span className={`w-2 h-8 ${iconColor} rounded-full`}></span>
+                <h3 className="text-sm md:text-xl font-black text-slate-900 uppercase tracking-tight">{title}</h3>
             </div>
-            <div className="flex-1">
-                {children}
+            <button
+                onClick={onRedirect}
+                className="p-2 hover:bg-slate-50 rounded-xl text-slate-400 hover:text-slate-900 transition-all group"
+                title="Ir para o módulo"
+            >
+                <svg className="w-5 h-5 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                </svg>
+            </button>
+        </div>
+        <div className="flex-1">
+            {children}
+        </div>
+    </div>
+);
+
+const PieChart = ({ data }: { data: [string, number][] }) => {
+    const total = data.reduce((acc, curr) => acc + curr[1], 0);
+    if (total === 0) return <div className="h-32 flex items-center justify-center text-slate-300 text-[10px] font-black uppercase">Sem dados</div>;
+
+    let currentAngle = 0;
+    const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+
+    return (
+        <div className="flex items-center gap-6">
+            <svg viewBox="0 0 100 100" className="w-32 h-32 transform -rotate-90">
+                {data.map((item, i) => {
+                    const percentage = item[1] / total;
+                    const angle = percentage * 360;
+                    
+                    // FIX CRÍTICO: Se for 100%, desenha um círculo completo em vez de um path (que falha em 360 graus)
+                    if (percentage === 1) {
+                        return <circle key={i} cx="50" cy="50" r="40" fill={colors[i % colors.length]} />;
+                    }
+
+                    const x1 = 50 + 40 * Math.cos((currentAngle * Math.PI) / 180);
+                    const y1 = 50 + 40 * Math.sin((currentAngle * Math.PI) / 180);
+                    const x2 = 50 + 40 * Math.cos(((currentAngle + angle) * Math.PI) / 180);
+                    const y2 = 50 + 40 * Math.sin(((currentAngle + angle) * Math.PI) / 180);
+
+                    const largeArc = angle > 180 ? 1 : 0;
+                    const d = `M 50 50 L ${x1} ${y1} A 40 40 0 ${largeArc} 1 ${x2} ${y2} Z`;
+
+                    currentAngle += angle;
+                    return <path key={i} d={d} fill={colors[i % colors.length]} />;
+                })}
+                <circle cx="50" cy="50" r="25" fill="white" />
+            </svg>
+            <div className="space-y-1">
+                {data.slice(0, 4).map((item, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: colors[i % colors.length] }}></div>
+                        <span className="text-[10px] font-bold text-slate-600 uppercase truncate max-w-[80px]">{item[0]}</span>
+                        <span className="text-[10px] font-black text-slate-900">{item[1]}</span>
+                    </div>
+                ))}
             </div>
         </div>
     );
 };
 
+const BarChart = ({ data, color, maxHeight = 80 }: { data: number[], color: string, maxHeight?: number }) => {
+    const max = Math.max(...data, 1);
+    return (
+        <div className="flex items-end gap-0.5 h-[100px] w-full bg-slate-50/50 rounded-lg px-2 pb-1">
+            {data.map((v, i) => (
+                <div key={i} className="flex-1 flex flex-col justify-end items-center gap-1 group">
+                    <div
+                        className="w-full rounded-t-sm transition-all group-hover:opacity-80"
+                        style={{
+                            height: `${(v / max) * maxHeight}px`,
+                            backgroundColor: color,
+                            minWidth: '2px'
+                        }}
+                        title={`Dia ${i + 1}: R$ ${v.toFixed(2)}`}
+                    />
+                    <span className="text-[8px] text-slate-400 font-bold">{i + 1}</span>
+                </div>
+            ))}
+        </div>
+    );
+};
+
+const SystemsBarChart = ({ data }: { data: [string, number][] }) => {
+    const max = Math.max(...data.map(d => d[1]), 1);
+    return (
+        <div className="space-y-2">
+            {data.map((item, i) => (
+                <div key={i} className="space-y-1">
+                    <div className="flex justify-between text-[9px] font-black uppercase text-slate-500">
+                        <span className="truncate max-w-[150px]">{item[0]}</span>
+                        <span>{item[1]} ajustes</span>
+                    </div>
+                    <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                            className="h-full bg-violet-500 rounded-full transition-all duration-1000"
+                            style={{ width: `${(item[1] / max) * 100}%` }}
+                        />
+                    </div>
+                </div>
+            ))}
+            {data.length === 0 && (
+                <div className="py-8 text-center text-slate-300 text-[10px] font-black uppercase tracking-widest italic">Nenhum ajuste pendente</div>
+            )}
+        </div>
+    );
+};
+
+// --- COMPONENTE PRINCIPAL ---
+
 const DashboardView: React.FC<DashboardViewProps> = ({
-    tarefas,
-    financeTransactions,
-    financeSettings,
-    fixedBills,
-    incomeEntries,
-    healthWeights,
-    healthDailyHabits,
-    healthSettings,
-    unidades,
-    sistemasDetalhes,
-    workItems,
-    currentMonth,
-    currentYear,
+    // Adicionado Fallbacks (= []) para evitar que a tela quebre se os dados vierem nulos
+    tarefas = [],
+    financeTransactions = [],
+    financeSettings = {} as FinanceSettings,
+    fixedBills = [],
+    incomeEntries = [],
+    healthWeights = [],
+    healthDailyHabits = [],
+    healthSettings = {} as HealthSettings,
+    unidades = [],
+    sistemasDetalhes = [],
+    workItems = [],
+    currentMonth = new Date().getMonth(),
+    currentYear = new Date().getFullYear(),
     onNavigate,
     onOpenBacklog
 }) => {
     const todayStr = new Date().toISOString().split('T')[0];
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = tomorrow.toISOString().split('T')[0];
     const afterTomorrow = new Date();
     afterTomorrow.setDate(afterTomorrow.getDate() + 2);
     const afterTomorrowStr = afterTomorrow.toISOString().split('T')[0];
@@ -95,7 +191,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
     // --- FINANCE LOGIC ---
     const periodKey = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
-    const currentBudget = financeSettings.monthlyBudgets?.[periodKey] || financeSettings.monthlyBudget || 0;
+    const currentBudget = financeSettings?.monthlyBudgets?.[periodKey] || financeSettings?.monthlyBudget || 0;
 
     const currentMonthTransactions = useMemo(() => {
         return financeTransactions.filter(t => {
@@ -134,7 +230,6 @@ const DashboardView: React.FC<DashboardViewProps> = ({
             .reduce((acc, curr) => acc + curr.amount, 0);
     }, [fixedBills, currentMonth, currentYear]);
 
-    // Previous month data for comparison
     const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
     const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
 
@@ -168,15 +263,20 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         const newest = healthWeights[0];
         const diffWeight = oldest.weight - newest.weight;
         const diffDays = (new Date(newest.date).getTime() - new Date(oldest.date).getTime()) / (1000 * 60 * 60 * 24);
+        
         if (diffDays <= 0 || diffWeight <= 0) return null;
+        
         const lostPerDay = diffWeight / diffDays;
-        if (!healthSettings.targetWeight || newest.weight <= healthSettings.targetWeight) return 'Meta atingida!';
-        const remainingToGoal = newest.weight - healthSettings.targetWeight;
+        const target = healthSettings?.targetWeight || 0;
+        
+        if (!target || newest.weight <= target) return 'Meta atingida!';
+        
+        const remainingToGoal = newest.weight - target;
         const daysUntilGoal = remainingToGoal / lostPerDay;
         const goalDate = new Date();
         goalDate.setDate(goalDate.getDate() + daysUntilGoal);
         return goalDate.toLocaleDateString('pt-BR');
-    }, [healthWeights, healthSettings.targetWeight]);
+    }, [healthWeights, healthSettings]);
 
     const habitStreak = useMemo(() => {
         let streak = 0;
@@ -189,7 +289,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
             if (hDate === expectedDate) {
                 const completedCount = [habit.noSugar, habit.noAlcohol, habit.noSnacks, habit.workout, habit.eatUntil18, habit.eatSlowly].filter(Boolean).length;
-                if (completedCount >= 4) { // Consider streak if at least 4 habits done
+                if (completedCount >= 4) { 
                     streak++;
                     checkDate.setDate(checkDate.getDate() - 1);
                 } else {
@@ -223,104 +323,13 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
     }, [workItems, unidades]);
 
-    // --- CHART COMPONENTS ---
-    const PieChart = ({ data }: { data: [string, number][] }) => {
-        const total = data.reduce((acc, curr) => acc + curr[1], 0);
-        if (total === 0) return <div className="h-32 flex items-center justify-center text-slate-300 text-[10px] font-black uppercase">Sem dados</div>;
-
-        let currentAngle = 0;
-        const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
-
-        return (
-            <div className="flex items-center gap-6">
-                <svg viewBox="0 0 100 100" className="w-32 h-32 transform -rotate-90">
-                    {data.map((item, i) => {
-                        const angle = (item[1] / total) * 360;
-                        const x1 = 50 + 40 * Math.cos((currentAngle * Math.PI) / 180);
-                        const y1 = 50 + 40 * Math.sin((currentAngle * Math.PI) / 180);
-                        const x2 = 50 + 40 * Math.cos(((currentAngle + angle) * Math.PI) / 180);
-                        const y2 = 50 + 40 * Math.sin(((currentAngle + angle) * Math.PI) / 180);
-
-                        const largeArc = angle > 180 ? 1 : 0;
-                        const d = `M 50 50 L ${x1} ${y1} A 40 40 0 ${largeArc} 1 ${x2} ${y2} Z`;
-
-                        const path = <path key={i} d={d} fill={colors[i % colors.length]} />;
-                        currentAngle += angle;
-                        return path;
-                    })}
-                    <circle cx="50" cy="50" r="25" fill="white" />
-                </svg>
-                <div className="space-y-1">
-                    {data.slice(0, 4).map((item, i) => (
-                        <div key={i} className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: colors[i % colors.length] }}></div>
-                            <span className="text-[10px] font-bold text-slate-600 uppercase truncate max-w-[80px]">{item[0]}</span>
-                            <span className="text-[10px] font-black text-slate-900">{item[1]}</span>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        );
-    };
-
-    const BarChart = ({ data, color, maxHeight = 80 }: { data: number[], color: string, maxHeight?: number }) => {
-        const max = Math.max(...data, 1);
-        return (
-            <div className="flex items-end gap-0.5 h-[100px] w-full bg-slate-50/50 rounded-lg px-2 pb-1">
-                {data.map((v, i) => (
-                    <div key={i} className="flex-1 flex flex-col justify-end items-center gap-1 group">
-                        <div
-                            className="w-full rounded-t-sm transition-all group-hover:opacity-80"
-                            style={{
-                                height: `${(v / max) * maxHeight}px`,
-                                backgroundColor: color,
-                                minWidth: '2px'
-                            }}
-                            title={`Dia ${i + 1}: R$ ${v.toFixed(2)}`}
-                        />
-                        <span className="text-[8px] text-slate-400 font-bold">{i + 1}</span>
-                    </div>
-                ))}
-            </div>
-        );
-    };
-
-    const SystemsBarChart = ({ data }: { data: [string, number][] }) => {
-        const max = Math.max(...data.map(d => d[1]), 1);
-        return (
-            <div className="space-y-2">
-                {data.map((item, i) => (
-                    <div key={i} className="space-y-1">
-                        <div className="flex justify-between text-[9px] font-black uppercase text-slate-500">
-                            <span className="truncate max-w-[150px]">{item[0]}</span>
-                            <span>{item[1]} ajustes</span>
-                        </div>
-                        <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                            <div
-                                className="h-full bg-violet-500 rounded-full transition-all duration-1000"
-                                style={{ width: `${(item[1] / max) * 100}%` }}
-                            />
-                        </div>
-                    </div>
-                ))}
-                {data.length === 0 && (
-                    <div className="py-8 text-center text-slate-300 text-[10px] font-black uppercase tracking-widest italic">Nenhum ajuste pendente</div>
-                )}
-            </div>
-        );
-    };
-
     return (
-        <div className="animate-in fade-in duration-700 space-y-8 md:space-y-12 pb-20 pt-8">
-            
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 max-w-6xl mx-auto">
+        // Adicionado px-4 md:px-8 para corrigir o bug visual dos cards grudados na borda da tela
+        <div className="animate-in fade-in duration-700 space-y-8 md:space-y-12 pb-20 pt-8 px-4 md:px-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 max-w-7xl mx-auto">
 
                 {/* CARD: AÇÕES */}
-                <DashboardCard
-                    title="Ações"
-                    iconColor="bg-blue-500"
-                    onRedirect={() => onNavigate('gallery')}
-                >
+                <DashboardCard title="Ações" iconColor="bg-blue-500" onRedirect={() => onNavigate('gallery')}>
                     <div className="space-y-6">
                         <div className="grid grid-cols-2 gap-4">
                             <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
@@ -340,11 +349,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                 </DashboardCard>
 
                 {/* CARD: FINANCEIRO */}
-                <DashboardCard
-                    title="Financeiro"
-                    iconColor="bg-emerald-500"
-                    onRedirect={() => onNavigate('finance')}
-                >
+                <DashboardCard title="Financeiro" iconColor="bg-emerald-500" onRedirect={() => onNavigate('finance')}>
                     <div className="space-y-6">
                         <div>
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Saldo Disponível</p>
@@ -376,17 +381,13 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                 </DashboardCard>
 
                 {/* CARD: SAÚDE */}
-                <DashboardCard
-                    title="Saúde"
-                    iconColor="bg-rose-500"
-                    onRedirect={() => onNavigate('saude')}
-                >
+                <DashboardCard title="Saúde" iconColor="bg-rose-500" onRedirect={() => onNavigate('saude')}>
                     <div className="space-y-6">
                         <div className="flex justify-between items-end">
                             <div>
                                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Peso vs Meta</p>
                                 <div className="text-2xl font-black text-slate-900">
-                                    {currentWeight.toFixed(1)} <span className="text-slate-300 text-sm">/ {healthSettings.targetWeight || '--'} kg</span>
+                                    {currentWeight.toFixed(1)} <span className="text-slate-300 text-sm">/ {healthSettings?.targetWeight || '--'} kg</span>
                                 </div>
                             </div>
                             <div className="text-right">
@@ -425,11 +426,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                 </DashboardCard>
 
                 {/* CARD: SISTEMAS */}
-                <DashboardCard
-                    title="Sistemas"
-                    iconColor="bg-violet-500"
-                    onRedirect={() => onNavigate('sistemas-dev')}
-                >
+                <DashboardCard title="Sistemas" iconColor="bg-violet-500" onRedirect={() => onNavigate('sistemas-dev')}>
                     <div className="space-y-6">
                         <div className="flex flex-wrap gap-1.5">
                             {systemsByPhase.map(([phase, count]) => (
