@@ -575,93 +575,82 @@ const FerramentasView = ({
           </div>
         </div>
 
-        <div className="flex flex-col md:flex-row gap-4 max-w-4xl mx-auto w-full mb-8 px-0">
-          <div className="flex-1 bg-white border border-slate-200 rounded-none md:rounded-xl px-4 py-3 flex items-center gap-3 shadow-none md:shadow-sm focus-within:ring-2 focus-within:ring-blue-100 transition-all">
-            <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-            <input
-              type="text"
-              placeholder="Pesquisar nas notas..."
-              className="flex-1 bg-transparent outline-none text-xs md:text-sm font-bold text-slate-700 placeholder:text-slate-400"
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-            />
+        <div className="space-y-4 max-w-4xl mx-auto w-full">
+          <div className="flex flex-col md:flex-row gap-4 w-full px-0">
+            <div className="flex-1 bg-white border border-slate-200 rounded-none md:rounded-xl px-4 py-3 flex items-center gap-3 shadow-none md:shadow-sm focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+              <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+              <input
+                type="text"
+                placeholder="Pesquisar nas notas..."
+                className="flex-1 bg-transparent outline-none text-xs md:text-sm font-bold text-slate-700 placeholder:text-slate-400"
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+              />
+            </div>
           </div>
-          <div className="flex bg-white border border-slate-200 rounded-lg md:rounded-xl p-1 shadow-sm w-fit self-end md:self-auto">
-            <button
-              onClick={() => setSortOrder('date-desc')}
-              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${sortOrder === 'date-desc' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-800'}`}
-            >
-              Recentes
-            </button>
-            <button
-              onClick={() => setSortOrder('date-asc')}
-              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${sortOrder === 'date-asc' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-800'}`}
-            >
-              Antigas
-            </button>
-          </div>
-        </div>
 
-        {/* Inserção de Nova Ideia via Digitação */}
-        <div className="max-w-4xl mx-auto w-full mb-12 animate-in slide-in-from-top-4 duration-500">
-          <div className="bg-white p-2 rounded-none md:rounded-[2rem] border-2 border-slate-100 shadow-none md:shadow-xl flex items-center gap-4 focus-within:border-blue-500 transition-all">
-            <button
-              onClick={isRecording ? stopRecording : startRecording}
-              disabled={isProcessing}
-              className={`p-4 rounded-none md:rounded-2xl transition-all flex-shrink-0 ${
-                isRecording 
-                  ? 'bg-rose-600 text-white animate-pulse shadow-lg' 
-                  : isProcessing
-                    ? 'bg-blue-100 text-blue-600 cursor-wait'
-                    : 'bg-slate-50 text-slate-400 hover:text-blue-600 hover:bg-blue-50'
-              }`}
-            >
-              {isProcessing ? (
-                // Spinner de Carregamento
-                <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-              ) : isRecording ? (
-                // Ícone de Parar (Quadrado)
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
-              ) : (
-                // Ícone de Microfone
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-              )}
-            </button>
+          {/* Inserção de Nova Ideia via Digitação */}
+          <div className="w-full animate-in slide-in-from-top-2 duration-500">
+            <div className="bg-white p-2 rounded-none md:rounded-[2rem] border-2 border-slate-100 shadow-none md:shadow-xl flex items-center gap-4 focus-within:border-blue-500 transition-all">
+              <button
+                onClick={isRecording ? stopRecording : startRecording}
+                disabled={isProcessing}
+                className={`p-4 rounded-none md:rounded-2xl transition-all flex-shrink-0 ${
+                  isRecording 
+                    ? 'bg-rose-600 text-white animate-pulse shadow-lg' 
+                    : isProcessing
+                      ? 'bg-blue-100 text-blue-600 cursor-wait'
+                      : 'bg-slate-50 text-slate-400 hover:text-blue-600 hover:bg-blue-50'
+                }`}
+              >
+                {isProcessing ? (
+                  // Spinner de Carregamento
+                  <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                ) : isRecording ? (
+                  // Ícone de Parar (Quadrado)
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
+                ) : (
+                  // Ícone de Microfone
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                )}
+              </button>
 
-            <input
-              type="text"
-              disabled={isRecording || isProcessing}
-              placeholder={
-                isRecording 
-                  ? "Gravando... Fale agora para transcrever." 
-                  : isProcessing 
-                    ? "Hermes AI está processando seu áudio..." 
-                    : "Digite ou grave uma nova nota..."
-              }
-              className={`flex-1 bg-transparent border-none outline-none px-2 py-4 text-sm font-bold text-slate-800 placeholder:text-slate-300 ${(isRecording || isProcessing) ? 'opacity-50' : ''}`}
-              value={textInput}
-              onChange={e => setTextInput(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && textInput.trim()) {
-                  onAddTextIdea(textInput);
-                  setTextInput('');
+              <input
+                type="text"
+                disabled={isRecording || isProcessing}
+                placeholder={
+                  isRecording 
+                    ? "Gravando... Fale agora para transcrever." 
+                    : isProcessing 
+                      ? "Hermes AI está processando seu áudio..." 
+                      : "Digite ou grave uma nova nota..."
                 }
-              }}
-            />
-            <button
-              onClick={() => {
-                if (textInput.trim()) {
-                  onAddTextIdea(textInput);
-                  setTextInput('');
-                }
-              }}
-              className="bg-blue-600 text-white h-12 px-8 rounded-lg md:rounded-[1.25rem] text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 active:scale-95"
-            >
-              Salvar Nota
-            </button>
+                className={`flex-1 bg-transparent border-none outline-none px-2 py-4 text-sm font-bold text-slate-800 placeholder:text-slate-300 ${(isRecording || isProcessing) ? 'opacity-50' : ''}`}
+                value={textInput}
+                onChange={e => setTextInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && textInput.trim()) {
+                    onAddTextIdea(textInput);
+                    setTextInput('');
+                  }
+                }}
+              />
+              <button
+                onClick={() => {
+                  if (textInput.trim()) {
+                    onAddTextIdea(textInput);
+                    setTextInput('');
+                  }
+                }}
+                className="bg-blue-600 text-white h-12 w-12 flex items-center justify-center rounded-lg md:rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 active:scale-95 shrink-0"
+                title="Salvar Nota"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -2725,14 +2714,16 @@ const App: React.FC = () => {
       });
       showToast("Nota registrada!", "success", undefined, [
         {
-          label: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>,
+          // Ícone de Copiar
+          label: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3" /></svg>,
           onClick: () => {
             navigator.clipboard.writeText(text);
             showToast("Conteúdo copiado!", "info");
           }
         },
         {
-          label: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg>,
+          // Ícone de Ir para Notas (Link Externo style)
+          label: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>,
           onClick: () => {
             setActiveModule('acoes');
             setViewMode('ferramentas');
@@ -3895,6 +3886,16 @@ const App: React.FC = () => {
                       )}
                     </button>
                   </div>
+                  <div className="relative">
+                    <button
+                      onClick={() => setIsSettingsModalOpen(true)}
+                      className="bg-white border border-slate-200 text-slate-700 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
+                      aria-label="Configurações Gerais"
+                      title="Configurações"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -4994,65 +4995,74 @@ const App: React.FC = () => {
                                     {/* Concluídos */}
                                     {systemWorkItems.filter(w => w.concluido).length > 0 && (
                                       <div className="space-y-4 pt-8">
-                                        <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-emerald-500 pl-3">Concluídos</h5>
-                                        <div className="space-y-3 opacity-60">
-                                          {systemWorkItems.filter(w => w.concluido).sort((a, b) => new Date(b.data_conclusao!).getTime() - new Date(a.data_conclusao!).getTime()).map(log => (
-                                            <div key={log.id} className="bg-white border border-slate-100 rounded-none md:rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 md:gap-4">
-                                              <div className="flex-1 flex items-center gap-4 w-full">
-                                                <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
-                                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                </div>
-                                                  <p className="text-xs font-medium text-slate-500 line-clamp-1">{log.descricao}</p>
-                                                  {log.pool_dados && log.pool_dados.length > 0 && (
-                                                    <div className="flex flex-wrap gap-1 mt-1">
-                                                      {log.pool_dados.map((at, i) => (
-                                                        <a key={i} href={at.valor} target="_blank" rel="noopener noreferrer" className="block">
-                                                          <img src={at.valor} alt="preview" className="w-8 h-8 object-cover rounded border border-slate-100 opacity-60 hover:opacity-100 transition-opacity" />
-                                                        </a>
-                                                      ))}
-                                                    </div>
-                                                  )}
-                                                </div>
-                                                <div className="flex gap-2 items-center">
-                                                  <button
-                                                    onClick={() => {
-                                                      setEditingWorkItem(log);
-                                                      setEditingWorkItemText(log.descricao);
-                                                    }}
-                                                    className="p-1.5 text-slate-300 hover:text-violet-600 rounded-lg transition-all"
-                                                    title="Editar"
-                                                  >
-                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                                  </button>
-                                                  <button
-                                                    onClick={() => {
-                                                      if (confirmDeleteLogId === log.id) {
-                                                        handleDeleteWorkItem(log.id);
-                                                        setConfirmDeleteLogId(null);
-                                                      } else {
-                                                        setConfirmDeleteLogId(log.id);
-                                                        setTimeout(() => setConfirmDeleteLogId(null), 3000);
-                                                      }
-                                                    }}
-                                                    className={`p-1.5 rounded-lg transition-colors ${confirmDeleteLogId === log.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-300 hover:text-rose-600'}`}
-                                                    title="Excluir"
-                                                  >
-                                                    {confirmDeleteLogId === log.id ? (
-                                                      <svg className="w-3.5 h-3.5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                    ) : (
-                                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                        <button 
+                                          onClick={() => setIsCompletedLogsOpen(!isCompletedLogsOpen)}
+                                          className="w-full flex items-center justify-between group cursor-pointer"
+                                        >
+                                          <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-emerald-500 pl-3">Concluídos ({systemWorkItems.filter(w => w.concluido).length})</h5>
+                                          <svg className={`w-4 h-4 text-slate-300 transition-transform ${isCompletedLogsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" /></svg>
+                                        </button>
+
+                                        {isCompletedLogsOpen && (
+                                          <div className="space-y-3 opacity-60 animate-in slide-in-from-top-2 duration-200">
+                                            {systemWorkItems.filter(w => w.concluido).sort((a, b) => new Date(b.data_conclusao!).getTime() - new Date(a.data_conclusao!).getTime()).map(log => (
+                                              <div key={log.id} className="bg-white border border-slate-100 rounded-none md:rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 md:gap-4">
+                                                <div className="flex-1 flex items-center gap-4 w-full">
+                                                  <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                  </div>
+                                                    <p className="text-xs font-medium text-slate-500 line-clamp-1">{log.descricao}</p>
+                                                    {log.pool_dados && log.pool_dados.length > 0 && (
+                                                      <div className="flex flex-wrap gap-1 mt-1">
+                                                        {log.pool_dados.map((at, i) => (
+                                                          <a key={i} href={at.valor} target="_blank" rel="noopener noreferrer" className="block">
+                                                            <img src={at.valor} alt="preview" className="w-8 h-8 object-cover rounded border border-slate-100 opacity-60 hover:opacity-100 transition-opacity" />
+                                                          </a>
+                                                        ))}
+                                                      </div>
                                                     )}
-                                                  </button>
-                                                  <button
-                                                    onClick={() => handleUpdateWorkItem(log.id, { concluido: false })}
-                                                    className="text-[9px] font-black text-slate-300 hover:text-violet-600 uppercase ml-2"
-                                                  >
-                                                    Reabrir
-                                                  </button>
-                                                </div>
-                                             </div>
-                                            ))}
-                                          </div>
+                                                  </div>
+                                                  <div className="flex gap-2 items-center">
+                                                    <button
+                                                      onClick={() => {
+                                                        setEditingWorkItem(log);
+                                                        setEditingWorkItemText(log.descricao);
+                                                      }}
+                                                      className="p-1.5 text-slate-300 hover:text-violet-600 rounded-lg transition-all"
+                                                      title="Editar"
+                                                    >
+                                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                                    </button>
+                                                    <button
+                                                      onClick={() => {
+                                                        if (confirmDeleteLogId === log.id) {
+                                                          handleDeleteWorkItem(log.id);
+                                                          setConfirmDeleteLogId(null);
+                                                        } else {
+                                                          setConfirmDeleteLogId(log.id);
+                                                          setTimeout(() => setConfirmDeleteLogId(null), 3000);
+                                                        }
+                                                      }}
+                                                      className={`p-1.5 rounded-lg transition-colors ${confirmDeleteLogId === log.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-300 hover:text-rose-600'}`}
+                                                      title="Excluir"
+                                                    >
+                                                      {confirmDeleteLogId === log.id ? (
+                                                        <svg className="w-3.5 h-3.5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                      ) : (
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                      )}
+                                                    </button>
+                                                    <button
+                                                      onClick={() => handleUpdateWorkItem(log.id, { concluido: false })}
+                                                      className="text-[9px] font-black text-slate-300 hover:text-violet-600 uppercase ml-2"
+                                                    >
+                                                      Reabrir
+                                                    </button>
+                                                  </div>
+                                               </div>
+                                              ))}
+                                            </div>
+                                          )}
                                       </div>
                                     )}
                                   </div>
@@ -5133,39 +5143,50 @@ const App: React.FC = () => {
                                           {systemWorkItems.filter(w => !w.concluido).length} Pendentes
                                         </span>
                                       </div>
-                                      <div className="grid grid-cols-1 gap-4">
-                                        {systemWorkItems.filter(w => !w.concluido).sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime()).map(log => (
-                                          <div key={log.id} className="bg-slate-50 border border-slate-100 rounded-none md:rounded-[2rem] p-6 hover:shadow-md transition-all">
-                                            <div className="flex items-start justify-between gap-6">
-                                              <div className="flex-1 space-y-3">
-                                                <div className="flex items-center gap-3">
-                                                  <span className={`text-[8px] font-black px-2 py-1 rounded uppercase tracking-widest ${log.tipo === 'desenvolvimento' ? 'bg-violet-100 text-violet-700' : log.tipo === 'ajuste' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
-                                                    {log.tipo}
-                                                  </span>
-                                                  <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">{new Date(log.data_criacao).toLocaleDateString('pt-BR')}</span>
-                                                </div>
-                                                <p className="text-sm md:text-base font-bold text-slate-700 leading-relaxed">{log.descricao}</p>
-                                                {log.pool_dados && log.pool_dados.length > 0 && (
-                                                  <div className="flex flex-wrap gap-2 mt-3">
-                                                    {log.pool_dados.map((at, i) => (
-                                                      <a key={i} href={at.valor} target="_blank" rel="noopener noreferrer" className="block">
-                                                        <img src={at.valor} alt="preview" className="w-20 h-20 object-cover rounded-lg border border-slate-100 hover:scale-105 transition-transform shadow-sm" />
-                                                      </a>
-                                                    ))}
+                                        <div className="grid grid-cols-1 gap-6">
+                                          {systemWorkItems.filter(w => !w.concluido).sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime()).map(log => (
+                                            <div key={log.id} className="bg-slate-50 border border-slate-100 rounded-none md:rounded-[2.5rem] p-8 md:p-10 hover:shadow-xl hover:bg-white transition-all group relative overflow-hidden">
+                                              {/* Decorative accent */}
+                                              <div className="absolute top-0 left-0 w-1.5 h-full bg-violet-500 opacity-20 group-hover:opacity-100 transition-opacity"></div>
+                                              
+                                              <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-8">
+                                                <div className="flex-1 min-w-0 space-y-4">
+                                                  <div className="flex items-center flex-wrap gap-3">
+                                                    <span className={`text-[9px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest shadow-sm ${log.tipo === 'desenvolvimento' ? 'bg-violet-600 text-white' : log.tipo === 'ajuste' ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-700'}`}>
+                                                      {log.tipo}
+                                                    </span>
+                                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{new Date(log.data_criacao).toLocaleDateString('pt-BR')}</span>
                                                   </div>
-                                                )}
-                                              </div>
-                                                <div className="flex gap-2 items-center">
+                                                  
+                                                  <div className="space-y-4">
+                                                    <p className="text-base md:text-xl font-bold text-slate-800 leading-[1.6] tracking-tight">{log.descricao}</p>
+                                                    
+                                                    {log.pool_dados && log.pool_dados.length > 0 && (
+                                                      <div className="flex flex-wrap gap-3 mt-6">
+                                                        {log.pool_dados.map((at, i) => (
+                                                          <a key={i} href={at.valor} target="_blank" rel="noopener noreferrer" className="block relative group/preview">
+                                                            <div className="absolute inset-0 bg-violet-600/20 opacity-0 group-hover/preview:opacity-100 rounded-2xl transition-all z-10 flex items-center justify-center">
+                                                              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                                            </div>
+                                                            <img src={at.valor} alt="preview" className="w-24 h-24 object-cover rounded-2xl border-2 border-white shadow-md hover:scale-105 transition-transform" />
+                                                          </a>
+                                                        ))}
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                </div>
+
+                                                <div className="flex items-center gap-3 shrink-0 self-end lg:self-start bg-white lg:bg-transparent p-2 lg:p-0 rounded-2xl shadow-sm lg:shadow-none border lg:border-none border-slate-100">
                                                   <button
                                                     onClick={() => {
                                                       setEditingWorkItem(log);
                                                       setEditingWorkItemText(log.descricao);
                                                       setEditingWorkItemAttachments(log.pool_dados || []);
                                                     }}
-                                                    className="p-3 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-xl transition-all"
+                                                    className="p-4 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-2xl transition-all"
                                                     title="Editar"
                                                   >
-                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                                                   </button>
                                                   <button
                                                     onClick={() => {
@@ -5177,26 +5198,26 @@ const App: React.FC = () => {
                                                         setTimeout(() => setConfirmDeleteLogId(null), 3000);
                                                       }
                                                     }}
-                                                    className={`p-3 rounded-xl transition-colors ${confirmDeleteLogId === log.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'}`}
+                                                    className={`p-4 rounded-2xl transition-all ${confirmDeleteLogId === log.id ? 'bg-rose-500 text-white shadow-lg shadow-rose-200' : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'}`}
                                                     title="Excluir"
                                                   >
                                                     {confirmDeleteLogId === log.id ? (
-                                                      <svg className="w-5 h-5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                      <svg className="w-6 h-6 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                                                     ) : (
-                                                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                                     )}
                                                   </button>
                                                   <button
                                                     onClick={() => handleUpdateWorkItem(log.id, { concluido: true, data_conclusao: new Date().toISOString() })}
-                                                    className="w-12 h-12 rounded-full border-2 border-slate-200 flex items-center justify-center text-slate-300 hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-50 transition-all group/check shadow-sm ml-2"
+                                                    className="w-16 h-16 rounded-full bg-white border-2 border-slate-200 flex items-center justify-center text-slate-300 hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-50 transition-all shadow-sm ml-2 group/check"
                                                   >
-                                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                                                   </button>
                                                 </div>
+                                              </div>
                                             </div>
-                                          </div>
-                                        ))}
-                                      </div>
+                                          ))}
+                                        </div>
                                     </div>
 
                                     {systemWorkItems.filter(w => w.concluido).length > 0 && (
@@ -5210,64 +5231,64 @@ const App: React.FC = () => {
                                         </button>
                                         
                                         {isModalCompletedLogsOpen && (
-                                          <div className="grid grid-cols-1 gap-4 opacity-70 animate-in slide-in-from-top-4 duration-300">
-                                          {systemWorkItems.filter(w => w.concluido).sort((a, b) => new Date(b.data_conclusao!).getTime() - new Date(a.data_conclusao!).getTime()).map(log => (
-                                            <div key={log.id} className="bg-white border border-slate-100 rounded-none md:rounded-2xl p-6 flex items-center justify-between gap-6">
-                                              <div className="flex-1 space-y-2">
-                                                <div className="flex items-center gap-3">
-                                                  <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">Concluído em {new Date(log.data_conclusao!).toLocaleDateString('pt-BR')}</span>
-                                                </div>
-                                                <p className="text-sm font-medium text-slate-500 leading-relaxed">{log.descricao}</p>
-                                                {log.pool_dados && log.pool_dados.length > 0 && (
-                                                  <div className="flex flex-wrap gap-1 mt-1">
-                                                    {log.pool_dados.map((at, i) => (
-                                                      <a key={i} href={at.valor} target="_blank" rel="noopener noreferrer" className="block">
-                                                        <img src={at.valor} alt="preview" className="w-10 h-10 object-cover rounded-lg border border-slate-100 opacity-60 hover:opacity-100 transition-opacity" />
-                                                      </a>
-                                                    ))}
+                                          <div className="grid grid-cols-1 gap-4 opacity-80 animate-in slide-in-from-top-4 duration-300">
+                                            {systemWorkItems.filter(w => w.concluido).sort((a, b) => new Date(b.data_conclusao!).getTime() - new Date(a.data_conclusao!).getTime()).map(log => (
+                                              <div key={log.id} className="bg-white border border-slate-100 rounded-none md:rounded-[2rem] p-8 flex flex-col md:flex-row md:items-center justify-between gap-6 hover:shadow-md transition-all">
+                                                <div className="flex-1 min-w-0 space-y-3">
+                                                  <div className="flex items-center gap-3">
+                                                    <span className="text-[10px] font-black text-emerald-500 bg-emerald-50 px-3 py-1 rounded-full uppercase tracking-widest">Concluído em {new Date(log.data_conclusao!).toLocaleDateString('pt-BR')}</span>
                                                   </div>
-                                                )}
-                                              </div>
-                                                <div className="flex gap-3 items-center">
-                                                  <button
-                                                    onClick={() => {
-                                                      setEditingWorkItem(log);
-                                                      setEditingWorkItemText(log.descricao);
-                                                    }}
-                                                    className="p-2 text-slate-400 hover:text-violet-600 rounded-lg transition-all"
-                                                    title="Editar"
-                                                  >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                                  </button>
-                                                  <button
-                                                    onClick={() => {
-                                                      if (confirmDeleteLogId === log.id) {
-                                                        handleDeleteWorkItem(log.id);
-                                                        setConfirmDeleteLogId(null);
-                                                      } else {
-                                                        setConfirmDeleteLogId(log.id);
-                                                        setTimeout(() => setConfirmDeleteLogId(null), 3000);
-                                                      }
-                                                    }}
-                                                    className={`p-2 rounded-lg transition-colors ${confirmDeleteLogId === log.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-400 hover:text-rose-600'}`}
-                                                    title="Excluir"
-                                                  >
-                                                    {confirmDeleteLogId === log.id ? (
-                                                      <svg className="w-4 h-4 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                    ) : (
-                                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                    )}
-                                                  </button>
-                                                  <button
-                                                    onClick={() => handleUpdateWorkItem(log.id, { concluido: false })}
-                                                    className="text-[10px] font-black text-violet-400 hover:text-violet-600 uppercase tracking-widest ml-2"
-                                                  >
-                                                    Reabrir
-                                                  </button>
+                                                  <p className="text-base font-bold text-slate-500 leading-relaxed line-clamp-2 hover:line-clamp-none transition-all">{log.descricao}</p>
+                                                  {log.pool_dados && log.pool_dados.length > 0 && (
+                                                    <div className="flex flex-wrap gap-2 mt-3">
+                                                      {log.pool_dados.map((at, i) => (
+                                                        <a key={i} href={at.valor} target="_blank" rel="noopener noreferrer" className="block relative group/preview">
+                                                          <img src={at.valor} alt="preview" className="w-12 h-12 object-cover rounded-xl border border-slate-100 opacity-60 hover:opacity-100 transition-opacity shadow-sm" />
+                                                        </a>
+                                                      ))}
+                                                    </div>
+                                                  )}
                                                 </div>
-                                            </div>
-                                          ))}
-                                        </div>
+                                                  <div className="flex gap-4 items-center shrink-0">
+                                                    <button
+                                                      onClick={() => {
+                                                        setEditingWorkItem(log);
+                                                        setEditingWorkItemText(log.descricao);
+                                                      }}
+                                                      className="p-3 text-slate-300 hover:text-violet-600 hover:bg-violet-50 rounded-xl transition-all"
+                                                      title="Editar"
+                                                    >
+                                                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                                    </button>
+                                                    <button
+                                                      onClick={() => {
+                                                        if (confirmDeleteLogId === log.id) {
+                                                          handleDeleteWorkItem(log.id);
+                                                          setConfirmDeleteLogId(null);
+                                                        } else {
+                                                          setConfirmDeleteLogId(log.id);
+                                                          setTimeout(() => setConfirmDeleteLogId(null), 3000);
+                                                        }
+                                                      }}
+                                                      className={`p-3 rounded-xl transition-all ${confirmDeleteLogId === log.id ? 'bg-rose-500 text-white shadow-lg' : 'text-slate-300 hover:text-rose-600 hover:bg-rose-50'}`}
+                                                      title="Excluir"
+                                                    >
+                                                      {confirmDeleteLogId === log.id ? (
+                                                        <svg className="w-5 h-5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                      ) : (
+                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                      )}
+                                                    </button>
+                                                    <button
+                                                      onClick={() => handleUpdateWorkItem(log.id, { concluido: false })}
+                                                      className="px-6 py-3 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-violet-600 transition-all shadow-md active:scale-95 ml-2"
+                                                    >
+                                                      Reabrir
+                                                    </button>
+                                                  </div>
+                                              </div>
+                                            ))}
+                                          </div>
                                       )}
                                       </div>
                                     )}

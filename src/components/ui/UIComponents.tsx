@@ -12,43 +12,59 @@ interface Toast {
   id: string;
   message: string;
   type: 'success' | 'error' | 'info';
-  action?: { label: string, onClick: () => void };
+  action?: { label: string | React.ReactNode, onClick: () => void };
+  actions?: { label: string | React.ReactNode, onClick: () => void }[];
 }
 
 export const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[], removeToast: (id: string) => void }) => {
   return (
-    <div className="fixed bottom-4 sm:top-8 right-4 sm:right-8 left-4 sm:left-auto z-[200] flex flex-col gap-3 pointer-events-none">
+    <div className="fixed bottom-4 sm:top-8 right-4 sm:right-8 left-4 sm:left-auto z-[9999] flex flex-col gap-3 pointer-events-none">
       {toasts.map(toast => (
         <div
           key={toast.id}
-          className={`pointer-events-auto px-6 py-4 rounded-lg sm:rounded-lg md:rounded-[1.25rem] shadow-[0_20px_50px_rgba(0,0,0,0.2)] flex items-center gap-4 animate-in slide-in-from-bottom-12 sm:slide-in-from-right-12 fade-in duration-500 min-w-[320px] ${toast.type === 'success' ? 'bg-emerald-600 text-white' :
-            toast.type === 'error' ? 'bg-rose-600 text-white' :
-              'bg-slate-900 text-white'
+          className={`pointer-events-auto px-6 py-4 rounded-lg sm:rounded-lg md:rounded-[1.25rem] shadow-[0_20px_50px_rgba(0,0,0,0.3)] backdrop-blur-md flex items-center gap-4 animate-in slide-in-from-bottom-12 sm:slide-in-from-right-12 fade-in duration-500 min-w-[320px] border border-white/10 ${toast.type === 'success' ? 'bg-emerald-600/95 text-white' :
+            toast.type === 'error' ? 'bg-rose-600/95 text-white' :
+              'bg-slate-900/95 text-white'
             }`}
         >
           <div className="flex-shrink-0">
-            {toast.type === 'success' && <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>}
-            {toast.type === 'error' && <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>}
-            {toast.type === 'info' && <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+            {toast.type === 'success' && <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg></div>}
+            {toast.type === 'error' && <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg></div>}
+            {toast.type === 'info' && <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></div>}
           </div>
           <div className="flex-1">
-            <span className="text-[10px] font-black uppercase tracking-[0.15em] leading-none opacity-80 block mb-0.5">{toast.type}</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] leading-none opacity-60 block mb-0.5">{toast.type}</span>
             <span className="text-sm font-bold tracking-tight">{toast.message}</span>
           </div>
-          {toast.action && (
-            <button
-              onClick={() => {
-                toast.action?.onClick();
-                removeToast(toast.id);
-              }}
-              className="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-widest transition-colors mr-2"
-            >
-              {toast.action.label}
+          <div className="flex items-center gap-2">
+            {toast.action && (
+              <button
+                onClick={() => {
+                  toast.action?.onClick();
+                  removeToast(toast.id);
+                }}
+                className="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all active:scale-95"
+              >
+                {toast.action.label}
+              </button>
+            )}
+            {toast.actions && toast.actions.map((act, i) => (
+              <button
+                key={i}
+                onClick={() => {
+                  act.onClick();
+                   // Opicional: remover toast ao clicar? Depende da ação. 
+                   // Para "copiar" talvez não precise remover.
+                }}
+                className="bg-white/10 hover:bg-white/20 p-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center"
+              >
+                {act.label}
+              </button>
+            ))}
+            <button onClick={() => removeToast(toast.id)} className="p-2 hover:bg-white/20 rounded-lg transition-colors opacity-40 hover:opacity-100">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
-          )}
-          <button onClick={() => removeToast(toast.id)} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
+          </div>
         </div>
       ))}
     </div>
