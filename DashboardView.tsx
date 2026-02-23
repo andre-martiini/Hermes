@@ -266,18 +266,20 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     const BarChart = ({ data, color, maxHeight = 80 }: { data: number[], color: string, maxHeight?: number }) => {
         const max = Math.max(...data, 1);
         return (
-            <div className="flex items-end gap-0.5 h-[80px] w-full bg-slate-50/50 rounded-lg px-2">
+            <div className="flex items-end gap-0.5 h-[100px] w-full bg-slate-50/50 rounded-lg px-2 pb-1">
                 {data.map((v, i) => (
-                    <div
-                        key={i}
-                        className="flex-1 rounded-t-sm transition-all hover:opacity-80"
-                        style={{
-                            height: `${(v / max) * maxHeight}px`,
-                            backgroundColor: color,
-                            minWidth: '2px'
-                        }}
-                        title={`Dia ${i + 1}: R$ ${v.toFixed(2)}`}
-                    />
+                    <div key={i} className="flex-1 flex flex-col justify-end items-center gap-1 group">
+                        <div
+                            className="w-full rounded-t-sm transition-all group-hover:opacity-80"
+                            style={{
+                                height: `${(v / max) * maxHeight}px`,
+                                backgroundColor: color,
+                                minWidth: '2px'
+                            }}
+                            title={`Dia ${i + 1}: R$ ${v.toFixed(2)}`}
+                        />
+                        <span className="text-[8px] text-slate-400 font-bold">{i + 1}</span>
+                    </div>
                 ))}
             </div>
         );
