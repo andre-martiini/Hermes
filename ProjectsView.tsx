@@ -3,6 +3,7 @@ import { collection, onSnapshot, query, addDoc, orderBy } from 'firebase/firesto
 import { db } from './firebase';
 import { Projeto } from './types';
 import { BolsistasView } from './BolsistasView';
+import { AutoExpandingTextarea } from './src/components/ui/UIComponents';
 
 export const ProjectsView: React.FC = () => {
   const [projects, setProjects] = useState<Projeto[]>([]);
@@ -137,10 +138,10 @@ export const ProjectsView: React.FC = () => {
                     </div>
                     <div>
                         <label className="text-xs font-bold text-slate-500 ml-1">Descrição</label>
-                        <textarea
+                        <AutoExpandingTextarea
                             value={newProjectDesc}
                             onChange={e => setNewProjectDesc(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 outline-none focus:ring-2 focus:ring-indigo-500 font-medium text-slate-600 mt-1 resize-none"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 outline-none focus:ring-2 focus:ring-indigo-500 font-medium text-slate-600 mt-1"
                             placeholder="Breve descrição do projeto..."
                             rows={3}
                         />

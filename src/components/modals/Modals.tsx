@@ -57,11 +57,11 @@ export const SettingsModal = ({
   onDeleteUnidade: (id: string) => void,
   onUpdateUnidade: (id: string, updates: any) => void,
   onEmitNotification: (title: string, message: string, type: 'info' | 'warning' | 'success' | 'error') => void,
-  initialTab?: 'notifications' | 'context' | 'sistemas' | 'google',
+  initialTab?: 'notifications' | 'context' | 'sistemas' | 'google' | 'pomodoro',
   showConfirm: (title: string, message: string, onConfirm: () => void, onCancel?: () => void) => void
 }) => {
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
-  const [activeTab, setActiveTab] = useState<'notifications' | 'context' | 'sistemas' | 'google'>(initialTab || 'notifications');
+  const [activeTab, setActiveTab] = useState<'notifications' | 'context' | 'sistemas' | 'google' | 'pomodoro'>(initialTab || 'notifications');
   const [newUnidadeNome, setNewUnidadeNome] = useState('');
   const [newKeywordMap, setNewKeywordMap] = useState<{ [key: string]: string }>({});
   const [newCustom, setNewCustom] = useState<Partial<CustomNotification>>({
@@ -131,6 +131,13 @@ export const SettingsModal = ({
               title="Google"
             >
               <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" /></svg>
+            </button>
+            <button
+              onClick={() => setActiveTab('pomodoro')}
+              className={`flex-1 py-4 rounded-lg md:rounded-xl flex items-center justify-center transition-all ${activeTab === 'pomodoro' ? 'bg-white text-rose-600 shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
+              title="Pomodoro"
+            >
+              <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
             </button>
           </div>
         </div>
@@ -697,6 +704,78 @@ export const SettingsModal = ({
                 </div>
               </div>
             </div>
+          ) : activeTab === 'pomodoro' ? (
+            <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
+              <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
+                <span className="w-2 h-2 bg-rose-500 rounded-full"></span>
+                Configurações do Pomodoro
+              </h4>
+
+              <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-rose-200 transition-all">
+                <div className="flex-1">
+                  <p className="text-sm font-bold text-slate-900 mb-1">Ativar Pomodoro</p>
+                  <p className="text-[11px] text-slate-500 font-medium">Habilitar ciclos de trabalho e descanso na execução</p>
+                </div>
+                <button
+                  onClick={() => setLocalSettings({
+                    ...localSettings,
+                    pomodoro: { ...localSettings.pomodoro!, enabled: !localSettings.pomodoro?.enabled }
+                  })}
+                  className={`w-12 h-6 rounded-full transition-all relative ${localSettings.pomodoro?.enabled ? 'bg-rose-600' : 'bg-slate-300'}`}
+                >
+                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.pomodoro?.enabled ? 'left-7' : 'left-1'}`} />
+                </button>
+              </div>
+
+              {localSettings.pomodoro?.enabled && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 space-y-3">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Tempo de Foco (minutos)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="60"
+                      value={localSettings.pomodoro?.focusTime || 10}
+                      onChange={(e) => setLocalSettings({
+                        ...localSettings,
+                        pomodoro: { ...localSettings.pomodoro!, focusTime: Number(e.target.value) }
+                      })}
+                      className="w-full bg-white border border-slate-200 rounded-lg md:rounded-xl px-4 py-3 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-rose-500 outline-none"
+                    />
+                  </div>
+                  <div className="p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 space-y-3">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Tempo de Descanso (minutos)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="30"
+                      value={localSettings.pomodoro?.breakTime || 5}
+                      onChange={(e) => setLocalSettings({
+                        ...localSettings,
+                        pomodoro: { ...localSettings.pomodoro!, breakTime: Number(e.target.value) }
+                      })}
+                      className="w-full bg-white border border-slate-200 rounded-lg md:rounded-xl px-4 py-3 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-rose-500 outline-none"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-amber-200 transition-all">
+                <div className="flex-1">
+                  <p className="text-sm font-bold text-slate-900 mb-1">Alertas Sonoros</p>
+                  <p className="text-[11px] text-slate-500 font-medium">Emitir bipes discretos nos últimos 3 segundos</p>
+                </div>
+                <button
+                  onClick={() => setLocalSettings({
+                    ...localSettings,
+                    pomodoro: { ...localSettings.pomodoro!, enableBeep: !localSettings.pomodoro?.enableBeep }
+                  })}
+                  className={`w-12 h-6 rounded-full transition-all relative ${localSettings.pomodoro?.enableBeep ? 'bg-amber-600' : 'bg-slate-300'}`}
+                >
+                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.pomodoro?.enableBeep ? 'left-7' : 'left-1'}`} />
+                </button>
+              </div>
+            </div>
           ) : activeTab === 'google' ? (
             <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
               <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
@@ -1037,8 +1116,7 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
     categoria: task.categoria || 'NÃO CLASSIFICADA',
     notas: task.notas || '',
     is_single_day: !!task.is_single_day,
-    entregas_relacionadas: task.entregas_relacionadas || [],
-    processo_sei: task.processo_sei || ''
+    entregas_relacionadas: task.entregas_relacionadas || []
   });
 
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
@@ -1148,52 +1226,6 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
                   <p className="text-[9px] font-medium text-blue-400 pl-1 uppercase tracking-wider">Selecione a entrega institucional correspondente</p>
                 </div>
 
-                {formData.categoria === 'CLC' && (
-                  <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-blue-600 uppercase tracking-widest pl-1">Número do Processo (SIPAC)</label>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={formData.processo_sei}
-                          onChange={e => setFormData({ ...formData, processo_sei: e.target.value })}
-                          placeholder="23083.XXXXXX/202X-XX"
-                          className="flex-1 bg-white border-2 border-blue-50 rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-blue-900 focus:ring-2 focus:ring-blue-500 outline-none"
-                        />
-                        <button
-                          onClick={async () => {
-                            if (!formData.processo_sei) return;
-                            setIsSyncing(true);
-                            try {
-                              await callScrapeSipac(task.id, formData.processo_sei);
-                              showAlert("Sucesso", "Sincronização iniciada com sucesso!");
-                            } catch (e) {
-                              console.error(e);
-                              showAlert("Erro", "Erro ao iniciar sincronização.");
-                            } finally {
-                              setIsSyncing(false);
-                            }
-                          }}
-                          disabled={isSyncing || !formData.processo_sei}
-                          className="px-6 bg-blue-600 text-white rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all disabled:opacity-50"
-                        >
-                          {isSyncing ? 'Sincronizando...' : 'Sincronizar SIPAC'}
-                        </button>
-                      </div>
-                      <div className="flex items-center justify-between px-1">
-                        <p className="text-[9px] font-medium text-blue-400 uppercase tracking-wider">Número radical.numero/ano-dv</p>
-                        {task.sync_status && (
-                          <span className={`text-[9px] font-black uppercase tracking-widest ${
-                            task.sync_status === 'concluido' ? 'text-emerald-500' :
-                            task.sync_status === 'erro' ? 'text-rose-500' : 'text-amber-500 animate-pulse'
-                          }`}>
-                            Status: {task.sync_status}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
               </>
             )}
           </div>

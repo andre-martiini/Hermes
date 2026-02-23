@@ -369,16 +369,44 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
     </div>
   );
 });
-export const WysiwygEditor = ({ value, onChange, onKeyDown, placeholder, className, id }: WysiwygEditorProps) => {
-  const containerRef = useRef<HTMLDivElement>(null);
+export interface AutoExpandingTextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {}
+
+export const AutoExpandingTextarea = (props: AutoExpandingTextareaProps) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  }, [props.value]);
+
+  return (
+    <textarea
+      {...props}
+      ref={textareaRef}
+      className={`${props.className} resize-none overflow-hidden block`}
+    />
+  );
+};
+
+export const WysiwygEditor = ({ value, onChange, onKeyDown, placeholder, className, id }: WysiwygEditorProps) => {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-expand logic
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  }, [value]);
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     onChange(e.target.value);
   };
 
   const renderFormattedText = (text: string) => {
-    if (!text) return <span className="text-slate-400">{placeholder}</span>;
+    if (!text) return <span className="text-slate-400/50">{placeholder}</span>;
 
     const lines = text.split('\n');
     const processedLines: React.JSX.Element[] = [];
@@ -399,7 +427,7 @@ export const WysiwygEditor = ({ value, onChange, onKeyDown, placeholder, classNa
               return <pre key={j} className="bg-slate-100/80 p-2 rounded-lg font-mono text-[11px] my-1 overflow-x-auto border border-slate-200 text-slate-800">{part.slice(3, -3)}</pre>;
             }
             if (part.startsWith('*') && part.endsWith('*')) {
-              return <span key={j} className="font-bold text-current"><span className="opacity-20">*</span>{part.slice(1, -1)}<span className="opacity-20">*</span></span>;
+              return <span key={j} className="font-bold text-slate-900"><span className="opacity-20">*</span>{part.slice(1, -1)}<span className="opacity-20">*</span></span>;
             }
             if (part.startsWith('_') && part.endsWith('_')) {
               return <span key={j} className="italic"><span className="opacity-20">_</span>{part.slice(1, -1)}<span className="opacity-20">_</span></span>;
@@ -419,19 +447,19 @@ export const WysiwygEditor = ({ value, onChange, onKeyDown, placeholder, classNa
     lines.forEach((line, index) => {
       const trimmed = line.trim();
       if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-        currentList.push(<li key={index} className="pl-1 text-sm">{formatInline(line.substring(line.indexOf(trimmed.startsWith('- ') ? '- ' : '* ') + 2))}</li>);
+        currentList.push(<li key={index} className="pl-1 text-sm leading-relaxed">{formatInline(line.substring(line.indexOf(trimmed.startsWith('- ') ? '- ' : '* ') + 2))}</li>);
       } else {
         flushList();
         if (trimmed.startsWith('>')) {
           processedLines.push(
-            <blockquote key={index} className="border-l-4 border-slate-300 pl-4 py-1 my-1 italic text-slate-500 bg-slate-50/50 rounded-r-lg">
+            <blockquote key={index} className="border-l-4 border-slate-300 pl-4 py-1 my-1 italic text-slate-500 bg-slate-50/50 rounded-r-lg leading-relaxed">
               {formatInline(line.substring(line.indexOf('>') + 1).trim())}
             </blockquote>
           );
         } else if (line === '') {
-          processedLines.push(<div key={index} className="h-1.5"></div>);
+          processedLines.push(<div key={index} className="h-[1.625em]"></div>);
         } else {
-          processedLines.push(<div key={index} className="min-h-[1.5em]">{formatInline(line)}</div>);
+          processedLines.push(<div key={index} className="min-h-[1.625em] leading-relaxed">{formatInline(line)}</div>);
         }
       }
     });
@@ -441,10 +469,19 @@ export const WysiwygEditor = ({ value, onChange, onKeyDown, placeholder, classNa
   };
 
   return (
-    <div className={`relative min-h-[44px] group ${className}`} ref={containerRef}>
-      <div className="absolute inset-0 p-4 pointer-events-none overflow-hidden text-sm">
+    <div className={`relative min-h-[56px] group ${className}`}>
+      {/* Background Decorative border to avoid glitchy rendering */}
+      <div className="absolute inset-0 border border-slate-200 rounded-2xl pointer-events-none group-focus-within:ring-2 group-focus-within:ring-blue-500/20 group-focus-within:border-blue-500 transition-all"></div>
+      
+      {/* Display Layer */}
+      <div 
+        className="absolute inset-0 p-4 pointer-events-none overflow-hidden text-sm font-medium leading-relaxed"
+        style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'inherit' }}
+      >
         {renderFormattedText(value)}
       </div>
+
+      {/* Input Layer */}
       <textarea
         ref={textareaRef}
         id={id}
@@ -452,7 +489,13 @@ export const WysiwygEditor = ({ value, onChange, onKeyDown, placeholder, classNa
         onChange={handleInput}
         onKeyDown={onKeyDown}
         placeholder={placeholder}
-        className="w-full min-h-[44px] bg-transparent border border-slate-200 rounded-2xl px-4 py-4 text-sm font-medium text-transparent caret-current focus:ring-2 focus:ring-blue-500 outline-none transition-all resize-none overflow-y-auto"
+        className="w-full bg-transparent border-none px-4 py-4 text-sm font-medium leading-relaxed text-transparent caret-blue-500 outline-none transition-all resize-none overflow-hidden block relative z-10"
+        style={{ 
+          minHeight: 'inherit',
+          WebkitTextFillColor: 'transparent',
+          appearance: 'none',
+          WebkitAppearance: 'none'
+        }}
         spellCheck={false}
       />
     </div>

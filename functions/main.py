@@ -491,7 +491,6 @@ def on_sync_request(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.D
 def scheduled_sync(event: scheduler_fn.ScheduledEvent) -> None:
     """Trigger agendado para rodar a cada 30 minutos"""
     run_full_sync()
-
 @firestore_fn.on_document_created(document="notificacoes/{notification_id}")
 def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]):
     """Trigger disparado quando uma nova notificação é criada"""
@@ -527,6 +526,120 @@ def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapsh
         event.data.reference.update({'sent_to_push': True})
     except Exception as e:
         print(f"Erro ao enviar push notification: {str(e)}")
+
+@scheduler_fn.on_schedule(schedule="every 1 minutes")
+def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
+    """Verifica e envia lembretes agendados (hábitos, pesagem, customizados e ações)"""
+    from datetime import datetime, timedelta
+    import pytz
+    
+    db = get_db()
+    # Define o fuso horário de Brasília para comparar com as strings de horário do usuário (HH:mm)
+    tz = pytz.timezone('America/Sao_Paulo')
+    now = datetime.now(tz)
+    current_time_str = now.strftime('%H:%M')
+    today_str = now.strftime('%Y-%m-%d')
+    day_of_week = now.weekday() # 0 = Monday, 1 = Tuesday... 6 = Sunday (Note: Python index matches our dayOfWeek if 0=Mon, but let's check)
+    # No helper.tsx: dayOfWeek: 1 // Segunda-feira. Python: 0=Mon, 1=Tue... 
+    # Precisamos ajustar para 0=Dom? Não, vamos seguir o padrão do AppSettings.
+    # AppSettings weighInReminder dayOfWeek: 0-6 (0=Dom no JS Date.getDay())
+    # Python now.strftime('%w') retorna 0 para Domingo.
+    js_day_of_week = int(now.strftime('%w'))
+
+    # 1. Carrega Configurações
+    settings_doc = db.collection('configuracoes').document('geral').get()
+    if settings_doc.exists:
+        settings = settings_doc.to_dict()
+        notifs_config = settings.get('notifications', {})
+        
+        # --- Lembrete de Hábitos ---
+        habits = notifs_config.get('habitsReminder', {})
+        if habits.get('enabled') and habits.get('time') == current_time_str:
+            remind_id = f"habits_{today_str}"
+            # Verifica se já enviou hoje
+            if not db.collection('system_reminders').document(remind_id).get().exists:
+                emit_notification_backend(
+                    "Lembrete de Hábitos",
+                    "Hora de registrar seus hábitos de hoje para manter sua rotina nos trilhos!",
+                    'info',
+                    'saude'
+                )
+                db.collection('system_reminders').document(remind_id).set({'sent_at': now.isoformat()})
+
+        # --- Lembrete de Pesagem ---
+        weigh_in = notifs_config.get('weighInReminder', {})
+        if weigh_in.get('enabled') and weigh_in.get('time') == current_time_str:
+            freq = weigh_in.get('frequency', 'weekly')
+            target_day = weigh_in.get('dayOfWeek', 1)
+            
+            should_remind = False
+            if js_day_of_week == target_day:
+                if freq == 'weekly':
+                    should_remind = True
+                elif freq == 'biweekly':
+                    # Lógica simplificada de biweekly baseada no timestamp da semana
+                    week_num = int(now.strftime('%V'))
+                    if week_num % 2 == 0: should_remind = True
+                elif freq == 'monthly' and now.day == 1:
+                    should_remind = True
+            
+            if should_remind:
+                remind_id = f"weighin_{today_str}"
+                if not db.collection('system_reminders').document(remind_id).get().exists:
+                    emit_notification_backend(
+                        "Lembrete de Pesagem",
+                        "Hora de registrar seu peso para acompanhar sua evolução no módulo Saúde!",
+                        'info',
+                        'saude'
+                    )
+                    db.collection('system_reminders').document(remind_id).set({'sent_at': now.isoformat()})
+
+        # --- Notificações Customizadas ---
+        custom_notifs = notifs_config.get('custom', [])
+        for cn in custom_notifs:
+            if cn.get('enabled') and cn.get('time') == current_time_str:
+                freq = cn.get('frequency', 'daily')
+                should_send = False
+                
+                if freq == 'daily':
+                    should_send = True
+                elif freq == 'weekly' and js_day_of_week in cn.get('daysOfWeek', []):
+                    should_send = True
+                elif freq == 'monthly' and now.day == cn.get('dayOfMonth', 1):
+                    should_send = True
+                
+                if should_send:
+                    remind_id = f"custom_{cn.get('id')}_{today_str}"
+                    if not db.collection('system_reminders').document(remind_id).get().exists:
+                        emit_notification_backend(
+                            "Lembrete Personalizado",
+                            cn.get('message', 'Notificação Hermes'),
+                            'info'
+                        )
+                        db.collection('system_reminders').document(remind_id).set({'sent_at': now.isoformat()})
+
+    # 2. Lembretes de Ações (Specific Task Reminders)
+    from google.cloud.firestore import Query
+    # Busca tarefas com reminder_at definido e que ainda não foram marcadas como lembradas
+    tasks_with_reminders = db.collection('tarefas')\
+        .where('reminder_at', '<=', now.isoformat())\
+        .where('reminder_sent', '==', False)\
+        .stream()
+
+    for task_doc in tasks_with_reminders:
+        t = task_doc.to_dict()
+        title = t.get('titulo', 'Ação Pendente')
+        task_id = task_doc.id
+        
+        emit_notification_backend(
+            f"Lembrete: {title}",
+            "Está na hora de realizar esta ação agendada!",
+            'warning',
+            'acoes'
+        )
+        
+        # Marca como enviado para não repetir
+        task_doc.reference.update({'reminder_sent': True})
 
 @https_fn.on_call()
 def upload_to_drive(req: https_fn.CallableRequest):

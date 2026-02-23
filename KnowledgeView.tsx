@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { ConhecimentoItem, formatDate, Tarefa, WorkItem } from './types';
 import pptxgen from "pptxgenjs";
+import { AutoExpandingTextarea } from './src/components/ui/UIComponents';
 
 interface KnowledgeViewProps {
     items: ConhecimentoItem[];
@@ -742,10 +743,10 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                 </div>
                                 <div className="flex-1 flex flex-col">
                                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Rascunho / Conteúdo Bruto</label>
-                                    <textarea
+                                    <AutoExpandingTextarea
                                         value={presentationDraft}
                                         onChange={e => setPresentationDraft(e.target.value)}
-                                        className="flex-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-orange-500 mt-2 resize-none leading-relaxed"
+                                        className="flex-1 w-full bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-orange-500 mt-2 leading-relaxed"
                                         placeholder="Cole aqui o texto, anotações ou tópicos que deseja transformar em slides..."
                                     />
                                 </div>

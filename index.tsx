@@ -32,15 +32,16 @@ import {
 } from './src/utils/helpers';
 import {
   ToastContainer, FilterChip, PgcMiniTaskCard, PgcAuditRow,
-  RowCard, WysiwygEditor, NotificationCenter
+  RowCard, WysiwygEditor, NotificationCenter, AutoExpandingTextarea
 } from './src/components/ui/UIComponents';
 import {
   HermesModal, SettingsModal, DailyHabitsModal,
   TaskCreateModal, TaskEditModal
 } from './src/components/modals/Modals';
-import {
-  DayView, CalendarView, CategoryView, TaskExecutionView
-} from './src/views/Views';
+import { DayView } from './src/views/DayView';
+import { CalendarView } from './src/views/CalendarView';
+import { CategoryView } from './src/views/CategoryView';
+import { TaskExecutionView } from './src/views/TaskExecutionView';
 
 
 type SortOption = 'date-asc' | 'date-desc' | 'priority-high' | 'priority-low';
@@ -295,7 +296,7 @@ const SlidesTool = ({ onBack, showToast }: { onBack: () => void, showToast: (msg
             <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-xl space-y-6">
               <div>
                 <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 ml-1">Conteúdo Base (Texto Bruto)</label>
-                <textarea className="w-full bg-slate-50 border border-slate-100 rounded-[1.5rem] p-6 text-slate-800 font-bold leading-relaxed outline-none focus:ring-4 focus:ring-orange-100 transition-all min-h-[300px] resize-none"
+                <AutoExpandingTextarea className="w-full bg-slate-50 border border-slate-100 rounded-[1.5rem] p-6 text-slate-800 font-bold leading-relaxed outline-none focus:ring-4 focus:ring-orange-100 transition-all min-h-[300px]"
                   placeholder="Cole aqui o texto, atas de reunião, artigos ou tópicos que deseja transformar em slides..."
                   value={rascunho} onChange={e => setRascunho(e.target.value)} />
               </div>
@@ -739,9 +740,9 @@ const FerramentasView = ({
               </div>
 
               {editingId === idea.id ? (
-                <textarea
+                <AutoExpandingTextarea
                   autoFocus
-                  className="w-full bg-slate-50 border border-slate-200 rounded-none md:rounded-2xl p-4 text-sm md:text-lg font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 min-h-[100px] resize-none"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-none md:rounded-2xl p-4 text-sm md:text-lg font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 min-h-[100px]"
                   value={editText}
                   onChange={e => setEditText(e.target.value)}
                 />
@@ -1958,7 +1959,7 @@ const App: React.FC = () => {
     } catch (err) {
       console.error("Erro ao persistir notificação:", err);
       // Feedback visual do erro para o usuário (agora que estamos validando)
-      showAlert("Erro", `Erro no sistema de notificação: ${err}`);
+      showToast(`Erro no sistema de notificação: ${err}`, "error");
     }
   };
 
@@ -2557,12 +2558,13 @@ const App: React.FC = () => {
     }
   };
 
-  const handleCreateWorkItem = async (sistemaId: string, tipo: 'desenvolvimento' | 'ajuste', descricao: string, attachments: PoolItem[] = []) => {
+  const handleCreateWorkItem = async (sistemaId: string, tipo: 'desenvolvimento' | 'ajuste' | 'log' | 'geral', descricao: string, attachments: PoolItem[] = []) => {
+    const finalTipo = tipo === 'geral' ? 'ajuste' : tipo;
     try {
       if (!descricao.trim()) return;
       const docRef = await addDoc(collection(db, 'sistemas_work_items'), {
         sistema_id: sistemaId,
-        tipo,
+        tipo: finalTipo,
         descricao,
         concluido: false,
         data_criacao: new Date().toISOString(),

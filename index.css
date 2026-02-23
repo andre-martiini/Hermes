@@ -2,6 +2,7 @@
 body {
   margin: 0;
   padding: 0;
+  background-color: #f4f5f7;
 }
 
 /* Utility: Truncate text to 3 lines with ellipsis */
@@ -12,4 +13,20 @@ body {
   line-clamp: 3;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Custom Scrollbar for Execution View */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #e2e8f0;
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #cbd5e1;
 }

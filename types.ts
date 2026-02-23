@@ -45,6 +45,8 @@ export interface Tarefa {
     horario_fim?: string;    // format "HH:mm"
     pool_dados?: PoolItem[];
     ordem?: number;
+    reminder_at?: string; // ISO date string for reminder
+    reminder_sent?: boolean;
 }
 
 export interface AtividadeRealizada {
@@ -240,6 +242,7 @@ export interface CustomNotification {
 export interface AppSettings {
     googleDriveFolderId?: string;
     pomodoro?: {
+        enabled: boolean;
         focusTime: number; // minutes
         breakTime: number; // minutes
         enableBeep?: boolean;
