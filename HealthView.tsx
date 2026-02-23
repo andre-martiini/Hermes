@@ -13,6 +13,8 @@ interface HealthViewProps {
     onAddExam: (exam: Omit<HealthExam, 'id' | 'data_criacao' | 'pool_dados'>, files: File[]) => void;
     onDeleteExam: (id: string) => void;
     onUpdateExam: (id: string, updates: Partial<HealthExam>) => void;
+    isWeightModalOpen: boolean;
+    setIsWeightModalOpen: (isOpen: boolean) => void;
 }
 
 const HealthSection = ({ title, children, iconColor, defaultExpanded = true }: { title: string, children: React.ReactNode, iconColor: string, defaultExpanded?: boolean }) => {
@@ -329,12 +331,13 @@ const HealthView: React.FC<HealthViewProps> = ({
     exams,
     onAddExam,
     onDeleteExam,
-    onUpdateExam
+    onUpdateExam,
+    isWeightModalOpen,
+    setIsWeightModalOpen
 }) => {
     const todayStr = formatDateLocalISO(new Date());
     const [selectedDate, setSelectedDate] = useState<string>(todayStr);
     const [newWeight, setNewWeight] = useState<string>('');
-    const [isWeightModalOpen, setIsWeightModalOpen] = useState(false);
     const [targetInput, setTargetInput] = useState<string>(settings.targetWeight?.toString() || '');
     const [isEditingTarget, setIsEditingTarget] = useState(false);
 

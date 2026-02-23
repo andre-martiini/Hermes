@@ -2134,6 +2134,43 @@ const SettingsModal = ({
                     </div>
                   )}
                 </div>
+
+                <div className="flex flex-col p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-amber-200 transition-all gap-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <p className="text-sm font-bold text-slate-900 mb-1">Ciclo Pomodoro</p>
+                      <p className="text-[11px] text-slate-500 font-medium">Tempos de foco e pausa (minutos)</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                     <div className="flex flex-col">
+                        <label className="text-[10px] font-black text-slate-400 uppercase">Foco</label>
+                        <input
+                           type="number"
+                           min="1"
+                           value={localSettings.pomodoro?.focusTime || 25}
+                           onChange={(e) => setLocalSettings({
+                              ...localSettings,
+                              pomodoro: { ...localSettings.pomodoro, focusTime: Number(e.target.value) }
+                           })}
+                           className="w-16 bg-white border-2 border-slate-100 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
+                        />
+                     </div>
+                     <div className="flex flex-col">
+                        <label className="text-[10px] font-black text-slate-400 uppercase">Pausa</label>
+                        <input
+                           type="number"
+                           min="1"
+                           value={localSettings.pomodoro?.breakTime || 5}
+                           onChange={(e) => setLocalSettings({
+                              ...localSettings,
+                              pomodoro: { ...localSettings.pomodoro, breakTime: Number(e.target.value) }
+                           })}
+                           className="w-16 bg-white border-2 border-slate-100 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 outline-none"
+                        />
+                     </div>
+                  </div>
+                </div>
               </div>
 
               {/* Financeiro / Ações Section */}
@@ -3708,7 +3745,7 @@ const TaskExecutionView = ({ task, tarefas, appSettings, onSave, onClose, showTo
   };
 
   return (
-    <div className={`fixed inset-0 z-[200] flex flex-col overflow-hidden transition-colors duration-500 ${isTimerRunning ? 'bg-[#050505] text-white' : 'bg-[#F2F4F7] text-slate-900'}`}>
+    <div className={`fixed inset-0 z-[200] flex flex-col overflow-hidden transition-colors duration-500 ${isTimerRunning ? (pomodoroMode === 'break' ? 'bg-emerald-900 text-white' : 'bg-[#050505] text-white') : 'bg-[#F2F4F7] text-slate-900'}`}>
       {/* Header: Title and Close */}
       <div className="p-6 md:p-10 pb-4 flex items-center justify-between shrink-0">
         <div className="flex flex-col">
@@ -6030,6 +6067,7 @@ const App: React.FC = () => {
   const [isSidebarRetracted, setIsSidebarRetracted] = useState(false);
   const [financeActiveTab, setFinanceActiveTab] = useState<'dashboard' | 'fixed'>('dashboard');
   const [isFinanceSettingsOpen, setIsFinanceSettingsOpen] = useState(false);
+  const [isWeightModalOpen, setIsWeightModalOpen] = useState(false);
 
   // Modal Mode State
   const [taskModalMode, setTaskModalMode] = useState<'default' | 'edit' | 'execute'>('default');
@@ -6288,6 +6326,16 @@ const App: React.FC = () => {
         setActiveModule('acoes');
         setViewMode('sistemas-dev');
         break;
+      case 'habits_modal':
+        setActiveModule('saude');
+        setViewMode('saude');
+        setIsHabitsReminderOpen(true);
+        break;
+      case 'weigh_in_modal':
+        setActiveModule('saude');
+        setViewMode('saude');
+        setIsWeightModalOpen(true);
+        break;
       default:
         break;
     }
@@ -6312,7 +6360,13 @@ const App: React.FC = () => {
       if (appSettings.notifications.habitsReminder.enabled && current_time === appSettings.notifications.habitsReminder.time) {
         const lastOpen = localStorage.getItem('lastHabitsReminderDate');
         if (lastOpen !== todayStr) {
-          setIsHabitsReminderOpen(true);
+          emitNotification(
+            "Lembrete de Hábitos",
+            "Não esqueça de registrar seus hábitos hoje!",
+            'info',
+            'habits_modal',
+            `habits_${todayStr}`
+          );
           localStorage.setItem('lastHabitsReminderDate', todayStr);
         }
       }
@@ -6338,7 +6392,7 @@ const App: React.FC = () => {
               "Lembrete de Pesagem",
               "Hora de registrar seu peso para acompanhar sua evolução no módulo Saúde!",
               'info',
-              'saude',
+              'weigh_in_modal',
               `weigh_in_${todayStr}`
             );
             localStorage.setItem('lastWeighInRemindDate', todayStr);
@@ -8559,6 +8613,8 @@ const App: React.FC = () => {
                   onAddWeight={handleAddHealthWeight}
                   onDeleteWeight={handleDeleteHealthWeight}
                   onUpdateHabits={handleUpdateHealthHabits}
+                  isWeightModalOpen={isWeightModalOpen}
+                  setIsWeightModalOpen={setIsWeightModalOpen}
                   exams={exams}
                   onAddExam={async (exam, files) => {
                      let poolItems: PoolItem[] = [];
