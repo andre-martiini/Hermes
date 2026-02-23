@@ -104,12 +104,11 @@ export const DiarioBordoUI = ({
   };
 
   return (
-    <div className="flex flex-col h-full">
-
+<div className={`flex flex-col h-full relative rounded-b-2xl ${isTimerRunning ? 'bg-black/20' : 'bg-slate-50'}`}>
       {/* ── Área de histórico com scroll suave e scrollbar fina ── */}
       <div
         onScroll={handleDiaryScroll}
-        className="flex-1 overflow-y-auto pr-1"
+        className="diary-scroll flex-1 overflow-y-auto"
         style={{
           scrollbarWidth: 'thin',
           scrollbarColor: '#CBD5E0 transparent',
@@ -122,7 +121,8 @@ export const DiarioBordoUI = ({
           .diary-scroll::-webkit-scrollbar-thumb:hover { background: #A0AEC0; }
         `}</style>
 
-        <div className="diary-scroll h-full overflow-y-auto pr-1">
+        {/* Wrapper interno com padding para afastar os elementos das bordas, sem tirar a barra de rolagem do limite */}
+        <div className="px-4 md:px-6 pt-4 pb-2">
           <div className="flex justify-center mb-6">
             <div className={`border rounded-full px-4 py-2 text-[10px] uppercase tracking-widest font-black ${isTimerRunning ? 'bg-white/5 border-white/5 text-white/40' : 'bg-slate-100 border-slate-200 text-slate-400'}`}>
               Início da Sessão • {new Date(task.data_criacao || Date.now()).toLocaleDateString()}
@@ -206,12 +206,12 @@ export const DiarioBordoUI = ({
       </div>
 
       {/* ── Área de Input Compacta ── */}
-      <div className="shrink-0 pt-3">
-        {/* Container principal do input */}
-        <div className={`rounded-2xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-[#F4F5F7] border-transparent focus-within:border-slate-200'}`}>
+      <div className="shrink-0 pt-3 px-4 md:px-6 pb-4 md:pb-6">
+        {/* Container principal do input - Agora com fundo branco e borda suave */}
+        <div className={`rounded-2xl border shadow-sm transition-all ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-200'}`}>
 
           {/* Campo de texto */}
-          <div className="relative px-3 pt-3 pb-1">
+          <div className="px-3 pt-3 pb-1">
             <AutoExpandingTextarea
               id="diary-input"
               value={newFollowUp}
@@ -223,27 +223,11 @@ export const DiarioBordoUI = ({
                 }
               }}
               placeholder="Descreva o que foi feito agora..."
-              className={`w-full outline-none text-sm leading-relaxed transition-all min-h-[40px] max-h-[120px] overflow-y-auto pr-8 resize-none ${isTimerRunning
+              className={`w-full outline-none text-sm leading-relaxed transition-all min-h-[40px] max-h-[120px] overflow-y-auto resize-none ${isTimerRunning
                 ? 'bg-transparent text-white placeholder:text-white/20'
                 : 'bg-transparent text-slate-800 placeholder:text-slate-400'
               }`}
             />
-            {/* Ícone microfone discreto dentro do campo */}
-            <button
-              onClick={isRecording ? stopRecording : startRecording}
-              disabled={isProcessingTranscription}
-              className={`absolute right-5 top-4 transition-all ${isRecording
-                ? 'text-rose-500 animate-pulse'
-                : isTimerRunning ? 'text-white/20 hover:text-white/50' : 'text-slate-300 hover:text-blue-500'
-              }`}
-              title={isRecording ? 'Parar Gravação' : 'Gravar Áudio'}
-            >
-              {isProcessingTranscription ? (
-                <div className="w-4 h-4 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin"></div>
-              ) : (
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 10v2a7 7 0 01-14 0v-2m14 0h2m-16 0H3m9 10v3m-3 0h6" /></svg>
-              )}
-            </button>
           </div>
 
           {/* Barra de ferramentas */}
@@ -288,26 +272,49 @@ export const DiarioBordoUI = ({
               <button onClick={() => applyFormatting('`')} className={`w-[20px] h-[20px] flex items-center justify-center rounded text-[8px] font-mono transition-colors ${isTimerRunning ? 'text-white/30 hover:text-white/70 hover:bg-white/10' : 'text-slate-400 hover:bg-slate-200 hover:text-slate-600'}`}>{'</>'}</button>
             </div>
 
-            {/* Direita: Botão Enviar pequeno e circular */}
-            <button
-              onClick={handleAddFollowUp}
-              disabled={!newFollowUp.trim()}
-              className={`w-8 h-8 flex items-center justify-center rounded-full transition-all active:scale-90 shadow-md ${newFollowUp.trim()
-                ? 'bg-blue-600 text-white hover:bg-blue-500 shadow-blue-600/30'
-                : isTimerRunning ? 'bg-white/10 text-white/20 cursor-not-allowed' : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-              }`}
-              title="Enviar (Enter)"
-            >
-              {/* Ícone de avião de papel */}
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-              </svg>
-            </button>
+            {/* Direita: Botão Mic + Botão Enviar */}
+            <div className="flex items-center gap-2">
+              
+              {/* Botão de Gravação de Áudio */}
+              <button
+                onClick={isRecording ? stopRecording : startRecording}
+                disabled={isProcessingTranscription}
+                className={`w-8 h-8 flex items-center justify-center rounded-full transition-all active:scale-90 shadow-sm ${
+                  isRecording
+                    ? 'bg-rose-500 text-white animate-pulse shadow-rose-500/30'
+                    : isTimerRunning
+                      ? 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white'
+                      : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
+                }`}
+                title={isRecording ? 'Parar Gravação' : 'Gravar Áudio'}
+              >
+                {isProcessingTranscription ? (
+                  <div className="w-4 h-4 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin"></div>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 10v2a7 7 0 01-14 0v-2m14 0h2m-16 0H3m9 10v3m-3 0h6" /></svg>
+                )}
+              </button>
+
+              {/* Botão Enviar */}
+              <button
+                onClick={handleAddFollowUp}
+                disabled={!newFollowUp.trim()}
+                className={`w-8 h-8 flex items-center justify-center rounded-full transition-all active:scale-90 shadow-md ${newFollowUp.trim()
+                  ? 'bg-blue-600 text-white hover:bg-blue-500 shadow-blue-600/30'
+                  : isTimerRunning ? 'bg-white/10 text-white/20 cursor-not-allowed' : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                }`}
+                title="Enviar (Enter)"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
 
         {/* Helper text */}
-        <p className={`text-[11px] mt-1.5 px-1 ${isTimerRunning ? 'text-white/20' : 'text-slate-400'}`}>
+        <p className={`text-[11px] mt-1.5 px-2 ${isTimerRunning ? 'text-white/20' : 'text-slate-400'}`}>
           Enter para enviar · Shift+Enter para nova linha
         </p>
       </div>
