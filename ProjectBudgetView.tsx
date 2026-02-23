@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { collection, doc, onSnapshot, updateDoc, addDoc, query, orderBy } from 'firebase/firestore';
+import { collection, doc, onSnapshot, updateDoc, addDoc, query, orderBy, where } from 'firebase/firestore';
 import { db } from './firebase';
-import { Projeto, OrcamentoProjeto, ItemOrcamento, RemanejamentoRecursos, TransacaoProjeto } from './types';
+import { Projeto, OrcamentoProjeto, ItemOrcamento, RemanejamentoRecursos, TransacaoProjeto, VinculoProjeto, TipoBolsa } from './types';
+import { BurnRateSimulator } from './src/components/projects/BurnRateSimulator';
 
 interface ProjectBudgetViewProps {
     projetoId: string;
@@ -12,6 +13,8 @@ export const ProjectBudgetView: React.FC<ProjectBudgetViewProps> = ({ projetoId 
     const [items, setItems] = useState<ItemOrcamento[]>([]);
     const [reallocations, setReallocations] = useState<RemanejamentoRecursos[]>([]);
     const [transactions, setTransactions] = useState<TransacaoProjeto[]>([]);
+    const [activeLinks, setActiveLinks] = useState<VinculoProjeto[]>([]);
+    const [scholarshipTypes, setScholarshipTypes] = useState<TipoBolsa[]>([]);
 
     // Budget Config State
     const [budgetConfig, setBudgetConfig] = useState<OrcamentoProjeto>({ custeio: 0, capital: 0, bolsas: 0 });
@@ -62,11 +65,24 @@ export const ProjectBudgetView: React.FC<ProjectBudgetViewProps> = ({ projetoId 
             setTransactions(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as TransacaoProjeto)));
         });
 
+        // Active Links (for Simulator)
+        const qLinks = query(collection(db, 'vinculos_projeto'), where('projeto_id', '==', projetoId));
+        const unsubLinks = onSnapshot(qLinks, (snapshot) => {
+            setActiveLinks(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as VinculoProjeto)));
+        });
+
+        // Scholarship Types
+        const unsubTypes = onSnapshot(collection(db, 'tipos_bolsa'), (snapshot) => {
+            setScholarshipTypes(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as TipoBolsa)));
+        });
+
         return () => {
             unsubProject();
             unsubItems();
             unsubRealloc();
             unsubTrans();
+            unsubLinks();
+            unsubTypes();
         };
     }, [projetoId]);
 
@@ -576,6 +592,17 @@ export const ProjectBudgetView: React.FC<ProjectBudgetViewProps> = ({ projetoId 
                         )}
                     </div>
                 </div>
+           </div>
+
+           {/* 5. Simulador de Sustentabilidade (Bolsas) */}
+           <div className="bg-white rounded-[2rem] border border-slate-200 p-8 shadow-sm">
+                <h3 className="text-xl font-black text-slate-800 mb-6">Simulador de Sustentabilidade (Bolsas)</h3>
+                <BurnRateSimulator
+                    availableBalance={balances.bolsas}
+                    totalBudget={totalAllocated.bolsas}
+                    activeLinks={activeLinks}
+                    scholarshipTypes={scholarshipTypes}
+                />
            </div>
 
         </div>
