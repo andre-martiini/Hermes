@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { ConhecimentoItem, formatDate, Tarefa, WorkItem } from './types';
-import pptxgen from "pptxgenjs";
+
 import { AutoExpandingTextarea } from './src/components/ui/UIComponents';
 
 interface KnowledgeViewProps {
@@ -100,10 +100,11 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
         }
     };
 
-    const handleExportPPTX = () => {
+    const handleExportPPTX = async () => {
         if (!currentItem || !currentItem.slides_data) return;
 
         try {
+            const pptxgen = (await import('pptxgenjs')).default;
             const pres = new pptxgen();
             const slidesData = currentItem.slides_data.slides || [];
 
