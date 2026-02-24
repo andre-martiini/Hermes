@@ -154,37 +154,42 @@ export const CalendarView = ({
 
   return (
     <div className="bg-white rounded-none md:rounded-[2rem] border border-slate-200 overflow-hidden shadow-sm animate-in fade-in">
-      <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <h3 className="text-xl font-black text-slate-900 capitalize tracking-tight">{monthName}</h3>
-          <div className="flex bg-slate-100 rounded-lg p-1">
-            <button
-              onClick={() => onViewModeChange('month')}
-              className={`px-3 py-1 text-[10px] uppercase font-black rounded-md transition-all ${viewMode === 'month' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
-            >
-              Mês
+      <div className="p-3 md:p-6 border-b border-slate-100 flex flex-col md:flex-row items-center justify-between gap-4 md:gap-6">
+        {/* Navegação e Data à Esquerda */}
+        <div className="flex flex-col md:flex-row items-center gap-3 md:gap-4 w-full md:w-auto">
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl shadow-inner shrink-0">
+            <button onClick={prevPeriod} className="p-2 hover:bg-white hover:shadow-sm rounded-lg transition-all text-slate-400 hover:text-slate-600">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
             </button>
-            <button
-              onClick={() => onViewModeChange('week')}
-              className={`px-3 py-1 text-[10px] uppercase font-black rounded-md transition-all ${viewMode === 'week' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
-            >
-              Semana
-            </button>
-            <button
-              onClick={() => onViewModeChange('day')}
-              className={`px-3 py-1 text-[10px] uppercase font-black rounded-md transition-all ${viewMode === 'day' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
-            >
-              Dia
+            <button onClick={() => onDateChange(new Date())} className="px-3 md:px-4 py-2 text-[9px] font-black uppercase bg-white text-slate-900 rounded-lg shadow-sm hover:bg-slate-50 transition-all active:scale-95">Hoje</button>
+            <button onClick={nextPeriod} className="p-2 hover:bg-white hover:shadow-sm rounded-lg transition-all text-slate-400 hover:text-slate-600">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
             </button>
           </div>
+          <h3 className="text-[10px] font-black text-slate-700 uppercase tracking-tight md:tracking-[0.2em] md:border-l md:border-slate-200 md:pl-4 text-center md:text-left truncate max-w-full">
+            {monthName}
+          </h3>
         </div>
-        <div className="flex gap-2">
-          <button onClick={prevPeriod} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-            <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" /></svg>
+        
+        {/* Seletor de Visualização à Direita */}
+        <div className="flex bg-slate-200/80 rounded-xl p-1 shadow-inner shrink-0 w-full md:w-auto">
+          <button
+            onClick={() => onViewModeChange('month')}
+            className={`flex-1 md:flex-none px-4 md:px-6 py-2 text-[9px] uppercase font-black rounded-lg transition-all ${viewMode === 'month' ? 'bg-white shadow-md text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            Mês
           </button>
-          <button onClick={() => onDateChange(new Date())} className="px-4 py-2 text-[10px] font-black uppercase bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors text-slate-700">Hoje</button>
-          <button onClick={nextPeriod} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-            <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
+          <button
+            onClick={() => onViewModeChange('week')}
+            className={`flex-1 md:flex-none px-4 md:px-6 py-2 text-[9px] uppercase font-black rounded-lg transition-all ${viewMode === 'week' ? 'bg-white shadow-md text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            Semana
+          </button>
+          <button
+            onClick={() => onViewModeChange('day')}
+            className={`flex-1 md:flex-none px-4 md:px-6 py-2 text-[9px] uppercase font-black rounded-lg transition-all ${viewMode === 'day' ? 'bg-white shadow-md text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            Dia
           </button>
         </div>
       </div>

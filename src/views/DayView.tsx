@@ -467,7 +467,7 @@ export const DayView = ({
         <>
           <div className="fixed inset-0 z-[150]" onClick={() => setContextMenu(null)}></div>
           <div
-            className="absolute z-[160] bg-white rounded-xl shadow-2xl border border-slate-100 py-2 w-48 animate-in fade-in zoom-in-95"
+            className="fixed z-[160] bg-white rounded-xl shadow-2xl border border-slate-100 py-2 w-48 animate-in fade-in zoom-in-95"
             style={{ top: Math.min(contextMenu.y, window.innerHeight - 200), left: Math.min(contextMenu.x, window.innerWidth - 200) }}
           >
             <button

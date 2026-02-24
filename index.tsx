@@ -9,7 +9,8 @@ import {
   DailyHabits, HealthSettings, HermesNotification, AppSettings,
   formatDate, formatDateLocalISO, Sistema, SistemaStatus, WorkItem, WorkItemPhase,
   WorkItemPriority, QualityLog, WorkItemAudit, GoogleCalendarEvent,
-  PoolItem, CustomNotification, HealthExam, ConhecimentoItem, UndoAction, HermesModalProps
+  PoolItem, CustomNotification, HealthExam, ConhecimentoItem, UndoAction, HermesModalProps,
+  ShoppingLocation, ShoppingItem
 } from './types';
 import HealthView from './HealthView';
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
@@ -359,6 +360,414 @@ const SlidesTool = ({ onBack, showToast }: { onBack: () => void, showToast: (msg
 
 
 
+const SHOPPING_LOCATIONS_KEY = 'hermes_shopping_locations';
+const SHOPPING_ITEMS_KEY = 'hermes_shopping_items';
+
+const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, showToast: (msg: string, type: 'success' | 'error' | 'info') => void }) => {
+  const [locations, setLocations] = useState<ShoppingLocation[]>(() => {
+    try { return JSON.parse(localStorage.getItem(SHOPPING_LOCATIONS_KEY) || '[]'); } catch { return []; }
+  });
+  const [items, setItems] = useState<ShoppingItem[]>(() => {
+    try { return JSON.parse(localStorage.getItem(SHOPPING_ITEMS_KEY) || '[]'); } catch { return []; }
+  });
+  const [activeLocationId, setActiveLocationId] = useState<string | null>(null);
+  const [view, setView] = useState<'locations' | 'planning' | 'shopping' | 'setup'>('locations');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [newItemName, setNewItemName] = useState('');
+  const [isDeletingLocation, setIsDeletingLocation] = useState<string | null>(null);
+  const [isEditingItem, setIsEditingItem] = useState<string | null>(null);
+  const [editItemValue, setEditItemValue] = useState('');
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    localStorage.setItem(SHOPPING_LOCATIONS_KEY, JSON.stringify(locations));
+  }, [locations]);
+
+  useEffect(() => {
+    localStorage.setItem(SHOPPING_ITEMS_KEY, JSON.stringify(items));
+  }, [items]);
+
+  const activeLocation = locations.find(l => l.id === activeLocationId);
+  
+  const handleAddLocation = () => {
+    const nome = prompt("Nome do Estabelecimento (ex: Atacadão, Farmácia):");
+    if (!nome) return;
+    const newLoc: ShoppingLocation = { id: `loc_${Date.now()}`, nome, icon: 'store' };
+    setLocations(prev => [...prev, newLoc]);
+    setActiveLocationId(newLoc.id);
+    setView('planning');
+  };
+
+  const handleAddItem = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!newItemName.trim() || !activeLocationId) return;
+
+    const existing = items.find(i => i.locationId === activeLocationId && i.nome.toLowerCase() === newItemName.trim().toLowerCase());
+    if (existing) {
+      setItems(prev => prev.map(i => i.id === existing.id ? { ...i, isPlanned: true } : i));
+    } else {
+      const newItem: ShoppingItem = {
+        id: `item_${Date.now()}`,
+        nome: newItemName.trim(),
+        categoria: 'Geral',
+        quantidade: '1',
+        unit: 'un',
+        isPlanned: true,
+        isPurchased: false,
+        locationId: activeLocationId
+      };
+      setItems(prev => [...prev, newItem]);
+    }
+    setNewItemName('');
+  };
+
+  const handleBatchImport = () => {
+    if (!importText.trim() || !activeLocationId) return;
+    const lines = importText.split('\n').map(l => l.trim()).filter(l => l !== '');
+    if (lines.length === 0) return;
+
+    setItems(prev => {
+      let currentItems = [...prev];
+      lines.forEach(line => {
+        const existing = currentItems.find(i => i.locationId === activeLocationId && i.nome.toLowerCase() === line.toLowerCase());
+        if (existing) {
+          currentItems = currentItems.map(i => i.id === existing.id ? { ...i, isPlanned: true } : i);
+        } else {
+          currentItems.push({
+            id: `item_${Date.now()}_${Math.random()}`,
+            nome: line,
+            categoria: 'Geral',
+            quantidade: '1',
+            unit: 'un',
+            isPlanned: true,
+            isPurchased: false,
+            locationId: activeLocationId
+          });
+        }
+      });
+      return currentItems;
+    });
+
+    setImportText('');
+    setIsImportModalOpen(false);
+    showToast(`${lines.length} itens importados!`, "success");
+  };
+
+  const toggleItemPlanned = (id: string) => {
+    setItems(prev => prev.map(i => i.id === id ? { ...i, isPlanned: !i.isPlanned } : i));
+  };
+
+  const handleUnplanAll = () => {
+    if (plannedItems.length === 0) return;
+    if (!window.confirm(`Deseja desmarcar todos os ${plannedItems.length} itens planejados?`)) return;
+    setItems(prev => prev.map(i => i.locationId === activeLocationId ? { ...i, isPlanned: false } : i));
+    showToast("Planejamento limpo!", "info");
+  };
+
+  const toggleItemSelection = (id: string) => {
+    setSelectedItemIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkCategorize = () => {
+    if (selectedItemIds.size === 0) return;
+    const firstItem = items.find(i => selectedItemIds.has(i.id));
+    const newCat = prompt(`Definir categoria para ${selectedItemIds.size} itens:`, firstItem?.categoria);
+    if (!newCat) return;
+    setItems(prev => prev.map(i => selectedItemIds.has(i.id) ? { ...i, categoria: newCat } : i));
+    setSelectedItemIds(new Set());
+    showToast(`${selectedItemIds.size} itens categorizados!`, "success");
+  };
+
+  const toggleItemPurchased = (id: string) => {
+    setItems(prev => prev.map(i => i.id === id ? { ...i, isPurchased: !i.isPurchased } : i));
+  };
+
+  const deleteItem = (id: string) => {
+    setItems(prev => prev.filter(i => i.id !== id));
+  };
+
+  const finalizeShopping = () => {
+    if (!window.confirm("Finalizar compra? Isso removerá os itens da lista de hoje, mantendo-os no histórico.")) return;
+    setItems(prev => prev.map(i => i.locationId === activeLocationId ? { ...i, isPlanned: false, isPurchased: false } : i));
+    setView('locations');
+    setActiveLocationId(null);
+    showToast("Compra finalizada!", "success");
+  };
+
+  const filteredItems = useMemo(() => {
+    return items
+      .filter(i => i.locationId === activeLocationId)
+      .filter(i => i.nome.toLowerCase().includes(searchTerm.toLowerCase()));
+  }, [items, activeLocationId, searchTerm]);
+
+  const groupedItems = useMemo(() => {
+    const groups: { [key: string]: ShoppingItem[] } = {};
+    filteredItems.forEach(item => {
+      const cat = item.categoria || 'Geral';
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(item);
+    });
+    return groups;
+  }, [filteredItems]);
+
+  const plannedItems = items.filter(i => i.locationId === activeLocationId && i.isPlanned);
+
+  return (
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8 pb-32">
+      <div className="flex items-center gap-6 mb-4">
+        <button onClick={view === 'locations' ? onBack : () => setView('locations')} className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-400 hover:text-slate-900 border border-slate-200 hover:border-slate-900 transition-all shadow-sm">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
+        </button>
+        <div className="flex-1">
+          <h2 className="text-3xl font-black text-slate-900 tracking-tighter">Lista de Compras</h2>
+          <p className="text-slate-500 font-medium">{activeLocation ? activeLocation.nome : 'Selecione ou crie um local de compra'}</p>
+        </div>
+        {activeLocation && (
+          <div className="flex bg-slate-100 p-1 rounded-2xl">
+            <button onClick={() => setView('planning')} className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${view === 'planning' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>Planejar</button>
+            <button onClick={() => setView('shopping')} className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${view === 'shopping' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
+              Comprar
+              {plannedItems.length > 0 && <span className="bg-orange-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full">{plannedItems.length}</span>}
+            </button>
+            <button onClick={() => setView('setup')} className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${view === 'setup' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>Configurar</button>
+          </div>
+        )}
+      </div>
+
+      {view === 'locations' && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {locations.map(loc => (
+            <button key={loc.id} onClick={() => { setActiveLocationId(loc.id); setView('planning'); }} className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-xl hover:shadow-2xl transition-all group text-left relative overflow-hidden">
+              <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onClick={(e) => { e.stopPropagation(); if (window.confirm("Excluir este local?")) setLocations(prev => prev.filter(l => l.id !== loc.id)); }} className="p-2 text-rose-500 hover:bg-rose-50 rounded-xl transition-colors">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                </button>
+              </div>
+              <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all mb-6">
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" /></svg>
+              </div>
+              <h3 className="text-2xl font-black text-slate-900 tracking-tighter mb-2">{loc.nome}</h3>
+              <p className="text-slate-400 font-bold text-xs uppercase tracking-widest">{items.filter(i => i.locationId === loc.id).length} itens no histórico</p>
+            </button>
+          ))}
+          <button onClick={handleAddLocation} className="border-4 border-dashed border-slate-100 p-8 rounded-[2.5rem] flex flex-col items-center justify-center text-slate-300 hover:text-blue-500 hover:border-blue-200 transition-all group">
+            <svg className="w-12 h-12 mb-4 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+            <span className="font-black uppercase tracking-widest text-xs">Novo Local</span>
+          </button>
+        </div>
+      )}
+
+      {view === 'planning' && activeLocation && (
+        <div className="space-y-8 animate-in fade-in duration-300">
+          <div className="max-w-2xl mx-auto space-y-6">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex-1 bg-white border border-slate-200 rounded-[1.5rem] px-6 py-3 flex items-center gap-3 shadow-sm focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+                <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                <input
+                  type="text"
+                  placeholder="Pesquisar nos itens..."
+                  className="flex-1 bg-transparent outline-none text-sm font-bold text-slate-700 placeholder:text-slate-300"
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                />
+              </div>
+              <button 
+                onClick={handleUnplanAll}
+                className="group flex flex-col items-center gap-1.5 px-4"
+                title="Desmarcar todos os itens"
+              >
+                <div className="w-10 h-10 bg-white border border-slate-200 rounded-xl flex items-center justify-center text-slate-400 group-hover:text-rose-500 group-hover:border-rose-200 group-hover:bg-rose-50 transition-all shadow-sm">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                </div>
+                <span className="text-[8px] font-black uppercase tracking-widest text-slate-400 group-hover:text-rose-500">Limpar</span>
+              </button>
+            </div>
+
+            <form onSubmit={handleAddItem} className="bg-white p-2 rounded-[2rem] border-2 border-slate-100 shadow-xl flex items-center gap-4 focus-within:border-blue-500 transition-all">
+              <input 
+                autoFocus
+                type="text" 
+                placeholder="O que você precisa comprar?" 
+                className="flex-1 bg-transparent border-none outline-none px-6 py-4 text-lg font-bold text-slate-800 placeholder:text-slate-300"
+                value={newItemName}
+                onChange={e => setNewItemName(e.target.value)}
+              />
+              <button 
+                type="button"
+                onClick={() => setIsImportModalOpen(true)}
+                className="p-3 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-xl transition-all"
+                title="Importar em Lote"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0l-4-4m4 4v12" /></svg>
+              </button>
+              <button type="submit" className="bg-blue-600 text-white h-12 w-12 flex items-center justify-center rounded-2xl hover:bg-blue-700 transition-all shadow-lg active:scale-95">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+              </button>
+            </form>
+
+            <div className="space-y-4">
+              {Object.entries(groupedItems).map(([cat, catItems]) => (
+                <div key={cat} className="space-y-3">
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] pl-4">{cat}</h4>
+                  <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm divide-y divide-slate-50">
+                    {catItems.map(item => (
+                      <div key={item.id} className="flex items-center gap-4 p-4 hover:bg-slate-50 transition-all group">
+                        <button onClick={() => toggleItemPlanned(item.id)} className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${item.isPlanned ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-300 hover:bg-slate-200'}`}>
+                          {item.isPlanned ? <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> : <div className="w-2 h-2 bg-current rounded-full"></div>}
+                        </button>
+                        <span className={`flex-1 font-bold ${item.isPlanned ? 'text-slate-900' : 'text-slate-300'}`}>{item.nome}</span>
+                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button onClick={() => {
+                            const newCat = prompt("Mudar categoria:", item.categoria);
+                            if (newCat) setItems(prev => prev.map(i => i.id === item.id ? { ...i, categoria: newCat } : i));
+                          }} className="p-2 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>
+                          </button>
+                          <button onClick={() => deleteItem(item.id)} className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {filteredItems.length === 0 && (
+                <div className="py-20 text-center text-slate-300">
+                  <p className="font-black uppercase tracking-widest text-sm italic">Nenhum item cadastrado ainda</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {view === 'shopping' && activeLocation && (
+        <div className="max-w-2xl mx-auto space-y-8 animate-in fade-in duration-300">
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl overflow-hidden">
+            <div className="p-8 border-b border-slate-50 flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-black text-slate-900">Carrinho de Compras</h3>
+                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">{plannedItems.filter(i => i.isPurchased).length} de {plannedItems.length} comprados</p>
+              </div>
+              <button onClick={finalizeShopping} className="bg-emerald-500 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-100">Finalizar</button>
+            </div>
+            
+            <div className="divide-y divide-slate-50">
+              {plannedItems.length === 0 ? (
+                <div className="py-20 text-center text-slate-300">
+                  <p className="font-black uppercase tracking-widest text-sm">Lista vazia</p>
+                  <button onClick={() => setView('planning')} className="text-blue-500 text-[10px] uppercase font-black tracking-widest mt-4">Vá para o Planejamento →</button>
+                </div>
+              ) : (
+                plannedItems.sort((a,b) => Number(a.isPurchased) - Number(b.isPurchased)).map(item => (
+                  <div key={item.id} onClick={() => toggleItemPurchased(item.id)} className={`flex items-center gap-6 p-6 cursor-pointer transition-all ${item.isPurchased ? 'bg-slate-50 opacity-50' : 'hover:bg-slate-50'}`}>
+                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-all ${item.isPurchased ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                      {item.isPurchased ? <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> : <div className="w-3 h-3 border-2 border-current rounded-full"></div>}
+                    </div>
+                    <div className="flex-1">
+                      <p className={`text-xl font-black ${item.isPurchased ? 'line-through text-slate-400' : 'text-slate-900'} tracking-tight`}>{item.nome}</p>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{item.categoria}</p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {view === 'setup' && activeLocation && (
+        <div className="max-w-2xl mx-auto space-y-8 animate-in fade-in duration-300 pb-20">
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl overflow-hidden">
+            <div className="p-8 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
+              <div>
+                <h3 className="text-xl font-black text-slate-900">Configurar Itens</h3>
+                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">{selectedItemIds.size} selecionados para ação em lote</p>
+              </div>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setSelectedItemIds(new Set())}
+                  className="px-6 py-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-all"
+                >
+                  Limpar
+                </button>
+                <button 
+                  onClick={handleBulkCategorize}
+                  disabled={selectedItemIds.size === 0}
+                  className="bg-blue-600 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-lg shadow-blue-100 flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>
+                  Categorizar
+                </button>
+              </div>
+            </div>
+
+            <div className="divide-y divide-slate-50">
+              {filteredItems.map(item => (
+                <div 
+                  key={item.id} 
+                  onClick={() => toggleItemSelection(item.id)}
+                  className={`flex items-center gap-4 p-5 cursor-pointer transition-all ${selectedItemIds.has(item.id) ? 'bg-blue-50/50' : 'hover:bg-slate-50'}`}
+                >
+                  <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${selectedItemIds.has(item.id) ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-200 text-transparent'}`}>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-bold text-slate-800">{item.nome}</p>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{item.categoria}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isImportModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+            <div className="p-8 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <h3 className="text-2xl font-black text-slate-900 tracking-tight">Importação em Lote</h3>
+                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">Um item por linha</p>
+              </div>
+              <button onClick={() => setIsImportModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="p-8 space-y-4">
+              <textarea 
+                autoFocus
+                className="w-full bg-slate-50 border border-slate-100 rounded-[1.5rem] p-6 text-slate-800 font-bold leading-relaxed outline-none focus:ring-4 focus:ring-blue-100 transition-all min-h-[300px] resize-none"
+                placeholder="Exemplo:&#10;Arroz&#10;Feijão&#10;Macarrão&#10;Leite"
+                value={importText}
+                onChange={e => setImportText(e.target.value)}
+              />
+              <div className="flex gap-4">
+                <button onClick={() => setIsImportModalOpen(false)} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-2xl transition-all">Cancelar</button>
+                <button 
+                  onClick={handleBatchImport}
+                  className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all"
+                >
+                  Importar {importText.split('\n').filter(l => l.trim()).length} Itens
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const FerramentasView = ({ 
   ideas, 
   onDeleteIdea, 
@@ -381,8 +790,8 @@ const FerramentasView = ({
   onUpdateIdea: (id: string, text: string) => void,
   onConvertToLog: (idea: BrainstormIdea) => void,
   onConvertToTask: (idea: BrainstormIdea) => void,
-  activeTool: 'brainstorming' | 'slides' | null,
-  setActiveTool: (tool: 'brainstorming' | 'slides' | null) => void,
+  activeTool: 'brainstorming' | 'slides' | 'shopping' | null,
+  setActiveTool: (tool: 'brainstorming' | 'slides' | 'shopping' | null) => void,
   isAddingText: boolean,
   setIsAddingText: (val: boolean) => void,
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void,
@@ -436,6 +845,10 @@ const FerramentasView = ({
     return <SlidesTool onBack={() => setActiveTool(null)} showToast={showToast} />;
   }
 
+  if (activeTool === 'shopping') {
+    return <ShoppingListTool onBack={() => setActiveTool(null)} showToast={showToast} />;
+  }
+
   if (!activeTool) {
     return (
       <div className="animate-in grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-0 md:gap-8 pb-20 px-0">
@@ -464,34 +877,20 @@ const FerramentasView = ({
             <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Crie apresentações profissionais com IA de forma rápida.</p>
           </div>
         </button>
-
         <button
-          disabled
-          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-100 shadow-none md:shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden -ml-px -mt-px md:m-0"
+          onClick={() => setActiveTool('shopping')}
+          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-200 shadow-none md:shadow-xl hover:shadow-none md:hover:shadow-2xl transition-all group text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 -ml-px -mt-px md:m-0"
         >
-          <div className="absolute top-2 right-2 md:top-4 md:right-4 bg-slate-100 text-slate-400 text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Em Breve</div>
-          <div className="w-12 h-12 md:w-16 md:h-16 bg-slate-50 rounded-none md:rounded-2xl flex items-center justify-center text-slate-400 flex-shrink-0">
-            <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+          <div className="w-12 h-12 md:w-16 md:h-16 bg-emerald-50 rounded-none md:rounded-2xl flex items-center justify-center text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-all flex-shrink-0">
+            <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" /></svg>
           </div>
           <div>
-            <h3 className="text-lg md:text-2xl font-black text-slate-400 tracking-tighter mb-1 md:mb-2">Termo de Referência</h3>
-            <p className="text-slate-400 font-medium leading-relaxed italic text-xs md:text-sm">Elabore TRs com IA.</p>
+            <h3 className="text-lg md:text-2xl font-black text-slate-900 tracking-tighter mb-1 md:mb-2">Lista de Compras</h3>
+            <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Organize suas compras por estabelecimento e categorias.</p>
           </div>
         </button>
 
-        <button
-          disabled
-          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-100 shadow-none md:shadow-sm opacity-60 grayscale cursor-not-allowed text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 relative overflow-hidden -ml-px -mt-px md:m-0"
-        >
-          <div className="absolute top-2 right-2 md:top-4 md:right-4 bg-slate-100 text-slate-400 text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Em Breve</div>
-          <div className="w-12 h-12 md:w-16 md:h-16 bg-slate-50 rounded-none md:rounded-2xl flex items-center justify-center text-slate-400 flex-shrink-0">
-            <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-          </div>
-          <div>
-            <h3 className="text-lg md:text-2xl font-black text-slate-400 tracking-tighter mb-1 md:mb-2">Pesquisa CATMAT</h3>
-            <p className="text-slate-400 font-medium leading-relaxed italic text-xs md:text-sm">Busca inteligente.</p>
-          </div>
-        </button>
+
       </div>
     );
   }
@@ -1272,6 +1671,162 @@ const QuickLogModal = ({ isOpen, onClose, onAddLog, unidades }: { isOpen: boolea
   );
 };
 
+const ShoppingAIModal = ({ isOpen, onClose, onProcessItems, onViewList }: { isOpen: boolean, onClose: () => void, onProcessItems: (text: string) => void, onViewList: () => void }) => {
+  const [textInput, setTextInput] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  if (!isOpen) return null;
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/m4a' });
+        await handleProcessAudio(audioBlob);
+        stream.getTracks().forEach(track => track.stop());
+      };
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Erro ao acessar microfone:", err);
+      alert("Permissão de microfone negada ou não disponível.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const handleProcessAudio = async (audioBlob: Blob) => {
+    setIsProcessing(true);
+    try {
+      const reader = new FileReader();
+      reader.readAsDataURL(audioBlob);
+      reader.onloadend = async () => {
+        try {
+          const base64String = (reader.result as string).split(',')[1];
+          const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
+          const response = await transcribeFunc({ audioBase64: base64String });
+          const data = response.data as { raw: string, refined: string };
+          if (data.refined) {
+             const newText = textInput ? textInput + ', ' + data.refined : data.refined;
+             setTextInput(newText);
+          }
+        } catch (error) {
+          console.error("Erro ao transcrever:", error);
+          alert("Erro ao processar áudio via Hermes AI.");
+        } finally {
+          setIsProcessing(false);
+        }
+      };
+    } catch (error) {
+      console.error("Erro ao ler áudio:", error);
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in">
+      <div className="bg-white w-full max-w-2xl rounded-none md:rounded-[3rem] shadow-[0_40px_80px_-20px_rgba(0,0,0,0.3)] overflow-hidden animate-in zoom-in-95 duration-300">
+        <div className="p-10 border-b border-slate-100 bg-gradient-to-br from-emerald-50 to-white flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 bg-emerald-600 rounded-[1.5rem] flex items-center justify-center shadow-lg shadow-emerald-200">
+              <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+            </div>
+            <div>
+              <h3 className="text-2xl font-black text-slate-900 tracking-tight">Assistente de Compras</h3>
+              <p className="text-emerald-600 text-[10px] font-black uppercase tracking-[0.2em] mt-1">Processamento via Gemini 2.5</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onViewList}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-100 text-emerald-700 rounded-none md:rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-200 transition-all border border-emerald-200"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
+              Ver Listas
+            </button>
+            <button onClick={onClose} className="p-3 hover:bg-slate-100 rounded-2xl transition-all group">
+              <svg className="w-6 h-6 text-slate-300 group-hover:text-slate-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+        </div>
+        
+        <div className="p-10 space-y-8">
+          <div className="bg-slate-50 p-3 rounded-[2rem] border-2 border-slate-100 flex items-center gap-5 focus-within:border-emerald-500 transition-all shadow-inner">
+            <button
+              onClick={isRecording ? stopRecording : startRecording}
+              disabled={isProcessing}
+              className={`w-16 h-16 rounded-2xl transition-all flex-shrink-0 flex items-center justify-center ${
+                isRecording
+                  ? 'bg-rose-600 text-white animate-pulse shadow-xl shadow-rose-200'
+                  : isProcessing
+                    ? 'bg-emerald-100 text-emerald-600 cursor-wait'
+                    : 'bg-white border-2 border-slate-100 text-slate-400 hover:text-emerald-600 hover:border-emerald-100 hover:shadow-lg transition-all'
+              }`}
+            >
+              {isProcessing ? (
+                <div className="w-6 h-6 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
+              ) : isRecording ? (
+                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
+              ) : (
+                <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+              )}
+            </button>
+            <textarea
+              autoFocus
+              disabled={isRecording || isProcessing}
+              placeholder={isRecording ? "Fale os itens que deseja comprar..." : isProcessing ? "O Hermes está organizando sua lista..." : "Digite os itens que deseja planejar..."}
+              className="flex-1 bg-transparent border-none outline-none py-4 text-lg font-bold text-slate-800 placeholder:text-slate-300 resize-none min-h-[100px]"
+              value={textInput}
+              onChange={e => setTextInput(e.target.value)}
+            />
+          </div>
+
+          <div className="bg-emerald-50/50 p-6 rounded-2xl border border-emerald-100/50 flex gap-4">
+             <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+             </div>
+             <p className="text-[11px] font-bold text-emerald-800 leading-relaxed">
+               Diga o que você precisa e o Hermes buscará em todas as listas cadastradas, marcando os itens automaticamente.
+             </p>
+          </div>
+
+          <div className="flex gap-6">
+            <button onClick={onClose} className="flex-1 py-5 text-[11px] font-black uppercase tracking-[0.2em] text-slate-400 hover:bg-slate-50 rounded-2xl transition-all">Descartar</button>
+            <button
+              onClick={() => {
+                if (textInput.trim()) {
+                  onProcessItems(textInput);
+                  setTextInput('');
+                  onClose();
+                }
+              }}
+              disabled={!textInput.trim() || isProcessing || isRecording}
+              className="flex-[2] bg-slate-900 text-white py-5 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] shadow-2xl shadow-slate-200 hover:bg-emerald-600 transition-all disabled:opacity-50 disabled:grayscale flex items-center justify-center gap-3"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+              Marcar Itens
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const App: React.FC = () => {
   // Public Route Interception
   if (window.location.pathname.startsWith('/join/')) {
@@ -1344,6 +1899,7 @@ const App: React.FC = () => {
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
   const [isModalCompletedLogsOpen, setIsModalCompletedLogsOpen] = useState(false);
   const [isQuickLogModalOpen, setIsQuickLogModalOpen] = useState(false);
+  const [isShoppingAIModalOpen, setIsShoppingAIModalOpen] = useState(false);
   const [editingResource, setEditingResource] = useState<{ field: string, label: string, value: string } | null>(null);
 
   const [newLogText, setNewLogText] = useState('');
@@ -1375,7 +1931,7 @@ const App: React.FC = () => {
   const [isImportPlanOpen, setIsImportPlanOpen] = useState(false);
   const [isCompletedTasksOpen, setIsCompletedTasksOpen] = useState(false);
   const [brainstormIdeas, setBrainstormIdeas] = useState<BrainstormIdea[]>([]);
-  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | null>(null);
+  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | 'shopping' | null>(null);
   const [isBrainstormingAddingText, setIsBrainstormingAddingText] = useState(false);
   const [confirmDeleteLogId, setConfirmDeleteLogId] = useState<string | null>(null);
   const [convertingIdea, setConvertingIdea] = useState<BrainstormIdea | null>(null);
@@ -1513,7 +2069,16 @@ const App: React.FC = () => {
           const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
           const response = await transcribeFunc({ audioBase64: base64String });
           const data = response.data as { raw: string, refined: string };
-          if (data.refined) setNewLogText(prev => prev ? prev + '\n' + data.refined : data.refined);
+          if (data.refined) {
+            if (viewMode === 'sistemas-dev' && selectedSystemId) {
+              await handleCreateWorkItem(selectedSystemId, newLogTipo, data.refined, newLogAttachments);
+              setNewLogText('');
+              setNewLogAttachments([]);
+              showToast("Log registrado via IA!", "success");
+            } else {
+              setNewLogText(prev => prev ? prev + '\n' + data.refined : data.refined);
+            }
+          }
         } catch (error) {
           console.error("Erro ao transcrever:", error);
           showToast("Erro ao processar áudio via Hermes AI.", "error");
@@ -2649,6 +3214,54 @@ const App: React.FC = () => {
     }
   };
 
+  const handleShoppingAIInput = (text: string) => {
+    const candidates = text.split(/,|\be\b|\n|\+ /).map(s => s.trim()).filter(s => s.length > 1);
+    
+    if (candidates.length === 0) {
+      showToast("Não consegui identificar itens na sua fala.", "info");
+      return;
+    }
+
+    try {
+      const itemsJson = localStorage.getItem('hermes_shopping_items');
+      const items: ShoppingItem[] = itemsJson ? JSON.parse(itemsJson) : [];
+      
+      if (items.length === 0) {
+        showToast("Sua base de itens de compra está vazia. Cadastre primeiro os itens nas listas.", "info");
+        return;
+      }
+      
+      let matchedCount = 0;
+      const updatedItems = items.map(item => {
+        const itemLower = item.nome.toLowerCase();
+        const isMatched = candidates.some(c => {
+          const cLower = c.toLowerCase();
+          return itemLower.includes(cLower) || cLower.includes(itemLower);
+        });
+        
+        if (isMatched && !item.isPlanned) {
+          matchedCount++;
+          return { ...item, isPlanned: true };
+        }
+        return item;
+      });
+      
+      if (matchedCount > 0) {
+        localStorage.setItem('hermes_shopping_items', JSON.stringify(updatedItems));
+        showToast(`${matchedCount} itens adicionados ao seu planejamento!`, "success", { label: "Ver Lista", onClick: () => setActiveFerramenta('shopping') });
+        if (activeFerramenta === 'shopping') {
+           setActiveFerramenta(null);
+           setTimeout(() => setActiveFerramenta('shopping'), 50);
+        }
+      } else {
+        showToast("Não encontramos itens correspondentes nas suas listas.", "info");
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao processar compras via IA.", "error");
+    }
+  };
+
   const handleUpdateWorkItem = async (id: string, updates: Partial<WorkItem>) => {
     try {
       await updateDoc(doc(db, 'sistemas_work_items', id), {
@@ -3690,6 +4303,18 @@ const App: React.FC = () => {
                   </div>
                   <div className="relative">
                     <button
+                      onClick={() => {
+                        setIsShoppingAIModalOpen(true);
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className="p-1.5 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors text-emerald-600"
+                      aria-label="Inteligência de Compras"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <button
                       onClick={() => setIsSettingsModalOpen(true)}
                       className="p-1.5 rounded-lg md:rounded-xl hover:bg-slate-100 transition-colors"
                       aria-label="Configurações"
@@ -3761,6 +4386,64 @@ const App: React.FC = () => {
                   >
                     PGC
                   </button>
+                </div>
+              )}
+
+              {/* Opções de Financeiro para Mobile */}
+              {viewMode === 'finance' && (
+                <div className="flex flex-col md:hidden gap-3 mt-3 pt-3 border-t border-slate-100 animate-in slide-in-from-top-2 duration-300">
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+                      <button
+                        onClick={() => setFinanceActiveTab('dashboard')}
+                        className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${financeActiveTab === 'dashboard' ? 'bg-white text-slate-900 shadow-sm border border-slate-100' : 'text-slate-400 hover:text-slate-600'}`}
+                      >
+                        Visão Geral
+                      </button>
+                      <button
+                        onClick={() => setFinanceActiveTab('fixed')}
+                        className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${financeActiveTab === 'fixed' ? 'bg-white text-slate-900 shadow-sm border border-slate-100' : 'text-slate-400 hover:text-slate-600'}`}
+                      >
+                        Obrigações
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => setIsFinanceSettingsOpen(!isFinanceSettingsOpen)}
+                      className={`p-2.5 rounded-xl transition-all border ${isFinanceSettingsOpen ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-50 hover:text-slate-900 shadow-sm'}`}
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                    </button>
+                  </div>
+                  
+                  <div className="flex items-center justify-between bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-11">
+                    <button
+                      onClick={() => {
+                        const newMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+                        const newYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+                        setCurrentMonth(newMonth);
+                        setCurrentYear(newYear);
+                      }}
+                      className="px-4 h-full flex items-center hover:bg-slate-50 text-slate-400 hover:text-slate-900 transition-all border-r border-slate-100"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 19l-7-7 7-7" /></svg>
+                    </button>
+                    <div className="px-4 text-center">
+                        <div className="text-xs font-black text-slate-900 capitalize tracking-tight">
+                            {new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(new Date(currentYear, currentMonth))}
+                        </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const newMonth = currentMonth === 11 ? 0 : currentMonth + 1;
+                        const newYear = currentMonth === 11 ? currentYear + 1 : currentYear;
+                        setCurrentMonth(newMonth);
+                        setCurrentYear(newYear);
+                      }}
+                      className="px-4 h-full flex items-center hover:bg-slate-50 text-slate-400 hover:text-slate-900 transition-all border-l border-slate-100"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -3938,6 +4621,20 @@ const App: React.FC = () => {
                   </div>
                   <div className="relative">
                     <button
+                      onClick={() => setIsShoppingAIModalOpen(true)}
+                      className="bg-white border border-slate-200 text-emerald-600 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative"
+                      aria-label="Inteligência de Compras"
+                      title="Assistente de Compras IA"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                      <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                      </span>
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <button
                       onClick={() => setIsNotificationCenterOpen(!isNotificationCenterOpen)}
                       className="bg-white border border-slate-200 text-slate-700 p-2 rounded-lg md:rounded-xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 relative notification-trigger"
                       aria-label="Notificações"
@@ -4088,60 +4785,62 @@ const App: React.FC = () => {
                   </div>
 
                   <div className="flex flex-col md:flex-row items-center justify-between mb-8 gap-4 px-4 md:px-0">
-                    {/* Layout & Sort Controls */}
-                    <div className="flex flex-wrap items-center gap-4 justify-center md:justify-start">
-                      {/* Area Filter */}
-                      <div className="relative group">
+                    {/* Linha de Filtros e Ações Globais */}
+                    <div className="flex items-center justify-between w-full gap-2">
+                      {/* Lado Esquerdo: Filtro de Área */}
+                      <div className="relative group flex-shrink-1 min-w-0 max-w-[140px] md:max-w-none md:min-w-[180px]">
                         <select
                           value={areaFilter}
                           onChange={(e) => setAreaFilter(e.target.value)}
-                          className="appearance-none bg-white pl-4 pr-10 py-2 rounded-lg md:rounded-xl border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-700 outline-none focus:ring-2 focus:ring-slate-900 shadow-sm hover:border-slate-300 transition-all cursor-pointer"
+                          className="h-11 w-full appearance-none bg-white pl-3 md:pl-4 pr-8 md:pr-10 rounded-xl border border-slate-200 text-[10px] font-black uppercase tracking-tight md:tracking-widest text-slate-700 outline-none focus:ring-2 focus:ring-slate-900 shadow-sm hover:border-slate-300 transition-all cursor-pointer truncate"
                         >
-                          <option value="TODAS">Todas as Áreas</option>
+                          <option value="TODAS">TODAS</option>
                           <option value="CLC">CLC</option>
-                          <option value="ASSISTÊNCIA">Assistência Estudantil</option>
-                          <option value="GERAL">Geral</option>
-                          <option value="NÃO CLASSIFICADA">Não Classificada</option>
+                          <option value="ASSISTÊNCIA">ASSISTÊNCIA</option>
+                          <option value="GERAL">GERAL</option>
+                          <option value="NÃO CLASSIFICADA">PENDENTES</option>
                           {unidades.filter(u => !['CLC', 'ASSISTÊNCIA', 'ASSISTÊNCIA ESTUDANTIL'].includes(u.nome.toUpperCase())).map(u => (
                             <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
                           ))}
                         </select>
-                        <div className="absolute inset-y-0 right-0 flex items-center px-3 pointer-events-none text-slate-400">
+                        <div className="absolute inset-y-0 right-0 flex items-center px-2 md:px-3 pointer-events-none text-slate-400">
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
                         </div>
                       </div>
 
+                      {/* Lado Direito: Modos de Visualização e Organizar Dia */}
+                      <div className="flex items-center gap-1 md:gap-2 flex-shrink-0">
+                        {searchTerm !== 'filter:unclassified' && (
+                          <div className="h-11 bg-slate-100 p-1 rounded-xl shadow-inner inline-flex border border-slate-200">
+                            <button
+                              onClick={() => setDashboardViewMode('list')}
+                              className={`px-2 md:px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${dashboardViewMode === 'list' ? 'bg-white shadow-md text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
+                              <span className="hidden lg:inline">Lista</span>
+                            </button>
+                            <button
+                              onClick={() => setDashboardViewMode('calendar')}
+                              className={`px-2 md:px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${dashboardViewMode === 'calendar' ? 'bg-white shadow-md text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2-2v12a2 2 0 002 2z" /></svg>
+                              <span className="hidden lg:inline">Calendário</span>
+                            </button>
+                          </div>
+                        )}
 
-                      {searchTerm !== 'filter:unclassified' && (
-                        <div className="bg-white p-0.5 md:p-1 rounded-lg md:rounded-xl border border-slate-200 inline-flex shadow-sm">
-                          <button
-                            onClick={() => setDashboardViewMode('list')}
-                            className={`px-3 md:px-4 py-2 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-wide md:tracking-widest transition-all flex items-center gap-1.5 md:gap-2 ${dashboardViewMode === 'list' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
-                          >
-                            <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
-                            <span className="hidden sm:inline">Lista</span>
-                          </button>
-                          <button
-                            onClick={() => setDashboardViewMode('calendar')}
-                            className={`px-3 md:px-4 py-2 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-wide md:tracking-widest transition-all flex items-center gap-1.5 md:gap-2 ${dashboardViewMode === 'calendar' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
-                          >
-                            <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                            <span className="hidden sm:inline">Calendário</span>
-                          </button>
-                        </div>
-                      )}
-
-                      <button
-                        onClick={() => {
-                          setDashboardViewMode('calendar');
-                          setCalendarViewMode('day');
-                          setCalendarDate(new Date());
-                        }}
-                        className="bg-white hover:bg-blue-50 border border-slate-200 text-slate-700 hover:text-blue-700 px-4 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm hover:shadow transition-all flex items-center gap-2 group"
-                      >
-                        <svg className="w-4 h-4 text-slate-400 group-hover:text-blue-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        Organizar o Dia
-                      </button>
+                        <button
+                          onClick={() => {
+                            setDashboardViewMode('calendar');
+                            setCalendarViewMode('day');
+                            setCalendarDate(new Date());
+                          }}
+                          className="h-11 bg-slate-900 text-white px-3 md:px-6 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center justify-center gap-2 active:scale-95"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                          <span className="hidden sm:inline">Organizar</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -4625,7 +5324,7 @@ const App: React.FC = () => {
                   {!selectedSystemId ? (
                     /* VISÃO GERAL - LISTA DE SISTEMAS */
                     <>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-0 md:gap-8 px-0 pt-8">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-8 p-3 md:p-0 pt-8">
                         {unidades.filter(u => u.nome.startsWith('SISTEMA:')).map(unit => {
                           const sysDetails = sistemasDetalhes.find(s => s.id === unit.id) || {
                             id: unit.id,
@@ -4641,7 +5340,7 @@ const App: React.FC = () => {
                             <button
                               key={unit.id}
                               onClick={() => setSelectedSystemId(unit.id)}
-                              className="bg-white border border-slate-200 rounded-none md:rounded-[2.5rem] p-8 text-left shadow-none md:shadow-xl hover:shadow-none md:hover:shadow-2xl hover:border-violet-300 transition-all group relative overflow-hidden -ml-px -mt-px md:m-0"
+                              className="bg-white border border-slate-200 rounded-2xl md:rounded-[2.5rem] p-6 md:p-8 text-left shadow-sm md:shadow-xl hover:shadow-md md:hover:shadow-2xl hover:border-violet-300 transition-all group relative overflow-hidden"
                             >
                               <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
                               <div className="relative z-10 space-y-6">
@@ -4742,13 +5441,13 @@ const App: React.FC = () => {
                             </div>
 
                             {/* Status Stepper */}
-                            <div className="bg-slate-50 border-b border-slate-100 p-6 md:p-10 flex flex-col items-center gap-8">
+                            <div className="bg-slate-50 border-b border-slate-100 p-4 md:p-10 flex flex-col items-center gap-4 md:gap-8">
                               <div className="text-center">
-                                <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight uppercase">{systemName}</h2>
-                                <div className="w-12 h-1.5 bg-violet-500 mx-auto mt-3 rounded-full"></div>
+                                <h2 className="text-lg md:text-3xl font-black text-slate-900 tracking-tight uppercase">{systemName}</h2>
+                                <div className="w-8 h-1 bg-violet-500 mx-auto mt-2 rounded-full"></div>
                               </div>
 
-                              <div className="flex flex-wrap items-center justify-center bg-slate-200/50 p-1.5 rounded-none md:rounded-2xl gap-1 w-full md:w-auto">
+                              <div className="flex flex-wrap items-center justify-center bg-slate-200/50 p-1 rounded-xl md:rounded-2xl gap-1 w-full md:w-auto">
                                 {steps.map((step, idx) => {
                                   const isActive = sysDetails.status === step;
                                   const stepLabels: Record<string, string> = {
@@ -4781,40 +5480,29 @@ const App: React.FC = () => {
                             </div>
 
                             <div className="p-0 md:p-8 grid grid-cols-1 lg:grid-cols-3 gap-0 md:gap-12">
-                              {/* Coluna 2: Links e Recursos (Agora embaixo no mobile) */}
-                              <div className="lg:col-span-1 order-2 md:order-1 space-y-0 md:space-y-8">
-                                <div className="p-6 md:p-0">
-                                  <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
-                                    <span className="w-1 h-4 bg-violet-500 rounded-full"></span>
-                                    Recursos Principais
+                              {/* Coluna 2: Links e Recursos (Topo no mobile) */}
+                              <div className="lg:col-span-1 order-1 md:order-1 space-y-0 md:space-y-8">
+                                <div className="p-4 md:p-0">
+                                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                                    <span className="w-1 h-3 bg-violet-500 rounded-full"></span>
+                                    Recursos
                                   </h4>
                                 </div>
 
-                                <div className="grid grid-cols-2 md:grid-cols-1 gap-0 md:gap-6">
+                                <div className="grid grid-cols-4 md:grid-cols-1 gap-2 md:gap-6 px-4 md:px-0 mb-8 md:mb-0">
                                   {/* Repositório */}
                                   <button
                                     onClick={() => setEditingResource({ field: 'repositorio_principal', label: 'Repositório', value: sysDetails.repositorio_principal || '' })}
-                                    className="group bg-slate-900 p-6 rounded-none md:rounded-3xl border border-slate-800 hover:border-slate-600 hover:shadow-xl transition-all text-left flex flex-col justify-between aspect-square md:aspect-auto md:min-h-[120px] relative overflow-hidden -ml-px -mt-px md:m-0"
+                                    className="group bg-slate-900 p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-800 hover:border-slate-600 hover:shadow-xl transition-all text-center md:text-left flex flex-col items-center md:items-stretch justify-center md:justify-between aspect-square md:aspect-auto md:min-h-[120px] relative overflow-hidden"
                                   >
                                     <div className="absolute top-0 right-0 w-24 h-24 bg-violet-500/10 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
-                                    {sysDetails.repositorio_principal && (
-                                      <a
-                                        href={sysDetails.repositorio_principal}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        onClick={(e) => e.stopPropagation()}
-                                        className="absolute top-4 right-4 z-20 p-2 bg-white/10 text-white rounded-lg hover:bg-violet-500 transition-all"
-                                      >
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                                      </a>
-                                    )}
-                                    <div className="relative z-10 space-y-3">
-                                      <div className="w-8 h-8 bg-white/10 text-white rounded-lg flex items-center justify-center">
-                                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" /></svg>
+                                    <div className="relative z-10 space-y-2 md:space-y-3">
+                                      <div className="w-8 h-8 md:w-10 md:h-10 bg-white/10 text-white rounded-lg flex items-center justify-center mx-auto md:mx-0">
+                                        <svg className="w-4 h-4 md:w-5 md:h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" /></svg>
                                       </div>
-                                      <h5 className="text-[10px] md:text-xs font-black text-white uppercase tracking-widest">Repositório</h5>
+                                      <h5 className="text-[8px] md:text-xs font-black text-white uppercase tracking-widest leading-none">Repo</h5>
                                     </div>
-                                    <div className="relative z-10">
+                                    <div className="hidden md:block relative z-10">
                                       <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{sysDetails.repositorio_principal ? 'Editar' : 'Configurar'}</span>
                                     </div>
                                   </button>
@@ -4822,27 +5510,16 @@ const App: React.FC = () => {
                                   {/* Documentação */}
                                   <button
                                     onClick={() => setEditingResource({ field: 'link_documentacao', label: 'Documentação', value: sysDetails.link_documentacao || '' })}
-                                    className="group bg-white p-6 rounded-none md:rounded-3xl border border-slate-200 hover:border-violet-300 hover:shadow-xl transition-all text-left flex flex-col justify-between aspect-square md:aspect-auto md:min-h-[120px] relative overflow-hidden -ml-px -mt-px md:m-0"
+                                    className="group bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-200 hover:border-violet-300 hover:shadow-xl transition-all text-center md:text-left flex flex-col items-center md:items-stretch justify-center md:justify-between aspect-square md:aspect-auto md:min-h-[120px] relative overflow-hidden"
                                   >
                                     <div className="absolute top-0 right-0 w-24 h-24 bg-violet-500/5 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
-                                    {sysDetails.link_documentacao && (
-                                      <a
-                                        href={sysDetails.link_documentacao}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        onClick={(e) => e.stopPropagation()}
-                                        className="absolute top-4 right-4 z-20 p-2 bg-violet-50 text-violet-600 rounded-lg hover:bg-violet-500 hover:text-white transition-all"
-                                      >
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                                      </a>
-                                    )}
-                                    <div className="relative z-10 space-y-3">
-                                      <div className="w-8 h-8 bg-violet-100 text-violet-600 rounded-lg flex items-center justify-center">
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                    <div className="relative z-10 space-y-2 md:space-y-3">
+                                      <div className="w-8 h-8 md:w-10 md:h-10 bg-violet-100 text-violet-600 rounded-lg flex items-center justify-center mx-auto md:mx-0">
+                                        <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                       </div>
-                                      <h5 className="text-[10px] md:text-xs font-black text-slate-900 uppercase tracking-widest">Docs</h5>
+                                      <h5 className="text-[8px] md:text-xs font-black text-slate-900 uppercase tracking-widest leading-none">Docs</h5>
                                     </div>
-                                    <div className="relative z-10">
+                                    <div className="hidden md:block relative z-10">
                                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{sysDetails.link_documentacao ? 'Editar' : 'Configurar'}</span>
                                     </div>
                                   </button>
@@ -4850,27 +5527,16 @@ const App: React.FC = () => {
                                   {/* AI Studio */}
                                   <button
                                     onClick={() => setEditingResource({ field: 'link_google_ai_studio', label: 'AI Studio', value: sysDetails.link_google_ai_studio || '' })}
-                                    className="group bg-white p-6 rounded-none md:rounded-3xl border border-slate-200 hover:border-blue-300 hover:shadow-xl transition-all text-left flex flex-col justify-between aspect-square md:aspect-auto md:min-h-[120px] relative overflow-hidden -ml-px -mt-px md:m-0"
+                                    className="group bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-200 hover:border-blue-300 hover:shadow-xl transition-all text-center md:text-left flex flex-col items-center md:items-stretch justify-center md:justify-between aspect-square md:aspect-auto md:min-h-[120px] relative overflow-hidden"
                                   >
                                     <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
-                                    {sysDetails.link_google_ai_studio && (
-                                      <a
-                                        href={sysDetails.link_google_ai_studio}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        onClick={(e) => e.stopPropagation()}
-                                        className="absolute top-4 right-4 z-20 p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-500 hover:text-white transition-all"
-                                      >
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                                      </a>
-                                    )}
-                                    <div className="relative z-10 space-y-3">
-                                      <div className="w-8 h-8 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center">
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                    <div className="relative z-10 space-y-2 md:space-y-3">
+                                      <div className="w-8 h-8 md:w-10 md:h-10 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center mx-auto md:mx-0">
+                                        <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                                       </div>
-                                      <h5 className="text-[10px] md:text-xs font-black text-slate-900 uppercase tracking-widest">AI Studio</h5>
+                                      <h5 className="text-[8px] md:text-xs font-black text-slate-900 uppercase tracking-widest leading-none">AI</h5>
                                     </div>
-                                    <div className="relative z-10">
+                                    <div className="hidden md:block relative z-10">
                                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{sysDetails.link_google_ai_studio ? 'Editar' : 'Configurar'}</span>
                                     </div>
                                   </button>
@@ -4878,53 +5544,35 @@ const App: React.FC = () => {
                                   {/* Link Hospedado */}
                                   <button
                                     onClick={() => setEditingResource({ field: 'link_hospedado', label: 'Hospedagem', value: sysDetails.link_hospedado || '' })}
-                                    className="group bg-emerald-50 p-6 rounded-none md:rounded-3xl border border-emerald-100 hover:border-emerald-300 hover:shadow-xl transition-all text-left flex flex-col justify-between aspect-square md:aspect-auto md:min-h-[120px] relative overflow-hidden -ml-px -mt-px md:m-0"
+                                    className="group bg-emerald-50 p-4 md:p-6 rounded-2xl md:rounded-3xl border border-emerald-100 hover:border-emerald-300 hover:shadow-xl transition-all text-center md:text-left flex flex-col items-center md:items-stretch justify-center md:justify-between aspect-square md:aspect-auto md:min-h-[120px] relative overflow-hidden"
                                   >
                                     <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
-                                    {sysDetails.link_hospedado && (
-                                      <a
-                                        href={sysDetails.link_hospedado}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        onClick={(e) => e.stopPropagation()}
-                                        className="absolute top-4 right-4 z-20 p-2 bg-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-500 hover:text-white transition-all"
-                                      >
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                                      </a>
-                                    )}
-                                    <div className="relative z-10 space-y-3">
-                                      <div className="w-8 h-8 bg-emerald-100 text-emerald-600 rounded-lg flex items-center justify-center">
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
+                                    <div className="relative z-10 space-y-2 md:space-y-3">
+                                      <div className="w-8 h-8 md:w-10 md:h-10 bg-emerald-100 text-emerald-600 rounded-lg flex items-center justify-center mx-auto md:mx-0">
+                                        <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
                                       </div>
-                                      <h5 className="text-[10px] md:text-xs font-black text-emerald-900 uppercase tracking-widest">Produção</h5>
+                                      <h5 className="text-[8px] md:text-xs font-black text-emerald-900 uppercase tracking-widest leading-none">App</h5>
                                     </div>
-                                    <div className="relative z-10">
+                                    <div className="hidden md:block relative z-10">
                                       <span className="text-[10px] font-bold text-emerald-600/60 uppercase tracking-widest">{sysDetails.link_hospedado ? 'Editar' : 'Configurar'}</span>
                                     </div>
                                   </button>
                                 </div>
                               </div>
 
-                              {/* Coluna 1: Logs de Trabalho (Agora em cima no mobile) */}
-                              <div className="lg:col-span-2 order-1 md:order-2 space-y-0 md:space-y-6">
+                              {/* Coluna 1: Logs de Trabalho (Abaixo no mobile) */}
+                              <div className="lg:col-span-2 order-2 md:order-2 space-y-0 md:space-y-6">
                                 <div className="bg-white border-0 md:border border-slate-200 rounded-none md:rounded-[2.5rem] overflow-hidden flex flex-col min-h-[400px] md:min-h-[600px] shadow-none md:shadow-sm">
                                   {/* Novo Log Input */}
                                   <div className="p-6 md:p-8 border-b border-slate-100 bg-slate-50">
                                     <div className="flex flex-col gap-6">
                                       <div className="flex items-center justify-between gap-4">
-                                        <div className="flex items-center gap-3">
-                                          <div className="p-2 bg-violet-600 text-white rounded-lg md:rounded-xl">
-                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                        <div className="flex items-center gap-2">
+                                          <div className="p-1.5 bg-violet-600 text-white rounded-lg">
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                                           </div>
-                                          <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Registro de Desenvolvimento</h4>
+                                          <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Dev Log</h4>
                                         </div>
-                                        <button
-                                          onClick={() => setIsLogsModalOpen(true)}
-                                          className="flex items-center gap-2 px-4 py-2 bg-violet-50 text-violet-600 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-violet-100 transition-all border border-violet-100"
-                                        >
-                                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                          Logs Ativos
-                                        </button>
                                       </div>
 
                                       <div className="flex flex-col gap-4">
@@ -4933,7 +5581,7 @@ const App: React.FC = () => {
                                             value={newLogText}
                                             onChange={setNewLogText}
                                             placeholder="O que foi feito no sistema?"
-                                            className="bg-white min-h-[120px]"
+                                            className="bg-white min-h-[120px] pb-10"
                                           />
                                           <div className="absolute right-4 top-4 flex flex-col gap-2">
                                             <button
@@ -4941,7 +5589,7 @@ const App: React.FC = () => {
                                               disabled={isProcessingLog}
                                               className={`p-3 rounded-xl transition-all ${
                                                 isRecordingLog
-                                                  ? 'bg-rose-600 text-white animate-pulse shadow-lg'
+                                                  ? 'bg-emerald-600 text-white animate-pulse shadow-lg'
                                                   : isProcessingLog
                                                     ? 'bg-violet-100 text-violet-600 cursor-wait'
                                                     : 'bg-slate-100 text-slate-400 hover:text-violet-600'
@@ -4951,12 +5599,32 @@ const App: React.FC = () => {
                                               {isProcessingLog ? (
                                                 <div className="w-5 h-5 border-2 border-violet-600 border-t-transparent rounded-full animate-spin"></div>
                                               ) : isRecordingLog ? (
-                                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
                                               ) : (
                                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
                                               )}
                                             </button>
                                           </div>
+
+                                          <label className={`absolute left-3 bottom-2 p-2 rounded-xl transition-all ${isUploading ? 'bg-violet-100 animate-pulse pointer-events-none' : 'text-slate-400 hover:text-violet-600 hover:bg-violet-50'} cursor-pointer`}>
+                                            <input
+                                              type="file"
+                                              accept="image/*"
+                                              className="hidden"
+                                              onChange={async (e) => {
+                                                const file = e.target.files?.[0];
+                                                if (file) {
+                                                  const item = await handleFileUploadToDrive(file);
+                                                  if (item) setNewLogAttachments(prev => [...prev, item]);
+                                                }
+                                              }}
+                                            />
+                                            {isUploading ? (
+                                              <div className="w-4 h-4 border-2 border-violet-600 border-t-transparent rounded-full animate-spin"></div>
+                                            ) : (
+                                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                                            )}
+                                          </label>
                                         </div>
                                         <div className="flex flex-wrap gap-2">
                                           {newLogAttachments.map((at, i) => (
@@ -4970,7 +5638,7 @@ const App: React.FC = () => {
                                               </button>
                                             </div>
                                           ))}
-                                          <label className={`w-16 h-16 border-2 border-dashed border-slate-200 rounded-lg flex items-center justify-center cursor-pointer hover:border-violet-400 hover:bg-violet-50 transition-all ${isUploading ? 'animate-pulse pointer-events-none' : ''}`}>
+                                          <label className={`w-16 h-16 border-2 border-dashed border-slate-200 rounded-lg hidden md:flex items-center justify-center cursor-pointer hover:border-violet-400 hover:bg-violet-50 transition-all ${isUploading ? 'animate-pulse pointer-events-none' : ''}`}>
                                             <input
                                               type="file"
                                               accept="image/*"
@@ -5005,8 +5673,8 @@ const App: React.FC = () => {
                                     </div>
                                   </div>
 
-                                  {/* Listagem de Logs (Desktop) - Hidden on Mobile if Modal is preferred, but user said "similar to action diary", so we show a button to open modal */}
-                                  <div className="hidden md:block flex-1 overflow-y-auto p-8 bg-white space-y-8">
+                                  {/* Listagem de Logs */}
+                                  <div className="block flex-1 overflow-y-auto p-4 md:p-8 bg-white space-y-8 pb-32">
                                     {/* Ativos (Não concluídos) */}
                                     <div className="space-y-4">
                                       <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-violet-500 pl-3">Logs Ativos</h5>
@@ -5956,6 +6624,18 @@ const App: React.FC = () => {
           onClose={() => setIsQuickLogModalOpen(false)}
           onAddLog={handleAddQuickLog}
           unidades={unidades}
+        />
+      )}
+
+      {isShoppingAIModalOpen && (
+        <ShoppingAIModal
+          isOpen={isShoppingAIModalOpen}
+          onClose={() => setIsShoppingAIModalOpen(false)}
+          onProcessItems={handleShoppingAIInput}
+          onViewList={() => {
+            setActiveFerramenta('shopping');
+            setIsShoppingAIModalOpen(false);
+          }}
         />
       )}
     </div>

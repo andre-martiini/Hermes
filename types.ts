@@ -547,3 +547,21 @@ export interface TransacaoProjeto {
     status: 'pendente' | 'pago' | 'cancelado';
     tipo: 'compra' | 'servico' | 'bolsa';
 }
+
+// Shopping List Module Types
+export interface ShoppingLocation {
+    id: string;
+    nome: string;
+    icon?: string; // e.g., "cart", "pills", "store"
+}
+
+export interface ShoppingItem {
+    id: string;
+    nome: string;
+    categoria: string;
+    quantidade: string;
+    unit: string;
+    isPlanned: boolean;
+    isPurchased: boolean;
+    locationId: string;
+}
