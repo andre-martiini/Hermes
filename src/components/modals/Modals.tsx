@@ -923,16 +923,18 @@ export const DailyHabitsModal = ({
     </div>
   );
 };
-export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert }: { unidades: { id: string, nome: string }[], onSave: (data: Partial<Tarefa>) => void, onClose: () => void, showAlert: (title: string, message: string) => void }) => {
+export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialData }: { unidades: { id: string, nome: string }[], onSave: (data: Partial<Tarefa>) => void, onClose: () => void, showAlert: (title: string, message: string) => void, initialData?: Partial<Tarefa> }) => {
   const [formData, setFormData] = useState({
-    titulo: '',
-    data_inicio: formatDateLocalISO(new Date()),
-    data_limite: '',
+    titulo: initialData?.titulo || '',
+    data_inicio: initialData?.data_inicio || formatDateLocalISO(new Date()),
+    data_limite: initialData?.data_limite || '',
     data_criacao: new Date().toISOString(), // Actual creation timestamp
-    status: 'em andamento' as Status,
-    categoria: 'NÃO CLASSIFICADA' as Categoria,
-    notas: '',
-    is_single_day: false
+    status: initialData?.status || 'em andamento' as Status,
+    categoria: initialData?.categoria || 'NÃO CLASSIFICADA' as Categoria,
+    notas: initialData?.notas || '',
+    is_single_day: !!initialData?.is_single_day,
+    horario_inicio: initialData?.horario_inicio || '',
+    horario_fim: initialData?.horario_fim || ''
   });
 
   const [autoClassified, setAutoClassified] = useState(false);
@@ -1021,6 +1023,27 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert }: { unid
                   }));
                 }}
                 className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Horário Início</label>
+              <input
+                type="time"
+                value={formData.horario_inicio}
+                onChange={e => setFormData({ ...formData, horario_inicio: e.target.value })}
+                className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Horário Fim</label>
+              <input
+                type="time"
+                value={formData.horario_fim}
+                onChange={e => setFormData({ ...formData, horario_fim: e.target.value })}
+                className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
               />
             </div>
           </div>
@@ -1116,7 +1139,9 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
     categoria: task.categoria || 'NÃO CLASSIFICADA',
     notas: task.notas || '',
     is_single_day: !!task.is_single_day,
-    entregas_relacionadas: task.entregas_relacionadas || []
+    entregas_relacionadas: task.entregas_relacionadas || [],
+    horario_inicio: task.horario_inicio || '',
+    horario_fim: task.horario_fim || ''
   });
 
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
@@ -1186,6 +1211,27 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
                   }));
                 }}
                 className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Horário Início</label>
+              <input
+                type="time"
+                value={formData.horario_inicio}
+                onChange={e => setFormData({ ...formData, horario_inicio: e.target.value })}
+                className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Horário Fim</label>
+              <input
+                type="time"
+                value={formData.horario_fim}
+                onChange={e => setFormData({ ...formData, horario_fim: e.target.value })}
+                className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
               />
             </div>
           </div>

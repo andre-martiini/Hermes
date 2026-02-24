@@ -43,15 +43,14 @@ export const DiarioBordoUI = ({
       if (parts.length >= 3) { nome = parts[1]; url = parts[2]; }
       else { url = text.replace('LINK::', ''); }
       return (
-        <a href={url} target="_blank" rel="noreferrer" className={`group flex items-center gap-4 p-4 rounded-2xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-blue-50/50 border-blue-100 hover:bg-blue-50'}`}>
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-blue-200 text-blue-600'}`}>
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+        <a href={url} target="_blank" rel="noreferrer" className={`group flex items-center gap-2 p-2 rounded-xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-blue-50/50 border-blue-100 hover:bg-blue-50'}`}>
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-blue-200 text-blue-600'}`}>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
           </div>
           <div className="flex-1 min-w-0">
-            <p className={`text-xs font-bold truncate ${isTimerRunning ? 'text-white' : 'text-blue-900'}`}>{nome || url}</p>
-            <p className={`text-[10px] uppercase font-black tracking-widest mt-0.5 ${isTimerRunning ? 'text-white/40' : 'text-blue-400'}`}>Link Externo</p>
+            <p className={`text-[11px] font-bold truncate ${isTimerRunning ? 'text-white' : 'text-blue-900'}`}>{nome || url}</p>
+            <p className={`text-[8px] uppercase font-black tracking-widest mt-0.5 opacity-50 ${isTimerRunning ? 'text-white/40' : 'text-blue-400'}`}>Link</p>
           </div>
-          <svg className={`w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity ${isTimerRunning ? 'text-white/60' : 'text-blue-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
         </a>
       );
     }
@@ -65,17 +64,17 @@ export const DiarioBordoUI = ({
       const num = contact.replace(/\D/g, '');
       const waLink = num.length >= 10 ? `https://wa.me/55${num}` : null;
       return (
-        <div className={`group flex items-center gap-4 p-4 rounded-2xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-emerald-50/50 border-emerald-100'}`}>
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-emerald-200 text-emerald-600'}`}>
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.022-.014-.503-.245-.583-.273-.08-.027-.138-.04-.197.048-.058.088-.227.288-.278.346-.05.058-.1.066-.188.022-.088-.044-.372-.137-.708-.437-.26-.231-.437-.515-.487-.603-.05-.088-.005-.135.039-.179.04-.04.088-.103.131-.154.044-.051.059-.088.088-.146.03-.058.015-.11-.008-.154-.022-.044-.197-.474-.27-.65-.072-.172-.143-.149-.197-.151l-.168-.002c-.058 0-.154.022-.234.11-.08.088-.307.3-.307.732 0 .432.315.849.359.907.044.058.62 1.04 1.502 1.42.21.09.372.143.5.184.21.067.4.057.55.035.168-.024.503-.205.574-.403.072-.198.072-.367.051-.403-.021-.037-.08-.058-.168-.102z" /><path d="M12 2C6.477 2 2 6.477 2 12c0 1.891.524 3.66 1.434 5.168L2 22l4.958-1.412A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.96 7.96 0 01-4.07-1.112l-.292-.174-3.024.863.878-2.946-.19-.302A7.957 7.957 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z" /></svg>
+        <div className={`group flex items-center gap-2 p-2 rounded-xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-emerald-50/50 border-emerald-100'}`}>
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-emerald-200 text-emerald-600'}`}>
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.022-.014-.503-.245-.583-.273-.08-.027-.138-.04-.197.048-.058.088-.227.288-.278.346-.05.058-.1.066-.188.022-.088-.044-.372-.137-.708-.437-.26-.231-.437-.515-.487-.603-.05-.088-.005-.135.039-.179.04-.04.088-.103.131-.154.044-.051.059-.088.088-.146.03-.058.015-.11-.008-.154-.022-.044-.197-.474-.27-.65-.072-.172-.143-.149-.197-.151l-.168-.002c-.058 0-.154.022-.234.11-.08.088-.307.3-.307.732 0 .432.315.849.359.907.044.058.62 1.04 1.502 1.42.21.09.372.143.5.184.21.067.4.057.55.035.168-.024.503-.205.574-.403.072-.198.072-.367.051-.403-.021-.037-.08-.058-.168-.102z" /><path d="M12 2C6.477 2 2 6.477 2 12c0 1.891.524 3.66 1.434 5.168L2 22l4.958-1.412A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.96 7.96 0 01-4.07-1.112l-.292-.174-3.024.863.878-2.946-.19-.302A7.957 7.957 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z" /></svg>
           </div>
           <div className="flex-1 min-w-0">
-            <p className={`text-xs font-bold truncate ${isTimerRunning ? 'text-white' : 'text-emerald-900'}`}>{nome || contact}</p>
-            <p className={`text-[10px] uppercase font-black tracking-widest mt-0.5 ${isTimerRunning ? 'text-white/40' : 'text-emerald-500'}`}>Contato Profissional</p>
+            <p className={`text-[11px] font-bold truncate ${isTimerRunning ? 'text-white' : 'text-emerald-900'}`}>{nome || contact}</p>
+            <p className={`text-[8px] uppercase font-black tracking-widest mt-0.5 opacity-50 ${isTimerRunning ? 'text-white/40' : 'text-emerald-500'}`}>Contato</p>
           </div>
           {waLink && (
-            <a href={waLink} target="_blank" rel="noreferrer" className={`p-2 rounded-lg transition-colors ${isTimerRunning ? 'hover:bg-white/10 text-white' : 'hover:bg-emerald-200 text-emerald-600'}`} title="WhatsApp">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+            <a href={waLink} target="_blank" rel="noreferrer" className={`p-1 rounded-lg transition-colors ${isTimerRunning ? 'hover:bg-white/10 text-white' : 'hover:bg-emerald-200 text-emerald-600'}`} title="WhatsApp">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
             </a>
           )}
         </div>
@@ -87,15 +86,14 @@ export const DiarioBordoUI = ({
       const nome = parts[1] || 'Arquivo';
       const url = parts[2] || '#';
       return (
-        <a href={url} target="_blank" rel="noreferrer" className={`group flex items-center gap-4 p-4 rounded-2xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-amber-50/50 border-amber-100 hover:bg-amber-50'}`}>
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-amber-200 text-amber-600'}`}>
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+        <a href={url} target="_blank" rel="noreferrer" className={`group flex items-center gap-2 p-2 rounded-xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-amber-50/50 border-amber-100 hover:bg-amber-50'}`}>
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-amber-200 text-amber-600'}`}>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
           </div>
           <div className="flex-1 min-w-0">
-            <p className={`text-xs font-bold truncate ${isTimerRunning ? 'text-white' : 'text-amber-900'}`}>{nome}</p>
-            <p className={`text-[10px] uppercase font-black tracking-widest mt-0.5 ${isTimerRunning ? 'text-white/40' : 'text-amber-600'}`}>Anexo</p>
+            <p className={`text-[11px] font-bold truncate ${isTimerRunning ? 'text-white' : 'text-amber-900'}`}>{nome}</p>
+            <p className={`text-[8px] uppercase font-black tracking-widest mt-0.5 opacity-50 ${isTimerRunning ? 'text-white/40' : 'text-amber-600'}`}>Anexo</p>
           </div>
-          <svg className={`w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity ${isTimerRunning ? 'text-white/60' : 'text-amber-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
         </a>
       );
     }
@@ -104,7 +102,7 @@ export const DiarioBordoUI = ({
   };
 
   return (
-<div className={`flex flex-col h-full relative rounded-b-2xl ${isTimerRunning ? 'bg-black/20' : 'bg-slate-50'}`}>
+<div className={`flex flex-col h-full relative rounded-none md:rounded-b-2xl ${isTimerRunning ? 'bg-black/20' : 'bg-slate-50'}`}>
       {/* ── Área de histórico com scroll suave e scrollbar fina ── */}
       <div
         onScroll={handleDiaryScroll}
@@ -122,7 +120,7 @@ export const DiarioBordoUI = ({
         `}</style>
 
         {/* Wrapper interno com padding para afastar os elementos das bordas, sem tirar a barra de rolagem do limite */}
-        <div className="px-4 md:px-6 pt-4 pb-2">
+        <div className="px-3 md:px-6 pt-2 pb-2">
           <div className="flex justify-center mb-6">
             <div className={`border rounded-full px-4 py-2 text-[10px] uppercase tracking-widest font-black ${isTimerRunning ? 'bg-white/5 border-white/5 text-white/40' : 'bg-slate-100 border-slate-200 text-slate-400'}`}>
               Início da Sessão • {new Date(task.data_criacao || Date.now()).toLocaleDateString()}
@@ -158,7 +156,7 @@ export const DiarioBordoUI = ({
                       </div>
                     )}
                     <div className="flex flex-col gap-1 items-start animate-in fade-in slide-in-from-bottom-2 duration-300 w-full mb-3">
-                      <div className={`p-4 rounded-2xl rounded-tl-none border max-w-full md:max-w-[90%] shadow-lg relative group ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-100 shadow-slate-200'}`}>
+                    <div className={`p-4 rounded-none md:rounded-2xl md:rounded-tl-none border max-w-full md:max-w-[90%] shadow-lg relative group ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-100 shadow-slate-200'}`}>
                         {renderDiaryContent(entry.nota)}
                         <div className="flex items-center justify-between mt-2 gap-4">
                           <span className={`text-[9px] font-black uppercase tracking-wider ${isTimerRunning ? 'text-white/30' : 'text-slate-300'}`}>
@@ -206,9 +204,9 @@ export const DiarioBordoUI = ({
       </div>
 
       {/* ── Área de Input Compacta ── */}
-      <div className="shrink-0 pt-3 px-4 md:px-6 pb-4 md:pb-6">
+      <div className="shrink-0 pt-1 px-2 md:px-6 pb-2 md:pb-6">
         {/* Container principal do input - Agora com fundo branco e borda suave */}
-        <div className={`rounded-2xl border shadow-sm transition-all ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-200'}`}>
+        <div className={`rounded-none md:rounded-2xl border shadow-sm transition-all ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-200'}`}>
 
           {/* Campo de texto */}
           <div className="px-3 pt-3 pb-1">
@@ -244,7 +242,7 @@ export const DiarioBordoUI = ({
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
                 </button>
                 {showAttachMenu && (
-                  <div className={`absolute bottom-8 left-0 w-48 rounded-xl border shadow-xl overflow-hidden animate-in zoom-in-95 origin-bottom-left z-[100] ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-200'}`}>
+                  <div className={`absolute bottom-8 left-0 w-48 rounded-none md:rounded-xl border shadow-xl overflow-hidden animate-in zoom-in-95 origin-bottom-left z-[100] ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-200'}`}>
                     <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleFileUploadInput} />
                     <button onClick={() => fileInputRef.current?.click()} className={`w-full text-left px-4 py-3 text-xs font-bold flex items-center gap-2 ${isTimerRunning ? 'text-white/80 hover:bg-white/10' : 'text-slate-700 hover:bg-slate-50'}`}>
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
@@ -314,7 +312,7 @@ export const DiarioBordoUI = ({
         </div>
 
         {/* Helper text */}
-        <p className={`text-[11px] mt-1.5 px-2 ${isTimerRunning ? 'text-white/20' : 'text-slate-400'}`}>
+        <p className={`hidden md:block text-[11px] mt-1.5 px-2 ${isTimerRunning ? 'text-white/20' : 'text-slate-400'}`}>
           Enter para enviar · Shift+Enter para nova linha
         </p>
       </div>

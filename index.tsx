@@ -366,6 +366,7 @@ const FerramentasView = ({
   onAddTextIdea, 
   onUpdateIdea, 
   onConvertToLog, 
+  onConvertToTask, 
   activeTool, 
   setActiveTool, 
   isAddingText, 
@@ -379,6 +380,7 @@ const FerramentasView = ({
   onAddTextIdea: (text: string) => void,
   onUpdateIdea: (id: string, text: string) => void,
   onConvertToLog: (idea: BrainstormIdea) => void,
+  onConvertToTask: (idea: BrainstormIdea) => void,
   activeTool: 'brainstorming' | 'slides' | null,
   setActiveTool: (tool: 'brainstorming' | 'slides' | null) => void,
   isAddingText: boolean,
@@ -692,6 +694,13 @@ const FerramentasView = ({
                         title="Converter em Log"
                       >
                         <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+                      </button>
+                      <button
+                        onClick={() => onConvertToTask(idea)}
+                        className="text-slate-400 hover:text-sky-600 p-2 rounded-lg md:rounded-xl transition-colors"
+                        title="Converter em Ação"
+                      >
+                        <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
                       </button>
                       <button
                         onClick={() => {
@@ -1371,6 +1380,7 @@ const App: React.FC = () => {
   const [confirmDeleteLogId, setConfirmDeleteLogId] = useState<string | null>(null);
   const [convertingIdea, setConvertingIdea] = useState<BrainstormIdea | null>(null);
   const [isSystemSelectorOpen, setIsSystemSelectorOpen] = useState(false);
+  const [taskInitialData, setTaskInitialData] = useState<Partial<Tarefa> | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -1997,9 +2007,13 @@ const App: React.FC = () => {
       t.data_limite < todayStr
     );
 
+    if (overdue.length === 0) return;
+
     try {
       const promises = overdue.map(t => updateDoc(doc(db, 'tarefas', t.id), {
         data_limite: todayStr,
+        horario_inicio: null,
+        horario_fim: null,
         data_atualizacao: new Date().toISOString()
       }));
       await Promise.all(promises);
@@ -2009,6 +2023,22 @@ const App: React.FC = () => {
     } catch (err) {
       console.error(err);
       showToast("Erro ao atualizar tarefas.", 'error');
+    }
+  };
+
+  const handleUpdateToToday = async (task: Tarefa) => {
+    const todayStr = formatDateLocalISO(new Date());
+    try {
+      await updateDoc(doc(db, 'tarefas', task.id), {
+        data_limite: todayStr,
+        horario_inicio: null,
+        horario_fim: null,
+        data_atualizacao: new Date().toISOString()
+      });
+      showToast("Ação atualizada para hoje!", 'success');
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao atualizar ação.", 'error');
     }
   };
 
@@ -2540,7 +2570,7 @@ const App: React.FC = () => {
     if (!unit) return;
 
     // Criar o log no sistema ao invés de uma tarefa geral (ação)
-    await handleCreateWorkItem(sistemaId, 'ajuste', convertingIdea.text);
+    await handleCreateWorkItem(sistemaId, 'ajuste', convertingIdea.text, [], true);
 
     // Remover a nota original após a conversão bem-sucedida
     await deleteDoc(doc(db, 'brainstorm_ideas', convertingIdea.id));
@@ -2548,6 +2578,23 @@ const App: React.FC = () => {
     setIsSystemSelectorOpen(false);
     setConvertingIdea(null);
     showToast("Nota convertida em log do sistema com sucesso!", "success");
+  };
+
+  const handleConvertToTask = (idea: BrainstormIdea) => {
+    const timeMatch = idea.text.match(/\[Horário:\s*(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})\]/);
+    const start = timeMatch ? timeMatch[1] : '';
+    const end = timeMatch ? timeMatch[2] : '';
+
+    setTaskInitialData({
+      titulo: idea.text.replace(/\[Horário:\s*\d{2}:\d{2}\s*-\s*\d{2}:\d{2}\]/g, '').trim(),
+      notas: idea.text,
+      horario_inicio: start,
+      horario_fim: end,
+      data_inicio: formatDateLocalISO(new Date()),
+      data_limite: formatDateLocalISO(new Date())
+    });
+    setConvertingIdea(idea); // To delete after save
+    setIsCreateModalOpen(true);
   };
 
   const handleUpdateSistema = async (id: string, updates: Partial<Sistema>) => {
@@ -2564,7 +2611,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleCreateWorkItem = async (sistemaId: string, tipo: 'desenvolvimento' | 'ajuste' | 'log' | 'geral', descricao: string, attachments: PoolItem[] = []) => {
+  const handleCreateWorkItem = async (sistemaId: string, tipo: 'desenvolvimento' | 'ajuste' | 'log' | 'geral', descricao: string, attachments: PoolItem[] = [], suppressToast = false) => {
     const finalTipo = tipo === 'geral' ? 'ajuste' : tipo;
     try {
       if (!descricao.trim()) return;
@@ -2593,7 +2640,9 @@ const App: React.FC = () => {
         }
       }
 
-      showToast(`${tipo === 'desenvolvimento' ? 'Desenvolvimento' : 'Ajuste'} registrado!`, "success");
+      if (!suppressToast) {
+        showToast(`${tipo === 'desenvolvimento' ? 'Desenvolvimento' : 'Ajuste'} registrado!`, "success");
+      }
     } catch (err) {
       console.error(err);
       showToast("Erro ao criar item.", "error");
@@ -2804,7 +2853,7 @@ const App: React.FC = () => {
 
   const handleAddQuickLog = async (text: string, systemId: string) => {
     try {
-      await handleCreateWorkItem(systemId, 'desenvolvimento', text, []);
+      await handleCreateWorkItem(systemId, 'desenvolvimento', text, [], true);
       showToast("Log registrado!", "success", {
         label: "Ver sistema",
         onClick: () => {
@@ -2842,6 +2891,12 @@ const App: React.FC = () => {
         acompanhamento: [],
         entregas_relacionadas: []
       });
+
+      if (convertingIdea) {
+        await deleteDoc(doc(db, 'brainstorm_ideas', convertingIdea.id));
+        setConvertingIdea(null);
+        setTaskInitialData(null);
+      }
       showToast("Nova ação criada!", 'success');
     } catch (err) {
       console.error("Erro ao criar tarefa:", err);
@@ -4297,6 +4352,7 @@ const App: React.FC = () => {
                                           onToggle={handleToggleTarefaStatus}
                                           onDelete={handleDeleteTarefa}
                                           onEdit={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
+                                          onUpdateToToday={handleUpdateToToday}
                                         />
                                       </div>
                                     ))}
@@ -4342,7 +4398,7 @@ const App: React.FC = () => {
                                     onToggle={handleToggleTarefaStatus}
                                     onDelete={handleDeleteTarefa}
                                     onEdit={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
-
+                                    onUpdateToToday={handleUpdateToToday}
                                   />
                                 ))
                             ) : (
@@ -4469,6 +4525,7 @@ const App: React.FC = () => {
                     setConvertingIdea(idea);
                     setIsSystemSelectorOpen(true);
                   }}
+                  onConvertToTask={handleConvertToTask}
                   activeTool={activeFerramenta}
                   setActiveTool={setActiveFerramenta}
                   isAddingText={isBrainstormingAddingText}
@@ -5610,8 +5667,12 @@ const App: React.FC = () => {
           <TaskCreateModal
             unidades={unidades}
             onSave={handleCreateTarefa}
-            onClose={() => setIsCreateModalOpen(false)}
+            onClose={() => {
+              setIsCreateModalOpen(false);
+              setTaskInitialData(null);
+            }}
             showAlert={showAlert}
+            initialData={taskInitialData || undefined}
           />
         )
       }

@@ -232,12 +232,13 @@ export const PgcAuditRow = ({
     </div>
   );
 };
-export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, highlighted }: {
+export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, onUpdateToToday, highlighted }: {
   task: Tarefa,
   onClick?: () => void,
   onToggle: (id: string, currentStatus: string) => void,
   onDelete: (id: string) => void,
   onEdit: (t: Tarefa) => void,
+  onUpdateToToday?: (t: Tarefa) => void,
   highlighted?: boolean
 }) => {
   const statusValue = normalizeStatus(task.status);
@@ -285,7 +286,7 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
         e.dataTransfer.effectAllowed = 'move';
       }}
       title={task.data_criacao ? `Criada em: ${formatDate(task.data_criacao.split('T')[0])}` : ''}
-      className={`group w-full px-4 md:px-6 py-4 md:py-3 border-b border-slate-100 hover:bg-slate-50/80 transition-all flex flex-col sm:flex-row sm:items-center gap-4 md:gap-6 animate-in cursor-pointer relative ${isCompleted ? 'opacity-60 grayscale-[0.5]' : ''} ${highlighted ? 'bg-gradient-to-r from-blue-50 to-white border-l-4 border-l-blue-500 py-6 md:py-5 shadow-sm' : 'bg-white'}`}
+      className={`group w-full px-4 md:px-6 py-4 md:py-3 border-b border-slate-100 hover:bg-slate-50/80 transition-all flex flex-col sm:flex-row sm:items-center gap-4 md:gap-6 animate-in cursor-pointer relative ${isCompleted ? 'opacity-60 grayscale-[0.5]' : ''} ${highlighted ? 'bg-gradient-to-r from-amber-50 to-white border-l-4 border-l-amber-500 py-7 md:py-6 shadow-md ring-1 ring-amber-200/50' : 'bg-white'}`}
     >
       {/* Esquerda: Checkbox + Título */}
       <div className="flex items-center gap-4 flex-1 min-w-0">
@@ -294,13 +295,21 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
             e.stopPropagation();
             onToggle(task.id, task.status);
           }}
-          className={`w-6 h-6 sm:w-5 sm:h-5 rounded-lg border-2 flex items-center justify-center transition-all flex-shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-200 hover:border-slate-400 text-transparent'}`}
+          className={`w-6 h-6 sm:w-5 sm:h-5 rounded-lg border-2 flex items-center justify-center transition-all flex-shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : (highlighted ? 'border-amber-300 hover:border-amber-500' : 'border-slate-200 hover:border-slate-400')} text-transparent`}
         >
           <svg className="w-4 h-4 sm:w-3.5 sm:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" /></svg>
         </button>
 
-        <div className={`${highlighted ? 'text-base md:text-lg font-black' : 'text-sm md:text-base font-bold'} text-[#1a202c] leading-tight transition-colors ${isCompleted ? 'line-through text-slate-400' : 'group-hover:text-blue-600'} line-clamp-2 sm:line-clamp-1`}>
-          {task.titulo}
+        <div className="flex flex-col gap-1 flex-1 min-w-0">
+          {highlighted && !isCompleted && (
+            <div className="flex items-center gap-1.5 animate-pulse">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+              <span className="text-[9px] font-black text-amber-600 uppercase tracking-[0.2em]">Prioridade Máxima • Ação do Dia</span>
+            </div>
+          )}
+          <div className={`${highlighted ? 'text-base md:text-xl font-black text-amber-950' : 'text-sm md:text-base font-bold text-[#1a202c]'} leading-tight transition-colors ${isCompleted ? 'line-through text-slate-400' : (highlighted ? 'group-hover:text-amber-700' : 'group-hover:text-blue-600')} line-clamp-2 sm:line-clamp-1`}>
+            {task.titulo}
+          </div>
         </div>
       </div>
 
@@ -330,6 +339,18 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
           {/* Ações: Sempre visíveis no mobile (sm:opacity-0), hover no desktop */}
           {!isCompleted && (
             <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all">
+              {onUpdateToToday && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onUpdateToToday(task); }}
+                  className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg md:rounded-xl transition-all"
+                  title="Atualizar para Hoje (Limpar Horário)"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                </button>
+              )}
+
               <button
                 onClick={(e) => { e.stopPropagation(); onEdit(task); }}
                 className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg md:rounded-xl transition-all"
@@ -562,7 +583,8 @@ export const NotificationCenter = ({
             <div
               key={n.id}
               className={`p-6 border-b border-slate-50 hover:bg-slate-50 transition-all cursor-pointer relative group ${!n.isRead ? 'bg-blue-50/30' : ''}`}
-              onClick={() => {
+              onClick={(e) => {
+                if ((e.target as HTMLElement).closest('button')) return;
                 onMarkAsRead(n.id);
                 if (n.link && onNavigate) {
                   onNavigate(n.link);

@@ -356,8 +356,8 @@ export const TaskExecutionView = ({
   return (
     <div className={`fixed inset-0 z-[200] flex flex-col overflow-hidden transition-all duration-1000 ${isBreakActive ? 'bg-[#1a0b0b] text-white' : isTimerRunning ? 'bg-[#050505] text-white' : 'bg-[#F2F4F7] text-slate-900'}`}>
       
-      {/* Header */}
-      <div className="p-6 md:p-10 pb-4 flex items-center justify-between shrink-0">
+      {/* Header - Mais compacto no mobile */}
+      <div className="p-3 md:p-10 pb-2 md:pb-4 flex items-center justify-between shrink-0">
         <div className="flex flex-col">
           <span className="text-blue-500 text-[8px] md:text-[10px] font-black uppercase tracking-[0.3em] mb-1 md:mb-2 block">Central de Execução</span>
           {isEditingTitle ? (
@@ -392,13 +392,38 @@ export const TaskExecutionView = ({
         </button>
       </div>
 
-      {/* Main Grid */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-4 md:p-10 pt-4 overflow-hidden">
+      {/* Main Grid - Otimizado para Mobile: Flex no mobile, Grid no Desktop */}
+      <div className="flex-1 flex flex-col lg:grid lg:grid-cols-12 gap-3 md:gap-6 p-2 md:p-10 pt-0 md:pt-4 overflow-y-auto lg:overflow-hidden">
         
-        {/* Left Column: Tools & Diary */}
-        <div className="lg:col-span-8 flex flex-col gap-4 overflow-hidden order-2 lg:order-1">
+        {/* Control Panel (Ordem 1 no mobile para ficar no topo) */}
+        <div className="lg:col-span-4 flex flex-col gap-3 order-1 lg:order-2 shrink-0">
+          <PainelControleUI
+            task={task}
+            chatUrl={chatUrl}
+            setChatUrl={setChatUrl}
+            handleSaveChatUrl={() => { onSave(task.id, { chat_gemini_url: chatUrl }); showToast("Link salvo!", "success"); }}
+            isTimerRunning={isTimerRunning}
+            sessionTotalSeconds={sessionTotalSeconds}
+            seconds={seconds}
+            pomodoroMode={pomodoroMode}
+            setPomodoroMode={setPomodoroMode}
+            handleToggleTimer={handleToggleTimer}
+            handleResetTimer={() => setModalConfig({ type: 'reset_timer', isOpen: true })}
+            handleCompleteTaskRequest={() => setIsConfirmModalOpen(true)}
+            appSettings={appSettings}
+            currentTime={currentTime}
+            formatTime={formatTime}
+            isBreakActive={isBreakActive}
+            setModalConfig={setModalConfig}
+            setReminderDate={setReminderDate}
+            setReminderTime={setReminderTime}
+          />
+        </div>
+
+        {/* Diary Column (Ordem 2 no mobile) */}
+        <div className="lg:col-span-8 flex flex-col gap-3 order-2 lg:order-1 flex-1 min-h-[500px] lg:overflow-hidden">
           {/* Data Pool */}
-          <div className={`shrink-0 rounded-2xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
+          <div className={`shrink-0 rounded-none md:rounded-2xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
             <button onClick={() => setShowPool(!showPool)} className="w-full flex items-center gap-2 px-4 py-3">
               <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 flex-1 text-left">Pool de Dados</span>
               <svg className={`w-3 h-3 transition-transform ${showPool ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeWidth="2.5" /></svg>
@@ -418,7 +443,7 @@ export const TaskExecutionView = ({
           </div>
 
           {/* Diary */}
-          <div className={`flex-1 flex flex-col rounded-[2.5rem] border overflow-hidden ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
+          <div className={`flex-1 flex flex-col rounded-none md:rounded-[2.5rem] border overflow-hidden ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
              <DiarioBordoUI
                 task={task}
                 currentTaskData={currentTaskData}
@@ -450,36 +475,12 @@ export const TaskExecutionView = ({
           </div>
         </div>
 
-        {/* Right Column: Control Panel */}
-        <div className="lg:col-span-4 flex flex-col gap-5 order-1 lg:order-2">
-          <PainelControleUI
-            task={task}
-            chatUrl={chatUrl}
-            setChatUrl={setChatUrl}
-            handleSaveChatUrl={() => { onSave(task.id, { chat_gemini_url: chatUrl }); showToast("Link salvo!", "success"); }}
-            isTimerRunning={isTimerRunning}
-            sessionTotalSeconds={sessionTotalSeconds}
-            seconds={seconds}
-            pomodoroMode={pomodoroMode}
-            setPomodoroMode={setPomodoroMode}
-            handleToggleTimer={handleToggleTimer}
-            handleResetTimer={() => setModalConfig({ type: 'reset_timer', isOpen: true })}
-            handleCompleteTaskRequest={() => setIsConfirmModalOpen(true)}
-            appSettings={appSettings}
-            currentTime={currentTime}
-            formatTime={formatTime}
-            isBreakActive={isBreakActive}
-            setModalConfig={setModalConfig}
-            setReminderDate={setReminderDate}
-            setReminderTime={setReminderTime}
-          />
-        </div>
       </div>
 
       {/* Confirmation Modal */}
       {isConfirmModalOpen && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
-          <div className="bg-[#111] border border-white/10 w-full max-w-sm rounded-[2.5rem] p-10 text-center">
+          <div className="bg-[#111] border border-white/10 w-full max-w-sm rounded-none md:rounded-[2.5rem] p-10 text-center">
             <h3 className="text-white font-black text-2xl mb-2">Concluir Tarefa?</h3>
             <p className="text-slate-400 text-sm mb-8">Confirma a conclusão de: {task.titulo}?</p>
             <div className="flex gap-4">
@@ -493,27 +494,27 @@ export const TaskExecutionView = ({
       {/* Dynamic Modal (CRUD/Settings) */}
       {modalConfig.isOpen && (
         <div className="fixed inset-0 z-[300] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className={`w-full max-w-md p-6 rounded-3xl shadow-2xl ${isTimerRunning ? 'bg-[#1A1A1A] text-white' : 'bg-white text-slate-900'}`}>
+          <div className={`w-full max-w-md p-6 rounded-none md:rounded-3xl shadow-2xl ${isTimerRunning ? 'bg-[#1A1A1A] text-white' : 'bg-white text-slate-900'}`}>
             <h3 className="text-lg font-black mb-4 uppercase tracking-tighter">Configuração</h3>
             
             {modalConfig.type === 'edit_diary' && (
               <AutoExpandingTextarea
                 value={modalInputValue}
                 onChange={e => setModalInputValue(e.target.value)}
-                className="w-full p-4 rounded-xl bg-slate-50 border outline-none min-h-[150px]"
+                className="w-full p-4 rounded-none md:rounded-xl bg-slate-50 border outline-none min-h-[150px]"
               />
             )}
 
             {modalConfig.type === 'link' && (
               <div className="flex flex-col gap-3">
-                <input placeholder="Nome" value={modalInputName} onChange={e => setModalInputName(e.target.value)} className="w-full p-3 rounded-xl border" />
-                <input placeholder="URL" value={modalInputValue} onChange={e => setModalInputValue(e.target.value)} className="w-full p-3 rounded-xl border" />
+                <input placeholder="Nome" value={modalInputName} onChange={e => setModalInputName(e.target.value)} className="w-full p-3 rounded-none md:rounded-xl border" />
+                <input placeholder="URL" value={modalInputValue} onChange={e => setModalInputValue(e.target.value)} className="w-full p-3 rounded-none md:rounded-xl border" />
               </div>
             )}
 
             <div className="flex gap-3 mt-6 justify-end">
               <button onClick={() => setModalConfig({ ...modalConfig, isOpen: false })} className="px-4 py-2 font-bold text-slate-400">Cancelar</button>
-              <button onClick={handleModalConfirm} className="px-6 py-2 bg-blue-600 text-white rounded-xl font-bold shadow-lg">Confirmar</button>
+              <button onClick={handleModalConfirm} className="px-6 py-2 bg-blue-600 text-white rounded-none md:rounded-xl font-bold shadow-lg">Confirmar</button>
             </div>
           </div>
         </div>

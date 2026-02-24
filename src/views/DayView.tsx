@@ -132,14 +132,18 @@ export const DayView = ({
         type: 'google' as const,
         data: e
       })),
-      ...dayTasks.filter(t => t.horario_inicio && t.data_inicio === dayStr).map(t => ({
-        id: t.id,
-        title: t.titulo,
-        start: timeToMinutes(t.horario_inicio || '00:00'),
-        end: timeToMinutes(t.horario_fim || '01:00'),
-        type: 'task' as const,
-        data: t
-      }))
+      ...dayTasks.filter(t => t.horario_inicio && t.data_inicio === dayStr).map(t => {
+        const start = timeToMinutes(t.horario_inicio || '00:00');
+        const end = t.horario_fim ? timeToMinutes(t.horario_fim) : start + 60;
+        return {
+          id: t.id,
+          title: t.titulo,
+          start,
+          end,
+          type: 'task' as const,
+          data: t
+        };
+      })
     ].sort((a, b) => a.start - b.start || b.end - a.end);
 
     const clusters: (any[])[] = [];
