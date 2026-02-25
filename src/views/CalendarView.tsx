@@ -1,6 +1,10 @@
+
 import React, { useEffect, useMemo } from 'react';
 import { Tarefa, GoogleCalendarEvent, formatDate, formatDateLocalISO } from '../../types';
 import { DayView } from './DayView';
+import { TimeGrid } from '../components/calendar/TimeGrid';
+import { addDoc, collection } from 'firebase/firestore';
+import { db } from '../../firebase';
 
 export const CalendarView = ({
   tasks,
@@ -54,6 +58,25 @@ export const CalendarView = ({
     }
     setDays(newDays);
   }, [currentDate, viewMode]);
+
+  const handleTaskCreate = async (task: Partial<Tarefa>) => {
+    try {
+      await addDoc(collection(db, 'tarefas'), {
+        ...task,
+        titulo: 'Nova Tarefa',
+        status: 'em andamento',
+        prioridade: 'média',
+        categoria: 'GERAL',
+        projeto: 'GERAL',
+        contabilizar_meta: true,
+        data_criacao: new Date().toISOString()
+      });
+      if (showToast) showToast("Tarefa criada!", "success");
+    } catch (e) {
+      console.error(e);
+      if (showToast) showToast("Erro ao criar tarefa.", "error");
+    }
+  };
 
   const googleEventsByDay = useMemo(() => {
     const map: Record<string, GoogleCalendarEvent[]> = {};
@@ -205,6 +228,26 @@ export const CalendarView = ({
           onReorderTasks={onReorderTasks}
           showToast={showToast}
         />
+      ) : viewMode === 'week' ? (
+        <div className="h-[600px] overflow-hidden">
+          <div className="flex border-b border-slate-100 bg-slate-50 pl-12">
+            {days.map(d => (
+              <div key={d.toString()} className="flex-1 py-3 text-center text-[10px] font-black text-slate-400 uppercase">
+                {new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: 'numeric' }).format(d)}
+              </div>
+            ))}
+          </div>
+          <TimeGrid
+            days={days}
+            tasks={tasks}
+            googleEvents={googleEvents}
+            onTaskClick={onTaskClick}
+            onTaskUpdate={onTaskUpdate}
+            onExecuteTask={onExecuteTask}
+            onTaskCreate={handleTaskCreate}
+            showToast={showToast}
+          />
+        </div>
       ) : (
         <>
           <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50">
@@ -224,7 +267,7 @@ export const CalendarView = ({
               return (
                 <div
                   key={i}
-                  className={`bg-white ${viewMode === 'week' ? 'min-h-[450px]' : 'min-h-[120px]'} p-2 flex flex-col gap-1 transition-colors hover:bg-slate-50
+                  className={`bg-white min-h-[120px] p-2 flex flex-col gap-1 transition-colors hover:bg-slate-50
                     ${!isCurrentMonth ? 'bg-slate-50/50' : ''}
                   `}
                 >
@@ -235,7 +278,7 @@ export const CalendarView = ({
                     {dayTasks.length > 0 && <span className="text-[9px] font-black text-slate-300">{dayTasks.length}</span>}
                   </div>
 
-                  <div className={`flex-1 flex flex-col gap-1 mt-1 overflow-y-auto ${viewMode === 'week' ? 'max-h-[400px]' : 'max-h-[100px]'} scrollbar-hide`}>
+                  <div className={`flex-1 flex flex-col gap-1 mt-1 overflow-y-auto max-h-[100px] scrollbar-hide`}>
                     {dayGoogleEvents.map(e => (
                       <div
                         key={e.id}
