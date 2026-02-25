@@ -4370,7 +4370,10 @@ const App: React.FC = () => {
       }
     }
     if (statusFilter.length > 0) {
-      result = result.filter(t => statusFilter.some(sf => normalizeStatus(t.status) === normalizeStatus(sf)));
+      result = result.filter(t => 
+        statusFilter.some(sf => normalizeStatus(t.status) === normalizeStatus(sf)) ||
+        (searchTerm && normalizeStatus(t.status) === 'concluido')
+      );
     }
 
     if (areaFilter !== 'TODAS') {
@@ -4440,7 +4443,8 @@ const App: React.FC = () => {
       amanha: [] as Tarefa[],
       estaSemana: [] as Tarefa[],
       esteMes: [] as Tarefa[],
-      semData: [] as Tarefa[]
+      semData: [] as Tarefa[],
+      concluidas: [] as Tarefa[]
     };
     const mesesFuturos: Record<string, { label: string, tasks: Tarefa[] }> = {};
 
@@ -4463,6 +4467,12 @@ const App: React.FC = () => {
     const endOfMonthStr = endOfMonth.toLocaleDateString('en-CA');
 
     filteredAndSortedTarefas.forEach(t => {
+      // Se a tarefa está concluída, vai para o bucket de concluídas (útil na pesquisa)
+      if (normalizeStatus(t.status) === 'concluido') {
+        buckets.concluidas.push(t);
+        return;
+      }
+
       // Sem Data
       if (!t.data_limite || t.data_limite === "-" || t.data_limite === "0000-00-00") {
         buckets.semData.push(t);
@@ -4515,6 +4525,7 @@ const App: React.FC = () => {
     });
 
     if (buckets.semData.length > 0) finalGroups["Sem Prazo Definido"] = buckets.semData;
+    if (buckets.concluidas.length > 0) finalGroups["Concluídas"] = buckets.concluidas;
 
     return finalGroups;
   }, [filteredAndSortedTarefas]);
@@ -5232,6 +5243,24 @@ const App: React.FC = () => {
                     onNavigate={handleDashboardNavigate}
                     onOpenBacklog={handleCopyBacklog}
                   />
+                ) : viewMode === 'day' ? (
+                  <DayView
+                    tasks={filteredAndSortedTarefas}
+                    financeTransactions={financeTransactions}
+                    financeSettings={financeSettings}
+                    fixedBills={fixedBills}
+                    incomeEntries={incomeEntries}
+                    healthWeights={healthWeights}
+                    healthDailyHabits={healthDailyHabits}
+                    healthSettings={healthSettings}
+                    unidades={unidades}
+                    sistemasDetalhes={sistemasDetalhes}
+                    workItems={workItems}
+                    currentMonth={currentMonth}
+                    currentYear={currentYear}
+                    onNavigate={handleDashboardNavigate}
+                    onOpenBacklog={handleCopyBacklog}
+                  />
                 ) : viewMode === 'gallery' ? (
                   <>
                     {/* Mobile Search Bar */}
@@ -5582,7 +5611,7 @@ const App: React.FC = () => {
                   </>
                 ) : (viewMode === 'licitacoes' || viewMode === 'assistencia') ? (
                   <CategoryView
-                    tasks={tarefas}
+                    tasks={filteredAndSortedTarefas}
                     viewMode={viewMode}
                     onSelectTask={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
                     onExecuteTask={(t) => { setSelectedTask(t); setTaskModalMode('execute'); }}

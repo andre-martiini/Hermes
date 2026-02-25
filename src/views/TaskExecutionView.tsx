@@ -341,6 +341,21 @@ export const TaskExecutionView = ({
           showToast("Lembrete agendado!", "success");
         }
         break;
+      case 'contact':
+        if (modalInputValue.trim()) {
+          const newItem: PoolItem = {
+            id: Math.random().toString(36).substring(2, 11),
+            tipo: 'telefone',
+            valor: modalInputValue,
+            nome: modalInputName || modalInputValue,
+            data_criacao: new Date().toISOString()
+          };
+          onSave(task.id, { 
+            pool_dados: [...(currentTaskData.pool_dados || []), newItem],
+            acompanhamento: [...(currentTaskData.acompanhamento || []), { data: new Date().toISOString(), nota: `CONTACT::${newItem.nome}::${newItem.valor}` }]
+          });
+        }
+        break;
       case 'file_upload':
         if (pendingFile) handleFileUpload(pendingFile, modalInputName);
         break;
@@ -495,26 +510,95 @@ export const TaskExecutionView = ({
       {modalConfig.isOpen && (
         <div className="fixed inset-0 z-[300] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-md p-6 rounded-none md:rounded-3xl shadow-2xl ${isTimerRunning ? 'bg-[#1A1A1A] text-white' : 'bg-white text-slate-900'}`}>
-            <h3 className="text-lg font-black mb-4 uppercase tracking-tighter">Configuração</h3>
+            <h3 className="text-lg font-black mb-4 uppercase tracking-tighter">
+              {modalConfig.type === 'confirm_delete' ? 'Excluir Registro' : 
+               modalConfig.type === 'reset_timer' ? 'Zerar Cronômetro' : 
+               modalConfig.type === 'reminder' ? 'Agendar Lembrete' : 'Configuração'}
+            </h3>
             
             {modalConfig.type === 'edit_diary' && (
               <AutoExpandingTextarea
                 value={modalInputValue}
                 onChange={e => setModalInputValue(e.target.value)}
-                className="w-full p-4 rounded-none md:rounded-xl bg-slate-50 border outline-none min-h-[150px]"
+                className={`w-full p-4 rounded-none md:rounded-xl border outline-none min-h-[150px] ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`}
               />
             )}
 
             {modalConfig.type === 'link' && (
               <div className="flex flex-col gap-3">
-                <input placeholder="Nome" value={modalInputName} onChange={e => setModalInputName(e.target.value)} className="w-full p-3 rounded-none md:rounded-xl border" />
-                <input placeholder="URL" value={modalInputValue} onChange={e => setModalInputValue(e.target.value)} className="w-full p-3 rounded-none md:rounded-xl border" />
+                <input placeholder="Nome" value={modalInputName} onChange={e => setModalInputName(e.target.value)} className={`w-full p-3 rounded-none md:rounded-xl border outline-none ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`} />
+                <input placeholder="URL" value={modalInputValue} onChange={e => setModalInputValue(e.target.value)} className={`w-full p-3 rounded-none md:rounded-xl border outline-none ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`} />
+              </div>
+            )}
+
+            {modalConfig.type === 'reminder' && (
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-black uppercase tracking-widest opacity-50">Data</label>
+                  <input 
+                    type="date" 
+                    value={reminderDate} 
+                    onChange={e => setReminderDate(e.target.value)} 
+                    className={`w-full p-3 rounded-none md:rounded-xl border outline-none ${isTimerRunning ? 'bg-white/5 border-white/10 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-black uppercase tracking-widest opacity-50">Hora</label>
+                  <input 
+                    type="time" 
+                    value={reminderTime} 
+                    onChange={e => setReminderTime(e.target.value)} 
+                    className={`w-full p-3 rounded-none md:rounded-xl border outline-none ${isTimerRunning ? 'bg-white/5 border-white/10 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
+                  />
+                </div>
+              </div>
+            )}
+
+            {modalConfig.type === 'contact' && (
+              <div className="flex flex-col gap-3">
+                <input placeholder="Nome do Contato" value={modalInputName} onChange={e => setModalInputName(e.target.value)} className={`w-full p-3 rounded-none md:rounded-xl border outline-none ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`} />
+                <input placeholder="Telefone / Info" value={modalInputValue} onChange={e => setModalInputValue(e.target.value)} className={`w-full p-3 rounded-none md:rounded-xl border outline-none ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`} />
+              </div>
+            )}
+
+            {modalConfig.type === 'confirm_delete' && (
+              <p className="text-slate-500 mb-4">Tem certeza que deseja excluir este registro do diário de bordo?</p>
+            )}
+
+            {modalConfig.type === 'reset_timer' && (
+              <p className="text-slate-500 mb-4">Deseja zerar o cronômetro desta sessão? Esta ação não pode ser desfeita.</p>
+            )}
+
+            {modalConfig.type === 'file_upload' && (
+              <div className="flex flex-col gap-3">
+                <p className="text-sm text-slate-500 mb-2">Renomear arquivo antes de carregar (opcional):</p>
+                <input 
+                  placeholder="Nome do arquivo" 
+                  value={modalInputName} 
+                  onChange={e => setModalInputName(e.target.value)} 
+                  className={`w-full p-3 rounded-none md:rounded-xl border outline-none ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`} 
+                />
               </div>
             )}
 
             <div className="flex gap-3 mt-6 justify-end">
-              <button onClick={() => setModalConfig({ ...modalConfig, isOpen: false })} className="px-4 py-2 font-bold text-slate-400">Cancelar</button>
-              <button onClick={handleModalConfirm} className="px-6 py-2 bg-blue-600 text-white rounded-none md:rounded-xl font-bold shadow-lg">Confirmar</button>
+              <button 
+                onClick={() => {
+                  setModalConfig({ ...modalConfig, isOpen: false });
+                  setModalInputValue('');
+                  setModalInputName('');
+                  setPendingFile(null);
+                }} 
+                className="px-4 py-2 font-bold text-slate-400"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={handleModalConfirm} 
+                className={`px-6 py-2 rounded-none md:rounded-xl font-bold shadow-lg transition-all ${modalConfig.type === 'confirm_delete' ? 'bg-rose-600' : 'bg-blue-600'} text-white hover:brightness-110`}
+              >
+                Confirmar
+              </button>
             </div>
           </div>
         </div>
