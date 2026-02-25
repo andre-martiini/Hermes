@@ -1,8 +1,7 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../../firebase';
-
-export const QuickLogModal = ({ isOpen, onClose, onAddLog, unidades }: { isOpen: boolean, onClose: () => void, onAddLog: (text: string, systemId: string) => void, unidades: { id: string, nome: string }[] }) => {
+const QuickLogModal = ({ isOpen, onClose, onAddLog, unidades }: { isOpen: boolean, onClose: () => void, onAddLog: (text: string, systemId: string) => void, unidades: { id: string, nome: string }[] }) => {
   const [textInput, setTextInput] = useState('');
   const [selectedSystem, setSelectedSystem] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -163,3 +162,5 @@ export const QuickLogModal = ({ isOpen, onClose, onAddLog, unidades }: { isOpen:
     </div>
   );
 };
+
+export { QuickLogModal };

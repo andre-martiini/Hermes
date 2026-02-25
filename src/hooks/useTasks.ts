@@ -1,18 +1,17 @@
 import { useState, useEffect } from 'react';
-import { collection, doc, addDoc, updateDoc, onSnapshot, query } from 'firebase/firestore';
+import { collection, doc, addDoc, updateDoc, onSnapshot, query, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Tarefa, UndoAction, BrainstormIdea, ConhecimentoItem } from '../types';
+import { Tarefa, UndoAction, BrainstormIdea } from '../types';
 import { formatDateLocalISO } from '../types';
 import { normalizeStatus } from '../utils/helpers';
 
-export const useTasks = (showToast: (msg: string, type: 'success' | 'error' | 'info') => void) => {
+export const useTasks = (showToast: (msg: string, type: 'success' | 'error' | 'info', action?: any, actions?: any) => void) => {
   const [tarefas, setTarefas] = useState<Tarefa[]>([]);
   const [brainstormIdeas, setBrainstormIdeas] = useState<BrainstormIdea[]>([]);
   const [undoStack, setUndoStack] = useState<UndoAction[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // UI States related to task creation
   const [convertingIdea, setConvertingIdea] = useState<BrainstormIdea | null>(null);
   const [taskInitialData, setTaskInitialData] = useState<Partial<Tarefa> | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -58,7 +57,6 @@ export const useTasks = (showToast: (msg: string, type: 'success' | 'error' | 'i
     showToast(`Desfeito: ${action.label}`, "info");
   };
 
-  // Listen for Ctrl+Z
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
@@ -89,11 +87,9 @@ export const useTasks = (showToast: (msg: string, type: 'success' | 'error' | 'i
       });
 
       if (convertingIdea) {
-        // Assume brainstorm_ideas is managed elsewhere or here?
-        // Logic in App.tsx used deleteDoc directly.
-        // We can import deleteDoc.
-        // We need to import deleteDoc from firebase/firestore.
-        // Wait, I need to import it.
+        await deleteDoc(doc(db, 'brainstorm_ideas', convertingIdea.id));
+        setConvertingIdea(null);
+        setTaskInitialData(null);
       }
       showToast("Nova ação criada!", 'success');
     } catch (err) {
@@ -179,14 +175,6 @@ export const useTasks = (showToast: (msg: string, type: 'success' | 'error' | 'i
   };
 
   const handleReorderTasks = async (taskId: string, targetTaskId: string, label?: string, tarefasAgrupadas?: {[key: string]: Tarefa[]}) => {
-     // Reorder logic requires knowledge of grouping.
-     // Since grouping logic is in the View (DayView usually), passing the grouping map is necessary.
-     // OR I can move grouping logic here? No, grouping depends on View logic.
-     // In original code, `tarefasAgrupadas` was computed in render or useMemo in App.
-     // I'll assume we pass it or I handle it differently.
-     // The original `handleReorderTasks` used `tarefasAgrupadas` from closure.
-     // I will make it accept `tarefasAgrupadas`.
-
      if (!tarefasAgrupadas) return;
 
      let currentLabel = label;

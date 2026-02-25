@@ -8,7 +8,6 @@ export const useToast = () => {
     const id = Math.random().toString(36).substring(2, 9);
     setToasts(prev => {
       if (prev.some(t => t.message === message)) return prev;
-
       if (prev.length > 0) {
         const last = prev[prev.length - 1];
         const lastPrefix = last.message.split(' ')[0];
@@ -17,7 +16,6 @@ export const useToast = () => {
            return [...prev.slice(0, -1), { id, message, type, action, actions }];
         }
       }
-
       const base = prev.length >= 2 ? prev.slice(1) : prev;
       return [...base, { id, message, type, action, actions }];
     });

@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../../firebase';
 
-export const ShoppingAIModal = ({ isOpen, onClose, onProcessItems, onViewList }: { isOpen: boolean, onClose: () => void, onProcessItems: (text: string) => void, onViewList: () => void }) => {
+const ShoppingAIModal = ({ isOpen, onClose, onProcessItems, onViewList }: { isOpen: boolean, onClose: () => void, onProcessItems: (text: string) => void, onViewList: () => void }) => {
   const [textInput, setTextInput] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -157,3 +157,5 @@ export const ShoppingAIModal = ({ isOpen, onClose, onProcessItems, onViewList }:
     </div>
   );
 };
+
+export { ShoppingAIModal };

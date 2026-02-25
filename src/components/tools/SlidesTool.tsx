@@ -3,10 +3,7 @@ import { httpsCallable } from 'firebase/functions';
 import { functions } from '../../firebase';
 import { AutoExpandingTextarea } from '../ui/UIComponents';
 
-const SLIDES_HISTORY_KEY = 'hermes_slides_history';
-export interface SlideHistoryEntry { id: string; title: string; createdAt: string; slides: any[]; rascunho: string; }
-
-export const SlidesTool = ({ onBack, showToast }: { onBack: () => void, showToast: (msg: string, type: 'success' | 'error' | 'info') => void }) => {
+const SlidesTool = ({ onBack, showToast }: { onBack: () => void, showToast: (msg: string, type: 'success' | 'error' | 'info') => void }) => {
   const [rascunho, setRascunho] = useState('');
   const [qtdSlides, setQtdSlides] = useState(5);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -295,3 +292,10 @@ export const SlidesTool = ({ onBack, showToast }: { onBack: () => void, showToas
     </div>
   );
 };
+
+
+
+const SHOPPING_LOCATIONS_KEY = 'hermes_shopping_locations';
+const SHOPPING_ITEMS_KEY = 'hermes_shopping_items';
+
+export { SlidesTool };

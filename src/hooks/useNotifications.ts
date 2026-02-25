@@ -10,16 +10,14 @@ export const useNotifications = (
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void
 ) => {
   const [notifications, setNotifications] = useState<HermesNotification[]>([]);
-  const [activePopup, setActivePopup] = useState<HermesNotification | null>(null);
-  const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
+  const [activePopup, setActivePopup] = useState<HermesNotification | null>(null);
   const [isHabitsReminderOpen, setIsHabitsReminderOpen] = useState(false);
 
   useEffect(() => {
     const setupFCM = async () => {
       if (!messaging) return;
       try {
-        console.log('Iniciando configuração de Push...');
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
           const registration = await navigator.serviceWorker.ready;
@@ -125,14 +123,15 @@ export const useNotifications = (
     if (activePopup?.id === id) setActivePopup(null);
   };
 
-  // Reminders Interval
+  // Time-based Triggers
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
       const current_time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
       const todayStr = formatDateLocalISO(now);
 
-      if (appSettings.notifications.habitsReminder.enabled && current_time === appSettings.notifications.habitsReminder.time) {
+      // Habits
+      if (appSettings.notifications?.habitsReminder?.enabled && current_time === appSettings.notifications.habitsReminder.time) {
         const lastOpen = localStorage.getItem('lastHabitsReminderDate');
         if (lastOpen !== todayStr) {
           setIsHabitsReminderOpen(true);
@@ -140,7 +139,8 @@ export const useNotifications = (
         }
       }
 
-      if (appSettings.notifications.weighInReminder.enabled && current_time === appSettings.notifications.weighInReminder.time) {
+      // Weigh-in
+      if (appSettings.notifications?.weighInReminder?.enabled && current_time === appSettings.notifications.weighInReminder.time) {
         const lastWeighInRemind = localStorage.getItem('lastWeighInRemindDate');
         if (lastWeighInRemind !== todayStr) {
           const dayMatch = now.getDay() === appSettings.notifications.weighInReminder.dayOfWeek;
@@ -155,7 +155,7 @@ export const useNotifications = (
             shouldRemind = true;
           }
 
-          if (shouldRemind) {
+            if (shouldRemind) {
             emitNotification(
               "Lembrete de Pesagem",
               "Hora de registrar seu peso para acompanhar sua evolução no módulo Saúde!",
@@ -168,25 +168,36 @@ export const useNotifications = (
         }
       }
 
-      // Daily Task Notifications (simplified here for brevity, logic was in index.tsx)
-      // I'll skip specific task reminders logic if not requested, but the plan asked for "setInterval que disparam lembretes".
-      // I included habits and weight. Task reminder logic depends on tasks iteration.
-      // I'll add task iteration if needed.
+      // Tasks
+      const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+      tarefas.forEach(t => {
+        if (t.status === 'concluído' || t.data_limite !== todayStr) return;
 
-    }, 60000);
+        if (t.horario_inicio) {
+          const [h, m] = t.horario_inicio.split(':').map(Number);
+          const startMin = h * 60 + m;
+          const diff = startMin - currentTimeInMinutes;
+          const lastReminded = localStorage.getItem(`lastStartRemind_${t.id}`);
+
+          if (diff === 15 && lastReminded !== `${todayStr}_15`) {
+             emitNotification(`Em 15 min: ${t.titulo}`, "Prepare-se para iniciar a tarefa.", 'info');
+             localStorage.setItem(`lastStartRemind_${t.id}`, `${todayStr}_15`);
+          }
+        }
+      });
+
+    }, 30000);
 
     return () => clearInterval(interval);
-  }, [appSettings, tarefas]); // Added dependencies
+  }, [appSettings, tarefas]);
 
   return {
     notifications,
-    activePopup,
-    setActivePopup,
-    isNotificationCenterOpen,
-    setIsNotificationCenterOpen,
     appSettings,
+    activePopup,
     isHabitsReminderOpen,
     setIsHabitsReminderOpen,
+    setActivePopup,
     emitNotification,
     handleMarkNotificationRead,
     handleDismissNotification,

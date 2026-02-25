@@ -565,17 +565,3 @@ export interface ShoppingItem {
     isPurchased: boolean;
     locationId: string;
 }
-
-export interface Unidade {
-    id: string;
-    nome: string;
-    palavras_chave?: string[];
-}
-
-export interface Toast {
-  id: string;
-  message: string;
-  type: 'success' | 'error' | 'info';
-  action?: { label: string | React.ReactNode, onClick: () => void };
-  actions?: { label: string | React.ReactNode, onClick: () => void }[];
-}

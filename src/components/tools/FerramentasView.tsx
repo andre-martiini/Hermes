@@ -1,13 +1,12 @@
 import React, { useState, useRef } from 'react';
-import { BrainstormIdea } from '../../types';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../../firebase';
-import { formatDate } from '../../types';
+import { BrainstormIdea, formatDate } from '../../types';
 import { AutoExpandingTextarea } from '../ui/UIComponents';
 import { SlidesTool } from './SlidesTool';
 import { ShoppingListTool } from './ShoppingListTool';
 
-export const FerramentasView = ({
+const FerramentasView = ({
   ideas,
   onDeleteIdea,
   onArchiveIdea,
@@ -36,7 +35,6 @@ export const FerramentasView = ({
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void,
   showAlert: (title: string, msg: string) => void
 }) => {
-  const [isProcessing, setIsProcessing] = useState(false);
   const [textInput, setTextInput] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
@@ -49,6 +47,7 @@ export const FerramentasView = ({
 
   // Gravador
   const [isRecording, setIsRecording] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
@@ -128,8 +127,6 @@ export const FerramentasView = ({
             <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Organize suas compras por estabelecimento e categorias.</p>
           </div>
         </button>
-
-
       </div>
     );
   }
@@ -148,10 +145,8 @@ export const FerramentasView = ({
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/m4a' }); // ou audio/webm
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/m4a' });
         await handleProcessAudio(audioBlob);
-
-        // Parar todas as tracks para desligar o ícone de microfone do navegador
         stream.getTracks().forEach(track => track.stop());
       };
 
@@ -173,19 +168,15 @@ export const FerramentasView = ({
   const handleProcessAudio = async (audioBlob: Blob) => {
     setIsProcessing(true);
     try {
-      // Converter Blob para Base64
       const reader = new FileReader();
       reader.readAsDataURL(audioBlob);
       reader.onloadend = async () => {
         try {
           const base64String = (reader.result as string).split(',')[1];
-
-          // Chamar a Cloud Function
           const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
           const response = await transcribeFunc({ audioBase64: base64String });
           const data = response.data as { raw: string, refined: string };
 
-          // Adicionar a ideia transcrita ao banco
           if (data.refined) {
             onAddTextIdea(data.refined);
           }
@@ -231,7 +222,6 @@ export const FerramentasView = ({
             </div>
           </div>
 
-          {/* Inserção de Nova Ideia via Digitação */}
           <div className="w-full animate-in slide-in-from-top-2 duration-500">
             <div className="bg-white p-2 rounded-none md:rounded-[2rem] border-2 border-slate-100 shadow-none md:shadow-xl flex items-center gap-4 focus-within:border-blue-500 transition-all">
               <button
@@ -246,16 +236,13 @@ export const FerramentasView = ({
                 }`}
               >
                 {isProcessing ? (
-                  // Spinner de Carregamento
                   <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
                 ) : isRecording ? (
-                  // Ícone de Parar (Quadrado)
                   <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
                 ) : (
-                  // Ícone de Microfone
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
                 )}
               </button>
@@ -561,3 +548,5 @@ export const FerramentasView = ({
     </>
   );
 };
+
+export { FerramentasView };

@@ -1,10 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { ShoppingLocation, ShoppingItem } from '../../types';
-
-const SHOPPING_LOCATIONS_KEY = 'hermes_shopping_locations';
-const SHOPPING_ITEMS_KEY = 'hermes_shopping_items';
-
-export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, showToast: (msg: string, type: 'success' | 'error' | 'info') => void }) => {
+const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, showToast: (msg: string, type: 'success' | 'error' | 'info') => void }) => {
   const [locations, setLocations] = useState<ShoppingLocation[]>(() => {
     try { return JSON.parse(localStorage.getItem(SHOPPING_LOCATIONS_KEY) || '[]'); } catch { return []; }
   });
@@ -408,3 +404,5 @@ export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, sh
     </div>
   );
 };
+
+export { ShoppingListTool };

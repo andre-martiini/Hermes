@@ -1,8 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../../firebase';
-
-export const QuickNoteModal = ({ isOpen, onClose, onAddIdea, showAlert }: { isOpen: boolean, onClose: () => void, onAddIdea: (text: string) => void, showAlert: (t: string, m: string) => void }) => {
+const QuickNoteModal = ({ isOpen, onClose, onAddIdea, showAlert }: { isOpen: boolean, onClose: () => void, onAddIdea: (text: string) => void, showAlert: (t: string, m: string) => void }) => {
   const [textInput, setTextInput] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -137,3 +136,5 @@ export const QuickNoteModal = ({ isOpen, onClose, onAddIdea, showAlert }: { isOp
     </div>
   );
 };
+
+export { QuickNoteModal };

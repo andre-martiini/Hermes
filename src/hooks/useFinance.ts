@@ -1,11 +1,7 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, updateDoc, addDoc, deleteDoc, query } from 'firebase/firestore';
+import { collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import {
-  FinanceTransaction, FinanceGoal, FinanceSettings, FixedBill, BillRubric,
-  IncomeEntry, IncomeRubric, Tarefa
-} from '../types';
-import { formatDateLocalISO } from '../types';
+import { Tarefa, FinanceTransaction, FinanceGoal, FinanceSettings, FixedBill, BillRubric, IncomeEntry, IncomeRubric, formatDateLocalISO } from '../types';
 import { normalizeStatus } from '../utils/helpers';
 
 export const useFinance = (
@@ -27,30 +23,30 @@ export const useFinance = (
   const [billRubrics, setBillRubrics] = useState<BillRubric[]>([]);
   const [incomeEntries, setIncomeEntries] = useState<IncomeEntry[]>([]);
   const [incomeRubrics, setIncomeRubrics] = useState<IncomeRubric[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'fixed'>('dashboard');
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-
+  // Sync Finance Data
   useEffect(() => {
+    setLoading(true);
     const unsubTransactions = onSnapshot(collection(db, 'finance_transactions'), (snapshot) => {
       setFinanceTransactions(snapshot.docs
         .map(d => ({ id: d.id, ...d.data() } as FinanceTransaction))
         .filter(t => t.status !== 'deleted')
       );
     });
+
     const unsubGoals = onSnapshot(collection(db, 'finance_goals'), (snapshot) => {
       setFinanceGoals(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as FinanceGoal)));
     });
-    const unsubSettings = onSnapshot(doc(db, 'finance_settings', 'config'), (doc) => {
-      if (doc.exists()) {
-        setFinanceSettings(doc.data() as FinanceSettings);
+
+    const unsubSettings = onSnapshot(doc(db, 'finance_settings', 'config'), (docSnap) => {
+      if (docSnap.exists()) {
+        setFinanceSettings(docSnap.data() as FinanceSettings);
       }
     });
 
-    const qFixedBills = query(collection(db, 'fixed_bills'));
-    const unsubFixedBills = onSnapshot(qFixedBills, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FixedBill));
-      setFixedBills(data);
+    const unsubFixedBills = onSnapshot(collection(db, 'fixed_bills'), (snapshot) => {
+       setFixedBills(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FixedBill)));
     });
 
     const unsubRubrics = onSnapshot(collection(db, 'bill_rubrics'), (snapshot) => {
@@ -66,6 +62,7 @@ export const useFinance = (
 
     const unsubIncomeRubrics = onSnapshot(collection(db, 'income_rubrics'), (snapshot) => {
       setIncomeRubrics(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as IncomeRubric)));
+      setLoading(false);
     });
 
     return () => {
@@ -79,11 +76,11 @@ export const useFinance = (
     };
   }, []);
 
-  // Finance Processing Logic (Automatic from Tasks)
+  // Automatic Processing of Finance Tasks
   useEffect(() => {
     const processFinanceTasks = async () => {
       const financeTasks = tarefas.filter(t =>
-        t.status !== 'excluído' as any &&
+        (t.status as any) !== 'excluído' &&
         t.titulo.toLowerCase().includes('gasto semanal') &&
         t.notas && /Tag:\s*GASTO\s*SEMANAL/i.test(t.notas)
       );
@@ -94,7 +91,6 @@ export const useFinance = (
           try {
             const amountStr = valueMatch[1].replace(/\./g, '').replace(',', '.');
             const amount = parseFloat(amountStr);
-
             if (isNaN(amount)) continue;
 
             const dateMatch = task.titulo.match(/(\d{2}\/\d{2}\/\d{4})/);
@@ -125,9 +121,8 @@ export const useFinance = (
                   description: task.titulo,
                   originalTaskId: task.id
                 });
-
                 if (existingTransaction.amount !== amount) {
-                  showToast(`Valor atualizado: R$ ${amount.toLocaleString('pt-BR')}`, 'info');
+                   showToast(`Valor atualizado: R$ ${amount.toLocaleString('pt-BR')}`, 'info');
                 }
               }
             } else {
@@ -137,13 +132,15 @@ export const useFinance = (
                 date: transactionDate,
                 sprint: sprintOriginal,
                 category: 'Gasto Semanal',
-                originalTaskId: task.id
+                originalTaskId: task.id,
+                status: 'active'
               });
 
               if (normalizeStatus(task.status) !== 'concluido') {
                 await updateDoc(doc(db, 'tarefas', task.id), {
                   status: 'concluído',
-                  data_conclusao: formatDateLocalISO(new Date())
+                  data_conclusao: formatDateLocalISO(new Date()),
+                  data_atualizacao: new Date().toISOString()
                 });
                 showToast(`Gasto processado: R$ ${amount.toLocaleString('pt-BR')}`, 'success');
               }
@@ -161,47 +158,76 @@ export const useFinance = (
   }, [tarefas, financeTransactions, showToast]);
 
   // Handlers
-  const handleUpdateFinanceGoal = async (id: string, updates: Partial<FinanceGoal>) => {
+  const handleUpdateFinanceGoal = async (goal: FinanceGoal) => {
     try {
-      await updateDoc(doc(db, 'finance_goals', id), updates);
-      if (updates.currentAmount !== undefined || updates.targetAmount !== undefined) {
-        // showToast("Meta atualizada!", "success"); // Optional feedback
-      }
-    } catch (e) {
-      console.error(e);
+      await updateDoc(doc(db, 'finance_goals', goal.id), goal as any);
+      showToast("Meta atualizada!", "success");
+    } catch (err) {
+      console.error(err);
       showToast("Erro ao atualizar meta.", "error");
     }
   };
 
   const handleDeleteFinanceGoal = async (id: string) => {
-    if (!window.confirm("Excluir esta meta?")) return;
     try {
       await deleteDoc(doc(db, 'finance_goals', id));
-      showToast("Meta removida.", "info");
-    } catch (e) {
+      showToast("Meta removida!", "info");
+    } catch (err) {
+      console.error(err);
       showToast("Erro ao remover meta.", "error");
     }
   };
 
-  const handleReorderFinanceGoals = async (startIndex: number, endIndex: number) => {
-    const reordered = [...financeGoals];
-    const [removed] = reordered.splice(startIndex, 1);
-    reordered.splice(endIndex, 0, removed);
-
-    // Optimistic update
-    setFinanceGoals(reordered);
-
-    // Batch update priorities
+  const handleReorderFinanceGoals = async (reorderedGoals: FinanceGoal[]) => {
     try {
-      const promises = reordered.map((g, index) =>
-        updateDoc(doc(db, 'finance_goals', g.id), { priority: index + 1 })
+      const promises = reorderedGoals.map((goal, index) =>
+        updateDoc(doc(db, 'finance_goals', goal.id), { priority: index + 1 })
       );
       await Promise.all(promises);
-    } catch (e) {
-      console.error(e);
+      showToast("Prioridades atualizadas!", "success");
+    } catch (err) {
+      console.error(err);
       showToast("Erro ao reordenar metas.", "error");
     }
   };
+
+  const handleAddTransaction = async (t: Partial<FinanceTransaction>) => {
+     await addDoc(collection(db, 'finance_transactions'), { ...t, status: 'active' });
+     showToast("Transação adicionada.", "success");
+  };
+
+  const handleUpdateTransaction = async (t: FinanceTransaction) => {
+     await updateDoc(doc(db, 'finance_transactions', t.id), t as any);
+     showToast("Transação atualizada.", "success");
+  };
+
+  const handleDeleteTransaction = async (id: string) => {
+     await updateDoc(doc(db, 'finance_transactions', id), { status: 'deleted' });
+     showToast("Transação removida.", "info");
+  };
+
+  // Settings
+  const handleUpdateSettings = async (newSettings: FinanceSettings) => {
+     await setDoc(doc(db, 'finance_settings', 'config'), newSettings);
+     showToast("Configurações financeiras salvas.", "success");
+  };
+
+  // Rubrics & Bills
+  const handleAddRubric = async (rubric: Partial<BillRubric>) => { await addDoc(collection(db, 'bill_rubrics'), rubric); };
+  const handleUpdateRubric = async (rubric: BillRubric) => { await updateDoc(doc(db, 'bill_rubrics', rubric.id), rubric as any); };
+  const handleDeleteRubric = async (id: string) => { await deleteDoc(doc(db, 'bill_rubrics', id)); };
+
+  const handleAddBill = async (bill: Partial<FixedBill>) => { await addDoc(collection(db, 'fixed_bills'), bill); };
+  const handleUpdateBill = async (bill: FixedBill) => { await updateDoc(doc(db, 'fixed_bills', bill.id), bill as any); };
+  const handleDeleteBill = async (id: string) => { await deleteDoc(doc(db, 'fixed_bills', id)); };
+
+  const handleAddIncomeRubric = async (rubric: Partial<IncomeRubric>) => { await addDoc(collection(db, 'income_rubrics'), rubric); };
+  const handleUpdateIncomeRubric = async (rubric: IncomeRubric) => { await updateDoc(doc(db, 'income_rubrics', rubric.id), rubric as any); };
+  const handleDeleteIncomeRubric = async (id: string) => { await deleteDoc(doc(db, 'income_rubrics', id)); };
+
+  const handleAddIncomeEntry = async (entry: Partial<IncomeEntry>) => { await addDoc(collection(db, 'income_entries'), { ...entry, status: 'active' }); };
+  const handleUpdateIncomeEntry = async (entry: IncomeEntry) => { await updateDoc(doc(db, 'income_entries', entry.id), entry as any); };
+  const handleDeleteIncomeEntry = async (id: string) => { await updateDoc(doc(db, 'income_entries', id), { status: 'deleted' }); };
 
   return {
     financeTransactions,
@@ -211,12 +237,25 @@ export const useFinance = (
     billRubrics,
     incomeEntries,
     incomeRubrics,
-    activeTab,
-    setActiveTab,
-    isSettingsOpen,
-    setIsSettingsOpen,
+    loading,
     handleUpdateFinanceGoal,
     handleDeleteFinanceGoal,
-    handleReorderFinanceGoals
+    handleReorderFinanceGoals,
+    handleAddTransaction,
+    handleUpdateTransaction,
+    handleDeleteTransaction,
+    handleUpdateSettings,
+    handleAddRubric,
+    handleUpdateRubric,
+    handleDeleteRubric,
+    handleAddBill,
+    handleUpdateBill,
+    handleDeleteBill,
+    handleAddIncomeRubric,
+    handleUpdateIncomeRubric,
+    handleDeleteIncomeRubric,
+    handleAddIncomeEntry,
+    handleUpdateIncomeEntry,
+    handleDeleteIncomeEntry
   };
 };

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { VinculoProjeto, TipoBolsa } from '../../../types';
+import { VinculoProjeto, TipoBolsa } from '../../types';
 
 interface BurnRateSimulatorProps {
     availableBalance: number; // Current cash on hand (Total - Spent)
