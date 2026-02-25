@@ -825,6 +825,11 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
     data = req.data
     audio_base64 = data.get('audioBase64')
+    extension = data.get('extension', '.m4a')
+
+    if not extension.startswith('.'):
+        extension = f".{extension}"
+
     if not audio_base64:
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="Áudio não fornecido.")
 
@@ -832,7 +837,7 @@ def transcreverAudio(req: https_fn.CallableRequest):
     try:
         # 1. Decodificar Base64 para arquivo temporário
         audio_data = base64.b64decode(audio_base64)
-        with tempfile.NamedTemporaryFile(suffix=".m4a", delete=False) as temp_audio:
+        with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as temp_audio:
             temp_audio.write(audio_data)
             temp_filename = temp_audio.name
 

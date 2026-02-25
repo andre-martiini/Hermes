@@ -17,6 +17,7 @@
             "codebase": "node",
             "ignore": [
                 "node_modules",
+                ".cache",
                 ".git",
                 "firebase-debug.log",
                 "firebase-debug.*.log"

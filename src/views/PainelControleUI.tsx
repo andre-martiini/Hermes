@@ -147,7 +147,19 @@ export const PainelControleUI = ({
             </button>
 
             <button
-              onClick={() => setModalConfig({ type: 'reminder', isOpen: true })}
+              onClick={() => {
+                if (task.reminder_at) {
+                  const [date, time] = task.reminder_at.split('T');
+                  setReminderDate(date);
+                  setReminderTime(time.slice(0, 5));
+                } else {
+                  // Pre-fill with today/now if no reminder
+                  const now = new Date();
+                  setReminderDate(now.toISOString().split('T')[0]);
+                  setReminderTime(now.toTimeString().slice(0, 5));
+                }
+                setModalConfig({ type: 'reminder', isOpen: true });
+              }}
               className={`flex-1 h-10 md:h-14 flex items-center justify-center rounded-none md:rounded-xl transition-all shadow-sm ${task.reminder_at && !task.reminder_sent ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}
             >
               <svg className="w-5 h-5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" strokeWidth="2.5" /></svg>

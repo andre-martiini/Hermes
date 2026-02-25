@@ -53,8 +53,8 @@ export const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[], remov
                 key={i}
                 onClick={() => {
                   act.onClick();
-                   // Opicional: remover toast ao clicar? Depende da ação. 
-                   // Para "copiar" talvez não precise remover.
+                  // Opicional: remover toast ao clicar? Depende da ação. 
+                  // Para "copiar" talvez não precise remover.
                 }}
                 className="bg-white/10 hover:bg-white/20 p-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center"
               >
@@ -390,7 +390,7 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
     </div>
   );
 });
-export interface AutoExpandingTextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {}
+export interface AutoExpandingTextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> { }
 
 export const AutoExpandingTextarea = (props: AutoExpandingTextareaProps) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -493,9 +493,9 @@ export const WysiwygEditor = ({ value, onChange, onKeyDown, placeholder, classNa
     <div className={`relative min-h-[56px] group ${className}`}>
       {/* Background Decorative border to avoid glitchy rendering */}
       <div className="absolute inset-0 border border-slate-200 rounded-2xl pointer-events-none group-focus-within:ring-2 group-focus-within:ring-blue-500/20 group-focus-within:border-blue-500 transition-all"></div>
-      
+
       {/* Display Layer */}
-      <div 
+      <div
         className="absolute inset-0 p-4 pointer-events-none overflow-hidden text-sm font-medium leading-relaxed"
         style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'inherit' }}
       >
@@ -511,7 +511,7 @@ export const WysiwygEditor = ({ value, onChange, onKeyDown, placeholder, classNa
         onKeyDown={onKeyDown}
         placeholder={placeholder}
         className="w-full bg-transparent border-none px-4 py-4 text-sm font-medium leading-relaxed text-transparent caret-blue-500 outline-none transition-all resize-none overflow-hidden block relative z-10"
-        style={{ 
+        style={{
           minHeight: 'inherit',
           WebkitTextFillColor: 'transparent',
           appearance: 'none',
@@ -536,7 +536,7 @@ export const NotificationCenter = ({
   onDismiss: (id: string) => void,
   isOpen: boolean,
   onClose: () => void,
-  onUpdateOverdue?: () => void,
+  onUpdateOverdue?: (id?: string) => void,
   onNavigate?: (link: string) => void
 }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -617,8 +617,9 @@ export const NotificationCenter = ({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        onUpdateOverdue();
+                        e.preventDefault();
                         onMarkAsRead(n.id);
+                        onUpdateOverdue(n.id);
                       }}
                       className="mt-4 w-full py-2.5 bg-slate-900 text-white text-[9px] font-black uppercase tracking-widest rounded-lg md:rounded-xl shadow-lg hover:bg-blue-600 transition-all active:scale-95"
                     >

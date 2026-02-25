@@ -940,18 +940,18 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
   const [autoClassified, setAutoClassified] = useState(false);
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-0 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className="bg-white w-full h-full md:h-auto md:max-w-xl rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-        <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
-          <h3 className="text-2xl font-black text-slate-900 tracking-tight">Nova Ação</h3>
-          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
-            <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="bg-white w-full h-auto max-h-[95vh] md:max-w-md rounded-2xl md:rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col">
+        <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between flex-shrink-0">
+          <h3 className="text-lg font-black text-slate-900 tracking-tight">Nova Ação</h3>
+          <button onClick={onClose} className="p-1.5 hover:bg-slate-200 rounded-full transition-colors">
+            <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
 
-        <div className="p-8 space-y-6">
-          <div className="space-y-2">
-            <label htmlFor="task-title-input" className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Título da Tarefa</label>
+        <div className="p-4 space-y-3 overflow-y-auto custom-scrollbar flex-1">
+          <div className="space-y-1">
+            <label htmlFor="task-title-input" className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Título da Tarefa</label>
             <input
               id="task-title-input"
               type="text"
@@ -968,18 +968,18 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
                   categoria: autoClassified ? formData.categoria : detectedArea
                 });
               }}
-              className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+              className="w-full bg-slate-100 border-none rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
               placeholder="O que precisa ser feito?"
             />
             {formData.categoria !== 'NÃO CLASSIFICADA' && formData.categoria !== 'GERAL' && !autoClassified && (
-              <p className="text-[9px] font-bold text-blue-600 pl-1 flex items-center gap-1">
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                Área detectada automaticamente. Você pode alterá-la abaixo.
+              <p className="text-[8px] font-bold text-blue-600 pl-1 flex items-center gap-1">
+                <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                Área detectada automaticamente.
               </p>
             )}
           </div>
 
-          <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-none md:rounded-2xl border border-slate-100">
+          <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
             <input
               type="checkbox"
               id="single-day"
@@ -992,25 +992,25 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
                   data_inicio: checked ? prev.data_limite || prev.data_inicio : prev.data_inicio
                 }));
               }}
-              className="w-5 h-5 rounded-lg border-slate-300 text-blue-600 focus:ring-blue-500 transition-all cursor-pointer"
+              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 transition-all cursor-pointer"
             />
-            <label htmlFor="single-day" className="text-xs font-bold text-slate-700 cursor-pointer select-none">Tarefa de um dia só (Apenas Prazo Final)</label>
+            <label htmlFor="single-day" className="text-[11px] font-bold text-slate-700 cursor-pointer select-none">Tarefa de um dia só (Apenas Prazo Final)</label>
           </div>
 
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-2 gap-3">
             {!formData.is_single_day && (
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Data de Início</label>
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Início</label>
                 <input
                   type="date"
                   value={formData.data_inicio}
                   onChange={e => setFormData({ ...formData, data_inicio: e.target.value })}
-                  className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                  className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
                 />
               </div>
             )}
-            <div className={`space-y-2 ${formData.is_single_day ? 'col-span-2' : ''}`}>
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Prazo Final</label>
+            <div className={`space-y-1 ${formData.is_single_day ? 'col-span-2' : ''}`}>
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Prazo Final</label>
               <input
                 type="date"
                 value={formData.data_limite}
@@ -1022,53 +1022,53 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
                     data_inicio: prev.is_single_day ? newLimit : prev.data_inicio
                   }));
                 }}
-                className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Horário Início</label>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Hora Início</label>
               <input
                 type="time"
                 value={formData.horario_inicio}
                 onChange={e => setFormData({ ...formData, horario_inicio: e.target.value })}
-                className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+                className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
               />
             </div>
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Horário Fim</label>
+            <div className="space-y-1">
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Hora Fim</label>
               <input
                 type="time"
                 value={formData.horario_fim}
                 onChange={e => setFormData({ ...formData, horario_fim: e.target.value })}
-                className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+                className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Status</label>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Status</label>
               <select
                 value={formData.status}
                 onChange={e => setFormData({ ...formData, status: e.target.value as Status })}
-                className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+                className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
               >
                 <option value="em andamento">Em Andamento</option>
                 <option value="concluído">Concluído</option>
               </select>
             </div>
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Tag (Classificação)</label>
+            <div className="space-y-1">
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Tag (Classificação)</label>
               <select
                 value={formData.categoria}
                 onChange={e => {
                   setFormData({ ...formData, categoria: e.target.value as Categoria });
                   setAutoClassified(true); // Marca que o usuário alterou manualmente
                 }}
-                className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[10px] tracking-widest"
+                className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
               >
                 <option value="GERAL">Geral</option>
                 <option value="NÃO CLASSIFICADA">Não Classificada</option>
@@ -1080,20 +1080,10 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
               </select>
             </div>
           </div>
-
-          <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Notas / Observações</label>
-            <WysiwygEditor
-              value={formData.notas}
-              onChange={val => setFormData({ ...formData, notas: val })}
-              placeholder="Detalhes da ação..."
-              className="bg-slate-100 min-h-[150px]"
-            />
-          </div>
         </div>
 
-        <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-4">
-          <button onClick={onClose} className="flex-1 px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all">Cancelar</button>
+        <div className="p-4 bg-slate-50 border-t border-slate-100 flex gap-3 flex-shrink-0">
+          <button onClick={onClose} className="flex-1 px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all border border-slate-200">Cancelar</button>
           <button
             onClick={() => {
               if (!formData.titulo || !formData.data_limite) {
@@ -1120,7 +1110,7 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
               });
               onClose();
             }}
-            className="flex-1 bg-blue-600 text-white px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
+            className="flex-1 bg-blue-600 text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
           >
             Criar Ação
           </button>
@@ -1148,26 +1138,28 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
   const [isSyncing, setIsSyncing] = useState(false);
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-0 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className="bg-white w-full h-full md:h-auto md:max-w-xl md:max-h-[90vh] flex flex-col rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-        <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between flex-shrink-0">
-          <h3 className="text-2xl font-black text-slate-900 tracking-tight">Editar Demanda</h3>
-          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
-            <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="bg-white w-full h-auto max-h-[95vh] md:max-w-md flex flex-col rounded-2xl md:rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+        <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between flex-shrink-0">
+          <h3 className="text-lg font-black text-slate-900 tracking-tight">Editar Demanda</h3>
+          <button onClick={onClose} className="p-1.5 hover:bg-slate-200 rounded-full transition-colors">
+            <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
 
-        <div className="p-8 space-y-6 overflow-y-auto custom-scrollbar flex-1">
-          <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Título da Tarefa</label>
-            <WysiwygEditor
+        <div className="p-4 space-y-3 overflow-y-auto custom-scrollbar flex-1">
+          <div className="space-y-1">
+            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Título da Tarefa</label>
+            <input
+              type="text"
               value={formData.titulo}
-              onChange={val => setFormData({ ...formData, titulo: val })}
-              className="bg-slate-100"
+              onChange={e => setFormData({ ...formData, titulo: e.target.value })}
+              className="w-full bg-slate-100 border-none rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+              placeholder="Título da demanda..."
             />
           </div>
 
-          <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-none md:rounded-2xl border border-slate-100">
+          <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
             <input
               type="checkbox"
               id="edit-single-day"
@@ -1180,25 +1172,25 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
                   data_inicio: checked ? prev.data_limite || prev.data_inicio : prev.data_inicio
                 }));
               }}
-              className="w-5 h-5 rounded-lg border-slate-300 text-blue-600 focus:ring-blue-500 transition-all cursor-pointer"
+              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 transition-all cursor-pointer"
             />
-            <label htmlFor="edit-single-day" className="text-xs font-bold text-slate-700 cursor-pointer select-none">Tarefa de um dia só (Apenas Prazo Final)</label>
+            <label htmlFor="edit-single-day" className="text-[11px] font-bold text-slate-700 cursor-pointer select-none">Tarefa de um dia só (Apenas Prazo Final)</label>
           </div>
 
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-2 gap-3">
             {!formData.is_single_day && (
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Data de Início</label>
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Início</label>
                 <input
                   type="date"
                   value={formData.data_inicio}
                   onChange={e => setFormData({ ...formData, data_inicio: e.target.value })}
-                  className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                  className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
                 />
               </div>
             )}
-            <div className={`space-y-2 ${formData.is_single_day ? 'col-span-2' : ''}`}>
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Prazo Final</label>
+            <div className={`space-y-1 ${formData.is_single_day ? 'col-span-2' : ''}`}>
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Prazo Final</label>
               <input
                 type="date"
                 value={formData.data_limite}
@@ -1210,39 +1202,39 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
                     data_inicio: prev.is_single_day ? newLimit : prev.data_inicio
                   }));
                 }}
-                className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Horário Início</label>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Hora Início</label>
               <input
                 type="time"
                 value={formData.horario_inicio}
                 onChange={e => setFormData({ ...formData, horario_inicio: e.target.value })}
-                className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+                className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
               />
             </div>
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Horário Fim</label>
+            <div className="space-y-1">
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Hora Fim</label>
               <input
                 type="time"
                 value={formData.horario_fim}
                 onChange={e => setFormData({ ...formData, horario_fim: e.target.value })}
-                className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+                className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-6">
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Tag (Classificação)</label>
+          <div className="grid grid-cols-1 gap-3">
+            <div className="space-y-1">
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Tag (Classificação)</label>
               <select
                 value={formData.categoria}
                 onChange={e => setFormData({ ...formData, categoria: e.target.value as Categoria })}
-                className="w-full bg-slate-100 border-none rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[10px] tracking-widest"
+                className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
               >
                 <option value="GERAL">Geral</option>
                 <option value="NÃO CLASSIFICADA">Não Classificada</option>
@@ -1254,30 +1246,25 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
               </select>
             </div>
 
-            {/* Opção de Vínculo com PGC e Processo SEI */}
             {(formData.categoria === 'CLC' || formData.categoria === 'ASSISTÊNCIA' || formData.categoria === 'ASSISTÊNCIA ESTUDANTIL') && (
-              <>
-                <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
-                  <label className="text-[10px] font-black text-blue-600 uppercase tracking-widest pl-1">Vincular ação ao PGC</label>
-                  <select
-                    value={formData.entregas_relacionadas[0] || ''}
-                    onChange={e => setFormData({ ...formData, entregas_relacionadas: e.target.value ? [e.target.value] : [] })}
-                    className="w-full bg-blue-50 border-blue-100 rounded-none md:rounded-2xl px-6 py-4 text-xs font-bold text-blue-900 focus:ring-2 focus:ring-blue-500 transition-all"
-                  >
-                    <option value="">Não vinculado ao PGC</option>
-                    {pgcEntregas.map(e => (
-                      <option key={e.id} value={e.id}>{e.entrega}</option>
-                    ))}
-                  </select>
-                  <p className="text-[9px] font-medium text-blue-400 pl-1 uppercase tracking-wider">Selecione a entrega institucional correspondente</p>
-                </div>
-
-              </>
+              <div className="space-y-1 animate-in fade-in slide-in-from-top-2">
+                <label className="text-[9px] font-black text-blue-600 uppercase tracking-widest pl-1">Vincular ao PGC</label>
+                <select
+                  value={formData.entregas_relacionadas[0] || ''}
+                  onChange={e => setFormData({ ...formData, entregas_relacionadas: e.target.value ? [e.target.value] : [] })}
+                  className="w-full bg-blue-50 border-blue-100 rounded-xl px-4 py-2 text-[10px] font-bold text-blue-900 focus:ring-2 focus:ring-blue-500 transition-all"
+                >
+                  <option value="">Não vinculado ao PGC</option>
+                  {pgcEntregas.map(e => (
+                    <option key={e.id} value={e.id}>{e.entrega}</option>
+                  ))}
+                </select>
+              </div>
             )}
           </div>
         </div>
 
-        <div className="p-6 md:p-8 bg-slate-50 border-t border-slate-100 flex flex-col md:flex-row gap-3 md:gap-4 flex-shrink-0">
+        <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-col md:flex-row gap-2 flex-shrink-0">
           <button
             onClick={() => {
               if (!formData.titulo || !formData.data_limite) {
@@ -1291,12 +1278,12 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
               onSave(task.id, formData);
               onClose();
             }}
-            className="w-full md:flex-1 bg-slate-900 text-white px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all order-1 md:order-3"
+            className="w-full md:flex-1 bg-slate-900 text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all order-1 md:order-2"
           >
             Salvar Alterações
           </button>
 
-          <div className="flex gap-3 order-2 w-full md:w-auto">
+          <div className="flex gap-2 order-2">
             <button
               onClick={() => {
                 showConfirm("Confirmar Exclusão", "Deseja realmente excluir esta tarefa?", () => {
@@ -1304,26 +1291,17 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
                    onClose();
                 });
               }}
-              className="flex-1 md:flex-none px-6 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border flex items-center justify-center gap-2 text-rose-600 hover:bg-rose-50 border-rose-100"
+              className="flex-1 md:flex-none px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all border flex items-center justify-center gap-2 text-rose-600 hover:bg-rose-50 border-rose-100"
             >
               Excluir
             </button>
             <button
               onClick={onClose}
-              className="flex-1 md:hidden px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all border border-slate-200"
+              className="flex-1 md:px-6 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all border border-slate-200"
             >
               Cancelar
             </button>
           </div>
-
-          <div className="hidden md:block md:flex-1 order-2"></div>
-
-          <button
-            onClick={onClose}
-            className="hidden md:block px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all order-2"
-          >
-            Cancelar
-          </button>
         </div>
       </div>
     </div>
