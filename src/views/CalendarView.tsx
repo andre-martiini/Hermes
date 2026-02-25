@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
-import { Tarefa, GoogleCalendarEvent, formatDate, formatDateLocalISO } from '../../types';
+import { Tarefa, GoogleCalendarEvent, formatDate, formatDateLocalISO } from '../types';
 import { DayView } from './DayView';
 
 export const CalendarView = ({

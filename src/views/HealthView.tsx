@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { HealthWeight, DailyHabits, HealthSettings, formatDate, formatDateLocalISO, HealthExam, PoolItem } from './types';
+import { HealthWeight, DailyHabits, HealthSettings, formatDate, formatDateLocalISO, HealthExam, PoolItem } from '../types';
 
 interface HealthViewProps {
     weights: HealthWeight[];

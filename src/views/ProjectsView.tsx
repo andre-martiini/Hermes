@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, query, addDoc, orderBy } from 'firebase/firestore';
-import { db } from './firebase';
-import { Projeto } from './types';
+import { db } from '../firebase';
+import { Projeto } from '../types';
 import { BolsistasView } from './BolsistasView';
 import { ProjectBudgetView } from './ProjectBudgetView';
 import { AcquisitionsView } from './AcquisitionsView';
-import { AutoExpandingTextarea } from './src/components/ui/UIComponents';
+import { AutoExpandingTextarea } from '../components/ui/UIComponents';
 
 export const ProjectsView: React.FC = () => {
   const [projects, setProjects] = useState<Projeto[]>([]);

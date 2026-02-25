@@ -2,10 +2,10 @@
 import {
   Tarefa, AppSettings, PoolItem, ConhecimentoItem, Acompanhamento,
   formatDate, formatDateLocalISO
-} from '../../types';
+} from '../types';
 import { normalizeStatus } from '../utils/helpers';
 import { AutoExpandingTextarea } from '../components/ui/UIComponents';
-import { db, functions } from '../../firebase';
+import { db, functions } from '../firebase';
 import { httpsCallable } from 'firebase/functions';
 import { setDoc, doc } from 'firebase/firestore';
 import { DiarioBordoUI } from './DiarioBordoUI';

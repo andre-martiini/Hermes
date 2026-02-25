@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { 
     Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry, 
     HealthWeight, DailyHabits, HealthSettings, WorkItem, Sistema 
-} from './types';
+} from '../types';
 
 interface DashboardViewProps {
     tarefas: Tarefa[];

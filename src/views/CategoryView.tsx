@@ -1,5 +1,5 @@
 import React from 'react';
-import { Tarefa, formatDate, formatDateLocalISO } from '../../types';
+import { Tarefa, formatDate, formatDateLocalISO } from '../types';
 import { normalizeStatus } from '../utils/helpers';
 
 export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask }: { tasks: Tarefa[], viewMode: string, onSelectTask: (t: Tarefa) => void, onExecuteTask: (t: Tarefa) => void }) => {

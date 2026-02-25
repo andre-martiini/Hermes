@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, onSnapshot, addDoc, doc, updateDoc, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { db, functions } from './firebase';
-import { ItemOrcamento, TransacaoProjeto, Cotacao } from './types';
+import { db, functions } from '../firebase';
+import { ItemOrcamento, TransacaoProjeto, Cotacao } from '../types';
 
 interface AcquisitionsViewProps {
     projetoId: string;

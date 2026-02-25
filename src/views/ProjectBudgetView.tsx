@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { collection, doc, onSnapshot, updateDoc, addDoc, query, orderBy, where } from 'firebase/firestore';
-import { db } from './firebase';
-import { Projeto, OrcamentoProjeto, ItemOrcamento, RemanejamentoRecursos, TransacaoProjeto, VinculoProjeto, TipoBolsa } from './types';
-import { BurnRateSimulator } from './src/components/projects/BurnRateSimulator';
+import { db } from '../firebase';
+import { Projeto, OrcamentoProjeto, ItemOrcamento, RemanejamentoRecursos, TransacaoProjeto, VinculoProjeto, TipoBolsa } from '../types';
+import { BurnRateSimulator } from '../components/projects/BurnRateSimulator';
 
 interface ProjectBudgetViewProps {
     projetoId: string;

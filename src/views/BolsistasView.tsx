@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, getDoc, getDocs } from 'firebase/firestore';
-import { db } from './firebase';
-import { VinculoProjeto, PerfilPessoa, TipoBolsa, Projeto } from './types';
-import { generateScholarshipForm } from './src/utils/pdfGenerator';
+import { db } from '../firebase';
+import { VinculoProjeto, PerfilPessoa, TipoBolsa, Projeto } from '../types';
+import { generateScholarshipForm } from '../utils/pdfGenerator';
 
 interface BolsistasViewProps {
     projetoId: string;

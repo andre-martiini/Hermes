@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, getDoc } from 'firebase/firestore';
-import { db } from '../../../firebase';
-import { PerfilPessoa, VinculoProjeto, Projeto } from '../../../types';
+import { db } from '../../firebase';
+import { PerfilPessoa, VinculoProjeto, Projeto } from '../../types';
 
 export const PublicScholarshipRegistration: React.FC = () => {
     // Extract projectId from URL manually since we don't have react-router hooks

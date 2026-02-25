@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { ConhecimentoItem, formatDate, Tarefa, WorkItem } from './types';
+import { ConhecimentoItem, formatDate, Tarefa, WorkItem } from '../types';
 
-import { AutoExpandingTextarea } from './src/components/ui/UIComponents';
+import { AutoExpandingTextarea } from '../components/ui/UIComponents';
 
 interface KnowledgeViewProps {
     items: ConhecimentoItem[];

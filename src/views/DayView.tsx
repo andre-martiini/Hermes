@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Tarefa, GoogleCalendarEvent, AppSettings, formatDateLocalISO } from '../../types';
+import { Tarefa, GoogleCalendarEvent, AppSettings, formatDateLocalISO } from '../types';
 import { normalizeStatus } from '../utils/helpers';
-import { PROJECT_COLORS } from '../../constants';
+import { PROJECT_COLORS } from '../constants';
 
 export const DayView = ({
   tasks,
