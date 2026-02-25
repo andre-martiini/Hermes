@@ -44,6 +44,7 @@ import { CalendarView } from './src/views/CalendarView';
 import { CategoryView } from './src/views/CategoryView';
 import { TaskExecutionView } from './src/views/TaskExecutionView';
 import { PublicScholarshipRegistration } from './src/components/public/PublicScholarshipRegistration';
+import { TranscriptionTool } from './src/components/tools/TranscriptionTool';
 
 
 type SortOption = 'date-asc' | 'date-desc' | 'priority-high' | 'priority-low';
@@ -779,8 +780,8 @@ const FerramentasView = ({
   onUpdateIdea: (id: string, text: string) => void,
   onConvertToLog: (idea: BrainstormIdea) => void,
   onConvertToTask: (idea: BrainstormIdea) => void,
-  activeTool: 'brainstorming' | 'slides' | 'shopping' | null,
-  setActiveTool: (tool: 'brainstorming' | 'slides' | 'shopping' | null) => void,
+  activeTool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | null,
+  setActiveTool: (tool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | null) => void,
   isAddingText: boolean,
   setIsAddingText: (val: boolean) => void,
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void,
@@ -838,6 +839,10 @@ const FerramentasView = ({
     return <ShoppingListTool onBack={() => setActiveTool(null)} showToast={showToast} />;
   }
 
+  if (activeTool === 'transcription') {
+    return <TranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} />;
+  }
+
   if (!activeTool) {
     return (
       <div className="animate-in grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-0 md:gap-8 pb-20 px-0">
@@ -879,6 +884,18 @@ const FerramentasView = ({
           </div>
         </button>
 
+        <button
+          onClick={() => setActiveTool('transcription')}
+          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-200 shadow-none md:shadow-xl hover:shadow-none md:hover:shadow-2xl transition-all group text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 -ml-px -mt-px md:m-0"
+        >
+          <div className="w-12 h-12 md:w-16 md:h-16 bg-purple-50 rounded-none md:rounded-2xl flex items-center justify-center text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-all flex-shrink-0">
+            <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+          </div>
+          <div>
+            <h3 className="text-lg md:text-2xl font-black text-slate-900 tracking-tighter mb-1 md:mb-2">Transcrição de Áudio</h3>
+            <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Transcreva e refine áudios do WhatsApp e outros.</p>
+          </div>
+        </button>
 
       </div>
     );
@@ -2343,7 +2360,7 @@ const App: React.FC = () => {
   const [isImportPlanOpen, setIsImportPlanOpen] = useState(false);
   const [isCompletedTasksOpen, setIsCompletedTasksOpen] = useState(false);
   const [brainstormIdeas, setBrainstormIdeas] = useState<BrainstormIdea[]>([]);
-  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | 'shopping' | null>(null);
+  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | 'shopping' | 'transcription' | null>(null);
   const [isBrainstormingAddingText, setIsBrainstormingAddingText] = useState(false);
   const [confirmDeleteLogId, setConfirmDeleteLogId] = useState<string | null>(null);
   const [convertingIdea, setConvertingIdea] = useState<BrainstormIdea | null>(null);
