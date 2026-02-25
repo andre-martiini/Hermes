@@ -411,28 +411,28 @@ export type StatusConvocacao = 'Em regularização' | 'Ativo(a)' | 'Concluído(a
  * @deprecated Use PerfilPessoa and VinculoProjeto instead. Kept for migration.
  */
 export interface Bolsista {
-  id?: string;
-  nome: string;
-  status: StatusConvocacao;
-  dataInicio: string;
-  dataConclusao: string;
-  intersticio: number;
-  funcao: string;
-  modalidadeBolsa: string;
-  cpf: string;
-  rg: string;
-  endereco: string;
-  telefone: string;
-  email: string;
-  campus?: string;
-  cursoIfes?: string;
-  agenciaBanestes: string;
-  contaBanestes: string;
-  curriculoLattes?: string;
-  termoResponsabilidadeUrl?: string;
-  termoComodatoUrl?: string;
-  createdAt: number;
-  updatedAt: number;
+    id?: string;
+    nome: string;
+    status: StatusConvocacao;
+    dataInicio: string;
+    dataConclusao: string;
+    intersticio: number;
+    funcao: string;
+    modalidadeBolsa: string;
+    cpf: string;
+    rg: string;
+    endereco: string;
+    telefone: string;
+    email: string;
+    campus?: string;
+    cursoIfes?: string;
+    agenciaBanestes: string;
+    contaBanestes: string;
+    curriculoLattes?: string;
+    termoResponsabilidadeUrl?: string;
+    termoComodatoUrl?: string;
+    createdAt: number;
+    updatedAt: number;
 }
 
 // --- New Project Module Types ---
@@ -549,12 +549,6 @@ export interface TransacaoProjeto {
 }
 
 // Shopping List Module Types
-export interface ShoppingLocation {
-    id: string;
-    nome: string;
-    icon?: string; // e.g., "cart", "pills", "store"
-}
-
 export interface ShoppingItem {
     id: string;
     nome: string;
@@ -563,5 +557,12 @@ export interface ShoppingItem {
     unit: string;
     isPlanned: boolean;
     isPurchased: boolean;
-    locationId: string;
+    ordem?: number;
+}
+
+/** @deprecated Use single-list ShoppingItem without locationId */
+export interface ShoppingLocation {
+    id: string;
+    nome: string;
+    icon?: string;
 }

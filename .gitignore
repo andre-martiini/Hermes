@@ -38,3 +38,5 @@ credentials.json
 # Python
 __pycache__/
 *.pyc
+
+functions_node/.cache/
