@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, addDoc, orderBy } from 'firebase/firestore';
+import { collection, onSnapshot, query, addDoc, orderBy, getDocs, where } from 'firebase/firestore';
 import { db } from './firebase';
-import { Projeto } from './types';
+import { Projeto, VinculoProjeto, ItemOrcamento, TransacaoProjeto, RemanejamentoRecursos } from './types';
 import { BolsistasView } from './BolsistasView';
 import { ProjectBudgetView } from './ProjectBudgetView';
 import { AcquisitionsView } from './AcquisitionsView';
@@ -33,18 +33,52 @@ export const ProjectsView = ({
     setNewProjectDesc('');
   };
 
-  const handleExportProject = (project: Projeto) => {
-    const md = generateMarkdown(
-      `Projeto: ${project.nome}`,
-      project.descricao || 'Sem descrição.',
-      {
-        'Nome': 'Nome do projeto',
-        'Descrição': 'Descrição detalhada',
-        'Data Criação': 'Data de início'
-      },
-      [{ title: 'Dados do Projeto', data: [project] }]
-    );
-    downloadMarkdown(`projeto_${project.nome.replace(/\s+/g, '_')}`, md);
+  const handleExportProject = async (project: Projeto) => {
+    try {
+      // 1. Fetch Related Data
+      const vinculosSnap = await getDocs(query(collection(db, 'vinculos_projeto'), where('projeto_id', '==', project.id)));
+      const vinculos = vinculosSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as VinculoProjeto));
+
+      const orcamentoItemsSnap = await getDocs(collection(db, `projetos/${project.id}/itens_orcamento`));
+      const orcamentoItems = orcamentoItemsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as ItemOrcamento));
+
+      const transacoesSnap = await getDocs(query(collection(db, 'transacoes_projeto'), where('projeto_id', '==', project.id)));
+      const transacoes = transacoesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as TransacaoProjeto));
+
+      const remanejamentosSnap = await getDocs(query(collection(db, 'remanejamentos_recursos'), where('projeto_id', '==', project.id)));
+      const remanejamentos = remanejamentosSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as RemanejamentoRecursos));
+
+      // 2. Build Sections for Markdown
+      const dataSections = [
+        { title: 'Dados Gerais', data: [project] },
+        { title: 'Bolsistas Vinculados', data: vinculos },
+        { title: 'Itens de Orçamento Planejados', data: orcamentoItems },
+        { title: 'Transações e Pagamentos', data: transacoes },
+        { title: 'Remanejamentos de Recursos', data: remanejamentos }
+      ];
+
+      const md = generateMarkdown(
+        `Projeto: ${project.nome}`,
+        project.descricao || 'Sem descrição.',
+        {
+          'Nome': 'Nome do projeto',
+          'Descrição': 'Descrição detalhada',
+          'id': 'ID do Registro',
+          'data_criacao': 'Criado em',
+          'data_inicio': 'Início',
+          'data_fim_prevista': 'Fim Previsto',
+          'status': 'Status Atual',
+          'valor_real': 'Valor Pago',
+          'rubrica': 'Rubrica',
+          'quantidade': 'Qtd',
+          'valor': 'Valor Movimentado'
+        },
+        dataSections
+      );
+      downloadMarkdown(`projeto_${project.nome.replace(/\s+/g, '_')}`, md);
+    } catch (error) {
+      console.error("Erro ao exportar projeto:", error);
+    }
   };
 
   if (selectedProjectId) {

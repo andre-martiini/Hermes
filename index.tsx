@@ -383,7 +383,8 @@ const FerramentasView = ({
   isAddingText,
   setIsAddingText,
   showToast,
-  showAlert
+  showAlert,
+  knowledgeItems
 }: {
   ideas: BrainstormIdea[],
   onDeleteIdea: (id: string) => void,
@@ -398,6 +399,11 @@ const FerramentasView = ({
   setIsAddingText: (val: boolean) => void,
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void,
   showAlert: (title: string, msg: string) => void,
+  onProcessWithAI?: (id: string) => Promise<any>,
+  onGenerateSlides?: (text: string) => Promise<any>,
+  handleUploadKnowledgeFile?: (file: File) => void,
+  handleAddKnowledgeLink?: (url: string, title: string) => Promise<void>,
+  handleSaveKnowledgeItem?: (item: Partial<ConhecimentoItem>) => Promise<void>,
   knowledgeItems?: ConhecimentoItem[]
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -1950,7 +1956,7 @@ const App: React.FC = () => {
   const [isImportPlanOpen, setIsImportPlanOpen] = useState(false);
   const [isCompletedTasksOpen, setIsCompletedTasksOpen] = useState(false);
   const [brainstormIdeas, setBrainstormIdeas] = useState<BrainstormIdea[]>([]);
-  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | 'shopping' | 'transcription' | null>(null);
+  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'media_player' | null>(null);
   const [isBrainstormingAddingText, setIsBrainstormingAddingText] = useState(false);
   const [confirmDeleteLogId, setConfirmDeleteLogId] = useState<string | null>(null);
   const [convertingIdea, setConvertingIdea] = useState<BrainstormIdea | null>(null);
@@ -5294,6 +5300,11 @@ const App: React.FC = () => {
                     setIsAddingText={setIsBrainstormingAddingText}
                     showToast={showToast}
                     showAlert={showAlert}
+                    onProcessWithAI={handleProcessWithAI}
+                    onGenerateSlides={handleGenerateSlides}
+                    handleUploadKnowledgeFile={handleUploadKnowledgeFile}
+                    handleAddKnowledgeLink={handleAddKnowledgeLink}
+                    handleSaveKnowledgeItem={handleSaveKnowledgeItem}
                     knowledgeItems={knowledgeItems}
                   />
                 ) : viewMode === 'projects' ? (
@@ -5376,18 +5387,26 @@ const App: React.FC = () => {
                   />
 
                 ) : viewMode === 'knowledge' ? (
-                  <KnowledgeView
-                    items={knowledgeItems}
-                    onDeleteItem={async (id) => { await deleteDoc(doc(db, 'conhecimento', id)); }}
-                    onUploadFile={handleUploadKnowledgeFile}
-                    onAddLink={handleAddKnowledgeLink}
-                    onSaveItem={handleSaveKnowledgeItem}
-                    onProcessWithAI={handleProcessWithAI}
-                    onGenerateSlides={handleGenerateSlides}
-                    showConfirm={showConfirm}
-                    allTasks={tarefas}
-                    allWorkItems={workItems}
-                  />
+                  <div className="fixed inset-0 z-[50] bg-slate-50 md:relative md:inset-auto md:z-0 md:bg-transparent">
+                    <KnowledgeView
+                      items={knowledgeItems}
+                      onDeleteItem={async (id) => { await deleteDoc(doc(db, 'conhecimento', id)); }}
+                      onUploadFile={handleUploadKnowledgeFile}
+                      onAddLink={handleAddKnowledgeLink}
+                      onSaveItem={handleSaveKnowledgeItem}
+                      onProcessWithAI={handleProcessWithAI}
+                      onGenerateSlides={handleGenerateSlides}
+                      showConfirm={showAlert}
+                      allTasks={tarefas}
+                      allWorkItems={workItems}
+                    />
+                    <button 
+                      onClick={() => setViewMode('dashboard')}
+                      className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-2xl md:hidden z-[60]"
+                    >
+                      Voltar ao Painel
+                    </button>
+                  </div>
                 ) : viewMode === 'sistemas-dev' ? (
                   <div className="space-y-8 animate-in fade-in duration-500 pb-20">
                     {!selectedSystemId ? (
