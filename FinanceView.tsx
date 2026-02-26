@@ -137,6 +137,8 @@ const FinanceView = ({
     const [newBill, setNewBill] = useState<Partial<FixedBill>>({ category: 'Conta Fixa' });
     const [uploading, setUploading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [editingAmountId, setEditingAmountId] = useState<string | null>(null);
+    const [tempAmount, setTempAmount] = useState<string>('');
 
     const today = new Date();
     const isCurrentMonth = today.getMonth() === currentMonth && today.getFullYear() === currentYear;
@@ -1272,19 +1274,39 @@ const FinanceView = ({
                                         b.year === (currentMonth === 0 ? currentYear - 1 : currentYear)
                                     );
                                     const diff = prevBill ? bill.amount - prevBill.amount : 0;
+                                    const isVariable = bill.amount === 0;
 
                                     return (
-                                        <div key={bill.id} className={`bg-white p-4 rounded-lg md:rounded-2xl border transition-all flex items-center justify-between group ${bill.isPaid ? 'border-emerald-100 bg-emerald-50/10' : 'border-slate-100 hover:shadow-md'}`}>
+                                        <div key={bill.id} 
+                                            className={`transition-all flex items-center justify-between group p-4 rounded-lg md:rounded-2xl border ${
+                                                bill.isPaid 
+                                                    ? 'border-emerald-100 bg-emerald-50/10' 
+                                                    : isVariable 
+                                                        ? 'border-2 border-dashed border-slate-200 bg-slate-50/30 opacity-60 hover:opacity-100' 
+                                                        : 'border-slate-100 bg-white hover:shadow-md'
+                                            }`}
+                                        >
                                             <div className="flex items-center gap-4">
                                                 <div className="checkbox-wrapper">
-                                                    <input type="checkbox" checked={bill.isPaid} onChange={() => onUpdateBill({ ...bill, isPaid: !bill.isPaid })} className="w-5 h-5 rounded-lg border-slate-300 text-emerald-500 focus:ring-emerald-500 cursor-pointer" />
+                                                    <input 
+                                                        type="checkbox" 
+                                                        checked={bill.isPaid} 
+                                                        disabled={isVariable}
+                                                        onChange={() => onUpdateBill({ ...bill, isPaid: !bill.isPaid })} 
+                                                        className={`w-5 h-5 rounded-lg border-slate-300 text-emerald-500 focus:ring-emerald-500 ${isVariable ? 'opacity-10 cursor-not-allowed' : 'cursor-pointer'}`} 
+                                                    />
                                                 </div>
                                                 <div>
-                                                    <div className={`text-[9px] font-black uppercase tracking-widest mb-0.5 ${bill.category === 'Poupança' ? 'text-amber-600' : 'text-slate-400'}`}>{bill.category || 'Conta Fixa'}</div>
-                                                    <div className={`text-sm font-black ${bill.isPaid ? 'text-slate-400 line-through' : 'text-slate-800'} leading-none`}>{bill.description}</div>
+                                                    <div className="flex items-center gap-2 mb-0.5">
+                                                        <div className={`text-[9px] font-black uppercase tracking-widest ${bill.category === 'Poupança' ? 'text-amber-600' : 'text-slate-400'}`}>{bill.category || 'Conta Fixa'}</div>
+                                                        {isVariable && (
+                                                            <span className="text-[7px] font-black text-slate-300 uppercase tracking-tighter">Aguardando Fechamento</span>
+                                                        )}
+                                                    </div>
+                                                    <div className={`text-sm font-black ${bill.isPaid ? 'text-slate-400 line-through' : isVariable ? 'text-slate-400' : 'text-slate-800'} leading-none`}>{bill.description}</div>
                                                     <div className="text-[10px] text-slate-400 font-bold mt-1 flex items-center gap-2">
                                                         Vence dia {bill.dueDay}
-                                                        {diff !== 0 && (
+                                                        {diff !== 0 && !isVariable && (
                                                             <span className={`text-[8px] font-black ${diff < 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                                                                 {diff < 0 ? '↓' : '↑'} R$ {Math.abs(diff).toLocaleString('pt-BR')}
                                                             </span>
@@ -1294,18 +1316,65 @@ const FinanceView = ({
                                             </div>
                                             <div className="flex items-center gap-4">
                                                 <div className="flex gap-2">
-                                                    {bill.barcode && (
-                                                        <button onClick={() => navigator.clipboard.writeText(bill.barcode || '')} className="p-2 text-slate-300 hover:text-blue-500 transition-colors" title="Copiar Código">
+                                                    {!isVariable && bill.barcode && (
+                                                        <button onClick={() => navigator.clipboard.writeText(bill.barcode || '')} className="p-2 text-slate-200 hover:text-blue-500 transition-colors" title="Copiar Código">
                                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
                                                         </button>
                                                     )}
-                                                    {bill.attachmentUrl && (
-                                                        <a href={bill.attachmentUrl} target="_blank" rel="noopener noreferrer" className="p-2 text-slate-300 hover:text-blue-500 transition-colors">
+                                                    {!isVariable && bill.attachmentUrl && (
+                                                        <a href={bill.attachmentUrl} target="_blank" rel="noopener noreferrer" className="p-2 text-slate-200 hover:text-blue-500 transition-colors">
                                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
                                                         </a>
                                                     )}
                                                 </div>
-                                                <div className={`text-lg font-black tracking-tighter ${bill.isPaid ? 'text-slate-400' : 'text-slate-900'}`}>R$ {bill.amount.toLocaleString('pt-BR')}</div>
+                                                
+                                                <div className="flex flex-col items-end">
+                                                    {editingAmountId === bill.id ? (
+                                                        <div className="flex items-center gap-1">
+                                                            <span className="text-[10px] font-black text-slate-400">R$</span>
+                                                            <input
+                                                                autoFocus
+                                                                type="number"
+                                                                className="w-24 bg-white border border-slate-200 rounded-lg px-2 py-1 text-sm font-black text-slate-800 outline-none"
+                                                                value={tempAmount}
+                                                                onChange={e => setTempAmount(e.target.value)}
+                                                                onBlur={() => {
+                                                                    if (tempAmount !== '') {
+                                                                        onUpdateBill({ ...bill, amount: Number(tempAmount) });
+                                                                    }
+                                                                    setEditingAmountId(null);
+                                                                }}
+                                                                onKeyDown={e => {
+                                                                    if (e.key === 'Enter') {
+                                                                        if (tempAmount !== '') {
+                                                                            onUpdateBill({ ...bill, amount: Number(tempAmount) });
+                                                                        }
+                                                                        setEditingAmountId(null);
+                                                                    }
+                                                                    if (e.key === 'Escape') setEditingAmountId(null);
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    ) : (
+                                                        <div 
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setEditingAmountId(bill.id);
+                                                                setTempAmount(isVariable ? '' : String(bill.amount));
+                                                            }}
+                                                            className={`text-lg font-black tracking-tighter cursor-pointer hover:bg-slate-100 px-3 py-1 rounded-xl transition-all ${
+                                                                bill.isPaid 
+                                                                    ? 'text-slate-300' 
+                                                                    : isVariable 
+                                                                        ? 'text-slate-300 text-xs font-bold uppercase border border-slate-100 hover:border-slate-200 hover:text-blue-500' 
+                                                                        : 'text-slate-900'
+                                                            }`}
+                                                        >
+                                                            {isVariable ? 'Lançar Valor' : `R$ ${bill.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                                                        </div>
+                                                    )}
+                                                </div>
+
                                                 <button onClick={() => onDeleteBill(bill.id)} className="p-2 text-slate-200 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100">
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                                 </button>

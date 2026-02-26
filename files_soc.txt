@@ -61,7 +61,6 @@ send_last_token.py
 setup_bot.bat
 setup_credentials.bat
 setup_keys.py
-slides-ia
 split.js
 src/App.tsx
 src/components/modals/Modals.tsx

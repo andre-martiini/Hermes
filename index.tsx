@@ -10,7 +10,7 @@ import {
   formatDate, formatDateLocalISO, Sistema, SistemaStatus, WorkItem, WorkItemPhase,
   WorkItemPriority, QualityLog, WorkItemAudit, GoogleCalendarEvent,
   PoolItem, CustomNotification, HealthExam, ConhecimentoItem, UndoAction, HermesModalProps,
-  ShoppingItem
+  ShoppingItem, Projeto
 } from './types';
 import HealthView from './HealthView';
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
@@ -1863,6 +1863,12 @@ const App: React.FC = () => {
   // Finance State
   const [financeTransactions, setFinanceTransactions] = useState<FinanceTransaction[]>([]);
   const [financeGoals, setFinanceGoals] = useState<FinanceGoal[]>([]);
+  const [fixedBills, setFixedBills] = useState<FixedBill[]>([]);
+  const [billRubrics, setBillRubrics] = useState<BillRubric[]>([]);
+  const [incomeEntries, setIncomeEntries] = useState<IncomeEntry[]>([]);
+  const [incomeRubrics, setIncomeRubrics] = useState<IncomeRubric[]>([]);
+  const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
+  const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   const [financeSettings, setFinanceSettings] = useState<FinanceSettings>({
     monthlyBudget: 5000,
     monthlyBudgets: {},
@@ -2450,15 +2456,9 @@ const App: React.FC = () => {
 
   // Dashboard states
   const [dashboardViewMode, setDashboardViewMode] = useState<'list' | 'calendar'>('list');
-  const [fixedBills, setFixedBills] = useState<FixedBill[]>([]);
-  const [billRubrics, setBillRubrics] = useState<BillRubric[]>([]);
-  const [incomeEntries, setIncomeEntries] = useState<IncomeEntry[]>([]);
-  const [incomeRubrics, setIncomeRubrics] = useState<IncomeRubric[]>([]);
   const [calendarViewMode, setCalendarViewMode] = useState<'month' | 'week' | 'day'>('month');
   const [calendarDate, setCalendarDate] = useState(new Date());
 
-  const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
-  const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
