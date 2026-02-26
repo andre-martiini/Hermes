@@ -332,6 +332,7 @@ export const TimeGrid = ({
 
                  {positioned.map(event => {
                    const isDragging = dragging?.id === event.id;
+                   const isResizing = resizing?.id === event.id;
                    const startMin = event.start;
                    const endMin = event.end;
                    const top = (startMin / 60) * hourHeight;
@@ -355,15 +356,15 @@ export const TimeGrid = ({
 
                    const taskItem = event.data as Tarefa;
                    return (
-                     <div
-                        key={event.id}
-                        className={`absolute rounded-lg border p-1 shadow-sm group transition-all overflow-hidden hover:z-30 cursor-grab active:cursor-grabbing
-                           ${taskItem.categoria === 'CLC' ? 'bg-blue-50 border-blue-200 text-blue-800' :
-                             taskItem.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
-                             'bg-white border-slate-200 text-slate-800'}
-                           ${isDragging ? 'opacity-30' : ''}
-                        `}
-                        style={{ top, height: Math.max(30, height), left: `${left}%`, width: `${columnWidth}%`, zIndex: 10, touchAction: 'none' }}
+                     <React.Fragment key={event.id}>
+                       <div
+                          className={`absolute rounded-lg border p-1 shadow-sm group transition-all overflow-hidden hover:z-30 cursor-grab active:cursor-grabbing
+                             ${taskItem.categoria === 'CLC' ? 'bg-blue-50 border-blue-200 text-blue-800' :
+                               taskItem.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
+                               'bg-white border-slate-200 text-slate-800'}
+                             ${isDragging || isResizing ? 'opacity-30' : ''}
+                          `}
+                          style={{ top, height: Math.max(30, height), left: `${left}%`, width: `${columnWidth}%`, zIndex: 10, touchAction: 'none' }}
                         onMouseDown={(e) => {
                           if ((e.target as HTMLElement).classList.contains('resize-handle')) return;
                           e.stopPropagation();
@@ -442,6 +443,35 @@ export const TimeGrid = ({
                          }}
                        />
                      </div>
+                     {isResizing && (
+                         (() => {
+                           const deltaY = resizing.currentY - resizing.startY;
+                           const deltaMin = Math.round((deltaY / hourHeight) * 60 / step) * step;
+                           let previewStart = resizing.originalStartMin;
+                           let previewEnd = resizing.originalEndMin;
+                           if (resizing.type === 'top') {
+                             previewStart = Math.min(previewStart + deltaMin, previewEnd - 15);
+                             previewStart = Math.max(0, previewStart);
+                           } else {
+                             previewEnd = Math.max(previewStart + 15, previewEnd + deltaMin);
+                             previewEnd = Math.min(1440, previewEnd);
+                           }
+                           const previewTop = (previewStart / 60) * hourHeight;
+                           const previewHeight = ((previewEnd - previewStart) / 60) * hourHeight;
+
+                           return (
+                             <div
+                               className="absolute rounded-lg border-2 border-dashed border-indigo-500 bg-indigo-50/50 p-1 z-50 pointer-events-none"
+                               style={{ top: previewTop, height: Math.max(30, previewHeight), left: `${left}%`, width: `${columnWidth}%` }}
+                             >
+                               <div className="text-[9px] font-bold text-indigo-800">
+                                 {minutesToTime(previewStart)} - {minutesToTime(previewEnd)}
+                               </div>
+                             </div>
+                           );
+                         })()
+                      )}
+                    </React.Fragment>
                    );
                  })}
                </div>
