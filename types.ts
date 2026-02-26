@@ -376,6 +376,8 @@ export interface ConhecimentoItem {
         id_origem: string;
     } | null;
     slides_data?: any;
+    parent_id?: string | null;
+    is_folder?: boolean;
 }
 
 export interface UndoAction {
