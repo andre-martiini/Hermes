@@ -27,14 +27,14 @@ interface DashboardViewProps {
 const DashboardCard = ({ title, iconColor, onRedirect, children }: { title: string, iconColor: string, onRedirect: () => void, children: React.ReactNode }) => (
     <div 
         onClick={onRedirect}
-        className="group bg-white p-4 md:p-5 rounded-2xl md:rounded-[2rem] border border-slate-200 shadow-sm md:shadow-md hover:shadow-xl hover:border-slate-300 h-full transition-all flex flex-col cursor-pointer min-h-0"
+        className="group bg-white p-3 md:p-4 rounded-2xl md:rounded-[1.5rem] border border-slate-200 shadow-sm md:shadow-md hover:shadow-xl hover:border-slate-300 h-full transition-all flex flex-col cursor-pointer min-h-0"
         role="button"
         tabIndex={0}
     >
-        <div className="flex items-center justify-between mb-3 shrink-0">
-            <div className="flex items-center gap-3">
-                <span className={`w-2 h-6 md:h-8 ${iconColor} rounded-full`}></span>
-                <h3 className="text-sm md:text-lg font-black text-slate-900 uppercase tracking-tight">{title}</h3>
+        <div className="flex items-center justify-between mb-2 shrink-0">
+            <div className="flex items-center gap-2">
+                <span className={`w-1.5 h-5 md:h-7 ${iconColor} rounded-full`}></span>
+                <h3 className="text-xs md:text-base font-black text-slate-900 uppercase tracking-tight">{title}</h3>
             </div>
             <div className="p-2 rounded-xl text-slate-400 group-hover:bg-slate-50 group-hover:text-slate-900 transition-all">
                 <svg className="w-5 h-5 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -50,14 +50,14 @@ const DashboardCard = ({ title, iconColor, onRedirect, children }: { title: stri
 
 const PieChart = ({ data }: { data: [string, number][] }) => {
     const total = data.reduce((acc, curr) => acc + curr[1], 0);
-    if (total === 0) return <div className="h-24 flex items-center justify-center text-slate-300 text-[10px] font-black uppercase">Sem dados</div>;
+    if (total === 0) return <div className="h-24 md:h-40 flex items-center justify-center text-slate-300 text-[10px] font-black uppercase">Sem dados</div>;
 
     let currentAngle = 0;
     const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
     return (
-        <div className="flex items-center gap-4">
-            <svg viewBox="0 0 100 100" className="w-24 h-24 transform -rotate-90 shrink-0">
+        <div className="flex items-center gap-3 md:gap-6">
+            <svg viewBox="0 0 100 100" className="w-16 h-16 md:w-28 md:h-28 transform -rotate-90 shrink-0 drop-shadow-lg">
                 {data.map((item, i) => {
                     const percentage = item[1] / total;
                     const angle = percentage * 360;
@@ -75,16 +75,18 @@ const PieChart = ({ data }: { data: [string, number][] }) => {
                     const d = `M 50 50 L ${x1} ${y1} A 40 40 0 ${largeArc} 1 ${x2} ${y2} Z`;
 
                     currentAngle += angle;
-                    return <path key={i} d={d} fill={colors[i % colors.length]} />;
+                    return <path key={i} d={d} className="transition-all duration-500 hover:opacity-80 cursor-pointer" fill={colors[i % colors.length]} />;
                 })}
-                <circle cx="50" cy="50" r="25" fill="white" />
+                <circle cx="50" cy="50" r="22" fill="white" />
             </svg>
-            <div className="space-y-1 overflow-hidden">
-                {data.slice(0, 4).map((item, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: colors[i % colors.length] }}></div>
-                        <span className="text-[10px] font-bold text-slate-600 uppercase truncate max-w-[70px]">{item[0]}</span>
-                        <span className="text-[10px] font-black text-slate-900">{item[1]}</span>
+            <div className="space-y-1 md:space-y-1.5 flex-1 min-w-0">
+                {data.slice(0, 5).map((item, i) => (
+                    <div key={i} className="flex items-center justify-between gap-3 group">
+                        <div className="flex items-center gap-2 truncate">
+                            <div className="w-2 h-2 md:w-2.5 md:h-2.5 rounded-full shrink-0 shadow-sm" style={{ backgroundColor: colors[i % colors.length] }}></div>
+                            <span className="text-[9px] md:text-[11px] font-bold text-slate-600 uppercase truncate group-hover:text-slate-900 transition-colors">{item[0]}</span>
+                        </div>
+                        <span className="text-[10px] md:text-xs font-black text-slate-900">{item[1]}</span>
                     </div>
                 ))}
             </div>
@@ -92,22 +94,23 @@ const PieChart = ({ data }: { data: [string, number][] }) => {
     );
 };
 
-const BarChart = ({ data, color, maxHeight = 60 }: { data: number[], color: string, maxHeight?: number }) => {
+const BarChart = ({ data, color, maxHeight = 65 }: { data: number[], color: string, maxHeight?: number }) => {
     const max = Math.max(...data, 1);
+    const chartHeightClass = "h-[40px] md:h-[65px]";
     return (
-        <div className="flex items-end gap-0.5 h-[60px] w-full bg-slate-50/50 rounded-lg px-1 pb-1">
+        <div className={`flex items-end gap-0.5 md:gap-1 ${chartHeightClass} w-full bg-slate-50/50 rounded-lg md:rounded-xl px-1 md:px-2 pb-1 md:pb-2`}>
             {data.map((v, i) => (
                 <div key={i} className="flex-1 flex flex-col justify-end items-center gap-0.5 group">
                     <div
-                        className="w-full rounded-t-sm transition-all group-hover:opacity-80"
+                        className="w-full rounded-t-sm md:rounded-t-md transition-all group-hover:opacity-80 cursor-pointer"
                         style={{
-                            height: `${(v / max) * maxHeight}px`,
+                            height: `${(v / max) * (typeof window !== 'undefined' && window.innerWidth >= 768 ? 50 : 35)}px`,
                             backgroundColor: color,
                             minWidth: '2px'
                         }}
                         title={`Dia ${i + 1}: R$ ${v.toFixed(2)}`}
                     />
-                    <span className="text-[8px] text-slate-400 font-bold scale-75 md:scale-100">{i + 1}</span>
+                    <span className="text-[6px] md:text-[8px] text-slate-400 font-bold opacity-60 group-hover:opacity-100">{i + 1}</span>
                 </div>
             ))}
         </div>
@@ -117,23 +120,23 @@ const BarChart = ({ data, color, maxHeight = 60 }: { data: number[], color: stri
 const SystemsBarChart = ({ data }: { data: [string, number][] }) => {
     const max = Math.max(...data.map(d => d[1]), 1);
     return (
-        <div className="space-y-1.5">
+        <div className="space-y-1 md:space-y-2">
             {data.map((item, i) => (
-                <div key={i} className="space-y-0.5">
-                    <div className="flex justify-between text-[9px] font-black uppercase text-slate-500">
-                        <span className="truncate max-w-[120px] md:max-w-[150px]">{item[0]}</span>
-                        <span>{item[1]} ajustes</span>
+                <div key={i} className="space-y-0.5 md:space-y-1">
+                    <div className="flex justify-between text-[8px] md:text-[10px] font-black uppercase text-slate-500 tracking-tight">
+                        <span className="truncate max-w-[150px] md:max-w-[200px]">{item[0]}</span>
+                        <span className="text-slate-900">{item[1]} ajustes</span>
                     </div>
-                    <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-1 md:h-2 bg-slate-100 rounded-full overflow-hidden shadow-inner">
                         <div
-                            className="h-full bg-violet-500 rounded-full transition-all duration-1000"
+                            className="h-full bg-violet-500 rounded-full transition-all duration-1000 shadow-[0_0_8px_rgba(139,92,246,0.3)]"
                             style={{ width: `${(item[1] / max) * 100}%` }}
                         />
                     </div>
                 </div>
             ))}
             {data.length === 0 && (
-                <div className="py-4 text-center text-slate-300 text-[10px] font-black uppercase tracking-widest italic">Nenhum ajuste pendente</div>
+                <div className="py-4 text-center text-slate-300 text-[10px] md:text-xs font-black uppercase tracking-widest italic opacity-50">Nenhum ajuste pendente</div>
             )}
         </div>
     );
@@ -158,19 +161,28 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     onNavigate,
     onOpenBacklog
 }) => {
-    const todayStr = new Date().toISOString().split('T')[0];
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const afterTomorrow = new Date();
-    afterTomorrow.setDate(afterTomorrow.getDate() + 2);
-    const afterTomorrowStr = afterTomorrow.toISOString().split('T')[0];
+    const { todayStr, tomorrowStr } = useMemo(() => {
+        const now = new Date();
+        const formatDate = (d: Date) => {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+        };
+        const tom = new Date(now);
+        tom.setDate(tom.getDate() + 1);
+        return {
+            todayStr: formatDate(now),
+            tomorrowStr: formatDate(tom)
+        };
+    }, []);
 
     // --- ACTIONS LOGIC ---
     const inProgressActions = useMemo(() => tarefas.filter(t => t.status !== 'concluído' && t.status !== 'excluído' as any), [tarefas]);
 
     const nextTwoDaysActions = useMemo(() => inProgressActions.filter(t =>
-        t.data_limite && t.data_limite !== '-' && t.data_limite >= todayStr && t.data_limite <= afterTomorrowStr
-    ), [inProgressActions, todayStr, afterTomorrowStr]);
+        t.data_limite && t.data_limite !== '-' && t.data_limite >= todayStr && t.data_limite <= tomorrowStr
+    ), [inProgressActions, todayStr, tomorrowStr]);
 
     const actionsByArea = useMemo(() => {
         const counts: Record<string, number> = {};
@@ -293,25 +305,24 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     }, [workItems, unidades]);
 
     return (
-        // Alterado para h-screen (ou h-[calc(...)]) flex-col para forçar ocupar apenas a tela e dividir espaço igualmente
-        <div className="animate-in fade-in duration-700 flex flex-col h-full min-h-screen lg:min-h-[calc(100vh-5rem)] p-4 md:p-6 w-full max-w-7xl mx-auto overflow-hidden">
-            <div className="grid grid-cols-1 lg:grid-cols-2 lg:grid-rows-2 gap-4 lg:gap-6 flex-1 min-h-0">
+        <div className="animate-in fade-in duration-700 flex flex-col h-full lg:h-[calc(100vh-5rem)] p-1 md:p-2 lg:p-1 w-full max-w-[1600px] mx-auto overflow-hidden">
+            <div className="grid grid-cols-1 lg:grid-cols-2 lg:grid-rows-2 gap-2 md:gap-3 lg:gap-2 flex-1 min-h-0">
 
                 {/* CARD: AÇÕES */}
                 <DashboardCard title="Ações" iconColor="bg-blue-500" onRedirect={() => onNavigate('gallery')}>
-                    <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-3">
-                            <div className="bg-blue-50 p-3 rounded-2xl border border-blue-100 flex flex-col justify-center">
-                                <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-0.5">Em Andamento</p>
-                                <div className="text-xl md:text-2xl font-black text-slate-900">{inProgressActions.length}</div>
+                    <div className="space-y-3 md:space-y-4">
+                        <div className="grid grid-cols-2 gap-2 md:gap-3">
+                            <div className="bg-blue-50/50 p-2 md:p-3 rounded-xl md:rounded-2xl border border-blue-100/50 flex flex-col justify-center transition-transform hover:scale-[1.01]">
+                                <p className="text-[8px] md:text-[10px] font-black text-blue-600 uppercase tracking-widest mb-1">Em Andamento</p>
+                                <div className="text-lg md:text-xl font-black text-slate-900">{inProgressActions.length}</div>
                             </div>
-                            <div className="bg-indigo-50 p-3 rounded-2xl border border-indigo-100 flex flex-col justify-center">
-                                <p className="text-[9px] font-black text-indigo-600 uppercase tracking-widest mb-0.5">Próx. 48h</p>
-                                <div className="text-xl md:text-2xl font-black text-slate-900">{nextTwoDaysActions.length}</div>
+                            <div className="bg-indigo-50/50 p-2 md:p-3 rounded-xl md:rounded-2xl border border-indigo-100/50 flex flex-col justify-center transition-transform hover:scale-[1.01]">
+                                <p className="text-[8px] md:text-[10px] font-black text-indigo-600 uppercase tracking-widest mb-1">Hoje/Amanhã</p>
+                                <div className="text-lg md:text-xl font-black text-slate-900">{nextTwoDaysActions.length}</div>
                             </div>
                         </div>
-                        <div>
-                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Distribuição por Área</p>
+                        <div className="flex-1">
+                            <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 md:mb-3">Distribuição por Área</p>
                             <PieChart data={actionsByArea} />
                         </div>
                     </div>
@@ -319,29 +330,29 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
                 {/* CARD: FINANCEIRO */}
                 <DashboardCard title="Financeiro" iconColor="bg-emerald-500" onRedirect={() => onNavigate('finance')}>
-                    <div className="space-y-3">
+                    <div className="space-y-2 md:space-y-4">
                         <div>
-                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Saldo Disponível</p>
-                            <div className={`text-xl md:text-2xl font-black tracking-tight ${availableBalance < 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+                            <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5 md:mb-1">Saldo Disponível</p>
+                            <div className={`text-lg md:text-2xl font-black tracking-tight ${availableBalance < 0 ? 'text-rose-600' : 'text-slate-900'}`}>
                                 R$ {availableBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </div>
                         </div>
-                        <div>
-                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Gastos Diários</p>
+                        <div className="flex-1">
+                            <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Gastos Diários</p>
                             <BarChart data={dailySpending} color="#10b981" />
                         </div>
-                        <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-50">
-                            <div>
-                                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Recebido</p>
-                                <div className="text-xs font-black text-slate-900">R$ {currentMonthIncome.toLocaleString('pt-BR')}</div>
-                                <div className={`text-[8px] font-bold ${incomeVariation >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                        <div className="grid grid-cols-2 gap-2 md:gap-4 pt-2 md:pt-3 border-t border-slate-100">
+                            <div className="group">
+                                <p className="text-[7px] md:text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Recebido</p>
+                                <div className="text-[10px] md:text-sm font-black text-slate-900 group-hover:text-emerald-600 transition-colors">R$ {currentMonthIncome.toLocaleString('pt-BR')}</div>
+                                <div className={`text-[7px] md:text-[9px] font-bold inline-flex items-center gap-1 ${incomeVariation >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                                     {incomeVariation >= 0 ? '↑' : '↓'} {Math.abs(incomeVariation).toFixed(0)}%
                                 </div>
                             </div>
-                            <div>
-                                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Em Contas</p>
-                                <div className="text-xs font-black text-slate-900">R$ {currentTotalBills.toLocaleString('pt-BR')}</div>
-                                <div className={`text-[8px] font-bold ${billsVariation <= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                            <div className="group">
+                                <p className="text-[7px] md:text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Em Contas</p>
+                                <div className="text-[10px] md:text-sm font-black text-slate-900 group-hover:text-rose-600 transition-colors">R$ {currentTotalBills.toLocaleString('pt-BR')}</div>
+                                <div className={`text-[7px] md:text-[9px] font-bold inline-flex items-center gap-1 ${billsVariation <= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                                     {billsVariation <= 0 ? '↓' : '↑'} {Math.abs(billsVariation).toFixed(0)}%
                                 </div>
                             </div>
@@ -351,29 +362,30 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
                 {/* CARD: SAÚDE */}
                 <DashboardCard title="Saúde" iconColor="bg-rose-500" onRedirect={() => onNavigate('saude')}>
-                    <div className="space-y-4">
+                    <div className="space-y-3 md:space-y-4">
                         <div className="flex justify-between items-end">
                             <div>
-                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Peso vs Meta</p>
-                                <div className="text-xl md:text-2xl font-black text-slate-900">
-                                    {currentWeight.toFixed(1)} <span className="text-slate-300 text-xs md:text-sm">/ {healthSettings?.targetWeight || '--'} kg</span>
+                                <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5 md:mb-1">Peso vs Meta</p>
+                                <div className="text-lg md:text-2xl font-black text-slate-900">
+                                    {currentWeight.toFixed(1)} <span className="text-slate-300 text-xs md:text-base">/ {healthSettings?.targetWeight || '--'} kg</span>
                                 </div>
                             </div>
                             <div className="text-right">
-                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Eliminado</p>
+                                <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5 md:mb-1">Eliminado</p>
                                 <div className="text-lg md:text-xl font-black text-emerald-500">-{totalWeightLost.toFixed(1)} kg</div>
                             </div>
                         </div>
-                        <div className="bg-slate-900 p-3 rounded-xl text-white">
-                            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Previsão (ETA)</p>
-                            <div className="text-base md:text-lg font-black text-blue-400">{healthProjection || '--'}</div>
+                        <div className="bg-slate-900 p-3 md:p-4 rounded-xl md:rounded-2xl text-white shadow-lg relative overflow-hidden group">
+                            <div className="absolute top-0 right-0 w-20 h-20 bg-blue-500/10 rounded-full blur-2xl -mr-10 -mt-10 group-hover:bg-blue-500/20 transition-all"></div>
+                            <p className="text-[7px] md:text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5 relative z-10">Previsão (ETA)</p>
+                            <div className="text-lg md:text-xl font-black text-blue-400 relative z-10">{healthProjection || '--'}</div>
                         </div>
                         <div>
-                            <div className="flex justify-between items-center mb-1.5">
-                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Ofensiva de Hábitos</p>
-                                <span className="bg-amber-100 text-amber-700 text-[9px] font-black px-2 py-0.5 rounded-full">{habitStreak} dias</span>
+                            <div className="flex justify-between items-center mb-2">
+                                <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Ofensiva de Hábitos</p>
+                                <span className="bg-amber-100 text-amber-700 text-[9px] md:text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm">{habitStreak} dias</span>
                             </div>
-                            <div className="flex gap-1">
+                            <div className="flex gap-1 md:gap-1.5">
                                 {Array.from({ length: 7 }).map((_, i) => {
                                     const d = new Date();
                                     d.setDate(d.getDate() - (6 - i));
@@ -383,7 +395,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                     return (
                                         <div
                                             key={i}
-                                            className="flex-1 h-6 md:h-8 rounded-md shadow-inner transition-all"
+                                            className="flex-1 h-5 md:h-10 rounded-md md:rounded-lg shadow-inner transition-all hover:scale-105"
                                             style={{ backgroundColor: count === 0 ? '#f1f5f9' : `hsl(${(count / 6) * 120}, 70%, 50%)` }}
                                             title={`${dStr}: ${count}/6 hábitos`}
                                         />
@@ -396,17 +408,17 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
                 {/* CARD: SISTEMAS */}
                 <DashboardCard title="Sistemas" iconColor="bg-violet-500" onRedirect={() => onNavigate('sistemas-dev')}>
-                    <div className="space-y-4">
-                        <div className="flex flex-wrap gap-1 md:gap-1.5">
+                    <div className="space-y-3 md:space-y-4 flex flex-col h-full">
+                        <div className="flex flex-wrap gap-2">
                             {systemsByPhase.map(([phase, count]) => (
-                                <div key={phase} className="px-2 py-1 bg-slate-50 border border-slate-100 rounded-lg flex items-center gap-1">
-                                    <span className="text-[7px] md:text-[8px] font-black text-slate-400 uppercase">{phase === 'prototipacao' ? 'Protótipo' : phase === 'producao' ? 'Prod' : phase}</span>
-                                    <span className="text-[9px] md:text-[10px] font-black text-slate-900">{count}</span>
+                                <div key={phase} className="px-2 py-1 md:px-3 md:py-1.5 bg-slate-50 border border-slate-100 rounded-xl flex items-center gap-1.5 md:gap-2 transition-colors hover:bg-slate-100">
+                                    <span className="text-[7px] md:text-[9px] font-black text-slate-400 uppercase tracking-tight">{phase === 'prototipacao' ? 'Protótipo' : phase === 'producao' ? 'Prod' : phase}</span>
+                                    <span className="text-[9px] md:text-xs font-black text-slate-900">{count}</span>
                                 </div>
                             ))}
                         </div>
-                        <div>
-                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Pendências por Sistema</p>
+                        <div className="flex-1">
+                            <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 md:mb-3">Pendências por Sistema</p>
                             <SystemsBarChart data={systemsByAdjustments} />
                         </div>
                     </div>

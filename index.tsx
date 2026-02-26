@@ -5222,30 +5222,12 @@ const App: React.FC = () => {
               )}
             </header>
 
-            <div className="max-w-[1400px] mx-auto w-full px-0 md:px-8 py-6">
+            <div className={`mx-auto w-full ${viewMode === 'dashboard' ? 'max-w-[1600px] px-0 py-0' : 'max-w-[1400px] px-0 md:px-8 py-6'}`}>
               {/* Painel de Estatísticas e Filtros - APENAS NA VISÃO GERAL */}
-              <main className="mb-20">
+              <main className={viewMode === 'dashboard' ? '' : 'mb-20'}>
                 {viewMode === 'dashboard' ? (
                   <DashboardView
                     tarefas={tarefas}
-                    financeTransactions={financeTransactions}
-                    financeSettings={financeSettings}
-                    fixedBills={fixedBills}
-                    incomeEntries={incomeEntries}
-                    healthWeights={healthWeights}
-                    healthDailyHabits={healthDailyHabits}
-                    healthSettings={healthSettings}
-                    unidades={unidades}
-                    sistemasDetalhes={sistemasDetalhes}
-                    workItems={workItems}
-                    currentMonth={currentMonth}
-                    currentYear={currentYear}
-                    onNavigate={handleDashboardNavigate}
-                    onOpenBacklog={handleCopyBacklog}
-                  />
-                ) : viewMode === 'day' ? (
-                  <DayView
-                    tasks={filteredAndSortedTarefas}
                     financeTransactions={financeTransactions}
                     financeSettings={financeSettings}
                     fixedBills={fixedBills}
