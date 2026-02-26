@@ -46,6 +46,7 @@ import { TaskExecutionView } from './src/views/TaskExecutionView';
 import { PublicScholarshipRegistration } from './src/components/public/PublicScholarshipRegistration';
 import { TranscriptionTool } from './src/components/tools/TranscriptionTool';
 import { ShoppingListTool } from './src/components/tools/ShoppingListTool';
+import { MediaPlayerTool } from './src/components/tools/MediaPlayerTool';
 import { SpeedDialMenu } from './src/components/ui/SpeedDialMenu';
 import { generateMarkdown, downloadMarkdown } from './src/utils/markdownGenerator';
 
@@ -391,12 +392,13 @@ const FerramentasView = ({
   onUpdateIdea: (id: string, text: string) => void,
   onConvertToLog: (idea: BrainstormIdea) => void,
   onConvertToTask: (idea: BrainstormIdea) => void,
-  activeTool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | null,
-  setActiveTool: (tool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | null) => void,
+  activeTool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'media_player' | null,
+  setActiveTool: (tool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'media_player' | null) => void,
   isAddingText: boolean,
   setIsAddingText: (val: boolean) => void,
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void,
-  showAlert: (title: string, msg: string) => void
+  showAlert: (title: string, msg: string) => void,
+  knowledgeItems?: ConhecimentoItem[]
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [textInput, setTextInput] = useState('');
@@ -454,6 +456,10 @@ const FerramentasView = ({
     return <TranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} />;
   }
 
+  if (activeTool === 'media_player') {
+    return <MediaPlayerTool onBack={() => setActiveTool(null)} showToast={showToast} items={knowledgeItems || []} />;
+  }
+
   if (!activeTool) {
     return (
       <div className="animate-in grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-0 md:gap-8 pb-20 px-0">
@@ -505,6 +511,19 @@ const FerramentasView = ({
           <div>
             <h3 className="text-lg md:text-2xl font-black text-slate-900 tracking-tighter mb-1 md:mb-2">Transcrição de Áudio</h3>
             <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Transcreva e refine áudios do WhatsApp e outros.</p>
+          </div>
+        </button>
+
+        <button
+          onClick={() => setActiveTool('media_player')}
+          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-200 shadow-none md:shadow-xl hover:shadow-none md:hover:shadow-2xl transition-all group text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 -ml-px -mt-px md:m-0"
+        >
+          <div className="w-12 h-12 md:w-16 md:h-16 bg-pink-50 rounded-none md:rounded-2xl flex items-center justify-center text-pink-600 group-hover:bg-pink-600 group-hover:text-white transition-all flex-shrink-0">
+            <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          </div>
+          <div>
+            <h3 className="text-lg md:text-2xl font-black text-slate-900 tracking-tighter mb-1 md:mb-2">Media Player</h3>
+            <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Reproduza arquivos de áudio e vídeo do sistema.</p>
           </div>
         </button>
 
@@ -2357,11 +2376,27 @@ const App: React.FC = () => {
     let filename = 'hermes_export';
 
     if (viewMode === 'projects') {
+       const projectData = projects.map(p => ({
+         'Nome': p.nome,
+         'Descrição': p.descricao || '-',
+         'Data Criação': new Date(p.data_criacao).toLocaleDateString(),
+         'Orçamento Custeio': p.orcamento?.custeio ? `R$ ${p.orcamento.custeio.toLocaleString('pt-BR')}` : '-',
+         'Orçamento Capital': p.orcamento?.capital ? `R$ ${p.orcamento.capital.toLocaleString('pt-BR')}` : '-',
+         'Orçamento Bolsas': p.orcamento?.bolsas ? `R$ ${p.orcamento.bolsas.toLocaleString('pt-BR')}` : '-'
+       }));
+
        md = generateMarkdown(
          'Módulo de Projetos',
-         'Listagem de todos os projetos cadastrados no sistema.',
-         { 'Nome': 'Nome do projeto', 'Descrição': 'Resumo', 'Data': 'Data de criação' },
-         [{ title: 'Projetos Ativos', data: projects.map(p => ({ Nome: p.nome, Descrição: p.descricao, Data: new Date(p.data_criacao).toLocaleDateString() })) }]
+         'Listagem detalhada de todos os projetos cadastrados no sistema, incluindo dados orçamentários.',
+         {
+           'Nome': 'Nome do projeto',
+           'Descrição': 'Resumo do projeto',
+           'Data Criação': 'Data de registro',
+           'Orçamento Custeio': 'Valor alocado para custeio',
+           'Orçamento Capital': 'Valor alocado para capital',
+           'Orçamento Bolsas': 'Valor alocado para bolsas'
+         },
+         [{ title: 'Projetos Detalhados', data: projectData }]
        );
        filename = 'hermes_projetos';
     } else if (viewMode === 'finance') {
@@ -2771,28 +2806,26 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // HermesNotification System Triggers (Time-based: Habits, Weigh-in)
+  // HermesNotification System Triggers (Time-based: Habits, Weigh-in, Task Reminders)
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
       const current_time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-
-      // Calculate local date string (YYYY-MM-DD) to match local time configuration
       const todayStr = formatDateLocalISO(now);
 
-      // 1. Habits Reminder
-      if (appSettings.notifications.habitsReminder.enabled && current_time === appSettings.notifications.habitsReminder.time) {
+      // 1. Habits Reminder (More robust check: >= time and not shown today)
+      if (appSettings.notifications.habitsReminder.enabled) {
         const lastOpen = localStorage.getItem('lastHabitsReminderDate');
-        if (lastOpen !== todayStr) {
+        if (lastOpen !== todayStr && current_time >= appSettings.notifications.habitsReminder.time) {
           setIsHabitsReminderOpen(true);
           localStorage.setItem('lastHabitsReminderDate', todayStr);
         }
       }
 
       // 2. Weigh-in Reminder (Bell HermesNotification)
-      if (appSettings.notifications.weighInReminder.enabled && current_time === appSettings.notifications.weighInReminder.time) {
+      if (appSettings.notifications.weighInReminder.enabled) {
         const lastWeighInRemind = localStorage.getItem('lastWeighInRemindDate');
-        if (lastWeighInRemind !== todayStr) {
+        if (lastWeighInRemind !== todayStr && current_time >= appSettings.notifications.weighInReminder.time) {
           const dayMatch = now.getDay() === appSettings.notifications.weighInReminder.dayOfWeek;
           let shouldRemind = false;
 
@@ -2817,7 +2850,26 @@ const App: React.FC = () => {
           }
         }
       }
-      // 3. Daily Task Notifications
+
+      // 3. Task Reminders (Scheduled via TaskExecutionView)
+      tarefas.forEach(task => {
+        if (task.reminder_at && !task.reminder_sent) {
+          const reminderTime = new Date(task.reminder_at);
+          if (now >= reminderTime) {
+            emitNotification(
+              "Lembrete de Tarefa",
+              `Chegou a hora de: ${task.titulo}`,
+              'info',
+              'acoes',
+              `task_${task.id}`
+            );
+            // Mark as sent to prevent loop
+            updateDoc(doc(db, 'tarefas', task.id), { reminder_sent: true }).catch(console.error);
+          }
+        }
+      });
+
+      // 4. Daily Task Notifications (Legacy / Overdue)
       const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
       tarefas.forEach(t => {
         if (t.status === 'concluído' || t.data_limite !== todayStr) return;
@@ -5242,6 +5294,7 @@ const App: React.FC = () => {
                     setIsAddingText={setIsBrainstormingAddingText}
                     showToast={showToast}
                     showAlert={showAlert}
+                    knowledgeItems={knowledgeItems}
                   />
                 ) : viewMode === 'projects' ? (
                   <ProjectsView
