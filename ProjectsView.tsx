@@ -7,42 +7,44 @@ import { ProjectBudgetView } from './ProjectBudgetView';
 import { AcquisitionsView } from './AcquisitionsView';
 import { AutoExpandingTextarea } from './src/components/ui/UIComponents';
 
-export const ProjectsView: React.FC = () => {
-  const [projects, setProjects] = useState<Projeto[]>([]);
+import { generateMarkdown, downloadMarkdown } from './src/utils/markdownGenerator';
+
+export const ProjectsView = ({
+  projects,
+  isCreating,
+  onCloseCreate,
+  onCreateProject
+}: {
+  projects: Projeto[],
+  isCreating: boolean,
+  onCloseCreate: () => void,
+  onCreateProject: (name: string, desc: string) => Promise<void>
+}) => {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDesc, setNewProjectDesc] = useState('');
   const [activeTab, setActiveTab] = useState<'bolsistas' | 'orcamento' | 'aquisicoes'>('bolsistas');
 
-  useEffect(() => {
-    const q = query(collection(db, 'projetos'), orderBy('data_criacao', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Projeto[];
-      setProjects(data);
-    });
-    return () => unsubscribe();
-  }, []);
-
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProjectName.trim()) return;
+    await onCreateProject(newProjectName, newProjectDesc);
+    setNewProjectName('');
+    setNewProjectDesc('');
+  };
 
-    try {
-      await addDoc(collection(db, 'projetos'), {
-        nome: newProjectName,
-        descricao: newProjectDesc,
-        data_criacao: new Date().toISOString()
-      });
-      setNewProjectName('');
-      setNewProjectDesc('');
-      setIsCreating(false);
-    } catch (error) {
-      console.error("Error creating project:", error);
-    }
+  const handleExportProject = (project: Projeto) => {
+    const md = generateMarkdown(
+      `Projeto: ${project.nome}`,
+      project.descricao || 'Sem descrição.',
+      {
+        'Nome': 'Nome do projeto',
+        'Descrição': 'Descrição detalhada',
+        'Data Criação': 'Data de início'
+      },
+      [{ title: 'Dados do Projeto', data: [project] }]
+    );
+    downloadMarkdown(`projeto_${project.nome.replace(/\s+/g, '_')}`, md);
   };
 
   if (selectedProjectId) {
@@ -72,11 +74,14 @@ export const ProjectsView: React.FC = () => {
                     </p>
                 </div>
                 
-                <div className="hidden md:flex gap-4">
-                  <div className="text-right">
+                <div className="flex gap-4 items-center">
+                  <div className="hidden md:block text-right">
                     <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Data de Início</p>
                     <p className="text-sm font-bold text-slate-700">{project?.data_criacao ? new Date(project.data_criacao).toLocaleDateString('pt-BR') : '-'}</p>
                   </div>
+                  <button onClick={() => project && handleExportProject(project)} className="p-2 text-slate-400 hover:text-indigo-600 transition-colors" title="Exportar Projeto">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4-4m0 0l-4-4m4 4v12" /></svg>
+                  </button>
                 </div>
              </div>
 
@@ -183,7 +188,7 @@ export const ProjectsView: React.FC = () => {
                     <div className="flex gap-3 pt-4">
                         <button
                             type="button"
-                            onClick={() => setIsCreating(false)}
+                            onClick={onCloseCreate}
                             className="flex-1 py-3 text-xs font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-xl transition-all"
                         >
                             Cancelar

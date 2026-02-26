@@ -10,6 +10,7 @@ import { httpsCallable } from 'firebase/functions';
 import { setDoc, doc } from 'firebase/firestore';
 import { DiarioBordoUI } from './DiarioBordoUI';
 import { PainelControleUI } from './PainelControleUI';
+import { SpeedDialMenu } from '../components/ui/SpeedDialMenu';
 
 interface TaskExecutionViewProps {
   task: Tarefa;
@@ -18,6 +19,21 @@ interface TaskExecutionViewProps {
   onSave: (id: string, updates: Partial<Tarefa>) => void;
   onClose: () => void;
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
+  // SpeedDial Props
+  notifications: any[];
+  isSyncing: boolean;
+  isNotificationCenterOpen: boolean;
+  onOpenNotes: () => void;
+  onOpenLog: () => void;
+  onOpenShopping: () => void;
+  onOpenTranscription: () => void;
+  onToggleNotifications: () => void;
+  onSync: () => void;
+  onOpenSettings: () => void;
+  onCloseNotifications: () => void;
+  onMarkAsRead: (id: string) => void;
+  onDismiss: (id: string) => void;
+  onCreateAction: () => void;
 }
 
 export const TaskExecutionView = ({
@@ -26,7 +42,21 @@ export const TaskExecutionView = ({
   appSettings,
   onSave,
   onClose,
-  showToast
+  showToast,
+  notifications,
+  isSyncing,
+  isNotificationCenterOpen,
+  onOpenNotes,
+  onOpenLog,
+  onOpenShopping,
+  onOpenTranscription,
+  onToggleNotifications,
+  onSync,
+  onOpenSettings,
+  onCloseNotifications,
+  onMarkAsRead,
+  onDismiss,
+  onCreateAction
 }: TaskExecutionViewProps) => {
   // --- States ---
   const [newFollowUp, setNewFollowUp] = useState('');
@@ -433,6 +463,43 @@ export const TaskExecutionView = ({
             setReminderDate={setReminderDate}
             setReminderTime={setReminderTime}
           />
+
+          {/* Date/Time Inputs */}
+          <div className={`border rounded-2xl p-4 space-y-4 transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+            <h4 className="text-[10px] font-black uppercase tracking-widest opacity-50">Planejamento</h4>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-[9px] font-bold uppercase opacity-60">Início</label>
+                <input
+                  type="date"
+                  value={task.data_inicio || ''}
+                  onChange={e => onSave(task.id, { data_inicio: e.target.value })}
+                  className={`w-full bg-transparent border-b text-xs font-bold outline-none ${isTimerRunning ? 'border-white/20 focus:border-white' : 'border-slate-200 focus:border-blue-500'}`}
+                />
+                <input
+                  type="time"
+                  value={task.horario_inicio || ''}
+                  onChange={e => onSave(task.id, { horario_inicio: e.target.value })}
+                  className={`w-full bg-transparent border-b text-xs font-bold outline-none ${isTimerRunning ? 'border-white/20 focus:border-white' : 'border-slate-200 focus:border-blue-500'}`}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[9px] font-bold uppercase opacity-60">Término</label>
+                <input
+                  type="date"
+                  value={task.data_limite || ''}
+                  onChange={e => onSave(task.id, { data_limite: e.target.value })}
+                  className={`w-full bg-transparent border-b text-xs font-bold outline-none ${isTimerRunning ? 'border-white/20 focus:border-white' : 'border-slate-200 focus:border-blue-500'}`}
+                />
+                <input
+                  type="time"
+                  value={task.horario_fim || ''}
+                  onChange={e => onSave(task.id, { horario_fim: e.target.value })}
+                  className={`w-full bg-transparent border-b text-xs font-bold outline-none ${isTimerRunning ? 'border-white/20 focus:border-white' : 'border-slate-200 focus:border-blue-500'}`}
+                />
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Diary Column (Ordem 2 no mobile) */}
@@ -505,6 +572,26 @@ export const TaskExecutionView = ({
           </div>
         </div>
       )}
+
+      {/* Speed Dial */}
+      <div className="fixed bottom-6 right-6 z-[250]">
+        <SpeedDialMenu
+          notifications={notifications}
+          isSyncing={isSyncing}
+          isNotificationCenterOpen={isNotificationCenterOpen}
+          onOpenNotes={onOpenNotes}
+          onOpenLog={onOpenLog}
+          onOpenShopping={onOpenShopping}
+          onOpenTranscription={onOpenTranscription}
+          onToggleNotifications={onToggleNotifications}
+          onSync={onSync}
+          onOpenSettings={onOpenSettings}
+          onCloseNotifications={onCloseNotifications}
+          onMarkAsRead={onMarkAsRead}
+          onDismiss={onDismiss}
+          onCreateAction={onCreateAction}
+        />
+      </div>
 
       {/* Dynamic Modal (CRUD/Settings) */}
       {modalConfig.isOpen && (
