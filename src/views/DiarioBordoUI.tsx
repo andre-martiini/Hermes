@@ -135,25 +135,7 @@ export const DiarioBordoUI = ({
             </div>
           </div>
 
-          {/* Notificações Replicadas */}
-          {notifications.length > 0 && notifications.some(n => !n.isRead) && (
-            <div className="space-y-2 mb-8 animate-in fade-in slide-in-from-top-4 duration-500">
-              <div className="flex items-center gap-2 mb-3 px-2">
-                <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
-                <h5 className="text-[9px] font-black text-blue-500 uppercase tracking-[0.2em]">Sinalização de Sistema</h5>
-              </div>
-              {notifications.filter(n => !n.isRead).map(n => (
-                <div key={n.id} className={`p-4 rounded-none md:rounded-2xl border flex items-start gap-4 transition-all shadow-sm ${isTimerRunning ? 'bg-blue-500/10 border-blue-500/20 text-blue-100' : 'bg-blue-50 border-blue-100 text-blue-900'}`}>
-                  <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 shadow-lg ${n.type === 'error' ? 'bg-rose-500' : n.type === 'warning' ? 'bg-amber-500' : 'bg-blue-500'}`}></div>
-                  <div className="flex-1">
-                    <p className="text-[11px] font-black leading-tight mb-1">{n.title}</p>
-                    <p className="text-[10px] font-medium opacity-70 leading-relaxed line-clamp-2">{n.message}</p>
-                  </div>
-                </div>
-              ))}
-              <div className="h-px bg-slate-100/10 mx-2 mt-6"></div>
-            </div>
-          )}
+
 
           <div className="space-y-1 pb-2">
             {(() => {

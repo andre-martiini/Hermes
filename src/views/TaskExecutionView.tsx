@@ -528,6 +528,28 @@ export const TaskExecutionView = ({
               </div>
             </div>
           </div>
+
+          {/* Notificação Compacta do Sistema */}
+          {notifications.length > 0 && notifications.some(n => !n.isRead) && (
+            <div className={`mt-3 p-3 rounded-2xl border animate-in fade-in slide-in-from-top-2 duration-500 ${isTimerRunning ? 'bg-blue-500/5 border-blue-500/20' : 'bg-blue-50/50 border-blue-100'}`}>
+              {(() => {
+                const latest = [...notifications].filter(n => !n.isRead).reverse()[0];
+                return (
+                  <div className="flex items-center gap-3">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 animate-pulse ${latest.type === 'error' ? 'bg-rose-500' : latest.type === 'warning' ? 'bg-amber-500' : 'bg-blue-500'}`}></span>
+                    <div className="min-w-0">
+                      <p className={`text-[9px] font-black uppercase tracking-wider truncate ${isTimerRunning ? 'text-blue-300' : 'text-blue-600'}`}>
+                        {latest.title}
+                      </p>
+                      <p className={`text-[10px] font-medium truncate opacity-70 ${isTimerRunning ? 'text-blue-100' : 'text-blue-900'}`}>
+                        {latest.message}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
         </div>
 
         {/* Diary Column (Ordem 2 no mobile) */}
