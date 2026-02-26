@@ -3306,7 +3306,7 @@ const App: React.FC = () => {
   };
 
   const handleCreateWorkItem = async (sistemaId: string, tipo: 'desenvolvimento' | 'ajuste' | 'log' | 'geral', descricao: string, attachments: PoolItem[] = [], suppressToast = false) => {
-    const finalTipo = tipo === 'geral' ? 'ajuste' : tipo;
+    const finalTipo = tipo === 'geral' ? 'log' : tipo;
     try {
       if (!descricao.trim()) return;
       const docRef = await addDoc(collection(db, 'sistemas_work_items'), {
@@ -5657,25 +5657,6 @@ const App: React.FC = () => {
                                                 </button>
                                               </div>
                                             ))}
-                                            <label className={`w-16 h-16 border-2 border-dashed border-slate-200 rounded-lg hidden md:flex items-center justify-center cursor-pointer hover:border-violet-400 hover:bg-violet-50 transition-all ${isUploading ? 'animate-pulse pointer-events-none' : ''}`}>
-                                              <input
-                                                type="file"
-                                                accept="image/*"
-                                                className="hidden"
-                                                onChange={async (e) => {
-                                                  const file = e.target.files?.[0];
-                                                  if (file) {
-                                                    const item = await handleFileUploadToDrive(file);
-                                                    if (item) setNewLogAttachments(prev => [...prev, item]);
-                                                  }
-                                                }}
-                                              />
-                                              {isUploading ? (
-                                                <div className="w-4 h-4 border-2 border-violet-600 border-t-transparent rounded-full animate-spin"></div>
-                                              ) : (
-                                                <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-                                              )}
-                                            </label>
                                           </div>
                                           <button
                                             onClick={() => {

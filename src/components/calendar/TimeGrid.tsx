@@ -417,7 +417,8 @@ export const TimeGrid = ({
                        </div>
 
                        <div
-                         className="resize-handle absolute top-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black/10 z-20"
+                         className="resize-handle absolute -top-2 left-0 right-0 h-6 cursor-ns-resize z-20 flex items-center justify-center opacity-0 hover:opacity-100 active:opacity-100 transition-opacity"
+                         style={{ touchAction: 'none' }}
                          onMouseDown={(e) => {
                            e.stopPropagation();
                            e.preventDefault();
@@ -428,9 +429,12 @@ export const TimeGrid = ({
                            e.preventDefault();
                            setResizing({ id: event.id, type: 'top', startY: e.touches[0].clientY, currentY: e.touches[0].clientY, originalStartMin: startMin, originalEndMin: endMin });
                          }}
-                       />
+                       >
+                         <div className="w-8 h-1 bg-slate-300 rounded-full shadow-sm"></div>
+                       </div>
                        <div
-                         className="resize-handle absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-black/10 z-20"
+                         className="resize-handle absolute -bottom-2 left-0 right-0 h-6 cursor-ns-resize z-20 flex items-center justify-center opacity-0 hover:opacity-100 active:opacity-100 transition-opacity"
+                         style={{ touchAction: 'none' }}
                          onMouseDown={(e) => {
                            e.stopPropagation();
                            e.preventDefault();
@@ -441,7 +445,9 @@ export const TimeGrid = ({
                            e.preventDefault();
                            setResizing({ id: event.id, type: 'bottom', startY: e.touches[0].clientY, currentY: e.touches[0].clientY, originalStartMin: startMin, originalEndMin: endMin });
                          }}
-                       />
+                       >
+                         <div className="w-8 h-1 bg-slate-300 rounded-full shadow-sm"></div>
+                       </div>
                      </div>
                      {isResizing && (
                          (() => {
