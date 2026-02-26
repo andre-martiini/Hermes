@@ -16,7 +16,7 @@ import HealthView from './HealthView';
 import { STATUS_COLORS, PROJECT_COLORS } from './constants';
 import { db, functions, messaging, auth, googleProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, onSnapshot, query, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, writeBatch, getDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, writeBatch, getDoc } from 'firebase/firestore';
 import { getToken, onMessage } from 'firebase/messaging';
 import { httpsCallable } from 'firebase/functions';
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -45,6 +45,9 @@ import { CategoryView } from './src/views/CategoryView';
 import { TaskExecutionView } from './src/views/TaskExecutionView';
 import { PublicScholarshipRegistration } from './src/components/public/PublicScholarshipRegistration';
 import { TranscriptionTool } from './src/components/tools/TranscriptionTool';
+import { ShoppingListTool } from './src/components/tools/ShoppingListTool';
+import { SpeedDialMenu } from './src/components/ui/SpeedDialMenu';
+import { generateMarkdown, downloadMarkdown } from './src/utils/markdownGenerator';
 
 
 type SortOption = 'date-asc' | 'date-desc' | 'priority-high' | 'priority-low';
@@ -363,398 +366,6 @@ const SlidesTool = ({ onBack, showToast }: { onBack: () => void, showToast: (msg
 
 
 
-const SHOPPING_ITEMS_KEY = 'hermes_shopping_items_v2';
-
-const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, showToast: (msg: string, type: 'success' | 'error' | 'info') => void }) => {
-  const [items, setItems] = useState<ShoppingItem[]>(() => {
-    try { return JSON.parse(localStorage.getItem(SHOPPING_ITEMS_KEY) || '[]'); } catch { return []; }
-  });
-  const [view, setView] = useState<'catalog' | 'planning' | 'shopping'>('catalog');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [newItemName, setNewItemName] = useState('');
-  const [newItemCategoria, setNewItemCategoria] = useState('Geral');
-  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [importText, setImportText] = useState('');
-  const [editingItemId, setEditingItemId] = useState<string | null>(null);
-  const [editingField, setEditingField] = useState<'nome' | 'categoria' | 'quantidade' | null>(null);
-  const [editValue, setEditValue] = useState('');
-
-  useEffect(() => {
-    localStorage.setItem(SHOPPING_ITEMS_KEY, JSON.stringify(items));
-  }, [items]);
-
-  // --- Catalog actions ---
-  const handleAddItem = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!newItemName.trim()) return;
-    const existing = items.find(i => i.nome.toLowerCase() === newItemName.trim().toLowerCase());
-    if (existing) { showToast('Item já cadastrado!', 'info'); setNewItemName(''); return; }
-    const newItem: ShoppingItem = {
-      id: `item_${Date.now()}`,
-      nome: newItemName.trim(),
-      categoria: newItemCategoria.trim() || 'Geral',
-      quantidade: '1',
-      unit: 'un',
-      isPlanned: false,
-      isPurchased: false,
-    };
-    setItems(prev => [...prev, newItem]);
-    setNewItemName('');
-    showToast('Item cadastrado!', 'success');
-  };
-
-  const handleDeleteItem = (id: string) => {
-    setItems(prev => prev.filter(i => i.id !== id));
-  };
-
-  const handleBatchImport = () => {
-    if (!importText.trim()) return;
-    const lines = importText.split('\n').map(l => l.trim()).filter(l => l !== '');
-    if (lines.length === 0) return;
-    setItems(prev => {
-      let current = [...prev];
-      lines.forEach(line => {
-        const [nome, cat] = line.split('|').map(s => s.trim());
-        if (!nome) return;
-        const exists = current.find(i => i.nome.toLowerCase() === nome.toLowerCase());
-        if (!exists) current.push({ id: `item_${Date.now()}_${Math.random()}`, nome, categoria: cat || 'Geral', quantidade: '1', unit: 'un', isPlanned: false, isPurchased: false });
-      });
-      return current;
-    });
-    setImportText('');
-    setIsImportModalOpen(false);
-    showToast(`${lines.length} itens importados!`, 'success');
-  };
-
-  const startEdit = (id: string, field: 'nome' | 'categoria' | 'quantidade', val: string) => {
-    setEditingItemId(id); setEditingField(field); setEditValue(val);
-  };
-
-  const commitEdit = () => {
-    if (!editingItemId || !editingField) return;
-    setItems(prev => prev.map(i => i.id === editingItemId ? { ...i, [editingField]: editValue } : i));
-    setEditingItemId(null); setEditingField(null); setEditValue('');
-  };
-
-  // --- Planning actions ---
-  const togglePlanned = (id: string) => {
-    setItems(prev => prev.map(i => i.id === id ? { ...i, isPlanned: !i.isPlanned, isPurchased: false } : i));
-  };
-
-  const updateQuantidade = (id: string, val: string) => {
-    setItems(prev => prev.map(i => i.id === id ? { ...i, quantidade: val } : i));
-  };
-
-  const handleUnplanAll = () => {
-    setItems(prev => prev.map(i => ({ ...i, isPlanned: false, isPurchased: false })));
-    showToast('Planejamento limpo!', 'info');
-  };
-
-  // --- Shopping actions ---
-  const togglePurchased = (id: string) => {
-    setItems(prev => prev.map(i => i.id === id ? { ...i, isPurchased: !i.isPurchased } : i));
-  };
-
-  const finalizeShopping = () => {
-    setItems(prev => prev.map(i => ({ ...i, isPlanned: false, isPurchased: false })));
-    setView('catalog');
-    showToast('Compra finalizada! Lista reiniciada.', 'success');
-  };
-
-  // --- Memos ---
-  const filteredCatalog = useMemo(() =>
-    items.filter(i => i.nome.toLowerCase().includes(searchTerm.toLowerCase()) || i.categoria.toLowerCase().includes(searchTerm.toLowerCase()))
-      .sort((a, b) => a.categoria.localeCompare(b.categoria) || a.nome.localeCompare(b.nome)),
-    [items, searchTerm]);
-
-  const groupedCatalog = useMemo(() => {
-    const g: { [k: string]: ShoppingItem[] } = {};
-    filteredCatalog.forEach(it => { if (!g[it.categoria]) g[it.categoria] = []; g[it.categoria].push(it); });
-    return g;
-  }, [filteredCatalog]);
-
-  const plannedItems = useMemo(() =>
-    items.filter(i => i.isPlanned).sort((a, b) => Number(a.isPurchased) - Number(b.isPurchased) || a.categoria.localeCompare(b.categoria)),
-    [items]);
-
-  const purchasedCount = plannedItems.filter(i => i.isPurchased).length;
-
-  const categories = useMemo(() => {
-    const cats = new Set(items.map(i => i.categoria));
-    return Array.from(cats).sort();
-  }, [items]);
-
-  return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6 pb-32">
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <button onClick={onBack} className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-400 hover:text-slate-900 border border-slate-200 hover:border-slate-900 transition-all shadow-sm">
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
-        </button>
-        <div className="flex-1">
-          <h2 className="text-3xl font-black text-slate-900 tracking-tighter">Lista de Compras</h2>
-          <p className="text-slate-500 font-medium text-sm">{items.length} itens cadastrados · {plannedItems.length} planejados</p>
-        </div>
-        {/* Tab selector */}
-        <div className="flex bg-slate-100 p-1 rounded-2xl gap-0.5">
-          {(['catalog', 'planning', 'shopping'] as const).map(tab => {
-            const labels: Record<string, string> = { catalog: 'Cadastro', planning: 'Planejar', shopping: 'Comprar' };
-            return (
-              <button key={tab} onClick={() => setView(tab)}
-                className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all relative ${view === tab ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
-                {labels[tab]}
-                {tab === 'planning' && plannedItems.length > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">{plannedItems.length}</span>
-                )}
-                {tab === 'shopping' && purchasedCount > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-emerald-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">{purchasedCount}</span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ===== CADASTRO ===== */}
-      {view === 'catalog' && (
-        <div className="space-y-6 animate-in fade-in duration-300">
-          {/* Add form */}
-          <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl p-6 space-y-4">
-            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Novo Item</h3>
-            <form onSubmit={handleAddItem} className="flex items-center gap-3">
-              <input
-                type="text"
-                placeholder="Nome do item..."
-                className="flex-[2] bg-slate-50 border border-slate-100 rounded-2xl px-5 py-3 text-slate-800 font-bold outline-none focus:ring-2 focus:ring-blue-100 transition-all"
-                value={newItemName}
-                onChange={e => setNewItemName(e.target.value)}
-                autoFocus
-              />
-              <select
-                className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-slate-700 font-bold outline-none focus:ring-2 focus:ring-blue-100 transition-all"
-                value={newItemCategoria}
-                onChange={e => setNewItemCategoria(e.target.value)}
-              >
-                {['Geral', 'Hortifruti', 'Carnes', 'Laticínios', 'Padaria', 'Bebidas', 'Limpeza', 'Higiene', 'Congelados', 'Grãos e Cereais', 'Snacks', 'Temperos', 'Pet', ...categories.filter(c => !['Geral', 'Hortifruti', 'Carnes', 'Laticínios', 'Padaria', 'Bebidas', 'Limpeza', 'Higiene', 'Congelados', 'Grãos e Cereais', 'Snacks', 'Temperos', 'Pet'].includes(c))].map(c => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-                <option value="Nova...">+ Nova categoria</option>
-              </select>
-              <button type="submit" className="bg-blue-600 text-white h-12 w-12 rounded-2xl flex items-center justify-center hover:bg-blue-700 transition-all shadow-lg active:scale-95 flex-shrink-0">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
-              </button>
-              <button type="button" onClick={() => setIsImportModalOpen(true)} title="Importar em lote" className="h-12 w-12 rounded-2xl border border-slate-200 flex items-center justify-center text-slate-400 hover:text-blue-500 hover:border-blue-200 transition-all flex-shrink-0">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0l-4-4m4 4v12" /></svg>
-              </button>
-            </form>
-          </div>
-
-          {/* Search */}
-          <div className="bg-white border border-slate-100 rounded-2xl px-5 py-3 flex items-center gap-3 shadow-sm focus-within:ring-2 focus-within:ring-blue-100 transition-all">
-            <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-            <input type="text" placeholder="Buscar no catálogo..." className="flex-1 bg-transparent outline-none text-sm font-bold text-slate-700 placeholder:text-slate-300" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
-            {searchTerm && <button onClick={() => setSearchTerm('')} className="text-slate-300 hover:text-slate-500"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg></button>}
-          </div>
-
-          {/* Catalog list grouped */}
-          {Object.keys(groupedCatalog).length === 0 ? (
-            <div className="py-24 text-center text-slate-300">
-              <svg className="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" /></svg>
-              <p className="font-black uppercase tracking-widest text-sm">Nenhum item cadastrado</p>
-              <p className="text-xs font-medium mt-2 opacity-60">Adicione itens acima para começar</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {Object.entries(groupedCatalog).map(([cat, catItems]) => (
-                <div key={cat}>
-                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] pl-2 mb-2">{cat}</h4>
-                  <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm divide-y divide-slate-50 overflow-hidden">
-                    {catItems.map(item => (
-                      <div key={item.id} className="flex items-center gap-4 px-5 py-4 hover:bg-slate-50 transition-all group">
-                        <div className="flex-1 min-w-0">
-                          {editingItemId === item.id && editingField === 'nome' ? (
-                            <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
-                              onBlur={commitEdit} onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') { setEditingItemId(null); setEditingField(null); } }}
-                              className="w-full bg-blue-50 border border-blue-200 rounded-lg px-3 py-1 text-slate-800 font-bold outline-none" />
-                          ) : (
-                            <p onClick={() => startEdit(item.id, 'nome', item.nome)} className="font-bold text-slate-800 cursor-pointer hover:text-blue-600 transition-colors truncate">{item.nome}</p>
-                          )}
-                          {editingItemId === item.id && editingField === 'categoria' ? (
-                            <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
-                              onBlur={commitEdit} onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') { setEditingItemId(null); setEditingField(null); } }}
-                              className="mt-0.5 w-32 bg-blue-50 border border-blue-200 rounded px-2 py-0.5 text-[10px] font-bold outline-none" />
-                          ) : (
-                            <p onClick={() => startEdit(item.id, 'categoria', item.categoria)} className="text-[10px] font-black text-slate-400 uppercase tracking-widest cursor-pointer hover:text-blue-500 transition-colors mt-0.5">{item.categoria}</p>
-                          )}
-                        </div>
-                        <button onClick={() => handleDeleteItem(item.id)} className="opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ===== PLANEJAMENTO ===== */}
-      {view === 'planning' && (
-        <div className="space-y-6 animate-in fade-in duration-300">
-          <div className="flex items-center gap-3">
-            <div className="flex-1 bg-white border border-slate-100 rounded-2xl px-5 py-3 flex items-center gap-3 shadow-sm focus-within:ring-2 focus-within:ring-blue-100 transition-all">
-              <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-              <input type="text" placeholder="Filtrar itens..." className="flex-1 bg-transparent outline-none text-sm font-bold text-slate-700 placeholder:text-slate-300" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
-            </div>
-            <button onClick={handleUnplanAll} title="Limpar planejamento" className="group h-12 px-4 bg-white border border-slate-100 rounded-2xl shadow-sm flex items-center gap-2 text-slate-400 hover:text-rose-500 hover:border-rose-200 hover:bg-rose-50 transition-all">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-              <span className="text-[9px] font-black uppercase tracking-widest">Limpar</span>
-            </button>
-          </div>
-
-          {items.length === 0 ? (
-            <div className="py-24 text-center text-slate-300">
-              <p className="font-black uppercase tracking-widest text-sm">Nenhum item no catálogo</p>
-              <button onClick={() => setView('catalog')} className="mt-4 text-blue-500 text-[10px] font-black uppercase tracking-widest hover:text-blue-600 transition-colors">Ir para o Cadastro →</button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {Object.entries(groupedCatalog).map(([cat, catItems]) => (
-                <div key={cat}>
-                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] pl-2 mb-2">{cat}</h4>
-                  <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm divide-y divide-slate-50 overflow-hidden">
-                    {catItems.map(item => (
-                      <div key={item.id} className={`flex items-center gap-4 px-5 py-4 transition-all ${item.isPlanned ? 'bg-blue-50/40' : 'hover:bg-slate-50'}`}>
-                        <button onClick={() => togglePlanned(item.id)}
-                          className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all flex-shrink-0 ${item.isPlanned ? 'bg-blue-600 text-white shadow-md shadow-blue-200' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>
-                          {item.isPlanned
-                            ? <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                            : <div className="w-2 h-2 bg-slate-400 rounded-full" />}
-                        </button>
-                        <span className={`flex-1 font-bold text-sm ${item.isPlanned ? 'text-slate-900' : 'text-slate-400'}`}>{item.nome}</span>
-                        {item.isPlanned && (
-                          <div className="flex items-center gap-2 bg-white border border-blue-100 rounded-xl px-3 py-1.5 shadow-sm">
-                            <button onClick={() => updateQuantidade(item.id, String(Math.max(0.5, parseFloat(item.quantidade || '1') - (parseFloat(item.quantidade || '1') % 1 === 0 ? 1 : 0.5))))}
-                              className="w-6 h-6 rounded-lg bg-slate-100 text-slate-600 font-black flex items-center justify-center hover:bg-blue-100 transition-all text-sm leading-none">−</button>
-                            {editingItemId === item.id && editingField === 'quantidade' ? (
-                              <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
-                                onBlur={commitEdit} onKeyDown={e => { if (e.key === 'Enter') commitEdit(); }}
-                                className="w-12 text-center bg-transparent text-slate-800 font-black text-sm outline-none" />
-                            ) : (
-                              <span onClick={() => startEdit(item.id, 'quantidade', item.quantidade)}
-                                className="w-10 text-center text-slate-800 font-black text-sm cursor-pointer hover:text-blue-600 transition-colors">
-                                {item.quantidade} <span className="text-slate-400 font-medium text-[10px]">{item.unit}</span>
-                              </span>
-                            )}
-                            <button onClick={() => updateQuantidade(item.id, String(parseFloat(item.quantidade || '1') + (parseFloat(item.quantidade || '1') % 1 === 0 ? 1 : 0.5)))}
-                              className="w-6 h-6 rounded-lg bg-slate-100 text-slate-600 font-black flex items-center justify-center hover:bg-blue-100 transition-all text-sm leading-none">+</button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {plannedItems.length > 0 && (
-            <div className="sticky bottom-6">
-              <button onClick={() => setView('shopping')}
-                className="w-full bg-blue-600 text-white py-4 rounded-[2rem] font-black uppercase tracking-widest text-sm shadow-2xl shadow-blue-200 hover:bg-blue-700 transition-all active:scale-[0.98] flex items-center justify-center gap-3">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
-                Ir às Compras · {plannedItems.length} itens
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ===== COMPRAS ===== */}
-      {view === 'shopping' && (
-        <div className="space-y-6 animate-in fade-in duration-300">
-          {/* Progress bar */}
-          <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-xl font-black text-slate-900">Comprando</h3>
-                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-0.5">{purchasedCount} de {plannedItems.length} comprados</p>
-              </div>
-              <button onClick={finalizeShopping} className="bg-emerald-500 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-100">Finalizar</button>
-            </div>
-            <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-              <div className="bg-emerald-500 h-2 rounded-full transition-all duration-500"
-                style={{ width: plannedItems.length > 0 ? `${(purchasedCount / plannedItems.length) * 100}%` : '0%' }} />
-            </div>
-          </div>
-
-          {plannedItems.length === 0 ? (
-            <div className="py-24 text-center text-slate-300">
-              <p className="font-black uppercase tracking-widest text-sm">Lista vazia</p>
-              <button onClick={() => setView('planning')} className="mt-4 text-blue-500 text-[10px] font-black uppercase tracking-widest hover:text-blue-600 transition-colors">Ir para o Planejamento →</button>
-            </div>
-          ) : (
-            <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl overflow-hidden">
-              <div className="divide-y divide-slate-50">
-                {plannedItems.map(item => (
-                  <div key={item.id} onClick={() => togglePurchased(item.id)}
-                    className={`flex items-center gap-5 px-6 py-5 cursor-pointer transition-all select-none ${item.isPurchased ? 'bg-slate-50/60 opacity-50' : 'hover:bg-slate-50'}`}>
-                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-all flex-shrink-0 ${item.isPurchased ? 'bg-emerald-500 text-white shadow-md shadow-emerald-200' : 'bg-slate-100 text-slate-400'}`}>
-                      {item.isPurchased
-                        ? <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                        : <div className="w-3 h-3 border-2 border-current rounded-full" />}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-lg font-black tracking-tight ${item.isPurchased ? 'line-through text-slate-400' : 'text-slate-900'}`}>{item.nome}</p>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{item.categoria}</p>
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <span className={`text-xl font-black ${item.isPurchased ? 'text-slate-300' : 'text-blue-600'}`}>{item.quantidade}</span>
-                      <span className="text-slate-400 font-medium text-xs ml-1">{item.unit}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Import Modal */}
-      {isImportModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-            <div className="p-8 border-b border-slate-100 flex items-center justify-between">
-              <div>
-                <h3 className="text-2xl font-black text-slate-900 tracking-tight">Importação em Lote</h3>
-                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">Um item por linha · Nome|Categoria (opcional)</p>
-              </div>
-              <button onClick={() => setIsImportModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-                <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-            <div className="p-8 space-y-4">
-              <textarea autoFocus
-                className="w-full bg-slate-50 border border-slate-100 rounded-[1.5rem] p-6 text-slate-800 font-bold leading-relaxed outline-none focus:ring-4 focus:ring-blue-100 transition-all min-h-[260px] resize-none"
-                placeholder={"Exemplo:\nArroz|Grãos e Cereais\nFeijão|Grãos e Cereais\nLeite|Laticínios\nSabão|Limpeza"}
-                value={importText}
-                onChange={e => setImportText(e.target.value)}
-              />
-              <div className="flex gap-4">
-                <button onClick={() => setIsImportModalOpen(false)} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-2xl transition-all">Cancelar</button>
-                <button onClick={handleBatchImport} className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all">
-                  Importar {importText.split('\n').filter(l => l.trim()).length} Itens
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
 
 
 
@@ -1377,219 +988,6 @@ const getBucketStartDate = (label: string): string => {
   return '';
 };
 
-// ─── Speed Dial ──────────────────────────────────────────────────────────────
-interface SpeedDialMenuProps {
-  notifications: HermesNotification[];
-  isSyncing: boolean;
-  isNotificationCenterOpen: boolean;
-  onOpenNotes: () => void;
-  onOpenLog: () => void;
-  onOpenShopping: () => void;
-  onOpenTranscription: () => void;
-  onToggleNotifications: () => void;
-  onSync: () => void;
-  onOpenSettings: () => void;
-  onCloseNotifications: () => void;
-  onMarkAsRead: (id: string) => void;
-  onDismiss: (id: string) => void;
-  onUpdateOverdue?: (id?: string) => void;
-  onNavigate?: (link: string) => void;
-  onCreateAction: () => void;
-}
-
-const SpeedDialMenu = ({
-  notifications, isSyncing, isNotificationCenterOpen,
-  onOpenNotes, onOpenLog, onOpenShopping, onOpenTranscription, onToggleNotifications,
-  onSync, onOpenSettings, onCloseNotifications,
-  onMarkAsRead, onDismiss, onUpdateOverdue, onNavigate,
-  onCreateAction
-}: SpeedDialMenuProps) => {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  const actions = [
-    {
-      label: 'Criar Ação',
-      color: 'text-blue-600',
-      badge: null as React.ReactNode,
-      onClick: () => { setOpen(false); onCreateAction(); },
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" />
-        </svg>
-      ),
-    },
-    {
-      label: 'Notas Rápidas',
-      color: 'text-amber-500',
-      badge: null as React.ReactNode,
-      onClick: () => { setOpen(false); onOpenNotes(); },
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-        </svg>
-      ),
-    },
-    {
-      label: 'Log de Sistema',
-      color: 'text-violet-600',
-      badge: null as React.ReactNode,
-      onClick: () => { setOpen(false); onOpenLog(); },
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-        </svg>
-      ),
-    },
-    {
-      label: 'Compras IA',
-      color: 'text-emerald-600',
-      badge: null as React.ReactNode,
-      onClick: () => { setOpen(false); onOpenShopping(); },
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-        </svg>
-      ),
-    },
-    {
-      label: 'Transcrição IA',
-      color: 'text-indigo-600',
-      badge: null as React.ReactNode,
-      onClick: () => { setOpen(false); onOpenTranscription(); },
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-        </svg>
-      ),
-    },
-    {
-      label: 'Notificações',
-      color: 'text-slate-700',
-      badge: notifications.some(n => !n.isRead)
-        ? <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 border border-white rounded-full" />
-        : null as React.ReactNode,
-      onClick: () => { setOpen(false); onToggleNotifications(); },
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-        </svg>
-      ),
-    },
-    {
-      label: isSyncing ? 'Sincronizando…' : 'Sincronizar',
-      color: 'text-slate-700',
-      badge: isSyncing
-        ? <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-blue-500 border border-white rounded-full animate-ping" />
-        : null as React.ReactNode,
-      onClick: () => { setOpen(false); onSync(); },
-      icon: (
-        <svg className={`w-5 h-5 ${isSyncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-        </svg>
-      ),
-    },
-    {
-      label: 'Configurações',
-      color: 'text-slate-700',
-      badge: null as React.ReactNode,
-      onClick: () => { setOpen(false); onOpenSettings(); },
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
-      ),
-    },
-  ];
-
-  const hasUrgentBadge = notifications.some(n => !n.isRead) || isSyncing;
-
-  return (
-    <div
-      ref={ref}
-      className="relative flex flex-col items-center"
-    >
-      {/* Expanded action buttons — slide down from trigger */}
-      <div
-        className="absolute top-full right-0 mt-2 flex flex-col items-end gap-2 z-50"
-        style={{ pointerEvents: open ? 'auto' : 'none' }}
-      >
-        {actions.map((action, i) => (
-          <div
-            key={action.label}
-            className="flex items-center gap-2"
-            style={{
-              transform: open ? 'translateY(0) scale(1)' : 'translateY(-10px) scale(0.85)',
-              opacity: open ? 1 : 0,
-              transition: `transform 200ms cubic-bezier(0.34,1.56,0.64,1) ${i * 50}ms, opacity 160ms ease ${i * 50}ms`,
-            }}
-          >
-            {/* Tooltip label */}
-            <span className="bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-lg whitespace-nowrap shadow-lg select-none pointer-events-none">
-              {action.label}
-            </span>
-            {/* Icon button */}
-            <button
-              onClick={action.onClick}
-              aria-label={action.label}
-              className={`relative bg-white border border-slate-200 ${action.color} p-2.5 rounded-xl shadow-md hover:shadow-lg hover:scale-110 active:scale-95 transition-all`}
-            >
-              {action.icon}
-              {action.badge}
-            </button>
-          </div>
-        ))}
-      </div>
-
-      {/* Trigger button */}
-      <button
-        onClick={() => setOpen(prev => !prev)}
-        aria-label="Ações Rápidas"
-        aria-expanded={open}
-        className={`relative p-2 rounded-xl shadow-sm transition-all duration-200 active:scale-95 ${open ? 'bg-slate-900 border border-slate-900 text-white shadow-lg scale-105' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'}`}
-      >
-        {/* 3×3 grid dots = "more actions" */}
-        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-          <circle cx="5" cy="5" r="1.8" />
-          <circle cx="12" cy="5" r="1.8" />
-          <circle cx="19" cy="5" r="1.8" />
-          <circle cx="5" cy="12" r="1.8" />
-          <circle cx="12" cy="12" r="1.8" />
-          <circle cx="19" cy="12" r="1.8" />
-          <circle cx="5" cy="19" r="1.8" />
-          <circle cx="12" cy="19" r="1.8" />
-          <circle cx="19" cy="19" r="1.8" />
-        </svg>
-        {/* Urgent badge on trigger */}
-        {hasUrgentBadge && !open && (
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 border border-white rounded-full" />
-        )}
-      </button>
-
-      {/* NotificationCenter panel (mounted always, visibility managed internally) */}
-      <NotificationCenter
-        notifications={notifications}
-        onMarkAsRead={onMarkAsRead}
-        onDismiss={onDismiss}
-        isOpen={isNotificationCenterOpen}
-        onClose={onCloseNotifications}
-        onUpdateOverdue={onUpdateOverdue}
-        onNavigate={onNavigate}
-      />
-    </div>
-  );
-};
 // ─────────────────────────────────────────────────────────────────────────────
 
 const QuickNoteModal = ({ isOpen, onClose, onAddIdea, showAlert }: { isOpen: boolean, onClose: () => void, onAddIdea: (text: string) => void, showAlert: (t: string, m: string) => void }) => {
@@ -2518,6 +1916,11 @@ const App: React.FC = () => {
 
   // Knowledge State
   const [knowledgeItems, setKnowledgeItems] = useState<ConhecimentoItem[]>([]);
+  // Shopping State
+  const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>([]);
+  // Projects State
+  const [projects, setProjects] = useState<Projeto[]>([]);
+  const [isProjectCreateModalOpen, setIsProjectCreateModalOpen] = useState(false);
 
   const [isImportPlanOpen, setIsImportPlanOpen] = useState(false);
   const [isCompletedTasksOpen, setIsCompletedTasksOpen] = useState(false);
@@ -2734,6 +2137,17 @@ const App: React.FC = () => {
       setIncomeRubrics(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as IncomeRubric)));
     });
 
+    const unsubShopping = onSnapshot(collection(db, 'shopping_items'), (snapshot) => {
+      setShoppingItems(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ShoppingItem)));
+    });
+
+    // Projects Sync
+    const qProjects = query(collection(db, 'projetos'), orderBy('data_criacao', 'desc')); // orderBy imported? Need to check imports
+    const unsubProjects = onSnapshot(qProjects, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Projeto[];
+      setProjects(data);
+    });
+
     // Health Sync
     const unsubHealthWeights = onSnapshot(collection(db, 'health_weights'), (snapshot) => {
       setHealthWeights(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as HealthWeight)));
@@ -2761,6 +2175,8 @@ const App: React.FC = () => {
       unsubRubrics();
       unsubIncomeEntries();
       unsubIncomeRubrics();
+      unsubShopping();
+      unsubProjects();
       unsubHealthWeights();
       unsubHealthHabits();
       unsubHealthSettings();
@@ -2859,6 +2275,45 @@ const App: React.FC = () => {
     }
   }, [tarefas, financeTransactions]); // Adicionado financeTransactions para garantir consistência
 
+  // Auto-generate Fixed Bills from Rubrics
+  useEffect(() => {
+    if (billRubrics.length === 0) return;
+
+    const missingBills: any[] = [];
+
+    billRubrics.forEach(rubric => {
+      const exists = fixedBills.some(b =>
+        b.rubricId === rubric.id &&
+        b.month === currentMonth &&
+        b.year === currentYear
+      );
+
+      if (!exists) {
+        missingBills.push({
+          description: rubric.description,
+          amount: rubric.defaultAmount || 0,
+          dueDay: rubric.dueDay,
+          month: currentMonth,
+          year: currentYear,
+          category: rubric.category,
+          isPaid: false,
+          rubricId: rubric.id
+        });
+      }
+    });
+
+    if (missingBills.length > 0) {
+      const batch = writeBatch(db);
+      missingBills.forEach(bill => {
+        const ref = doc(collection(db, 'fixed_bills'));
+        batch.set(ref, bill);
+      });
+      batch.commit().then(() => {
+        showToast(`${missingBills.length} contas fixas geradas para este mês.`, 'info');
+      }).catch(err => console.error("Erro ao gerar contas fixas:", err));
+    }
+  }, [billRubrics, fixedBills, currentMonth, currentYear]);
+
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success', action?: { label: string, onClick: () => void }, actions?: { label: string | React.ReactNode, onClick: () => void }[]) => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -2889,6 +2344,75 @@ const App: React.FC = () => {
 
   const removeToast = (id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
+  };
+
+  const handleExportModule = () => {
+    let md = '';
+    let filename = 'hermes_export';
+
+    if (viewMode === 'projects') {
+       md = generateMarkdown(
+         'Módulo de Projetos',
+         'Listagem de todos os projetos cadastrados no sistema.',
+         { 'Nome': 'Nome do projeto', 'Descrição': 'Resumo', 'Data': 'Data de criação' },
+         [{ title: 'Projetos Ativos', data: projects.map(p => ({ Nome: p.nome, Descrição: p.descricao, Data: new Date(p.data_criacao).toLocaleDateString() })) }]
+       );
+       filename = 'hermes_projetos';
+    } else if (viewMode === 'finance') {
+       md = generateMarkdown(
+         'Módulo Financeiro',
+         'Transações, Metas e Obrigações.',
+         { 'Data': 'Data da transação', 'Valor': 'Montante em BRL', 'Descrição': 'Detalhes' },
+         [
+           { title: 'Transações Recentes', data: financeTransactions.map(t => ({ Data: new Date(t.date).toLocaleDateString(), Descrição: t.description, Valor: t.amount })) },
+           { title: 'Contas Fixas', data: fixedBills.filter(b => b.month === currentMonth && b.year === currentYear).map(b => ({ Descrição: b.description, Valor: b.amount, Status: b.isPaid ? 'Pago' : 'Pendente' })) }
+         ]
+       );
+       filename = 'hermes_financeiro';
+    } else if (viewMode === 'saude') {
+       md = generateMarkdown(
+         'Módulo de Saúde',
+         'Registros de peso e hábitos.',
+         { 'Data': 'Data do registro', 'Peso': 'Peso em kg' },
+         [{ title: 'Histórico de Peso', data: healthWeights.map(w => ({ Data: new Date(w.date).toLocaleDateString(), Peso: w.weight })) }]
+       );
+       filename = 'hermes_saude';
+    } else if (viewMode === 'gallery') {
+       md = generateMarkdown(
+         'Módulo de Ações',
+         'Tarefas e atividades.',
+         { 'Titulo': 'Nome da tarefa', 'Status': 'Estado atual' },
+         [{ title: 'Tarefas', data: tarefas.map(t => ({ Titulo: t.titulo, Status: t.status, Prazo: t.data_limite })) }]
+       );
+       filename = 'hermes_acoes';
+    } else if (viewMode === 'sistemas-dev') {
+        const sys = selectedSystemId ? unidades.find(u => u.id === selectedSystemId)?.nome : 'Todos os Sistemas';
+        md = generateMarkdown(
+            `Módulo de Sistemas: ${sys}`,
+            'Logs e itens de trabalho.',
+            { 'Descrição': 'O que foi feito', 'Tipo': 'Classificação' },
+            [{ title: 'Work Items', data: workItems.filter(w => !selectedSystemId || w.sistema_id === selectedSystemId).map(w => ({ Descrição: w.descricao, Tipo: w.tipo, Data: new Date(w.data_criacao).toLocaleDateString() })) }]
+        );
+        filename = 'hermes_sistemas';
+    }
+
+    if (md) downloadMarkdown(filename, md);
+    else showToast('Exportação não disponível para esta visão.', 'info');
+  };
+
+  const handleCreateProject = async (name: string, desc: string) => {
+    try {
+      await addDoc(collection(db, 'projetos'), {
+        nome: name,
+        descricao: desc,
+        data_criacao: new Date().toISOString()
+      });
+      setIsProjectCreateModalOpen(false);
+      showToast("Projeto criado com sucesso!", "success");
+    } catch (error) {
+      console.error("Error creating project:", error);
+      showToast("Erro ao criar projeto.", "error");
+    }
   };
 
   const handleBatchTag = async (categoria: Categoria) => {
@@ -3819,28 +3343,23 @@ const App: React.FC = () => {
     }
   };
 
-  const handleShoppingAIConfirm = (confirmedItems: { id: string; quantidade: string }[]) => {
+  const handleShoppingAIConfirm = async (confirmedItems: { id: string; quantidade: string }[]) => {
     try {
-      const stored = localStorage.getItem(SHOPPING_ITEMS_KEY);
-      const currentItems: ShoppingItem[] = stored ? JSON.parse(stored) : [];
-
-      if (currentItems.length === 0) {
-        showToast('Catálogo vazio. Cadastre itens primeiro.', 'info');
-        return;
-      }
-
-      const updated = currentItems.map(item => {
-        const match = confirmedItems.find(c => c.id === item.id);
-        if (match) return { ...item, isPlanned: true, quantidade: match.quantidade };
-        return item;
+      const batch = writeBatch(db);
+      let count = 0;
+      confirmedItems.forEach(c => {
+        const exists = shoppingItems.find(i => i.id === c.id);
+        if (exists) {
+          batch.update(doc(db, 'shopping_items', c.id), { isPlanned: true, quantidade: c.quantidade, isPurchased: false });
+          count++;
+        }
       });
 
-      localStorage.setItem(SHOPPING_ITEMS_KEY, JSON.stringify(updated));
-      const count = confirmedItems.length;
-      showToast(`${count} iten${count !== 1 ? 's' : ''} adicionado${count !== 1 ? 's' : ''} ao planejamento!`, 'success', { label: 'Ver Lista', onClick: () => setActiveFerramenta('shopping') });
-      if (activeFerramenta === 'shopping') {
-        setActiveFerramenta(null);
-        setTimeout(() => setActiveFerramenta('shopping'), 50);
+      if (count > 0) {
+        await batch.commit();
+        showToast(`${count} iten${count !== 1 ? 's' : ''} adicionado${count !== 1 ? 's' : ''} ao planejamento!`, 'success', { label: 'Ver Lista', onClick: () => setActiveFerramenta('shopping') });
+      } else {
+        showToast('Nenhum item atualizado.', 'info');
       }
     } catch (err) {
       console.error(err);
@@ -5012,14 +4531,30 @@ const App: React.FC = () => {
                     {viewMode === 'projects' && (
                       <div className="flex items-center gap-3 animate-in fade-in slide-in-from-left duration-500">
                         <button
-                          onClick={() => setIsCreateModalOpen(true)}
-                          className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
-                          title="Novo Projeto"
+                          onClick={() => setIsProjectCreateModalOpen(true)}
+                          className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 text-xs font-black uppercase tracking-widest flex items-center gap-2"
+                          title="Criar Projeto"
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+                          Criar Projeto
                         </button>
-                        <button className="p-2 bg-white border border-slate-200 text-slate-400 rounded-xl hover:bg-slate-50 transition-all shadow-sm">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 4.5h18m-18 5h18m-18 5h18m-18 5h18" /></svg>
+                        <button
+                          onClick={handleExportModule}
+                          className="p-2 bg-white border border-slate-200 text-slate-400 rounded-xl hover:bg-slate-50 transition-all shadow-sm"
+                          title="Exportar Markdown"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4v12" /></svg>
+                        </button>
+                      </div>
+                    )}
+                    {['finance', 'saude', 'gallery', 'sistemas-dev'].includes(viewMode) && (
+                      <div className="flex items-center gap-3 animate-in fade-in slide-in-from-left duration-500">
+                        <button
+                          onClick={handleExportModule}
+                          className="p-2 bg-white border border-slate-200 text-slate-400 rounded-xl hover:bg-slate-50 transition-all shadow-sm"
+                          title="Exportar Markdown"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4v12" /></svg>
                         </button>
                       </div>
                     )}
@@ -5731,7 +5266,12 @@ const App: React.FC = () => {
                     showAlert={showAlert}
                   />
                 ) : viewMode === 'projects' ? (
-                  <ProjectsView />
+                  <ProjectsView
+                    projects={projects}
+                    isCreating={isProjectCreateModalOpen}
+                    onCloseCreate={() => setIsProjectCreateModalOpen(false)}
+                    onCreateProject={handleCreateProject}
+                  />
                 ) : viewMode === 'finance' ? (
                   <FinanceView
                     transactions={financeTransactions}
@@ -6854,6 +6394,20 @@ const App: React.FC = () => {
                 onSave={handleUpdateTarefa}
                 onClose={() => setSelectedTask(null)}
                 showToast={showToast}
+                notifications={notifications}
+                isSyncing={isSyncing}
+                isNotificationCenterOpen={isNotificationCenterOpen}
+                onOpenNotes={() => setIsQuickNoteModalOpen(true)}
+                onOpenLog={() => setIsQuickLogModalOpen(true)}
+                onOpenShopping={() => setIsShoppingAIModalOpen(true)}
+                onOpenTranscription={() => setIsTranscriptionAIModalOpen(true)}
+                onToggleNotifications={() => setIsNotificationCenterOpen(prev => !prev)}
+                onSync={handleSync}
+                onOpenSettings={() => setIsSettingsModalOpen(true)}
+                onCloseNotifications={() => setIsNotificationCenterOpen(false)}
+                onMarkAsRead={handleMarkNotificationRead}
+                onDismiss={handleDismissNotification}
+                onCreateAction={() => setIsCreateModalOpen(true)}
               />
             ) : (
               <TaskEditModal
@@ -7135,7 +6689,7 @@ const App: React.FC = () => {
             <ShoppingAIModal
               isOpen={isShoppingAIModalOpen}
               onClose={() => setIsShoppingAIModalOpen(false)}
-              catalogItems={(() => { try { return JSON.parse(localStorage.getItem(SHOPPING_ITEMS_KEY) || '[]'); } catch { return []; } })()}
+              catalogItems={shoppingItems}
               onConfirmItems={handleShoppingAIConfirm}
               onViewList={() => {
                 setActiveFerramenta('shopping');
