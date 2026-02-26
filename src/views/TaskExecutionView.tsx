@@ -4,7 +4,7 @@ import {
   formatDate, formatDateLocalISO
 } from '../../types';
 import { normalizeStatus } from '../utils/helpers';
-import { AutoExpandingTextarea } from '../components/ui/UIComponents';
+import { AutoExpandingTextarea, NotificationCenter } from '../components/ui/UIComponents';
 import { db, functions } from '../../firebase';
 import { httpsCallable } from 'firebase/functions';
 import { setDoc, doc } from 'firebase/firestore';
@@ -205,6 +205,16 @@ export const TaskExecutionView = ({
             if (next >= currentTimeTarget) {
               const newMode = pomodoroMode === 'focus' ? 'break' : 'focus';
               setPomodoroMode(newMode);
+
+              // Play transition sound
+              try {
+                const audio = new Audio(newMode === 'break'
+                  ? 'https://assets.mixkit.co/active_storage/sfx/1112/1112-preview.mp3' // Success/Break
+                  : 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3'); // Start/Focus
+                audio.volume = 0.5;
+                audio.play().catch(() => {});
+              } catch (e) {}
+
               if (newMode === 'break') {
                 showToast("Hora do descanso! Relaxe um pouco.", "info");
               } else {
@@ -230,6 +240,23 @@ export const TaskExecutionView = ({
       onSave(task.id, { tempo_total_segundos: sessionTotalSeconds });
     }
     setIsTimerRunning(!isTimerRunning);
+  };
+
+  const handleSkipPhase = () => {
+    setSeconds(0);
+    const newMode = pomodoroMode === 'focus' ? 'break' : 'focus';
+    setPomodoroMode(newMode);
+
+    // Play sound
+    try {
+      const audio = new Audio(newMode === 'break'
+        ? 'https://assets.mixkit.co/active_storage/sfx/1112/1112-preview.mp3'
+        : 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3');
+      audio.volume = 0.5;
+      audio.play().catch(() => {});
+    } catch (e) {}
+
+    showToast(newMode === 'break' ? "Descanso iniciado (Skip)." : "Foco iniciado (Skip).", "info");
   };
 
   const formatTime = (totalSeconds: number) => {
@@ -443,7 +470,7 @@ export const TaskExecutionView = ({
         {/* Control Panel (Ordem 1 no mobile para ficar no topo) */}
         <div className="lg:col-span-4 flex flex-col gap-3 order-1 lg:order-2 shrink-0">
           <PainelControleUI
-            task={task}
+            task={currentTaskData}
             chatUrl={chatUrl}
             setChatUrl={setChatUrl}
             handleSaveChatUrl={() => { onSave(task.id, { chat_gemini_url: chatUrl }); showToast("Link salvo!", "success"); }}
@@ -454,6 +481,7 @@ export const TaskExecutionView = ({
             setPomodoroMode={setPomodoroMode}
             handleToggleTimer={handleToggleTimer}
             handleResetTimer={() => setModalConfig({ type: 'reset_timer', isOpen: true })}
+            handleSkipPhase={handleSkipPhase}
             handleCompleteTaskRequest={() => setIsConfirmModalOpen(true)}
             appSettings={appSettings}
             currentTime={currentTime}
@@ -513,9 +541,9 @@ export const TaskExecutionView = ({
             {showPool && (
               <div className="px-4 pb-4 flex flex-wrap gap-2 max-h-40 overflow-y-auto">
                 {(currentTaskData.pool_dados || []).map((item) => (
-                  <div key={item.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-50 border border-slate-100 text-xs font-semibold">
+                  <div key={item.id} className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold ${isTimerRunning ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-slate-100 text-slate-700'}`}>
                     <span className="truncate max-w-[150px]">{item.nome}</span>
-                    <button onClick={() => window.open(item.valor, '_blank')} className="text-blue-500 hover:text-blue-700">
+                    <button onClick={() => window.open(item.valor, '_blank')} className={`${isTimerRunning ? 'text-blue-300 hover:text-blue-200' : 'text-blue-500 hover:text-blue-700'}`}>
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" strokeWidth="2" /></svg>
                     </button>
                   </div>
@@ -570,6 +598,18 @@ export const TaskExecutionView = ({
               <button onClick={() => { onSave(task.id, { status: 'concluído' }); onClose(); }} className="flex-1 bg-emerald-500 text-white py-4 rounded-2xl text-[10px] font-black uppercase shadow-xl shadow-emerald-500/20">Sim, concluída</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Notifications Panel */}
+      {isNotificationCenterOpen && (
+        <div className="absolute top-20 right-6 z-[300] w-80 md:w-96 shadow-2xl animate-in slide-in-from-right-4 duration-300">
+          <NotificationCenter
+            notifications={notifications}
+            onMarkAsRead={onMarkAsRead}
+            onDismiss={onDismiss}
+            onClose={onCloseNotifications}
+          />
         </div>
       )}
 

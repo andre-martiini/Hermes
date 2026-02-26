@@ -24,6 +24,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
     const [isProcessingAI, setIsProcessingAI] = useState(false);
     const [isOcrExpanded, setIsOcrExpanded] = useState(false);
+    const [newTag, setNewTag] = useState('');
 
     // Modals State
     const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
@@ -76,7 +77,12 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                 (item.tags && item.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()))) ||
                 (item.texto_bruto && item.texto_bruto.toLowerCase().includes(searchTerm.toLowerCase()));
 
-            const matchesCategory = !selectedCategory || item.categoria === selectedCategory;
+            let matchesCategory = true;
+            if (selectedCategory === 'Ações') {
+                matchesCategory = item.origem?.modulo === 'tarefas';
+            } else if (selectedCategory) {
+                matchesCategory = item.categoria === selectedCategory;
+            }
 
             return matchesSearch && matchesCategory;
         }).sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime());
@@ -210,6 +216,13 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
 
                     <div className="pt-4">
                         <h4 className="px-4 text-[9px] font-black text-slate-300 uppercase tracking-widest mb-4">Categorias</h4>
+                        <button
+                            onClick={() => setSelectedCategory('Ações')}
+                            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all mb-1 ${selectedCategory === 'Ações' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                            <span className="text-[11px] font-black uppercase tracking-wider truncate">Ações</span>
+                        </button>
                         {categories.map(cat => (
                             <button
                                 key={cat}
@@ -513,18 +526,61 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                             )}
 
                             {/* Tags */}
-                            {(currentItem.tags || []).length > 0 && (
-                                <section>
-                                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Tags Identificadas</h4>
-                                    <div className="flex flex-wrap gap-2">
-                                        {currentItem.tags?.map(tag => (
-                                            <span key={tag} className="bg-slate-100 text-slate-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-slate-200">
-                                                #{tag}
-                                            </span>
-                                        ))}
+                            <section>
+                                <div className="flex items-center justify-between mb-4">
+                                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Tags</h4>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                    {(currentItem.tags || []).map(tag => (
+                                        <span key={tag} className="bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest border border-slate-200 flex items-center gap-2 group">
+                                            #{tag}
+                                            <button
+                                                onClick={() => {
+                                                    if (onSaveItem) {
+                                                        const newTags = (currentItem.tags || []).filter(t => t !== tag);
+                                                        onSaveItem({ id: currentItem.id, tags: newTags });
+                                                    }
+                                                }}
+                                                className="w-4 h-4 rounded-full bg-slate-200 text-slate-500 hover:bg-rose-500 hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"
+                                            >
+                                                <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                                            </button>
+                                        </span>
+                                    ))}
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="text"
+                                            value={newTag}
+                                            onChange={e => setNewTag(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' && newTag.trim() && onSaveItem) {
+                                                    const tags = currentItem.tags || [];
+                                                    if (!tags.includes(newTag.trim())) {
+                                                        onSaveItem({ id: currentItem.id, tags: [...tags, newTag.trim()] });
+                                                        setNewTag('');
+                                                    }
+                                                }
+                                            }}
+                                            placeholder="Nova tag..."
+                                            className="w-24 bg-transparent border-b border-slate-200 text-[10px] font-bold text-slate-600 outline-none focus:border-blue-500 focus:w-32 transition-all px-1 py-1"
+                                        />
+                                        <button
+                                            onClick={() => {
+                                                if (newTag.trim() && onSaveItem) {
+                                                    const tags = currentItem.tags || [];
+                                                    if (!tags.includes(newTag.trim())) {
+                                                        onSaveItem({ id: currentItem.id, tags: [...tags, newTag.trim()] });
+                                                        setNewTag('');
+                                                    }
+                                                }
+                                            }}
+                                            className="text-blue-500 hover:text-blue-700"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
+                                        </button>
                                     </div>
-                                </section>
-                            )}
+                                </div>
+                            </section>
 
                             {/* Metadados */}
                             <section className="pt-10 border-t border-slate-100 grid grid-cols-2 gap-8">

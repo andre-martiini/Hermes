@@ -12,6 +12,7 @@ interface PainelControleUIProps {
   setPomodoroMode: (mode: 'focus' | 'break') => void;
   handleToggleTimer: () => void;
   handleResetTimer: () => void;
+  handleSkipPhase?: () => void;
   handleCompleteTaskRequest: () => void;
   appSettings: any;
   currentTime: Date;
@@ -24,7 +25,7 @@ interface PainelControleUIProps {
 
 export const PainelControleUI = ({
   task, chatUrl, setChatUrl, handleSaveChatUrl, isTimerRunning, sessionTotalSeconds, seconds,
-  pomodoroMode, setPomodoroMode, handleToggleTimer, handleResetTimer, handleCompleteTaskRequest,
+  pomodoroMode, setPomodoroMode, handleToggleTimer, handleResetTimer, handleSkipPhase, handleCompleteTaskRequest,
   appSettings, currentTime, formatTime, isBreakActive, setModalConfig,
   setReminderDate, setReminderTime
 }: PainelControleUIProps) => {
@@ -126,6 +127,11 @@ export const PainelControleUI = ({
                     style={{ width: `${(countdownInfo.remaining / ((pomodoroMode === 'focus' ? appSettings.pomodoro.focusTime : appSettings.pomodoro.breakTime) * 60)) * 100}%` }}
                   />
                 </div>
+                {handleSkipPhase && (
+                  <button onClick={handleSkipPhase} className="mt-2 text-[8px] font-black uppercase opacity-50 hover:opacity-100 transition-opacity">
+                    Pular {pomodoroMode === 'focus' ? 'Execução' : 'Descanso'}
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -155,7 +161,10 @@ export const PainelControleUI = ({
                 } else {
                   // Pre-fill with today/now if no reminder
                   const now = new Date();
-                  setReminderDate(now.toISOString().split('T')[0]);
+                  const year = now.getFullYear();
+                  const month = String(now.getMonth() + 1).padStart(2, '0');
+                  const day = String(now.getDate()).padStart(2, '0');
+                  setReminderDate(`${year}-${month}-${day}`);
                   setReminderTime(now.toTimeString().slice(0, 5));
                 }
                 setModalConfig({ type: 'reminder', isOpen: true });

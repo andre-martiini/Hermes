@@ -35,6 +35,12 @@ export const DiarioBordoUI = ({
   diaryEndRef, handleDiaryScroll, handleEditDiaryEntry, handleDeleteDiaryEntry, isUploading
 }: DiarioBordoUIProps) => {
 
+  React.useEffect(() => {
+    if (diaryEndRef.current) {
+      diaryEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [currentTaskData.acompanhamento, isUploading, diaryEndRef]);
+
   const renderDiaryContent = (text: string) => {
     if (text.startsWith('LINK::')) {
       const parts = text.split('::');
