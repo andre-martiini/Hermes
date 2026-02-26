@@ -581,6 +581,7 @@ export const TaskExecutionView = ({
                 }}
                 handleDeleteDiaryEntry={(index) => setModalConfig({ type: 'confirm_delete', data: { index }, isOpen: true })}
                 isUploading={isUploading}
+                notifications={notifications}
               />
           </div>
         </div>
@@ -608,6 +609,7 @@ export const TaskExecutionView = ({
             notifications={notifications}
             onMarkAsRead={onMarkAsRead}
             onDismiss={onDismiss}
+            isOpen={isNotificationCenterOpen}
             onClose={onCloseNotifications}
           />
         </div>

@@ -3925,23 +3925,19 @@ const App: React.FC = () => {
       const dateCompare = sortOption === 'date-asc' ? dVal(a) - dVal(b) : dVal(b) - dVal(a);
       if (dateCompare !== 0) return dateCompare;
 
-      // Se as datas são iguais, usamos a ordem manual se existir
-      if (a.ordem !== undefined && b.ordem !== undefined) return a.ordem - b.ordem;
-      if (a.ordem !== undefined) return -1;
-      if (b.ordem !== undefined) return 1;
+      // Se as datas são iguais, priorizamos o horário (conforme solicitação do usuário)
+      if (a.horario_inicio && b.horario_inicio) return a.horario_inicio.localeCompare(b.horario_inicio);
+      if (a.horario_inicio) return -1; // Tarefa com horário vem primeiro
+      if (b.horario_inicio) return 1;  // Tarefa sem horário vai para baixo
 
-      // Se não houver ordem manual, usamos prioridade
+      // Se ambas não têm horário, usamos a ordem manual se existir
+      if (a.ordem !== undefined && b.ordem !== undefined) return a.ordem - b.ordem;
+      
+      // Finalmente prioridade
       const priorityOrder = { 'alta': 3, 'média': 2, 'baixa': 1 };
       const pA = priorityOrder[a.prioridade] || 0;
       const pB = priorityOrder[b.prioridade] || 0;
-      if (pA !== pB) return pB - pA;
-
-      // Se ainda empatar, usamos o horário
-      if (a.horario_inicio && b.horario_inicio) return a.horario_inicio.localeCompare(b.horario_inicio);
-      if (a.horario_inicio) return -1;
-      if (b.horario_inicio) return 1;
-
-      return 0;
+      return pB - pA;
     });
     return result;
   }, [tarefas, searchTerm, statusFilter, sortOption, areaFilter]);
@@ -5683,8 +5679,8 @@ const App: React.FC = () => {
                                             <div className="flex flex-col md:flex-row items-start justify-between gap-4 md:gap-6">
                                               <div className="flex-1 space-y-2 w-full">
                                                 <div className="flex items-center gap-3">
-                                                  <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-wider ${log.tipo === 'desenvolvimento' ? 'bg-violet-100 text-violet-700' : log.tipo === 'ajuste' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
-                                                    {log.tipo}
+                                                  <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-wider ${log.tipo === 'desenvolvimento' ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-600'}`}>
+                                                    {log.tipo === 'ajuste' ? 'log' : log.tipo}
                                                   </span>
                                                   <span className="text-[8px] font-black text-slate-300 uppercase">{new Date(log.data_criacao).toLocaleDateString('pt-BR')}</span>
                                                 </div>
@@ -5906,8 +5902,8 @@ const App: React.FC = () => {
                                               <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-8">
                                                 <div className="flex-1 min-w-0 space-y-4">
                                                   <div className="flex items-center flex-wrap gap-3">
-                                                    <span className={`text-[9px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest shadow-sm ${log.tipo === 'desenvolvimento' ? 'bg-violet-600 text-white' : log.tipo === 'ajuste' ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-700'}`}>
-                                                      {log.tipo}
+                                                    <span className={`text-[9px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest shadow-sm ${log.tipo === 'desenvolvimento' ? 'bg-violet-600 text-white' : 'bg-slate-200 text-slate-700'}`}>
+                                                      {log.tipo === 'ajuste' ? 'log' : log.tipo}
                                                     </span>
                                                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{new Date(log.data_criacao).toLocaleDateString('pt-BR')}</span>
                                                   </div>

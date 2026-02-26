@@ -20,6 +20,7 @@ interface KnowledgeViewProps {
 const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAddLink, onSaveItem, onDeleteItem, onProcessWithAI, onGenerateSlides, onNavigateToOrigin, allTasks = [], allWorkItems = [], showConfirm }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+    const [selectedActionId, setSelectedActionId] = useState<string | null>(null);
     const [selectedItem, setSelectedItem] = useState<ConhecimentoItem | null>(null);
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
     const [isProcessingAI, setIsProcessingAI] = useState(false);
@@ -65,10 +66,23 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
     const categories = useMemo(() => {
         const cats = new Set<string>();
         items.forEach(item => {
-            if (item.categoria) cats.add(item.categoria);
+            if (item.categoria && item.categoria !== 'Ações') cats.add(item.categoria);
         });
         return Array.from(cats).sort();
     }, [items]);
+
+    const activeActions = useMemo(() => {
+        const actionIds = new Set<string>();
+        items.forEach(item => {
+            if (item.origem?.modulo === 'tarefas') {
+                actionIds.add(item.origem.id_origem);
+            }
+        });
+        return Array.from(actionIds).map(id => {
+            const task = allTasks.find(t => t.id === id);
+            return { id, title: task?.titulo || `Tarefa #${id}` };
+        }).sort((a, b) => a.title.localeCompare(b.title));
+    }, [items, allTasks]);
 
     const filteredItems = useMemo(() => {
         return items.filter(item => {
@@ -78,7 +92,9 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                 (item.texto_bruto && item.texto_bruto.toLowerCase().includes(searchTerm.toLowerCase()));
 
             let matchesCategory = true;
-            if (selectedCategory === 'Ações') {
+            if (selectedActionId) {
+                matchesCategory = item.origem?.modulo === 'tarefas' && item.origem.id_origem === selectedActionId;
+            } else if (selectedCategory === 'Ações') {
                 matchesCategory = item.origem?.modulo === 'tarefas';
             } else if (selectedCategory) {
                 matchesCategory = item.categoria === selectedCategory;
@@ -86,7 +102,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
 
             return matchesSearch && matchesCategory;
         }).sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime());
-    }, [items, searchTerm, selectedCategory]);
+    }, [items, searchTerm, selectedCategory, selectedActionId]);
 
     const handleAIProcess = async (id: string) => {
         setIsProcessingAI(true);
@@ -207,22 +223,29 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
 
                 <nav className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
                     <button
-                        onClick={() => setSelectedCategory(null)}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${!selectedCategory ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}
+                        onClick={() => { setSelectedCategory(null); setSelectedActionId(null); }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${!selectedCategory && !selectedActionId ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}
                     >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
                         <span className="text-[11px] font-black uppercase tracking-wider">Todos os Arquivos</span>
                     </button>
 
                     <div className="pt-4">
+                        <h4 className="px-4 text-[9px] font-black text-slate-300 uppercase tracking-widest mb-4">Ações / Projetos</h4>
+                        {activeActions.map(action => (
+                            <button
+                                key={action.id}
+                                onClick={() => { setSelectedActionId(action.id); setSelectedCategory(null); }}
+                                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all mb-1 border-l-2 ${selectedActionId === action.id ? 'bg-blue-600 text-white border-blue-400 shadow-md translate-x-1' : 'text-slate-500 hover:bg-slate-50 border-transparent'}`}
+                            >
+                                <div className={`w-1.5 h-1.5 rounded-full ${selectedActionId === action.id ? 'bg-white' : 'bg-blue-400'}`}></div>
+                                <span className="text-[10px] font-bold uppercase tracking-wide truncate flex-1 text-left">{action.title}</span>
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="pt-4">
                         <h4 className="px-4 text-[9px] font-black text-slate-300 uppercase tracking-widest mb-4">Categorias</h4>
-                        <button
-                            onClick={() => setSelectedCategory('Ações')}
-                            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all mb-1 ${selectedCategory === 'Ações' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}
-                        >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
-                            <span className="text-[11px] font-black uppercase tracking-wider truncate">Ações</span>
-                        </button>
                         {categories.map(cat => (
                             <button
                                 key={cat}
