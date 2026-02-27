@@ -119,6 +119,7 @@ export interface FinanceTransaction {
     originalTaskId?: string;
     google_message_id?: string;
     status?: 'active' | 'deleted';
+    origin?: 'internal' | 'external';
 }
 
 export interface FinanceGoal {
@@ -138,6 +139,8 @@ export interface FinanceSettings {
     emergencyReserveCurrent: number;
     billCategories: string[];
     incomeCategories: string[];
+    externalSpendingLimit?: number;
+    externalToken?: string;
 }
 
 

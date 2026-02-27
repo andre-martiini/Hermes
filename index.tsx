@@ -44,6 +44,7 @@ import { CalendarView } from './src/views/CalendarView';
 import { CategoryView } from './src/views/CategoryView';
 import { TaskExecutionView } from './src/views/TaskExecutionView';
 import { PublicScholarshipRegistration } from './src/components/public/PublicScholarshipRegistration';
+import PublicFinancePortal from './src/components/public/PublicFinancePortal';
 import { TranscriptionTool } from './src/components/tools/TranscriptionTool';
 import { ShoppingListTool } from './src/components/tools/ShoppingListTool';
 import { MediaPlayerTool } from './src/components/tools/MediaPlayerTool';
@@ -1844,6 +1845,9 @@ const App: React.FC = () => {
   // Public Route Interception
   if (window.location.pathname.startsWith('/join/')) {
     return <PublicScholarshipRegistration />;
+  }
+  if (window.location.pathname.startsWith('/gastos-externos')) {
+    return <PublicFinancePortal />;
   }
 
   const [user, setUser] = useState<User | null>(null);

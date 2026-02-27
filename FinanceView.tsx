@@ -1,7 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { FinanceTransaction, FinanceGoal, FinanceSettings, FixedBill, BillRubric, IncomeEntry, IncomeRubric } from './types';
-import { storage } from './firebase';
+import { storage, db } from './firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { doc, setDoc } from 'firebase/firestore';
 
 interface FinanceViewProps {
     transactions: FinanceTransaction[];
@@ -311,6 +312,72 @@ const FinanceView = ({
                                 className="bg-white/10 border border-white/20 rounded-xl px-4 py-2 text-white font-bold outline-none focus:ring-2 focus:ring-emerald-500 w-full md:w-64"
                             />
                         </div>
+                    </div>
+
+                    {/* Configuração de Gastos Externos */}
+                    <div className="pt-4 border-t border-white/5">
+                        <h4 className="text-sm font-black uppercase tracking-widest mb-4 text-white/60 text-purple-400">Portal de Gastos Externos</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label className="text-[10px] font-black text-white/40 uppercase tracking-widest block mb-2">Limite de Gastos Externo</label>
+                                <input
+                                    type="number"
+                                    defaultValue={settings.externalSpendingLimit || 0}
+                                    onBlur={async (e) => {
+                                        const newVal = Number(e.target.value);
+                                        const newSettings = { ...settings, externalSpendingLimit: newVal };
+                                        onUpdateSettings(newSettings);
+                                        // Sync public doc
+                                        await setDoc(doc(db, 'public_configs', 'finance_portal'), {
+                                            limit: newVal,
+                                            token: settings.externalToken
+                                        }, { merge: true });
+                                    }}
+                                    className="bg-white/10 border border-white/20 rounded-xl px-4 py-2 text-white font-bold outline-none focus:ring-2 focus:ring-purple-500 w-full"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-black text-white/40 uppercase tracking-widest block mb-2">Token de Acesso</label>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={settings.externalToken || ''}
+                                        readOnly
+                                        placeholder="Gere um token"
+                                        className="bg-white/10 border border-white/20 rounded-xl px-4 py-2 text-white font-mono text-xs outline-none w-full"
+                                    />
+                                    <button
+                                        onClick={async () => {
+                                            const newToken = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10);
+                                            const newSettings = { ...settings, externalToken: newToken };
+                                            onUpdateSettings(newSettings);
+                                            // Sync public doc
+                                            await setDoc(doc(db, 'public_configs', 'finance_portal'), {
+                                                limit: settings.externalSpendingLimit,
+                                                token: newToken
+                                            }, { merge: true });
+                                        }}
+                                        className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase whitespace-nowrap"
+                                    >
+                                        Gerar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        {settings.externalToken && (
+                            <div className="mt-4 bg-purple-500/10 border border-purple-500/20 p-4 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4">
+                                <div className="text-xs font-mono text-purple-200 break-all">
+                                    {window.location.origin}/gastos-externos?token={settings.externalToken}
+                                </div>
+                                <button
+                                    onClick={() => navigator.clipboard.writeText(`${window.location.origin}/gastos-externos?token=${settings.externalToken}`)}
+                                    className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                                    Copiar Link
+                                </button>
+                            </div>
+                        )}
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4 border-t border-white/5">
