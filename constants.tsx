@@ -25,3 +25,5 @@ export const PROJECT_COLORS: Record<string, string> = {
 
 export const DEFAULT_JSON_URL = '/tarefas_andre.json';
 export const ATIVIDADES_FEVEREIRO_URL = '/atividades_fevereiro.json';
+
+export const SLIDES_HISTORY_KEY = 'hermes_slides_history';

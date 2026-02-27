@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import {
   Tarefa, Status, Categoria, EntregaInstitucional, DailyHabits,
   AppSettings, HermesModalProps, CustomNotification
-} from '../../../types';
-import { formatDate, formatDateLocalISO } from '../../../types';
+} from '@/types';
+import { formatDate, formatDateLocalISO } from '@/types';
 import { detectAreaFromTitle, callScrapeSipac } from '../../utils/helpers';
 import { WysiwygEditor } from '../ui/UIComponents';
 export const HermesModal = ({ isOpen, title, message, type, onConfirm, onCancel, confirmLabel, cancelLabel }: HermesModalProps) => {

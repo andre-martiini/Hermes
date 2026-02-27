@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { ConhecimentoItem } from '../../../types';
+import { ConhecimentoItem } from '@/types';
 
 interface MediaPlayerToolProps {
     onBack: () => void;

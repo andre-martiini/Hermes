@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '../../../firebase';
+import { functions } from '@/firebase';
 
 interface TranscriptionToolProps {
   onBack: () => void;

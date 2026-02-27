@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot, addDoc, deleteDoc, updateDoc, doc, writeBatch } from 'firebase/firestore';
-import { db } from '../../../firebase';
-import { ShoppingItem } from '../../../types';
+import { db } from '@/firebase';
+import { ShoppingItem } from '@/types';
 
 export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, showToast: (msg: string, type: 'success' | 'error' | 'info') => void }) => {
   const [items, setItems] = useState<ShoppingItem[]>([]);

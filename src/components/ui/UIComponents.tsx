@@ -2,9 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Tarefa, HermesNotification, WysiwygEditorProps, PlanoTrabalhoItem,
   EntregaInstitucional, AtividadeRealizada
-} from '../../../types';
-import { formatDate } from '../../../types';
-import { STATUS_COLORS, PROJECT_COLORS } from '../../../constants';
+} from '@/types';
+import { formatDate } from '@/types';
+import { STATUS_COLORS, PROJECT_COLORS } from '@/constants';
 import { normalizeStatus } from '../../utils/helpers';
 
 // Local Toast type (matches the one in index.tsx)
