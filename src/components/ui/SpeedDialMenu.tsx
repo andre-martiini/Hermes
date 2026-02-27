@@ -19,6 +19,7 @@ interface SpeedDialMenuProps {
   onUpdateOverdue?: (id?: string) => void;
   onNavigate?: (link: string) => void;
   onCreateAction: () => void;
+  direction?: 'up' | 'down';
 }
 
 export const SpeedDialMenu = ({
@@ -26,7 +27,8 @@ export const SpeedDialMenu = ({
   onOpenNotes, onOpenLog, onOpenShopping, onOpenTranscription, onToggleNotifications,
   onSync, onOpenSettings, onCloseNotifications,
   onMarkAsRead, onDismiss, onUpdateOverdue, onNavigate,
-  onCreateAction
+  onCreateAction,
+  direction = 'down'
 }: SpeedDialMenuProps) => {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -144,17 +146,17 @@ export const SpeedDialMenu = ({
       ref={ref}
       className="relative flex flex-col items-center"
     >
-      {/* Expanded action buttons — slide down from trigger */}
+      {/* Expanded action buttons — slide down or up from trigger */}
       <div
-        className="absolute top-full right-0 mt-2 flex flex-col items-end gap-2 z-50"
+        className={`absolute ${direction === 'up' ? 'bottom-full mb-2' : 'top-full mt-2'} right-0 flex flex-col items-end gap-2 z-50`}
         style={{ pointerEvents: open ? 'auto' : 'none' }}
       >
-        {actions.map((action, i) => (
+        {(direction === 'up' ? [...actions].reverse() : actions).map((action, i) => (
           <div
             key={action.label}
             className="flex items-center gap-2"
             style={{
-              transform: open ? 'translateY(0) scale(1)' : 'translateY(-10px) scale(0.85)',
+              transform: open ? 'translateY(0) scale(1)' : `translateY(${direction === 'up' ? '10px' : '-10px'}) scale(0.85)`,
               opacity: open ? 1 : 0,
               transition: `transform 200ms cubic-bezier(0.34,1.56,0.64,1) ${i * 50}ms, opacity 160ms ease ${i * 50}ms`,
             }}
@@ -175,6 +177,7 @@ export const SpeedDialMenu = ({
           </div>
         ))}
       </div>
+
 
       {/* Trigger button */}
       <button
@@ -210,6 +213,7 @@ export const SpeedDialMenu = ({
         onClose={onCloseNotifications}
         onUpdateOverdue={onUpdateOverdue}
         onNavigate={onNavigate}
+        direction={direction}
       />
     </div>
   );

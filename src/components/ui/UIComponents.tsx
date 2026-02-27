@@ -529,7 +529,8 @@ export const NotificationCenter = ({
   isOpen,
   onClose,
   onUpdateOverdue,
-  onNavigate
+  onNavigate,
+  direction = 'down'
 }: {
   notifications: HermesNotification[],
   onMarkAsRead: (id: string) => void,
@@ -537,7 +538,8 @@ export const NotificationCenter = ({
   isOpen: boolean,
   onClose: () => void,
   onUpdateOverdue?: (id?: string) => void,
-  onNavigate?: (link: string) => void
+  onNavigate?: (link: string) => void,
+  direction?: 'up' | 'down'
 }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -565,7 +567,7 @@ export const NotificationCenter = ({
   return (
     <div
       ref={dropdownRef}
-      className="fixed sm:absolute bottom-0 sm:bottom-auto sm:top-full left-0 right-0 sm:left-auto sm:right-0 w-full sm:w-96 bg-white rounded-t-[2rem] sm:rounded-none md:rounded-[2.5rem] shadow-[0_-20px_50px_rgba(0,0,0,0.1)] sm:shadow-[0_20px_50px_rgba(0,0,0,0.2)] border-t sm:border border-slate-100 overflow-hidden z-[100] animate-in fade-in slide-in-from-bottom-10 sm:slide-in-from-top-4 sm:slide-in-from-right-4 duration-300"
+      className={`fixed sm:absolute ${direction === 'up' ? 'bottom-full mb-6' : 'bottom-0 sm:bottom-auto sm:top-full mt-2'} left-0 right-0 sm:left-auto sm:right-0 w-full sm:w-96 bg-white rounded-t-[2rem] sm:rounded-none md:rounded-[2.5rem] shadow-[0_-20px_50px_rgba(0,0,0,0.1)] sm:shadow-[0_20px_50px_rgba(0,0,0,0.2)] border-t sm:border border-slate-100 overflow-hidden z-[100] animate-in fade-in ${direction === 'up' ? 'slide-in-from-bottom-4' : 'slide-in-from-bottom-10 sm:slide-in-from-top-4'} sm:slide-in-from-right-4 duration-300`}
     >
       <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mt-4 mb-2 sm:hidden"></div>
       <div className="p-8 border-b border-slate-50 bg-slate-50/50 flex items-center justify-between">

@@ -654,6 +654,7 @@ export const TaskExecutionView = ({
           onMarkAsRead={onMarkAsRead}
           onDismiss={onDismiss}
           onCreateAction={onCreateAction}
+          direction="up"
         />
       </div>
 
