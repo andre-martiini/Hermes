@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot, updateDoc, writeBatch } from 'firebase/firestore';
 import { db } from '../../../firebase';
 import { ShoppingItem } from '../../../types';
-import { getVisibleShoppingItems } from '../../utils/shoppingTransitions';
 
 const PublicShoppingPortal = () => {
     const [isValid, setIsValid] = useState<boolean | null>(null);
@@ -13,6 +12,7 @@ const PublicShoppingPortal = () => {
     const [isClearPlanningPending, setIsClearPlanningPending] = useState(false);
     const [isFinalizingConfirmOpen, setIsFinalizingConfirmOpen] = useState(false);
     const [exitingPurchasedIds, setExitingPurchasedIds] = useState<string[]>([]);
+    const [isPurchasedSectionOpen, setIsPurchasedSectionOpen] = useState(false);
 
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
@@ -83,7 +83,8 @@ const PublicShoppingPortal = () => {
     );
 
     const purchasedCount = plannedItems.filter((item) => item.isPurchased).length;
-    const visibleShoppingItems = useMemo(() => getVisibleShoppingItems(plannedItems, exitingPurchasedIds), [plannedItems, exitingPurchasedIds]);
+    const pendingShoppingItems = useMemo(() => plannedItems.filter((item) => !item.isPurchased), [plannedItems]);
+    const purchasedShoppingItems = useMemo(() => plannedItems.filter((item) => item.isPurchased), [plannedItems]);
 
     const togglePlanned = async (id: string) => {
         const item = items.find((i) => i.id === id);
@@ -310,31 +311,79 @@ const PublicShoppingPortal = () => {
                                 <p className="text-xs font-medium mt-2 opacity-60">Planeje itens para começar</p>
                             </div>
                         ) : (
-                            <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl overflow-hidden">
-                                <div className="divide-y divide-slate-50">
-                                    {visibleShoppingItems.map((item) => (
-                                        <div
-                                            key={item.id}
-                                            onClick={() => togglePurchased(item.id)}
-                                            className={`flex items-center gap-5 px-6 py-5 cursor-pointer transition-all duration-300 select-none ${item.isPurchased ? 'bg-slate-50/60 opacity-0 scale-[0.97]' : 'hover:bg-slate-50'} ${exitingPurchasedIds.includes(item.id) ? 'bg-emerald-50 opacity-40 scale-[0.98]' : ''}`}
-                                        >
-                                            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-all flex-shrink-0 ${item.isPurchased ? 'bg-emerald-500 text-white shadow-md shadow-emerald-200' : 'bg-slate-100 text-slate-400'}`}>
-                                                {item.isPurchased ? (
-                                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                ) : (
+                            <div className="space-y-4">
+                                <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl overflow-hidden">
+                                    <div className="divide-y divide-slate-50">
+                                        {pendingShoppingItems.map((item) => (
+                                            <div
+                                                key={item.id}
+                                                onClick={() => togglePurchased(item.id)}
+                                                className={`flex items-center gap-5 px-6 py-5 cursor-pointer transition-all duration-300 select-none hover:bg-slate-50 ${exitingPurchasedIds.includes(item.id) ? 'bg-emerald-50 opacity-40 scale-[0.98]' : ''}`}
+                                            >
+                                                <div className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all flex-shrink-0 bg-slate-100 text-slate-400">
                                                     <div className="w-3 h-3 border-2 border-current rounded-full" />
-                                                )}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-lg font-black tracking-tight text-slate-900">{item.nome}</p>
+                                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{item.categoria}</p>
+                                                </div>
+                                                <div className="text-right flex-shrink-0">
+                                                    <span className="text-xl font-black text-blue-600">{item.quantidade}</span>
+                                                    <span className="text-slate-400 font-medium text-xs ml-1">{item.unit}</span>
+                                                </div>
                                             </div>
-                                            <div className="flex-1 min-w-0">
-                                                <p className={`text-lg font-black tracking-tight ${item.isPurchased ? 'line-through text-slate-400' : 'text-slate-900'}`}>{item.nome}</p>
-                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{item.categoria}</p>
+                                        ))}
+                                        {pendingShoppingItems.length === 0 && (
+                                            <div className="px-6 py-8 text-center text-slate-400">
+                                                <p className="text-sm font-black uppercase tracking-widest">Tudo comprado</p>
                                             </div>
-                                            <div className="text-right flex-shrink-0">
-                                                <span className={`text-xl font-black ${item.isPurchased ? 'text-slate-300' : 'text-blue-600'}`}>{item.quantidade}</span>
-                                                <span className="text-slate-400 font-medium text-xs ml-1">{item.unit}</span>
-                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl overflow-hidden">
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsPurchasedSectionOpen((prev) => !prev)}
+                                        className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors"
+                                    >
+                                        <div className="text-left">
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Comprados</p>
+                                            <p className="text-sm font-black text-slate-900">{purchasedShoppingItems.length} itens</p>
                                         </div>
-                                    ))}
+                                        <svg className={`w-5 h-5 text-slate-400 transition-transform ${isPurchasedSectionOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                    </button>
+
+                                    {isPurchasedSectionOpen && (
+                                        <div className="divide-y divide-slate-50 border-t border-slate-100">
+                                            {purchasedShoppingItems.map((item) => (
+                                                <div
+                                                    key={item.id}
+                                                    onClick={() => togglePurchased(item.id)}
+                                                    className="flex items-center gap-5 px-6 py-5 cursor-pointer transition-all duration-300 select-none bg-slate-50/70 hover:bg-slate-100/70"
+                                                >
+                                                    <div className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all flex-shrink-0 bg-emerald-500 text-white shadow-md shadow-emerald-200">
+                                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-lg font-black tracking-tight line-through text-slate-400">{item.nome}</p>
+                                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{item.categoria}</p>
+                                                    </div>
+                                                    <div className="text-right flex-shrink-0">
+                                                        <span className="text-xl font-black text-slate-300">{item.quantidade}</span>
+                                                        <span className="text-slate-400 font-medium text-xs ml-1">{item.unit}</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            {purchasedShoppingItems.length === 0 && (
+                                                <div className="px-6 py-8 text-center text-slate-400">
+                                                    <p className="text-sm font-black uppercase tracking-widest">Nenhum item comprado ainda</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}
