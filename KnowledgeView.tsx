@@ -1,15 +1,27 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { ConhecimentoItem, formatDate, Tarefa, WorkItem } from './types';
-import { computeFolderStructure, filterCurrentItems } from './src/utils/knowledgeLogic';
+import {
+    type KnowledgeSearchMode,
+    ROOT_ACTIONS_FOLDER_ID,
+    ROOT_HEALTH_FOLDER_ID,
+    ROOT_PROJECTS_FOLDER_ID,
+    computeFolderStructure,
+    filterCurrentItems,
+    getTaskIdFromActionFolderId,
+    isActionDiaryItemId,
+    isActionVirtualFolderId,
+    isRootKnowledgeFolderId
+} from './src/utils/knowledgeLogic';
 import * as idb from 'idb-keyval';
 
 import { AutoExpandingTextarea } from './src/components/ui/UIComponents';
 
 interface KnowledgeViewProps {
     items: ConhecimentoItem[];
-    onUploadFile: (file: File) => void;
-    onAddLink?: (url: string, title: string) => Promise<void>;
+    onUploadFile: (file: File, destinationFolderId?: string | null) => void;
+    onAddLink?: (url: string, title: string, destinationFolderId?: string | null) => Promise<void>;
     onSaveItem?: (item: Partial<ConhecimentoItem>) => Promise<void>;
+    onRenameAction?: (taskId: string, title: string) => Promise<void>;
     onDeleteItem: (id: string) => void;
     onProcessWithAI?: (id: string) => Promise<any>;
     onGenerateSlides?: (text: string) => Promise<any>;
@@ -19,8 +31,9 @@ interface KnowledgeViewProps {
     showConfirm?: (title: string, message: string, onConfirm: () => void) => void;
 }
 
-const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAddLink, onSaveItem, onDeleteItem, onProcessWithAI, onNavigateToOrigin, allTasks = [], allWorkItems = [], showConfirm }) => {
+const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAddLink, onSaveItem, onRenameAction, onDeleteItem, onProcessWithAI, onNavigateToOrigin, allTasks = [], allWorkItems = [], showConfirm }) => {
     const [searchTerm, setSearchTerm] = useState('');
+    const [searchMode, setSearchMode] = useState<KnowledgeSearchMode>('all');
     const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
     const [selectedItem, setSelectedItem] = useState<ConhecimentoItem | null>(null);
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -38,15 +51,25 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
     const [editOcrText, setEditOcrText] = useState<string | null>(null);
     const [clipboard, setClipboard] = useState<{ type: 'copy'|'cut', ids: string[] }>({ type: 'copy', ids: [] });
     const [renamingItemId, setRenamingItemId] = useState<string | null>(null);
+    const [renamingSidebarFolderId, setRenamingSidebarFolderId] = useState<string | null>(null);
+    const [sidebarRenameValue, setSidebarRenameValue] = useState('');
     const [lassoStart, setLassoStart] = useState<{ x: number, y: number } | null>(null);
     const [lassoCurrent, setLassoCurrent] = useState<{ x: number, y: number } | null>(null);
     const [undoStackLocal, setUndoStackLocal] = useState<{action: string, data: any}[]>([]);
+    const lassoBaseSelectionRef = useRef<Set<string>>(new Set());
+    const lassoIsAdditiveRef = useRef(false);
+    const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(
+        new Set([ROOT_ACTIONS_FOLDER_ID, ROOT_HEALTH_FOLDER_ID, ROOT_PROJECTS_FOLDER_ID])
+    );
 
     // Virtual Scrolling Variables
     const [containerWidth, setContainerWidth] = useState(1000);
     const gridCols = containerWidth < 768 ? 2 : containerWidth < 1024 ? 4 : containerWidth < 1280 ? 5 : 6;
     const itemHeightGrid = 160;
     const itemHeightList = 64;
+    const listSizeColWidth = 96;
+    const listModifiedColWidth = 210;
+    const listActionsColWidth = 92;
 
     // Modals State
     const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
@@ -65,28 +88,175 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
     }, [items, allTasks]);
 
     const breadcrumbs = useMemo(() => {
-        const path: { id: string | null, name: string }[] = [{ id: null, name: 'Raiz' }];
-        if (!currentFolderId) return path;
+        const root: { id: string | null, name: string } = { id: null, name: 'Biblioteca' };
+        if (!currentFolderId) return [root];
 
-        // Check if the current folder is a virtual task folder
-        const taskFolder = allTasks.find(t => t.id === currentFolderId);
-        if (taskFolder) {
-            return [...path, { id: taskFolder.id, name: taskFolder.titulo }];
+        const folderMap = new Map(folderStructure.map(folder => [folder.id, folder]));
+        const chain: { id: string, name: string }[] = [];
+        const visited = new Set<string>();
+        let cursor: string | null = currentFolderId;
+
+        while (cursor && !visited.has(cursor)) {
+            visited.add(cursor);
+            const folder = folderMap.get(cursor);
+            if (!folder) break;
+            chain.unshift({ id: folder.id, name: folder.titulo });
+            cursor = folder.parent_id || null;
         }
 
-        let current = items.find(i => i.id === currentFolderId);
-        const tempPath: { id: string, name: string }[] = [];
-
-        while (current) {
-            tempPath.unshift({ id: current.id, name: current.titulo });
-            current = current.parent_id ? items.find(i => i.id === current.parent_id) : undefined;
-        }
-        return [...path, ...tempPath];
-    }, [currentFolderId, items]);
+        return [root, ...chain];
+    }, [currentFolderId, folderStructure]);
 
     const currentItems = useMemo(() => {
-        return filterCurrentItems(items, allTasks, folderStructure, currentFolderId, searchTerm);
-    }, [items, currentFolderId, searchTerm, allTasks, folderStructure]);
+        return filterCurrentItems(items, allTasks, folderStructure, currentFolderId, searchTerm, searchMode);
+    }, [items, currentFolderId, searchTerm, searchMode, allTasks, folderStructure]);
+
+    const isVirtualItem = (item: ConhecimentoItem) =>
+        isRootKnowledgeFolderId(item.id) || isActionVirtualFolderId(item.id) || isActionDiaryItemId(item.id);
+
+    const getDestinationPatch = (targetFolderId: string | null): Partial<ConhecimentoItem> => {
+        if (!targetFolderId) return { parent_id: null };
+
+        if (targetFolderId === ROOT_ACTIONS_FOLDER_ID) {
+            return { parent_id: null, categoria: 'Ações' };
+        }
+        if (targetFolderId === ROOT_HEALTH_FOLDER_ID) {
+            return { parent_id: null, categoria: 'Saúde' };
+        }
+        if (targetFolderId === ROOT_PROJECTS_FOLDER_ID) {
+            return { parent_id: null, categoria: 'Projetos' };
+        }
+
+        const actionTaskId = getTaskIdFromActionFolderId(targetFolderId);
+        if (actionTaskId) {
+            return {
+                parent_id: null,
+                categoria: 'Ações',
+                origem: { modulo: 'tarefas', id_origem: actionTaskId }
+            };
+        }
+
+        return { parent_id: targetFolderId };
+    };
+
+    const folderById = useMemo(() => {
+        return new Map(folderStructure.map(folder => [folder.id, folder]));
+    }, [folderStructure]);
+
+    const sidebarChildrenByParent = useMemo(() => {
+        const map = new Map<string | null, ConhecimentoItem[]>();
+
+        folderStructure.forEach((folder) => {
+            const parentKey = folder.parent_id || null;
+            const siblings = map.get(parentKey) || [];
+            siblings.push(folder);
+            map.set(parentKey, siblings);
+        });
+
+        map.forEach((siblings, parentId) => {
+            if (parentId === null) {
+                siblings.sort((a, b) => {
+                    const rootOrder = [ROOT_ACTIONS_FOLDER_ID, ROOT_HEALTH_FOLDER_ID, ROOT_PROJECTS_FOLDER_ID];
+                    const indexA = rootOrder.indexOf(a.id);
+                    const indexB = rootOrder.indexOf(b.id);
+                    if (indexA !== -1 || indexB !== -1) {
+                        if (indexA === -1) return 1;
+                        if (indexB === -1) return -1;
+                        return indexA - indexB;
+                    }
+                    return a.titulo.localeCompare(b.titulo, 'pt-BR');
+                });
+            } else {
+                siblings.sort((a, b) => a.titulo.localeCompare(b.titulo, 'pt-BR'));
+            }
+        });
+
+        return map;
+    }, [folderStructure]);
+
+    const isFolderSearchActive = searchTerm.trim().length > 0 && searchMode !== 'files';
+
+    const visibleSidebarFolderIds = useMemo(() => {
+        if (!isFolderSearchActive) return null;
+
+        const query = searchTerm.toLowerCase().trim();
+        const visibleIds = new Set<string>();
+
+        const matches = folderStructure.filter(folder => folder.titulo.toLowerCase().includes(query));
+
+        const addAncestors = (folderId: string) => {
+            let cursor: string | null = folderId;
+            const visited = new Set<string>();
+            while (cursor && !visited.has(cursor)) {
+                visited.add(cursor);
+                visibleIds.add(cursor);
+                const parentId = folderById.get(cursor)?.parent_id || null;
+                cursor = parentId;
+            }
+        };
+
+        matches.forEach(folder => addAncestors(folder.id));
+        return visibleIds;
+    }, [isFolderSearchActive, searchTerm, folderStructure, folderById]);
+
+    const isRenamableFolder = (item: ConhecimentoItem) => {
+        if (!item.is_folder) return false;
+        if (isRootKnowledgeFolderId(item.id)) return false;
+        return true;
+    };
+
+    const findSelectedItemForRename = () => {
+        if (selectedItems.size !== 1) return null;
+        const selectedId = Array.from(selectedItems)[0];
+        return currentItems.find(item => item.id === selectedId) || folderById.get(selectedId) || null;
+    };
+
+    const handleRenameEntity = async (item: ConhecimentoItem, rawTitle: string) => {
+        const title = rawTitle.trim();
+        if (!title || title === item.titulo) return;
+
+        const actionTaskId = getTaskIdFromActionFolderId(item.id);
+        if (actionTaskId) {
+            if (!onRenameAction) {
+                alert('Renomear ações não está disponível neste contexto.');
+                return;
+            }
+            await onRenameAction(actionTaskId, title);
+            return;
+        }
+
+        if (!onSaveItem) return;
+        if (isActionDiaryItemId(item.id) || isRootKnowledgeFolderId(item.id)) return;
+        await onSaveItem({ id: item.id, titulo: title });
+    };
+
+    const startItemRename = (item: ConhecimentoItem) => {
+        if (!isRenamableFolder(item) && item.is_folder) return;
+        if (isRootKnowledgeFolderId(item.id) || isActionDiaryItemId(item.id)) return;
+        setRenamingItemId(item.id);
+    };
+
+    useEffect(() => {
+        if (!currentFolderId) return;
+        const toExpand: string[] = [];
+        let cursor: string | null = currentFolderId;
+        const visited = new Set<string>();
+
+        while (cursor && !visited.has(cursor)) {
+            visited.add(cursor);
+            const folder = folderById.get(cursor);
+            if (!folder) break;
+            if (folder.parent_id) toExpand.push(folder.parent_id);
+            cursor = folder.parent_id || null;
+        }
+
+        if (toExpand.length === 0) return;
+        setExpandedFolderIds((prev) => {
+            const next = new Set(prev);
+            toExpand.forEach(id => next.add(id));
+            return next;
+        });
+    }, [currentFolderId, folderById]);
 
     // Handle Desktop Keyboard Shortcuts
     useEffect(() => {
@@ -96,15 +266,17 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
 
             if (e.key === 'F2') {
                 e.preventDefault();
-                if (selectedItems.size === 1) {
-                    setRenamingItemId(Array.from(selectedItems)[0]);
+                const target = findSelectedItemForRename();
+                if (target) {
+                    startItemRename(target);
                 }
             }
 
             if (e.key === 'Delete') {
-                if (selectedItems.size > 0) {
-                    if (window.confirm(`Tem certeza que deseja deletar ${selectedItems.size} item(s)?`)) {
-                        selectedItems.forEach(id => onDeleteItem(id));
+                const persistedSelectedIds = Array.from(selectedItems).filter(id => items.some(item => item.id === id));
+                if (persistedSelectedIds.length > 0) {
+                    if (window.confirm(`Tem certeza que deseja deletar ${persistedSelectedIds.length} item(s)?`)) {
+                        persistedSelectedIds.forEach(id => onDeleteItem(id));
                         setSelectedItems(new Set());
                     }
                 } else if (selectedItem && !selectedItem.is_folder) {
@@ -145,12 +317,12 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                             if (clipboard.type === 'copy') {
                                 // Duplicate
                                 const newId = `copy_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-                                const copy = { ...original, id: newId, titulo: `${original.titulo} (Cópia)`, parent_id: currentFolderId };
+                                const copy = { ...original, id: newId, titulo: `${original.titulo} (Cópia)`, ...getDestinationPatch(currentFolderId) };
                                 onSaveItem(copy);
                                 setUndoStackLocal(prev => [...prev, { action: 'copy', data: newId }]);
                             } else {
                                 // Move (Cut)
-                                onSaveItem({ id: id, parent_id: currentFolderId });
+                                onSaveItem({ id: id, ...getDestinationPatch(currentFolderId) });
                                 setUndoStackLocal(prev => [...prev, { action: 'move', data: { id, oldParent: original.parent_id } }]);
                             }
                         }
@@ -181,7 +353,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [selectedItem, selectedItems, currentItems, onDeleteItem, clipboard, items, currentFolderId, onSaveItem, undoStackLocal]);
+    }, [selectedItem, selectedItems, currentItems, onDeleteItem, clipboard, items, currentFolderId, onSaveItem, undoStackLocal, folderById]);
 
     const handleItemClick = (e: React.MouseEvent, item: ConhecimentoItem) => {
         e.stopPropagation();
@@ -224,6 +396,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
     const handleContextMenu = (e: React.MouseEvent, item: ConhecimentoItem) => {
         e.preventDefault();
         e.stopPropagation();
+        if (isVirtualItem(item)) return;
         if (!selectedItems.has(item.id)) {
             setSelectedItems(new Set([item.id]));
         }
@@ -303,19 +476,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
         const itemId = e.dataTransfer.getData("text/plain");
         if (itemId && onSaveItem) {
             if (itemId === targetFolderId) return; // Can't move folder into itself (simple check)
-
-            // Check if target is a virtual task folder
-            const isTargetVirtualFolder = allTasks.some(t => t.id === targetFolderId);
-
-            if (isTargetVirtualFolder && targetFolderId) {
-                onSaveItem({
-                    id: itemId,
-                    origem: { modulo: 'acoes', id_origem: targetFolderId },
-                    parent_id: null // Unlink from any real folder when moving to a task
-                });
-            } else {
-                onSaveItem({ id: itemId, parent_id: targetFolderId });
-            }
+            onSaveItem({ id: itemId, ...getDestinationPatch(targetFolderId) });
         }
     };
 
@@ -388,6 +549,143 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
         }
     };
 
+    const getIntersectingItemIds = (
+        container: HTMLDivElement,
+        lassoRect: { left: number; right: number; top: number; bottom: number }
+    ) => {
+        const ids = new Set<string>();
+        const containerRect = container.getBoundingClientRect();
+        const itemElements = container.querySelectorAll<HTMLElement>('[data-knowledge-item-id]');
+
+        itemElements.forEach((element) => {
+            const id = element.dataset.knowledgeItemId;
+            if (!id) return;
+
+            const rect = element.getBoundingClientRect();
+            const itemRect = {
+                left: rect.left - containerRect.left + container.scrollLeft,
+                right: rect.right - containerRect.left + container.scrollLeft,
+                top: rect.top - containerRect.top + container.scrollTop,
+                bottom: rect.bottom - containerRect.top + container.scrollTop
+            };
+
+            const intersects =
+                itemRect.left < lassoRect.right &&
+                itemRect.right > lassoRect.left &&
+                itemRect.top < lassoRect.bottom &&
+                itemRect.bottom > lassoRect.top;
+
+            if (intersects) ids.add(id);
+        });
+
+        return ids;
+    };
+
+    const toggleFolderExpanded = (folderId: string) => {
+        setExpandedFolderIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(folderId)) next.delete(folderId);
+            else next.add(folderId);
+            return next;
+        });
+    };
+
+    const submitSidebarFolderRename = async (folder: ConhecimentoItem) => {
+        try {
+            await handleRenameEntity(folder, sidebarRenameValue);
+        } catch (error) {
+            console.error('Erro ao renomear pasta:', error);
+            alert('Não foi possível renomear a pasta.');
+        } finally {
+            setRenamingSidebarFolderId(null);
+            setSidebarRenameValue('');
+        }
+    };
+
+    const renderSidebarFolder = (folder: ConhecimentoItem, depth: number) => {
+        const children = (sidebarChildrenByParent.get(folder.id) || []).filter(
+            child => !visibleSidebarFolderIds || visibleSidebarFolderIds.has(child.id)
+        );
+        const hasChildren = children.length > 0;
+        const isExpanded = isFolderSearchActive ? true : expandedFolderIds.has(folder.id);
+        const isSelected = currentFolderId === folder.id;
+        const canRename = isRenamableFolder(folder);
+
+        return (
+            <div key={folder.id}>
+                <div
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => handleDrop(e, folder.id)}
+                    style={{ marginLeft: `${depth * 12}px` }}
+                    className={`group w-full flex items-center gap-2 px-3 py-2 rounded-xl transition-all mb-1 ${isSelected ? 'bg-slate-100 text-slate-900 font-bold' : 'text-slate-500 hover:bg-slate-50'}`}
+                >
+                    <button
+                        type="button"
+                        onClick={() => hasChildren ? toggleFolderExpanded(folder.id) : setCurrentFolderId(folder.id)}
+                        className={`w-4 h-4 shrink-0 flex items-center justify-center ${hasChildren ? 'text-slate-400 hover:text-slate-700' : 'opacity-0 pointer-events-none'}`}
+                        aria-label={hasChildren ? (isExpanded ? 'Recolher pasta' : 'Expandir pasta') : 'Sem subpastas'}
+                    >
+                        {hasChildren && (
+                            <svg className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
+                            </svg>
+                        )}
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={() => setCurrentFolderId(folder.id)}
+                        className="flex-1 min-w-0 flex items-center gap-2 text-left"
+                        title={folder.titulo}
+                    >
+                        <span className="w-4 h-4 min-w-[16px] shrink-0 flex items-center justify-center text-amber-400">
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+                            </svg>
+                        </span>
+                        {renamingSidebarFolderId === folder.id ? (
+                            <input
+                                autoFocus
+                                value={sidebarRenameValue}
+                                onChange={(e) => setSidebarRenameValue(e.target.value)}
+                                onBlur={() => submitSidebarFolderRename(folder)}
+                                onClick={(e) => e.stopPropagation()}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') e.currentTarget.blur();
+                                    if (e.key === 'Escape') {
+                                        setRenamingSidebarFolderId(null);
+                                        setSidebarRenameValue('');
+                                    }
+                                }}
+                                className="w-full bg-white border border-blue-300 rounded px-2 py-0.5 text-[11px] font-semibold text-slate-800 outline-none"
+                            />
+                        ) : (
+                            <span className="text-[11px] truncate">{folder.titulo}</span>
+                        )}
+                    </button>
+
+                    {canRename && renamingSidebarFolderId !== folder.id && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setRenamingSidebarFolderId(folder.id);
+                                setSidebarRenameValue(folder.titulo);
+                            }}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-slate-400 hover:text-blue-600"
+                            title="Renomear pasta"
+                        >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                            </svg>
+                        </button>
+                    )}
+                </div>
+
+                {hasChildren && isExpanded && children.map(child => renderSidebarFolder(child, depth + 1))}
+            </div>
+        );
+    };
+
     return (
         <div className="flex h-[calc(100vh-120px)] bg-slate-50 overflow-hidden rounded-none md:rounded-[2.5rem] border border-slate-200 shadow-2xl animate-in fade-in duration-500">
             {/* Sidebar - Folder Tree */}
@@ -405,21 +703,11 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                         className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl transition-all mb-1 ${currentFolderId === null ? 'bg-slate-100 text-slate-900 font-bold' : 'text-slate-500 hover:bg-slate-50'}`}
                     >
                         <svg className="w-4 h-4 text-amber-400" fill="currentColor" viewBox="0 0 24 24"><path d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" /></svg>
-                        <span className="text-[11px]">Raiz</span>
+                        <span className="text-[11px]">Biblioteca</span>
                     </button>
-                    {/* Simplified Tree - Flat list of folders for now, recursive would be better but keeping it simple for V1 */}
-                    {folderStructure.map(folder => (
-                        <button
-                            key={folder.id}
-                            onClick={() => setCurrentFolderId(folder.id)}
-                            onDragOver={(e) => e.preventDefault()}
-                            onDrop={(e) => handleDrop(e, folder.id)}
-                            className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl transition-all mb-1 ml-2 ${currentFolderId === folder.id ? 'bg-slate-100 text-slate-900 font-bold' : 'text-slate-500 hover:bg-slate-50'}`}
-                        >
-                            <svg className="w-4 h-4 text-amber-400" fill="currentColor" viewBox="0 0 24 24"><path d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" /></svg>
-                            <span className="text-[11px] truncate">{folder.titulo}</span>
-                        </button>
-                    ))}
+                    {(sidebarChildrenByParent.get(null) || [])
+                        .filter(folder => !visibleSidebarFolderIds || visibleSidebarFolderIds.has(folder.id))
+                        .map(folder => renderSidebarFolder(folder, 0))}
                 </nav>
 
                 <div className="p-6 border-t border-slate-50 space-y-3">
@@ -443,7 +731,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                             className="hidden"
                             onChange={(e) => {
                                 const file = e.target.files?.[0];
-                                if (file) onUploadFile(file);
+                                if (file) onUploadFile(file, currentFolderId);
                             }}
                         />
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
@@ -476,7 +764,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                         const targetFolder = folderStructure.find(f => f.titulo === targetName);
                                         if (targetFolder) {
                                             setCurrentFolderId(targetFolder.id);
-                                        } else if (targetName.toLowerCase() === 'raiz') {
+                                        } else if (['raiz', 'biblioteca'].includes(targetName.toLowerCase())) {
                                             setCurrentFolderId(null);
                                         }
                                         setIsAddressEditing(false);
@@ -499,15 +787,38 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                         )}
                     </div>
 
-                    <div className="flex-1 max-w-md relative">
-                        <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                        <input
-                            type="text"
-                            placeholder="Buscar..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full bg-slate-50 border-none rounded-xl pl-10 pr-4 py-3 text-xs font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 transition-all outline-none"
-                        />
+                    <div className="flex-1 max-w-xl flex items-center gap-3">
+                        <div className="flex-1 relative">
+                            <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                            <input
+                                type="text"
+                                placeholder={searchMode === 'folders' ? 'Buscar pastas...' : searchMode === 'files' ? 'Buscar arquivos...' : 'Buscar pastas e arquivos...'}
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="w-full bg-slate-50 border-none rounded-xl pl-10 pr-4 py-3 text-xs font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 transition-all outline-none"
+                            />
+                        </div>
+
+                        <div className="flex bg-slate-100 p-1 rounded-xl shrink-0">
+                            <button
+                                onClick={() => setSearchMode('all')}
+                                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${searchMode === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                            >
+                                Tudo
+                            </button>
+                            <button
+                                onClick={() => setSearchMode('folders')}
+                                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${searchMode === 'folders' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                            >
+                                Pastas
+                            </button>
+                            <button
+                                onClick={() => setSearchMode('files')}
+                                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${searchMode === 'files' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                            >
+                                Arquivos
+                            </button>
+                        </div>
                     </div>
 
                     <div className="flex bg-slate-100 p-1 rounded-xl">
@@ -536,56 +847,69 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                         }
                     }}
                     onMouseDown={(e) => {
-                        if (e.target === e.currentTarget || (e.target as HTMLElement).className.includes('grid') || (e.target as HTMLElement).className.includes('custom-scrollbar')) {
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            setLassoStart({ x: e.clientX - rect.left, y: e.clientY - rect.top + e.currentTarget.scrollTop });
-                            setLassoCurrent({ x: e.clientX - rect.left, y: e.clientY - rect.top + e.currentTarget.scrollTop });
-                            if (!e.ctrlKey && !e.metaKey && !e.shiftKey) setSelectedItems(new Set());
-                        }
+                        if (e.button !== 0) return;
+                        const target = e.target as HTMLElement;
+                        if (target.closest('[data-knowledge-item-id]')) return;
+                        if (target.closest('button, a, input, textarea, select, label')) return;
+
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const start = {
+                            x: e.clientX - rect.left + e.currentTarget.scrollLeft,
+                            y: e.clientY - rect.top + e.currentTarget.scrollTop
+                        };
+
+                        e.preventDefault();
+                        setLassoStart(start);
+                        setLassoCurrent(start);
+
+                        const additive = e.ctrlKey || e.metaKey || e.shiftKey;
+                        lassoIsAdditiveRef.current = additive;
+                        lassoBaseSelectionRef.current = new Set(selectedItems);
+
+                        if (!additive) setSelectedItems(new Set());
                     }}
                     onMouseMove={(e) => {
                         if (lassoStart) {
                             const rect = e.currentTarget.getBoundingClientRect();
-                            const currentY = e.clientY - rect.top + e.currentTarget.scrollTop;
-                            setLassoCurrent({ x: e.clientX - rect.left, y: currentY });
+                            const current = {
+                                x: e.clientX - rect.left + e.currentTarget.scrollLeft,
+                                y: e.clientY - rect.top + e.currentTarget.scrollTop
+                            };
+                            setLassoCurrent(current);
 
-                            // Intersect items logic:
-                            const top = Math.min(lassoStart.y, currentY);
-                            const bottom = Math.max(lassoStart.y, currentY);
-                            const left = Math.min(lassoStart.x, e.clientX - rect.left);
-                            const right = Math.max(lassoStart.x, e.clientX - rect.left);
+                            const lassoRect = {
+                                top: Math.min(lassoStart.y, current.y),
+                                bottom: Math.max(lassoStart.y, current.y),
+                                left: Math.min(lassoStart.x, current.x),
+                                right: Math.max(lassoStart.x, current.x)
+                            };
 
-                            // Fast approximate intersection logic for grid items
-                            if (viewMode === 'grid') {
-                                const newSelected = new Set(selectedItems);
-                                currentItems.forEach((item, idx) => {
-                                    const row = Math.floor(idx / gridCols);
-                                    const col = idx % gridCols;
-                                    const itemX = 32 + col * (containerWidth / gridCols); // approximation
-                                    const itemY = row * itemHeightGrid;
-
-                                    if (itemY >= top && itemY <= bottom && itemX >= left && itemX <= right) {
-                                        newSelected.add(item.id);
-                                    }
-                                });
-                                setSelectedItems(newSelected);
+                            const intersectingIds = getIntersectingItemIds(e.currentTarget, lassoRect);
+                            if (lassoIsAdditiveRef.current) {
+                                const merged = new Set(lassoBaseSelectionRef.current);
+                                intersectingIds.forEach((id) => merged.add(id));
+                                setSelectedItems(merged);
+                            } else {
+                                setSelectedItems(intersectingIds);
                             }
                         }
                     }}
                     onMouseUp={() => {
                         setLassoStart(null);
                         setLassoCurrent(null);
+                        lassoIsAdditiveRef.current = false;
                     }}
                     onMouseLeave={() => {
                         setLassoStart(null);
                         setLassoCurrent(null);
+                        lassoIsAdditiveRef.current = false;
                     }}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => {
                         const itemId = e.dataTransfer.getData("text/plain");
                         if (itemId && onSaveItem) {
                             if (itemId === currentFolderId) return;
-                            onSaveItem({ id: itemId, parent_id: currentFolderId });
+                            onSaveItem({ id: itemId, ...getDestinationPatch(currentFolderId) });
                         }
                     }}
                 >
@@ -615,7 +939,8 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                     {visibleItems.map(item => (
                                         <div
                                     key={item.id}
-                                    draggable
+                                    data-knowledge-item-id={item.id}
+                                    draggable={!isVirtualItem(item)}
                                     onDragStart={(e) => {
                                         e.dataTransfer.setData("text/plain", item.id);
                                         if (!item.fileHandle && item.url_drive && !item.is_folder) {
@@ -644,10 +969,8 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                                 type="text"
                                                 className="w-full text-xs font-bold text-slate-900 bg-white border border-blue-500 rounded px-2 py-1 outline-none text-center"
                                                 defaultValue={item.titulo}
-                                                onBlur={(e) => {
-                                                    if (onSaveItem && e.target.value.trim() !== '' && e.target.value !== item.titulo) {
-                                                        onSaveItem({ id: item.id, titulo: e.target.value.trim() });
-                                                    }
+                                                onBlur={async (e) => {
+                                                    await handleRenameEntity(item, e.target.value);
                                                     setRenamingItemId(null);
                                                 }}
                                                 onKeyDown={(e) => {
@@ -657,7 +980,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                                 onClick={(e) => e.stopPropagation()}
                                             />
                                         ) : (
-                                            <h4 className="text-xs font-bold text-slate-700 leading-tight truncate px-2" onDoubleClick={(e) => { e.stopPropagation(); setRenamingItemId(item.id); }}>{item.titulo}</h4>
+                                            <h4 className="text-xs font-bold text-slate-700 leading-tight truncate px-2" onDoubleClick={(e) => { e.stopPropagation(); startItemRename(item); }}>{item.titulo}</h4>
                                                 )}
                                                 <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">{item.is_folder ? `${items.filter(i => i.parent_id === item.id).length} itens` : formatSize(item.tamanho || 0)}</p>
                                             </div>
@@ -679,18 +1002,29 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                 <table className="w-full text-left" style={{ display: 'block' }}>
                                     <thead className="bg-slate-50 border-b border-slate-100" style={{ display: 'table', width: '100%', tableLayout: 'fixed' }}>
                                         <tr>
-                                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Nome</th>
-                                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-32">Tamanho</th>
-                                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-40 hidden md:table-cell">Modificado</th>
-                                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-24"></th>
+                                            <th className="pl-6 pr-3 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-left">Nome</th>
+                                            <th
+                                                className="px-3 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right"
+                                                style={{ width: listSizeColWidth }}
+                                            >
+                                                Tamanho
+                                            </th>
+                                            <th
+                                                className="hidden md:table-cell px-3 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right"
+                                                style={{ width: listModifiedColWidth }}
+                                            >
+                                                Modificado
+                                            </th>
+                                            <th style={{ width: listActionsColWidth }} className="pr-6 pl-3 py-4"></th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-50" style={{ display: 'block', height: currentItems.length * itemHeightList, position: 'relative' }}>
                                         {visibleItems.map((item, idx) => (
                                             <tr
+                                                data-knowledge-item-id={item.id}
                                                 style={{ position: 'absolute', top: (startRow + idx) * itemHeightList, width: '100%', display: 'table', tableLayout: 'fixed' }}
                                             key={item.id}
-                                            draggable
+                                            draggable={!isVirtualItem(item)}
                                             onDragStart={(e) => {
                                                 e.dataTransfer.setData("text/plain", item.id);
                                                 if (!item.fileHandle && item.url_drive && !item.is_folder) {
@@ -709,25 +1043,55 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                             onContextMenu={(e) => handleContextMenu(e, item)}
                                             className={`${selectedItems.has(item.id) ? 'bg-blue-50/50' : 'hover:bg-slate-50'} transition-colors cursor-pointer group`}
                                         >
-                                            <td className="px-8 py-3">
-                                                <div className="flex items-center gap-3">
+                                            <td className="pl-6 pr-3 py-3">
+                                                <div className="flex items-center gap-3 min-w-0">
                                                     <div className="w-8 h-8 flex items-center justify-center shrink-0">
                                                         {getFileIcon(item)}
                                                     </div>
-                                                    <span className="text-xs font-bold text-slate-700 group-hover:text-blue-600 transition-colors">{item.titulo}</span>
+                                                    {renamingItemId === item.id ? (
+                                                        <input
+                                                            autoFocus
+                                                            type="text"
+                                                            className="min-w-0 flex-1 bg-white border border-blue-400 rounded px-2 py-1 text-xs font-bold text-slate-800 outline-none"
+                                                            defaultValue={item.titulo}
+                                                            onBlur={async (e) => {
+                                                                await handleRenameEntity(item, e.target.value);
+                                                                setRenamingItemId(null);
+                                                            }}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') e.currentTarget.blur();
+                                                                if (e.key === 'Escape') setRenamingItemId(null);
+                                                            }}
+                                                            onClick={(e) => e.stopPropagation()}
+                                                        />
+                                                    ) : (
+                                                        <span
+                                                            title={item.titulo}
+                                                            onDoubleClick={(e) => { e.stopPropagation(); startItemRename(item); }}
+                                                            className="min-w-0 flex-1 truncate whitespace-nowrap text-xs font-bold text-slate-700 group-hover:text-blue-600 transition-colors"
+                                                        >
+                                                            {item.titulo}
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </td>
-                                            <td className="px-8 py-3 text-[10px] font-bold text-slate-400">
+                                            <td
+                                                className="px-3 py-3 text-[10px] font-bold text-slate-400 text-right whitespace-nowrap"
+                                                style={{ width: listSizeColWidth }}
+                                            >
                                                 {item.is_folder ? '-' : formatSize(item.tamanho || 0)}
                                             </td>
-                                            <td className="px-8 py-3 text-[10px] font-bold text-slate-400 uppercase">
+                                            <td
+                                                className="hidden md:table-cell px-3 py-3 text-[10px] font-bold text-slate-400 uppercase text-right whitespace-nowrap"
+                                                style={{ width: listModifiedColWidth }}
+                                            >
                                                 {formatDate(item.data_criacao?.split('T')[0])}
                                             </td>
-                                            <td className="px-8 py-3 text-right">
+                                            <td className="pl-3 pr-6 py-3 text-right" style={{ width: listActionsColWidth }}>
                                                 <div className="flex items-center justify-end gap-2">
-                                                    {!item.is_folder && item.tipo_arquivo !== 'link' && (
+                                                    {!item.is_folder && item.tipo_arquivo !== 'link' && Boolean(item.url_drive) && !isVirtualItem(item) && (
                                                         <a
-                                                            href={`https://drive.google.com/uc?export=download&id=${item.id}`}
+                                                            href={item.url_drive}
                                                             target="_blank"
                                                             rel="noreferrer"
                                                             onClick={(e) => e.stopPropagation()}
@@ -805,8 +1169,9 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                     <button
                         className="w-full text-left px-4 py-2 text-xs font-bold text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2 mt-1"
                         onClick={() => {
-                            if (window.confirm(`Tem certeza que deseja deletar ${selectedItems.size} item(s)?`)) {
-                                selectedItems.forEach(id => onDeleteItem(id));
+                            const persistedSelectedIds = Array.from(selectedItems).filter(id => items.some(item => item.id === id));
+                            if (window.confirm(`Tem certeza que deseja deletar ${persistedSelectedIds.length} item(s)?`)) {
+                                persistedSelectedIds.forEach(id => onDeleteItem(id));
                                 setSelectedItems(new Set());
                             }
                             setContextMenu(null);
@@ -978,7 +1343,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                 </button>
                             )}
 
-                            {currentItem.tipo_arquivo !== 'link' && (
+                            {currentItem.tipo_arquivo !== 'link' && Boolean(currentItem.url_drive) && !isVirtualItem(currentItem) && (
                                 <a
                                     href={currentItem.url_drive}
                                     target="_blank"
@@ -1011,6 +1376,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                             <button
                                 onClick={() => {
                                     if (onSaveItem && newFolderName) {
+                                        const destinationPatch = getDestinationPatch(currentFolderId);
                                         // Creating a new folder requires a new ID.
                                         // We can't generate it here reliably without Firestore refs if we want to follow 'onSave' pattern.
                                         // We will pass a special "new" flag or object.
@@ -1027,11 +1393,13 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                             id: newId,
                                             titulo: newFolderName,
                                             is_folder: true,
-                                            parent_id: currentFolderId,
+                                            parent_id: destinationPatch.parent_id || null,
                                             tipo_arquivo: 'folder',
                                             data_criacao: new Date().toISOString(),
                                             tamanho: 0,
-                                            url_drive: ''
+                                            url_drive: '',
+                                            ...(destinationPatch.categoria ? { categoria: destinationPatch.categoria } : {}),
+                                            ...(destinationPatch.origem ? { origem: destinationPatch.origem } : {})
                                         });
                                         setNewFolderName('');
                                         setIsNewFolderModalOpen(false);
@@ -1079,7 +1447,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                             <button
                                 onClick={async () => {
                                     if (linkUrl && linkTitle && onAddLink) {
-                                        await onAddLink(linkUrl, linkTitle);
+                                        await onAddLink(linkUrl, linkTitle, currentFolderId);
                                         setLinkUrl('');
                                         setLinkTitle('');
                                         setIsLinkModalOpen(false);

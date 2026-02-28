@@ -389,6 +389,7 @@ export interface ConhecimentoItem {
     slides_data?: any;
     parent_id?: string | null;
     is_folder?: boolean;
+    orphan_action_title?: string;
     fileHandle?: any;
 }
 

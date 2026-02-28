@@ -1,6 +1,6 @@
 ﻿
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { createRoot } from 'react-dom/client';
+import { createRoot, Root } from 'react-dom/client';
 import {
   Tarefa, Status, EntregaInstitucional, Prioridade, AtividadeRealizada,
   Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento,
@@ -16,7 +16,7 @@ import HealthView from './HealthView';
 import { STATUS_COLORS, PROJECT_COLORS, SLIDES_HISTORY_KEY } from './constants';
 import { db, functions, messaging, auth, googleProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, onSnapshot, query, orderBy, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, writeBatch, getDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, writeBatch, getDoc, getDocs, where } from 'firebase/firestore';
 import { getToken, onMessage } from 'firebase/messaging';
 import { httpsCallable } from 'firebase/functions';
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -53,6 +53,12 @@ import { FerramentasView } from './src/components/tools/FerramentasView';
 import { QuickNoteModal } from './src/components/modals/QuickNoteModal';
 import { SpeedDialMenu } from './src/components/ui/SpeedDialMenu';
 import { generateMarkdown, downloadMarkdown } from './src/utils/markdownGenerator';
+import {
+  ROOT_ACTIONS_FOLDER_ID,
+  ROOT_HEALTH_FOLDER_ID,
+  ROOT_PROJECTS_FOLDER_ID,
+  getTaskIdFromActionFolderId
+} from './src/utils/knowledgeLogic';
 
 
 type SortOption = 'date-asc' | 'date-desc' | 'priority-high' | 'priority-low';
@@ -2243,9 +2249,37 @@ const App: React.FC = () => {
     }
   };
 
-  const handleUploadKnowledgeFile = async (file: File) => {
+  const resolveKnowledgeDestinationMetadata = (
+    destinationFolderId?: string | null
+  ): { parent_id: string | null; categoria?: string; origem?: ConhecimentoItem['origem'] } => {
+    if (!destinationFolderId) return { parent_id: null as string | null };
+
+    if (destinationFolderId === ROOT_ACTIONS_FOLDER_ID) {
+      return { parent_id: null as string | null, categoria: 'Ações' };
+    }
+    if (destinationFolderId === ROOT_HEALTH_FOLDER_ID) {
+      return { parent_id: null as string | null, categoria: 'Saúde' };
+    }
+    if (destinationFolderId === ROOT_PROJECTS_FOLDER_ID) {
+      return { parent_id: null as string | null, categoria: 'Projetos' };
+    }
+
+    const actionTaskId = getTaskIdFromActionFolderId(destinationFolderId);
+    if (actionTaskId) {
+      return {
+        parent_id: null as string | null,
+        categoria: 'Ações',
+        origem: { modulo: 'tarefas', id_origem: actionTaskId }
+      };
+    }
+
+    return { parent_id: destinationFolderId };
+  };
+
+  const handleUploadKnowledgeFile = async (file: File, destinationFolderId?: string | null) => {
     const item = await handleFileUploadToDrive(file);
     if (item) {
+      const destinationMetadata = resolveKnowledgeDestinationMetadata(destinationFolderId);
       const knowledgeItem: ConhecimentoItem = {
         id: item.id,
         titulo: item.nome || 'Sem título',
@@ -2253,7 +2287,9 @@ const App: React.FC = () => {
         url_drive: item.valor,
         tamanho: 0,
         data_criacao: item.data_criacao,
-        origem: null // Upload direto
+        origem: destinationMetadata.origem || null,
+        parent_id: destinationMetadata.parent_id,
+        ...(destinationMetadata.categoria ? { categoria: destinationMetadata.categoria } : {})
       };
       await setDoc(doc(db, 'conhecimento', item.id), knowledgeItem);
       showToast("Arquivo enviado e indexação iniciada.", "success");
@@ -2283,6 +2319,7 @@ const App: React.FC = () => {
 
   const handleNavigateToOrigin = (modulo: string, id: string) => {
     switch (modulo) {
+      case 'acoes':
       case 'tarefas':
         const task = tarefas.find(t => t.id === id);
         if (task) {
@@ -2582,15 +2619,18 @@ const App: React.FC = () => {
     }
   };
 
-  const handleAddKnowledgeLink = async (url: string, title: string) => {
+  const handleAddKnowledgeLink = async (url: string, title: string, destinationFolderId?: string | null) => {
     try {
+      const destinationMetadata = resolveKnowledgeDestinationMetadata(destinationFolderId);
       await addDoc(collection(db, 'conhecimento'), {
         titulo: title,
         tipo_arquivo: 'link',
         url_drive: url,
         tamanho: 0,
         data_criacao: new Date().toISOString(),
-        origem: null
+        origem: destinationMetadata.origem || null,
+        parent_id: destinationMetadata.parent_id,
+        ...(destinationMetadata.categoria ? { categoria: destinationMetadata.categoria } : {})
       });
       showToast("Link salvo com sucesso.", "success");
     } catch (e) {
@@ -2602,8 +2642,8 @@ const App: React.FC = () => {
   const handleSaveKnowledgeItem = async (item: Partial<ConhecimentoItem>) => {
     try {
       if (item.id) {
-        await updateDoc(doc(db, 'conhecimento', item.id), item);
-        showToast("Item atualizado.", "success");
+        await setDoc(doc(db, 'conhecimento', item.id), item, { merge: true });
+        showToast("Item salvo.", "success");
       } else {
         await addDoc(collection(db, 'conhecimento'), {
           ...item,
@@ -2614,6 +2654,52 @@ const App: React.FC = () => {
     } catch (e) {
       console.error(e);
       showToast("Erro ao salvar item.", "error");
+    }
+  };
+
+  const handleRenameActionFromKnowledge = async (taskId: string, title: string) => {
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) return;
+
+    try {
+      const taskExists = tarefas.some(task => task.id === taskId);
+      if (taskExists) {
+        await updateDoc(doc(db, 'tarefas', taskId), {
+          titulo: trimmedTitle,
+          data_atualizacao: new Date().toISOString()
+        });
+        showToast("Ação renomeada.", "success");
+        return;
+      }
+
+      // Ação órfã: persiste o título customizado nos documentos vinculados do Conhecimento.
+      const orphanDocsSnapshot = await getDocs(
+        query(collection(db, 'conhecimento'), where('origem.id_origem', '==', taskId))
+      );
+
+      const actionDocs = orphanDocsSnapshot.docs.filter((docSnap) => {
+        const data = docSnap.data() as any;
+        const modulo = data?.origem?.modulo;
+        return modulo === 'tarefas' || modulo === 'acoes';
+      });
+
+      if (actionDocs.length === 0) {
+        showToast("Nenhum documento vinculado encontrado para essa ação sem cadastro.", "info");
+        return;
+      }
+
+      const batch = writeBatch(db);
+      actionDocs.forEach((docSnap) => {
+        batch.update(doc(db, 'conhecimento', docSnap.id), {
+          orphan_action_title: trimmedTitle
+        });
+      });
+      await batch.commit();
+      showToast("Pasta da ação sem cadastro renomeada.", "success");
+    } catch (e) {
+      console.error(e);
+      showToast("Erro ao renomear ação.", "error");
+      throw e;
     }
   };
 
@@ -4399,6 +4485,7 @@ const App: React.FC = () => {
                       onUploadFile={handleUploadKnowledgeFile}
                       onAddLink={handleAddKnowledgeLink}
                       onSaveItem={handleSaveKnowledgeItem}
+                      onRenameAction={handleRenameActionFromKnowledge}
                       onProcessWithAI={handleProcessWithAI}
                       onGenerateSlides={handleGenerateSlides}
                       showConfirm={showAlert}
@@ -5749,8 +5836,16 @@ const App: React.FC = () => {
   );
 };
 
+declare global {
+  interface Window {
+    __hermesReactRoot?: Root;
+  }
+}
+
 const container = document.getElementById('root');
 if (container) {
-  const root = createRoot(container);
-  root.render(<App />);
+  if (!window.__hermesReactRoot) {
+    window.__hermesReactRoot = createRoot(container);
+  }
+  window.__hermesReactRoot.render(<App />);
 }
