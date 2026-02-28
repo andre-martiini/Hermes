@@ -487,6 +487,20 @@ def on_sync_request(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.D
     db.collection('system').document('sync').update({'status': 'processing'})
     run_full_sync()
 
+@firestore_fn.on_document_written(document="system/sync_trigger")
+def on_sync_trigger_written(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot] | firestore_fn.DocumentSnapshot]):
+    """Trigger disparado quando o telegram bot atualiza system/sync_trigger"""
+    db = get_db()
+    sync_ref = db.collection('system').document('sync')
+    try:
+        ts = get_tasks_service()
+        logs = ["Sincronização Push acionada via sync_trigger (Telegram Bot)..."]
+        # Executa sincronização de push instantaneamente
+        sync_google_tasks_push(ts, sync_ref, logs)
+        print("Sincronização push do trigger concluída com sucesso.")
+    except Exception as e:
+        print(f"Erro no sync_trigger: {str(e)}")
+
 @scheduler_fn.on_schedule(schedule="every 30 minutes")
 def scheduled_sync(event: scheduler_fn.ScheduledEvent) -> None:
     """Trigger agendado para rodar a cada 30 minutos"""
@@ -1089,6 +1103,61 @@ def gerarSlidesIA(req: https_fn.CallableRequest):
 
     except Exception as e:
         print(f"Erro ao gerar slides: {str(e)}")
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=str(e))
+
+@https_fn.on_call()
+def get_action_document_link(req: https_fn.CallableRequest):
+    """
+    Recebe um ID de tarefa (taskId), acessa a coleção 'tarefas', localiza os documentos
+    no array 'pool_dados' e devolve os links com as permissões devidamente validadas (webViewLink).
+    """
+    task_id = req.data.get('taskId')
+    if not task_id:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="taskId é obrigatório.")
+
+    try:
+        db = get_db()
+        task_doc = db.collection('tarefas').document(task_id).get()
+
+        if not task_doc.exists:
+            raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.NOT_FOUND, message="Tarefa não encontrada.")
+
+        task_data = task_doc.to_dict()
+        pool_dados = task_data.get('pool_dados', [])
+
+        if not pool_dados:
+            return {"links": []}
+
+        service = get_drive_service()
+        resultado_links = []
+
+        for item in pool_dados:
+            file_id = item.get('drive_file_id')
+            nome = item.get('nome', 'Arquivo sem nome')
+
+            if file_id:
+                try:
+                    # Tenta obter o webViewLink diretamente do Drive para garantir permissão validada
+                    file_metadata = service.files().get(fileId=file_id, fields='webViewLink').execute()
+                    web_link = file_metadata.get('webViewLink')
+                    if web_link:
+                        resultado_links.append({"nome": nome, "link": web_link})
+                except Exception as e:
+                    print(f"Erro ao obter permissão para file_id {file_id}: {str(e)}")
+                    # Fallback para o link armazenado se não conseguir acesso (mas avisa no log)
+                    fallback_link = item.get('webViewLink') or item.get('valor')
+                    if fallback_link:
+                        resultado_links.append({"nome": nome, "link": fallback_link})
+            else:
+                # Documentos sem drive_file_id, como links genéricos
+                link = item.get('webViewLink') or item.get('valor')
+                if link:
+                    resultado_links.append({"nome": nome, "link": link})
+
+        return {"links": resultado_links}
+
+    except Exception as e:
+        print(f"Erro no get_action_document_link: {str(e)}")
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=str(e))
 
 @https_fn.on_call(memory=options.MemoryOption.GB_1)
