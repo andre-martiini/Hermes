@@ -45,6 +45,7 @@ import { CategoryView } from './src/views/CategoryView';
 import { TaskExecutionView } from './src/views/TaskExecutionView';
 import { PublicScholarshipRegistration } from './src/components/public/PublicScholarshipRegistration';
 import PublicFinancePortal from './src/components/public/PublicFinancePortal';
+import PublicShoppingPortal from './src/components/public/PublicShoppingPortal';
 import { TranscriptionTool } from './src/components/tools/TranscriptionTool';
 import { ShoppingListTool } from './src/components/tools/ShoppingListTool';
 import { SlidesTool } from './src/components/tools/SlidesTool';
@@ -820,6 +821,9 @@ const App: React.FC = () => {
   }
   if (window.location.pathname.startsWith('/gastos-externos')) {
     return <PublicFinancePortal />;
+  }
+  if (window.location.pathname.startsWith('/compras-externas')) {
+    return <PublicShoppingPortal />;
   }
 
   const [user, setUser] = useState<User | null>(null);

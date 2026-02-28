@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, onSnapshot, addDoc, deleteDoc, updateDoc, doc, writeBatch } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, deleteDoc, updateDoc, doc, writeBatch, setDoc } from 'firebase/firestore';
 import { db } from '@/firebase';
 import { ShoppingItem } from '@/types';
 
@@ -14,6 +14,8 @@ export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, sh
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editingField, setEditingField] = useState<'nome' | 'categoria' | 'quantidade' | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [isPortalConfigOpen, setIsPortalConfigOpen] = useState(false);
+  const [externalToken, setExternalToken] = useState('');
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'shopping_items'), (snapshot) => {
@@ -22,6 +24,44 @@ export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, sh
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(doc(db, 'public_configs', 'shopping_portal'), (docSnap) => {
+      if (!docSnap.exists()) {
+        setExternalToken('');
+        return;
+      }
+      const data = docSnap.data() as { token?: string };
+      setExternalToken(data.token || '');
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const generateExternalToken = async () => {
+    try {
+      const token = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10);
+      await setDoc(doc(db, 'public_configs', 'shopping_portal'), { token }, { merge: true });
+      showToast('Token externo gerado!', 'success');
+    } catch (e) {
+      console.error(e);
+      showToast('Erro ao gerar token externo.', 'error');
+    }
+  };
+
+  const copyExternalLink = async () => {
+    if (!externalToken) {
+      showToast('Gere um token antes de copiar o link.', 'info');
+      return;
+    }
+    const link = `${window.location.origin}/compras-externas?token=${externalToken}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      showToast('Link externo copiado!', 'success');
+    } catch (e) {
+      console.error(e);
+      showToast('Erro ao copiar link.', 'error');
+    }
+  };
 
   // --- Catalog actions ---
   const handleAddItem = async (e?: React.FormEvent) => {
@@ -188,25 +228,66 @@ export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, sh
           <h2 className="text-3xl font-black text-slate-900 tracking-tighter">Lista de Compras</h2>
           <p className="text-slate-500 font-medium text-sm">{items.length} itens cadastrados · {plannedItems.length} planejados</p>
         </div>
-        {/* Tab selector */}
-        <div className="flex bg-slate-100 p-1 rounded-2xl gap-0.5">
-          {(['catalog', 'planning', 'shopping'] as const).map(tab => {
-            const labels: Record<string, string> = { catalog: 'Cadastro', planning: 'Planejar', shopping: 'Comprar' };
-            return (
-              <button key={tab} onClick={() => setView(tab)}
-                className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all relative ${view === tab ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
-                {labels[tab]}
-                {tab === 'planning' && plannedItems.length > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">{plannedItems.length}</span>
-                )}
-                {tab === 'shopping' && purchasedCount > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-emerald-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">{purchasedCount}</span>
-                )}
-              </button>
-            );
-          })}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsPortalConfigOpen(prev => !prev)}
+            className={`h-11 px-4 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition-all ${isPortalConfigOpen ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800 hover:border-slate-300'}`}
+          >
+            Portal Externo
+          </button>
+          {/* Tab selector */}
+          <div className="flex bg-slate-100 p-1 rounded-2xl gap-0.5">
+            {(['catalog', 'planning', 'shopping'] as const).map(tab => {
+              const labels: Record<string, string> = { catalog: 'Cadastro', planning: 'Planejar', shopping: 'Comprar' };
+              return (
+                <button key={tab} onClick={() => setView(tab)}
+                  className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all relative ${view === tab ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
+                  {labels[tab]}
+                  {tab === 'planning' && plannedItems.length > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">{plannedItems.length}</span>
+                  )}
+                  {tab === 'shopping' && purchasedCount > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-emerald-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">{purchasedCount}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
+
+      {isPortalConfigOpen && (
+        <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl p-6 animate-in fade-in slide-in-from-top-2 duration-300">
+          <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">Portal Externo da Lista</h3>
+          <div className="flex flex-col md:flex-row gap-3">
+            <input
+              type="text"
+              readOnly
+              value={externalToken}
+              placeholder="Nenhum token gerado"
+              className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs font-mono text-slate-700 outline-none"
+            />
+            <button onClick={generateExternalToken} className="bg-blue-600 text-white px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all">
+              Gerar Token
+            </button>
+          </div>
+          <div className="mt-3 flex flex-col md:flex-row gap-3">
+            <input
+              type="text"
+              readOnly
+              value={externalToken ? `${window.location.origin}/compras-externas?token=${externalToken}` : ''}
+              placeholder="Link externo aparecerá aqui"
+              className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs font-mono text-slate-700 outline-none"
+            />
+            <button onClick={copyExternalLink} className="bg-emerald-600 text-white px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all">
+              Copiar Link
+            </button>
+          </div>
+          <p className="text-[10px] text-slate-400 font-bold mt-3">
+            O portal externo compartilha os mesmos itens e status de planejamento/compra em tempo real.
+          </p>
+        </div>
+      )}
 
       {/* ===== CADASTRO ===== */}
       {view === 'catalog' && (
