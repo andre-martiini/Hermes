@@ -1,9 +1,10 @@
-﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Tarefa, AppSettings, PoolItem, ConhecimentoItem, Acompanhamento,
   formatDate, formatDateLocalISO
 } from '../../types';
 import { normalizeStatus } from '../utils/helpers';
+import { buildDiaryRichNote, ensureHttpUrl, getRenamedFileName } from '../utils/diaryEntries';
 import { AutoExpandingTextarea, NotificationCenter } from '../components/ui/UIComponents';
 import { db, functions } from '../../firebase';
 import { httpsCallable } from 'firebase/functions';
@@ -11,6 +12,8 @@ import { setDoc, doc } from 'firebase/firestore';
 import { DiarioBordoUI } from './DiarioBordoUI';
 import { PainelControleUI } from './PainelControleUI';
 import { SpeedDialMenu } from '../components/ui/SpeedDialMenu';
+
+const getPendingFileKey = (file: File) => `${file.name}-${file.size}-${file.lastModified}`;
 
 interface TaskExecutionViewProps {
   task: Tarefa;
@@ -78,7 +81,8 @@ export const TaskExecutionView = ({
   const [modalInputName, setModalInputName] = useState('');
   const [reminderDate, setReminderDate] = useState('');
   const [reminderTime, setReminderTime] = useState('');
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [pendingFileNames, setPendingFileNames] = useState<Record<string, string>>({});
   const [sessionTotalSeconds, setSessionTotalSeconds] = useState(task.tempo_total_segundos || 0);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -287,14 +291,15 @@ export const TaskExecutionView = ({
     showToast("Histórico completo copiado!", "success");
   };
 
-  const handleFileUpload = async (files: File | FileList, customName?: string) => {
+  const handleFileUpload = async (files: Array<{ file: File; customName?: string }>) => {
+    if (files.length === 0) return [];
     setIsUploading(true);
     const uploadFunc = httpsCallable(functions, 'upload_to_drive');
-    const filesToUpload = files instanceof FileList ? Array.from(files) : [files];
     const uploadedItems: PoolItem[] = [];
 
     try {
-      for (const file of filesToUpload) {
+      for (const { file, customName } of files) {
+        const finalFileName = getRenamedFileName(file.name, customName);
         const reader = new FileReader();
         const fileContentB64 = await new Promise<string>((resolve, reject) => {
           reader.onload = () => resolve((reader.result as string).split(',')[1]);
@@ -303,7 +308,7 @@ export const TaskExecutionView = ({
         });
 
         const result = await uploadFunc({
-          fileName: customName || file.name,
+          fileName: finalFileName,
           fileContent: fileContentB64,
           mimeType: file.type,
           folderId: appSettings.googleDriveFolderId
@@ -314,7 +319,7 @@ export const TaskExecutionView = ({
           id: Math.random().toString(36).substring(2, 11),
           tipo: 'arquivo',
           valor: data.webViewLink,
-          nome: customName || file.name,
+          nome: finalFileName,
           data_criacao: new Date().toISOString()
         };
         uploadedItems.push(newItem);
@@ -322,7 +327,7 @@ export const TaskExecutionView = ({
 
       const newEntries = uploadedItems.map(item => ({
         data: new Date().toISOString(),
-        nota: `FILE::${item.nome}::${item.valor}`
+        nota: buildDiaryRichNote('FILE', item.nome || 'Arquivo', item.valor)
       }));
 
       onSave(task.id, {
@@ -355,7 +360,23 @@ export const TaskExecutionView = ({
     }
   };
 
-  const handleModalConfirm = () => {
+  const handleFileUploadInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = e.target.files ? Array.from(e.target.files) : [];
+    if (selectedFiles.length === 0) return;
+
+    const initialNames = selectedFiles.reduce((acc, file) => {
+      acc[getPendingFileKey(file)] = file.name;
+      return acc;
+    }, {} as Record<string, string>);
+
+    setPendingFiles(selectedFiles);
+    setPendingFileNames(initialNames);
+    setModalConfig({ type: 'file_upload', isOpen: true });
+    setShowAttachMenu(false);
+    e.target.value = '';
+  };
+
+  const handleModalConfirm = async () => {
     switch (modalConfig.type) {
       case 'reset_timer':
         setSeconds(0);
@@ -379,16 +400,18 @@ export const TaskExecutionView = ({
         break;
       case 'link':
         if (modalInputValue.trim()) {
+          const normalizedLink = ensureHttpUrl(modalInputValue);
+          const displayName = modalInputName.trim() || normalizedLink;
           const newItem: PoolItem = {
             id: Math.random().toString(36).substring(2, 11),
             tipo: 'link',
-            valor: modalInputValue,
-            nome: modalInputName || modalInputValue,
+            valor: normalizedLink,
+            nome: displayName,
             data_criacao: new Date().toISOString()
           };
           onSave(task.id, { 
             pool_dados: [...(currentTaskData.pool_dados || []), newItem],
-            acompanhamento: [...(currentTaskData.acompanhamento || []), { data: new Date().toISOString(), nota: `LINK::${newItem.nome}::${newItem.valor}` }]
+            acompanhamento: [...(currentTaskData.acompanhamento || []), { data: new Date().toISOString(), nota: buildDiaryRichNote('LINK', newItem.nome || newItem.valor, newItem.valor) }]
           });
         }
         break;
@@ -400,27 +423,36 @@ export const TaskExecutionView = ({
         break;
       case 'contact':
         if (modalInputValue.trim()) {
+          const displayName = modalInputName.trim() || modalInputValue;
           const newItem: PoolItem = {
             id: Math.random().toString(36).substring(2, 11),
             tipo: 'telefone',
             valor: modalInputValue,
-            nome: modalInputName || modalInputValue,
+            nome: displayName,
             data_criacao: new Date().toISOString()
           };
           onSave(task.id, { 
             pool_dados: [...(currentTaskData.pool_dados || []), newItem],
-            acompanhamento: [...(currentTaskData.acompanhamento || []), { data: new Date().toISOString(), nota: `CONTACT::${newItem.nome}::${newItem.valor}` }]
+            acompanhamento: [...(currentTaskData.acompanhamento || []), { data: new Date().toISOString(), nota: buildDiaryRichNote('CONTACT', newItem.nome || newItem.valor, newItem.valor) }]
           });
         }
         break;
       case 'file_upload':
-        if (pendingFile) handleFileUpload(pendingFile, modalInputName);
+        if (pendingFiles.length > 0) {
+          await handleFileUpload(
+            pendingFiles.map(file => ({
+              file,
+              customName: pendingFileNames[getPendingFileKey(file)]
+            }))
+          );
+        }
         break;
     }
     setModalConfig({ ...modalConfig, isOpen: false });
     setModalInputValue('');
     setModalInputName('');
-    setPendingFile(null);
+    setPendingFiles([]);
+    setPendingFileNames({});
   };
 
   const isBreakActive = appSettings.pomodoro?.enabled && pomodoroMode === 'break' && isTimerRunning;
@@ -591,7 +623,7 @@ export const TaskExecutionView = ({
                 showAttachMenu={showAttachMenu}
                 setShowAttachMenu={setShowAttachMenu}
                 fileInputRef={fileInputRef}
-                handleFileUploadInput={(e) => e.target.files && handleFileUpload(e.target.files)}
+                handleFileUploadInput={handleFileUploadInput}
                 setModalConfig={setModalConfig}
                 applyFormatting={() => {}} // Implementação simplificada para o exemplo
                 isTimerRunning={isTimerRunning}
@@ -723,13 +755,24 @@ export const TaskExecutionView = ({
 
             {modalConfig.type === 'file_upload' && (
               <div className="flex flex-col gap-3">
-                <p className="text-sm text-slate-500 mb-2">Renomear arquivo antes de carregar (opcional):</p>
-                <input 
-                  placeholder="Nome do arquivo" 
-                  value={modalInputName} 
-                  onChange={e => setModalInputName(e.target.value)} 
-                  className={`w-full p-3 rounded-none md:rounded-xl border outline-none ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`} 
-                />
+                <p className="text-sm text-slate-500 mb-2">Renomeie os arquivos antes de carregar (opcional):</p>
+                {pendingFiles.map((file, index) => {
+                  const key = getPendingFileKey(file);
+                  return (
+                    <div key={key} className="flex flex-col gap-1">
+                      <label className="text-[10px] font-black uppercase tracking-widest opacity-50">
+                        Arquivo {index + 1}
+                      </label>
+                      <input
+                        placeholder="Nome do arquivo"
+                        value={pendingFileNames[key] || ''}
+                        onChange={e => setPendingFileNames(prev => ({ ...prev, [key]: e.target.value }))}
+                        className={`w-full p-3 rounded-none md:rounded-xl border outline-none ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}
+                      />
+                      <p className="text-[11px] text-slate-400">Original: {file.name}</p>
+                    </div>
+                  );
+                })}
               </div>
             )}
 
@@ -739,7 +782,8 @@ export const TaskExecutionView = ({
                   setModalConfig({ ...modalConfig, isOpen: false });
                   setModalInputValue('');
                   setModalInputName('');
-                  setPendingFile(null);
+                  setPendingFiles([]);
+                  setPendingFileNames({});
                 }} 
                 className="px-4 py-2 font-bold text-slate-400"
               >

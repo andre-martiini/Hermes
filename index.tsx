@@ -47,7 +47,6 @@ import { PublicScholarshipRegistration } from './src/components/public/PublicSch
 import PublicFinancePortal from './src/components/public/PublicFinancePortal';
 import { TranscriptionTool } from './src/components/tools/TranscriptionTool';
 import { ShoppingListTool } from './src/components/tools/ShoppingListTool';
-import { MediaPlayerTool } from './src/components/tools/MediaPlayerTool';
 import { SlidesTool } from './src/components/tools/SlidesTool';
 import { FerramentasView } from './src/components/tools/FerramentasView';
 import { QuickNoteModal } from './src/components/modals/QuickNoteModal';
@@ -673,7 +672,7 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
                   <textarea
                     autoFocus
                     className="flex-1 bg-transparent border-none outline-none py-3 text-base font-bold text-slate-800 placeholder:text-slate-300 resize-none min-h-[120px]"
-                    placeholder={isRecording ? '??? Gravando... Fale os itens que deseja comprar...' : 'Ex: "2 kg de arroz, 1 caixa de leite, ricota, sabão em pó e 3 iogurtes"'}
+                    placeholder={isRecording ? 'Gravando... Fale os itens que deseja comprar...' : 'Ex: "2 kg de arroz, 1 caixa de leite, ricota, sabão em pó e 3 iogurtes"'}
                     value={textInput}
                     disabled={isRecording}
                     onChange={e => setTextInput(e.target.value)}
@@ -933,7 +932,7 @@ const App: React.FC = () => {
   const [isImportPlanOpen, setIsImportPlanOpen] = useState(false);
   const [isCompletedTasksOpen, setIsCompletedTasksOpen] = useState(false);
   const [brainstormIdeas, setBrainstormIdeas] = useState<BrainstormIdea[]>([]);
-  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'media_player' | null>(null);
+  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | 'shopping' | 'transcription' | null>(null);
   const [isBrainstormingAddingText, setIsBrainstormingAddingText] = useState(false);
   const [confirmDeleteLogId, setConfirmDeleteLogId] = useState<string | null>(null);
   const [convertingIdea, setConvertingIdea] = useState<BrainstormIdea | null>(null);
@@ -3732,15 +3731,15 @@ const App: React.FC = () => {
                 <div className="md:hidden border-t border-slate-200 bg-white shadow-2xl animate-in slide-in-from-top-4 duration-300">
                   <nav className="flex flex-col p-4 gap-2">
                     {[
-                      { label: '?? Dashboard', active: viewMode === 'dashboard', onClick: () => { setActiveModule('dashboard'); setViewMode('dashboard'); } },
-                      { label: '?? Ações', active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'licitacoes' || viewMode === 'assistencia'), onClick: () => { setActiveModule('acoes'); setViewMode('gallery'); } },
-                      { label: '?? Projetos', active: activeModule === 'projetos' && viewMode === 'projects', onClick: () => { setActiveModule('projetos'); setViewMode('projects'); } },
-                      { label: '?? PGC', active: activeModule === 'acoes' && viewMode === 'pgc', onClick: () => { setActiveModule('acoes'); setViewMode('pgc'); } },
-                      { label: '?? Financeiro', active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
-                      { label: '?? Saúde', active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
-                      { label: '?? Sistemas', active: viewMode === 'sistemas-dev', onClick: () => { setActiveModule('acoes'); setViewMode('sistemas-dev'); } },
-                      { label: '?? Conhecimento', active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
-                      { label: '??? Ferramentas', active: viewMode === 'ferramentas', onClick: () => { setActiveModule('acoes'); setViewMode('ferramentas'); setActiveFerramenta(null); } },
+                      { label: 'Dashboard', active: viewMode === 'dashboard', onClick: () => { setActiveModule('dashboard'); setViewMode('dashboard'); } },
+                      { label: 'Ações', active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'licitacoes' || viewMode === 'assistencia'), onClick: () => { setActiveModule('acoes'); setViewMode('gallery'); } },
+                      { label: 'Projetos', active: activeModule === 'projetos' && viewMode === 'projects', onClick: () => { setActiveModule('projetos'); setViewMode('projects'); } },
+                      { label: 'PGC', active: activeModule === 'acoes' && viewMode === 'pgc', onClick: () => { setActiveModule('acoes'); setViewMode('pgc'); } },
+                      { label: 'Financeiro', active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
+                      { label: 'Saúde', active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
+                      { label: 'Sistemas', active: viewMode === 'sistemas-dev', onClick: () => { setActiveModule('acoes'); setViewMode('sistemas-dev'); } },
+                      { label: 'Conhecimento', active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
+                      { label: 'Ferramentas', active: viewMode === 'ferramentas', onClick: () => { setActiveModule('acoes'); setViewMode('ferramentas'); setActiveFerramenta(null); } },
                     ].map((item, idx) => (
                       <button
                         key={idx}
@@ -4277,7 +4276,6 @@ const App: React.FC = () => {
                     setIsAddingText={setIsBrainstormingAddingText}
                     showToast={showToast}
                     showAlert={showAlert}
-                    knowledgeItems={knowledgeItems}
                   />
                 ) : viewMode === 'projects' ? (
                   <ProjectsView

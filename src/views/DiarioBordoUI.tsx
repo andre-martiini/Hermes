@@ -1,6 +1,7 @@
 import React from 'react';
 import { AutoExpandingTextarea } from '../components/ui/UIComponents';
 import { formatWhatsAppText } from '../utils/helpers';
+import { ensureHttpUrl, parseDiaryRichNote } from '../utils/diaryEntries';
 
 interface DiarioBordoUIProps {
   task: any;
@@ -44,40 +45,37 @@ export const DiarioBordoUI = ({
   }, [currentTaskData.acompanhamento, isUploading, diaryEndRef]);
 
   const renderDiaryContent = (text: string) => {
-    if (text.startsWith('LINK::')) {
-      const parts = text.split('::');
-      let url = '';
-      let nome = '';
-      if (parts.length >= 3) { nome = parts[1]; url = parts[2]; }
-      else { url = text.replace('LINK::', ''); }
+    const richEntry = parseDiaryRichNote(text);
+
+    if (richEntry?.type === 'LINK') {
+      const url = ensureHttpUrl(richEntry.value);
+      const nome = richEntry.name || richEntry.value;
       return (
         <a href={url} target="_blank" rel="noreferrer" className={`group flex items-center gap-2 p-2 rounded-xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-blue-50/50 border-blue-100 hover:bg-blue-50'}`}>
           <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-blue-200 text-blue-600'}`}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
           </div>
           <div className="flex-1 min-w-0">
-            <p className={`text-[11px] font-bold truncate ${isTimerRunning ? 'text-white' : 'text-blue-900'}`}>{nome || url}</p>
+            <p className={`text-[11px] font-bold break-all leading-snug ${isTimerRunning ? 'text-white' : 'text-blue-900'}`}>{nome || url}</p>
             <p className={`text-[8px] uppercase font-black tracking-widest mt-0.5 opacity-50 ${isTimerRunning ? 'text-white/40' : 'text-blue-400'}`}>Link</p>
           </div>
         </a>
       );
     }
 
-    if (text.startsWith('CONTACT::')) {
-      const parts = text.split('::');
-      let contact = '';
-      let nome = '';
-      if (parts.length >= 3) { nome = parts[1]; contact = parts[2]; }
-      else { contact = text.replace('CONTACT::', ''); }
+    if (richEntry?.type === 'CONTACT') {
+      const contact = richEntry.value;
+      const nome = richEntry.name || contact;
       const num = contact.replace(/\D/g, '');
-      const waLink = num.length >= 10 ? `https://wa.me/55${num}` : null;
+      const waNumber = num.startsWith('55') ? num : `55${num}`;
+      const waLink = num.length >= 10 ? `https://wa.me/${waNumber}` : null;
       return (
         <div className={`group flex items-center gap-2 p-2 rounded-xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-emerald-50/50 border-emerald-100'}`}>
           <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-emerald-200 text-emerald-600'}`}>
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.022-.014-.503-.245-.583-.273-.08-.027-.138-.04-.197.048-.058.088-.227.288-.278.346-.05.058-.1.066-.188.022-.088-.044-.372-.137-.708-.437-.26-.231-.437-.515-.487-.603-.05-.088-.005-.135.039-.179.04-.04.088-.103.131-.154.044-.051.059-.088.088-.146.03-.058.015-.11-.008-.154-.022-.044-.197-.474-.27-.65-.072-.172-.143-.149-.197-.151l-.168-.002c-.058 0-.154.022-.234.11-.08.088-.307.3-.307.732 0 .432.315.849.359.907.044.058.62 1.04 1.502 1.42.21.09.372.143.5.184.21.067.4.057.55.035.168-.024.503-.205.574-.403.072-.198.072-.367.051-.403-.021-.037-.08-.058-.168-.102z" /><path d="M12 2C6.477 2 2 6.477 2 12c0 1.891.524 3.66 1.434 5.168L2 22l4.958-1.412A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.96 7.96 0 01-4.07-1.112l-.292-.174-3.024.863.878-2.946-.19-.302A7.957 7.957 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z" /></svg>
           </div>
           <div className="flex-1 min-w-0">
-            <p className={`text-[11px] font-bold truncate ${isTimerRunning ? 'text-white' : 'text-emerald-900'}`}>{nome || contact}</p>
+            <p className={`text-[11px] font-bold break-all leading-snug ${isTimerRunning ? 'text-white' : 'text-emerald-900'}`}>{nome || contact}</p>
             <p className={`text-[8px] uppercase font-black tracking-widest mt-0.5 opacity-50 ${isTimerRunning ? 'text-white/40' : 'text-emerald-500'}`}>Contato</p>
           </div>
           {waLink && (
@@ -89,24 +87,23 @@ export const DiarioBordoUI = ({
       );
     }
 
-    if (text.startsWith('FILE::')) {
-      const parts = text.split('::');
-      const nome = parts[1] || 'Arquivo';
-      const url = parts[2] || '#';
+    if (richEntry?.type === 'FILE') {
+      const nome = richEntry.name || 'Arquivo';
+      const url = richEntry.value || '#';
       return (
         <a href={url} target="_blank" rel="noreferrer" className={`group flex items-center gap-2 p-2 rounded-xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-amber-50/50 border-amber-100 hover:bg-amber-50'}`}>
           <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-amber-200 text-amber-600'}`}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
           </div>
           <div className="flex-1 min-w-0">
-            <p className={`text-[11px] font-bold truncate ${isTimerRunning ? 'text-white' : 'text-amber-900'}`}>{nome}</p>
+            <p className={`text-[11px] font-bold break-all leading-snug ${isTimerRunning ? 'text-white' : 'text-amber-900'}`}>{nome}</p>
             <p className={`text-[8px] uppercase font-black tracking-widest mt-0.5 opacity-50 ${isTimerRunning ? 'text-white/40' : 'text-amber-600'}`}>Anexo</p>
           </div>
         </a>
       );
     }
 
-    return <div className={`text-xs md:text-sm leading-relaxed ${isTimerRunning ? 'text-white/90' : 'text-slate-700'}`}>{formatWhatsAppText(text)}</div>;
+    return <div className={`text-xs md:text-sm leading-relaxed break-words [overflow-wrap:anywhere] ${isTimerRunning ? 'text-white/90' : 'text-slate-700'}`}>{formatWhatsAppText(text)}</div>;
   };
 
   return (

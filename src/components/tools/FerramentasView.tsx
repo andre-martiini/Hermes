@@ -1,12 +1,11 @@
 import React, { useState, useRef } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/firebase';
-import { BrainstormIdea, ConhecimentoItem, formatDate } from '@/types';
+import { BrainstormIdea, formatDate } from '@/types';
 import { AutoExpandingTextarea } from '../ui/UIComponents';
 import { SlidesTool } from './SlidesTool';
 import { ShoppingListTool } from './ShoppingListTool';
 import { TranscriptionTool } from './TranscriptionTool';
-import { MediaPlayerTool } from './MediaPlayerTool';
 
 interface FerramentasViewProps {
   ideas: BrainstormIdea[];
@@ -16,13 +15,12 @@ interface FerramentasViewProps {
   onUpdateIdea: (id: string, text: string) => void;
   onConvertToLog: (idea: BrainstormIdea) => void;
   onConvertToTask: (idea: BrainstormIdea) => void;
-  activeTool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'media_player' | null;
-  setActiveTool: (tool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'media_player' | null) => void;
+  activeTool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | null;
+  setActiveTool: (tool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | null) => void;
   isAddingText: boolean;
   setIsAddingText: (val: boolean) => void;
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
   showAlert: (title: string, msg: string) => void;
-  knowledgeItems?: ConhecimentoItem[];
 }
 
 export const FerramentasView: React.FC<FerramentasViewProps> = ({
@@ -38,8 +36,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   isAddingText,
   setIsAddingText,
   showToast,
-  showAlert,
-  knowledgeItems
+  showAlert
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [textInput, setTextInput] = useState('');
@@ -92,10 +89,6 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
 
   if (activeTool === 'transcription') {
     return <TranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} />;
-  }
-
-  if (activeTool === 'media_player') {
-    return <MediaPlayerTool onBack={() => setActiveTool(null)} showToast={showToast} items={knowledgeItems || []} />;
   }
 
   const startRecording = async () => {
@@ -204,20 +197,6 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
             <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Transcreva e refine áudios do WhatsApp e outros.</p>
           </div>
         </button>
-
-        <button
-          onClick={() => setActiveTool('media_player')}
-          className="bg-white p-6 md:p-12 rounded-none md:rounded-[3rem] border border-slate-200 shadow-none md:shadow-xl hover:shadow-none md:hover:shadow-2xl transition-all group text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6 -ml-px -mt-px md:m-0"
-        >
-          <div className="w-12 h-12 md:w-16 md:h-16 bg-pink-50 rounded-none md:rounded-2xl flex items-center justify-center text-pink-600 group-hover:bg-pink-600 group-hover:text-white transition-all flex-shrink-0">
-            <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-          </div>
-          <div>
-            <h3 className="text-lg md:text-2xl font-black text-slate-900 tracking-tighter mb-1 md:mb-2">Media Player</h3>
-            <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Reproduza arquivos de áudio e vídeo do sistema.</p>
-          </div>
-        </button>
-
       </div>
     );
   }
