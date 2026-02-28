@@ -25,6 +25,7 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
   const [transcription, setTranscription] = useState<{ raw: string, refined: string } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [history, setHistory] = useState<TranscriptionHistoryEntry[]>([]);
+  const [pendingDeleteHistoryId, setPendingDeleteHistoryId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -292,10 +293,22 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
                       </p>
                     </div>
                     <button
-                      onClick={() => deleteFromHistory(entry.id)}
-                      className="absolute top-4 right-4 text-slate-300 hover:text-rose-500 transition-colors"
+                      onClick={() => {
+                        if (pendingDeleteHistoryId !== entry.id) {
+                          setPendingDeleteHistoryId(entry.id);
+                          window.setTimeout(() => setPendingDeleteHistoryId((current) => (current === entry.id ? null : current)), 3500);
+                          return;
+                        }
+                        setPendingDeleteHistoryId(null);
+                        deleteFromHistory(entry.id);
+                      }}
+                      className={`absolute top-4 right-4 rounded-lg p-1 transition-colors ${pendingDeleteHistoryId === entry.id ? 'bg-rose-500 text-white' : 'text-slate-300 hover:text-rose-500'}`}
                     >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      {pendingDeleteHistoryId === entry.id ? (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                      ) : (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      )}
                     </button>
                   </div>
                   <p className="text-xs text-slate-600 line-clamp-2 mb-3 italic">{entry.refined}</p>

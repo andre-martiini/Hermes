@@ -25,6 +25,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
     const [isProcessingAI, setIsProcessingAI] = useState(false);
     const [isOcrExpanded, setIsOcrExpanded] = useState(false);
     const [newTag, setNewTag] = useState('');
+    const [pendingDeleteItemId, setPendingDeleteItemId] = useState<string | null>(null);
 
     // Modals State
     const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
@@ -369,11 +370,24 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                                         </a>
                                                     )}
                                                     <button
-                                                        onClick={(e) => { e.stopPropagation(); if(window.confirm("Excluir item?")) onDeleteItem(item.id); }}
-                                                        className="p-2 text-slate-300 hover:text-rose-500 transition-colors"
-                                                        title="Excluir"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            if (pendingDeleteItemId !== item.id) {
+                                                                setPendingDeleteItemId(item.id);
+                                                                window.setTimeout(() => setPendingDeleteItemId((current) => (current === item.id ? null : current)), 3500);
+                                                                return;
+                                                            }
+                                                            setPendingDeleteItemId(null);
+                                                            onDeleteItem(item.id);
+                                                        }}
+                                                        className={`p-2 rounded-lg transition-colors ${pendingDeleteItemId === item.id ? 'bg-rose-500 text-white' : 'text-slate-300 hover:text-rose-500'}`}
+                                                        title={pendingDeleteItemId === item.id ? "Confirmar exclusão" : "Excluir"}
                                                     >
-                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                        {pendingDeleteItemId === item.id ? (
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                        ) : (
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                        )}
                                                     </button>
                                                 </div>
                                             </td>

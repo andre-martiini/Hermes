@@ -136,6 +136,7 @@ const ExamsAndConsultationsManager = ({
         data: formatDateLocalISO(new Date())
     });
     const [files, setFiles] = useState<File[]>([]);
+    const [pendingDeleteExamId, setPendingDeleteExamId] = useState<string | null>(null);
     
     // Convert FileList to array correctly when handling input
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -273,11 +274,23 @@ const ExamsAndConsultationsManager = ({
                                 <span className="text-[10px] font-black text-slate-300 uppercase">{formatDate(exam.data)}</span>
                             </div>
                             <button 
-                                onClick={() => onDeleteExam(exam.id)}
-                                className="text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                                title="Excluir"
+                                onClick={() => {
+                                    if (pendingDeleteExamId !== exam.id) {
+                                        setPendingDeleteExamId(exam.id);
+                                        window.setTimeout(() => setPendingDeleteExamId((current) => (current === exam.id ? null : current)), 3500);
+                                        return;
+                                    }
+                                    setPendingDeleteExamId(null);
+                                    onDeleteExam(exam.id);
+                                }}
+                                className={`opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity rounded-lg p-1 ${pendingDeleteExamId === exam.id ? 'bg-rose-500 text-white' : 'text-slate-300 hover:text-rose-500'}`}
+                                title={pendingDeleteExamId === exam.id ? "Confirmar exclusão" : "Excluir"}
                             >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                {pendingDeleteExamId === exam.id ? (
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                ) : (
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                )}
                             </button>
                         </div>
 
@@ -337,6 +350,7 @@ const HealthView: React.FC<HealthViewProps> = ({
     const [isWeightModalOpen, setIsWeightModalOpen] = useState(false);
     const [targetInput, setTargetInput] = useState<string>(settings.targetWeight?.toString() || '');
     const [isEditingTarget, setIsEditingTarget] = useState(false);
+    const [pendingDeleteWeightId, setPendingDeleteWeightId] = useState<string | null>(null);
 
     const currentHabits = dailyHabits.find(h => h.id === selectedDate) || {
         id: selectedDate,
@@ -352,38 +366,54 @@ const HealthView: React.FC<HealthViewProps> = ({
         return [...weights].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     }, [weights]);
 
+    const hasWeightData = sortedWeights.length > 0;
+    const hasWeightTrendData = sortedWeights.length > 1;
     const currentWeight = sortedWeights[0]?.weight || 0;
     const initialWeight = sortedWeights[sortedWeights.length - 1]?.weight || 0;
-    const totalLost = initialWeight > 0 ? initialWeight - currentWeight : 0;
+    const weightDelta = initialWeight > 0 ? initialWeight - currentWeight : 0; // + perda | - ganho
+    const weightDeltaAbs = Math.abs(weightDelta);
+    const isWeightLoss = weightDelta > 0.05;
+    const isWeightGain = weightDelta < -0.05;
+    const weightDeltaLabel = isWeightLoss ? 'Eliminado' : isWeightGain ? 'Ganho' : 'Variação';
+    const weightDeltaPrefix = isWeightGain ? '+' : isWeightLoss ? '-' : '';
 
     // Projection Logic
     const projection = useMemo(() => {
-        if (weights.length < 2) return null;
+        if (sortedWeights.length < 2) return null;
 
-        const oldest = weights[weights.length - 1];
-        const newest = weights[0];
+        const newest = sortedWeights[0];
+        const oldest = sortedWeights[sortedWeights.length - 1];
 
         const diffWeight = oldest.weight - newest.weight;
         const diffDays = (new Date(newest.date).getTime() - new Date(oldest.date).getTime()) / (1000 * 60 * 60 * 24);
 
-        if (diffDays <= 0 || diffWeight <= 0) return null;
+        if (diffDays <= 0) return null;
 
-        const lostPerDay = diffWeight / diffDays;
-        const lostPerWeek = lostPerDay * 7;
+        const trendPerDay = diffWeight / diffDays;
+        const trendPerWeek = trendPerDay * 7;
 
-        if (!settings.targetWeight || newest.weight <= settings.targetWeight) return { lostPerWeek, goalDate: 'Meta atingida!' };
+        if (!settings.targetWeight) {
+            return {
+                trendPerWeek,
+                goalDate: trendPerDay < 0 ? 'Peso em alta' : 'Defina uma meta'
+            };
+        }
+
+        if (newest.weight <= settings.targetWeight) return { trendPerWeek, goalDate: 'Meta atingida!' };
+
+        if (trendPerDay <= 0) return { trendPerWeek, goalDate: 'Sem previsão (peso em alta)' };
 
         const remainingToGoal = newest.weight - settings.targetWeight;
-        const daysUntilGoal = remainingToGoal / lostPerDay;
+        const daysUntilGoal = remainingToGoal / trendPerDay;
 
         const goalDate = new Date();
         goalDate.setDate(goalDate.getDate() + daysUntilGoal);
 
         return {
-            lostPerWeek,
+            trendPerWeek,
             goalDate: goalDate.toLocaleDateString('pt-BR')
         };
-    }, [weights, settings.targetWeight]);
+    }, [sortedWeights, settings.targetWeight]);
 
     const handleHabitToggle = (habitKey: keyof DailyHabits) => {
         if (habitKey === 'id') return;
@@ -418,7 +448,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Peso Atual</span>
                     <div className="flex items-center justify-between">
                         <div className="flex items-baseline gap-2">
-                            <span className="text-4xl font-black text-slate-900">{currentWeight.toFixed(1) || '--'}</span>
+                            <span className="text-4xl font-black text-slate-900">{hasWeightData ? currentWeight.toFixed(1) : '--'}</span>
                             <span className="text-sm font-bold text-slate-400">kg</span>
                         </div>
                         <button
@@ -458,11 +488,11 @@ const HealthView: React.FC<HealthViewProps> = ({
                     </button>
                 </div>
 
-                <div className="bg-emerald-500 p-6 rounded-none md:rounded-[2rem] border-b md:border-none border-emerald-600 shadow-none md:shadow-xl flex flex-col justify-center text-white">
-                    <span className="text-[10px] font-black text-emerald-100 uppercase tracking-widest mb-1">Eliminado</span>
+                <div className={`p-6 rounded-none md:rounded-[2rem] border-b md:border-none shadow-none md:shadow-xl flex flex-col justify-center text-white ${isWeightGain ? 'bg-rose-500 border-rose-600' : isWeightLoss ? 'bg-emerald-500 border-emerald-600' : 'bg-slate-500 border-slate-600'}`}>
+                    <span className={`text-[10px] font-black uppercase tracking-widest mb-1 ${isWeightGain ? 'text-rose-100' : isWeightLoss ? 'text-emerald-100' : 'text-slate-200'}`}>{weightDeltaLabel}</span>
                     <div className="flex items-baseline gap-2">
-                        <span className="text-4xl font-black">{totalLost > 0 ? `-${totalLost.toFixed(1)}` : '--'}</span>
-                        <span className="text-sm font-bold text-emerald-100">kg</span>
+                        <span className="text-4xl font-black">{hasWeightTrendData ? `${weightDeltaPrefix}${weightDeltaAbs.toFixed(1)}` : '--'}</span>
+                        <span className={`text-sm font-bold ${isWeightGain ? 'text-rose-100' : isWeightLoss ? 'text-emerald-100' : 'text-slate-200'}`}>kg</span>
                     </div>
                 </div>
 
@@ -470,12 +500,25 @@ const HealthView: React.FC<HealthViewProps> = ({
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Previsão Meta</span>
                     <div className="flex flex-col">
                         <span className="text-xl font-black text-blue-400">{projection?.goalDate || 'Aguardando dados...'}</span>
-                        {projection?.lostPerWeek && (
-                            <span className="text-[9px] font-bold text-slate-500 uppercase mt-1">Média: {projection.lostPerWeek.toFixed(2)}kg/sem</span>
+                        {projection?.trendPerWeek !== undefined && (
+                            <span className={`text-[9px] font-bold uppercase mt-1 ${projection.trendPerWeek < 0 ? 'text-rose-400' : 'text-slate-500'}`}>
+                                Ritmo: {projection.trendPerWeek < 0 ? '+' : '-'}{Math.abs(projection.trendPerWeek).toFixed(2)}kg/sem
+                            </span>
                         )}
                     </div>
                 </div>
             </div>
+
+            {isWeightGain && hasWeightTrendData && (
+                <div className="mx-4 md:mx-0 mt-4 md:mt-0 bg-rose-50 border border-rose-200 rounded-2xl p-3 flex items-center gap-2">
+                    <svg className="w-4 h-4 text-rose-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4m0 4h.01M4.93 19h14.14c1.54 0 2.5-1.67 1.73-3L13.73 4c-.77-1.33-2.69-1.33-3.46 0L3.2 16c-.77 1.33.19 3 1.73 3z" />
+                    </svg>
+                    <p className="text-[11px] font-bold text-rose-700">
+                        Alerta: você ganhou {weightDeltaAbs.toFixed(1)} kg desde a primeira pesagem registrada.
+                    </p>
+                </div>
+            )}
 
             {/* WEIGHT REGISTRY AND EVOLUTION CHART (Moved here for mobile positioning) */}
             <div className="flex flex-col gap-0 md:gap-8">
@@ -560,11 +603,23 @@ const HealthView: React.FC<HealthViewProps> = ({
                                         <td className="px-6 py-4 text-sm font-black text-slate-900 text-right">{w.weight.toFixed(1)} kg</td>
                                         <td className="px-6 py-4 text-right">
                                             <button
-                                                onClick={() => onDeleteWeight(w.id)}
-                                                className="p-2 text-rose-300 hover:text-rose-600 hover:bg-rose-50 rounded-lg md:rounded-xl transition-all opacity-0 group-hover/row:opacity-100"
-                                                title="Excluir Registro"
+                                                onClick={() => {
+                                                    if (pendingDeleteWeightId !== w.id) {
+                                                        setPendingDeleteWeightId(w.id);
+                                                        window.setTimeout(() => setPendingDeleteWeightId((current) => (current === w.id ? null : current)), 3500);
+                                                        return;
+                                                    }
+                                                    setPendingDeleteWeightId(null);
+                                                    onDeleteWeight(w.id);
+                                                }}
+                                                className={`p-2 rounded-lg md:rounded-xl transition-all opacity-0 group-hover/row:opacity-100 ${pendingDeleteWeightId === w.id ? 'bg-rose-500 text-white opacity-100' : 'text-rose-300 hover:text-rose-600 hover:bg-rose-50'}`}
+                                                title={pendingDeleteWeightId === w.id ? "Confirmar exclusão" : "Excluir Registro"}
                                             >
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                {pendingDeleteWeightId === w.id ? (
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                ) : (
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                )}
                                             </button>
                                         </td>
                                     </tr>
@@ -581,10 +636,22 @@ const HealthView: React.FC<HealthViewProps> = ({
                                         <div className="text-lg font-black text-slate-900">{w.weight.toFixed(1)} kg</div>
                                     </div>
                                     <button
-                                        onClick={() => onDeleteWeight(w.id)}
-                                        className="p-3 text-rose-500 bg-rose-50 rounded-lg md:rounded-xl active:bg-rose-100 transition-all"
+                                        onClick={() => {
+                                            if (pendingDeleteWeightId !== w.id) {
+                                                setPendingDeleteWeightId(w.id);
+                                                window.setTimeout(() => setPendingDeleteWeightId((current) => (current === w.id ? null : current)), 3500);
+                                                return;
+                                            }
+                                            setPendingDeleteWeightId(null);
+                                            onDeleteWeight(w.id);
+                                        }}
+                                        className={`p-3 rounded-lg md:rounded-xl active:bg-rose-100 transition-all ${pendingDeleteWeightId === w.id ? 'bg-rose-500 text-white' : 'text-rose-500 bg-rose-50'}`}
                                     >
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                        {pendingDeleteWeightId === w.id ? (
+                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                        ) : (
+                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                        )}
                                     </button>
                                 </div>
                             ))}

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot, updateDoc, writeBatch } from 'firebase/firestore';
 import { db } from '../../../firebase';
 import { ShoppingItem } from '../../../types';
+import { getVisibleShoppingItems } from '../../utils/shoppingTransitions';
 
 const PublicShoppingPortal = () => {
     const [isValid, setIsValid] = useState<boolean | null>(null);
@@ -9,6 +10,9 @@ const PublicShoppingPortal = () => {
     const [items, setItems] = useState<ShoppingItem[]>([]);
     const [view, setView] = useState<'planning' | 'shopping'>('planning');
     const [searchTerm, setSearchTerm] = useState('');
+    const [isClearPlanningPending, setIsClearPlanningPending] = useState(false);
+    const [isFinalizingConfirmOpen, setIsFinalizingConfirmOpen] = useState(false);
+    const [exitingPurchasedIds, setExitingPurchasedIds] = useState<string[]>([]);
 
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
@@ -79,6 +83,7 @@ const PublicShoppingPortal = () => {
     );
 
     const purchasedCount = plannedItems.filter((item) => item.isPurchased).length;
+    const visibleShoppingItems = useMemo(() => getVisibleShoppingItems(plannedItems, exitingPurchasedIds), [plannedItems, exitingPurchasedIds]);
 
     const togglePlanned = async (id: string) => {
         const item = items.find((i) => i.id === id);
@@ -89,6 +94,17 @@ const PublicShoppingPortal = () => {
     const togglePurchased = async (id: string) => {
         const item = items.find((i) => i.id === id);
         if (!item) return;
+        if (!item.isPurchased) {
+            setExitingPurchasedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+            window.setTimeout(async () => {
+                try {
+                    await updateDoc(doc(db, 'shopping_items', id), { isPurchased: true });
+                } finally {
+                    setExitingPurchasedIds((prev) => prev.filter((itemId) => itemId !== id));
+                }
+            }, 320);
+            return;
+        }
         await updateDoc(doc(db, 'shopping_items', id), { isPurchased: !item.isPurchased });
     };
 
@@ -104,6 +120,16 @@ const PublicShoppingPortal = () => {
             batch.update(doc(db, 'shopping_items', item.id), { isPlanned: false, isPurchased: false });
         });
         await batch.commit();
+    };
+
+    const handleClearPlanningClick = async () => {
+        if (!isClearPlanningPending) {
+            setIsClearPlanningPending(true);
+            window.setTimeout(() => setIsClearPlanningPending(false), 3500);
+            return;
+        }
+        setIsClearPlanningPending(false);
+        await clearPlanning();
     };
 
     const finalizeShopping = async () => {
@@ -187,9 +213,9 @@ const PublicShoppingPortal = () => {
                                     onChange={(e) => setSearchTerm(e.target.value)}
                                 />
                             </div>
-                            <button onClick={clearPlanning} className="h-12 px-4 bg-white border border-slate-100 rounded-2xl shadow-sm flex items-center gap-2 text-slate-400 hover:text-rose-500 hover:border-rose-200 hover:bg-rose-50 transition-all">
+                            <button onClick={handleClearPlanningClick} className={`h-12 px-3 border rounded-2xl shadow-sm flex items-center gap-2 transition-all ${isClearPlanningPending ? 'bg-rose-500 border-rose-600 text-white' : 'bg-white border-slate-100 text-slate-400 hover:text-rose-500 hover:border-rose-200 hover:bg-rose-50'}`}>
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-                                <span className="text-[9px] font-black uppercase tracking-widest">Limpar</span>
+                                <span className="text-[8px] font-black uppercase tracking-widest">{isClearPlanningPending ? 'Confirma limpeza' : 'Limpar Planejamento'}</span>
                             </button>
                         </div>
 
@@ -266,7 +292,7 @@ const PublicShoppingPortal = () => {
                                         {purchasedCount} de {plannedItems.length} comprados
                                     </p>
                                 </div>
-                                <button onClick={finalizeShopping} className="bg-emerald-500 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-100">
+                                <button onClick={() => setIsFinalizingConfirmOpen(true)} className="bg-emerald-500 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-100">
                                     Finalizar
                                 </button>
                             </div>
@@ -286,11 +312,11 @@ const PublicShoppingPortal = () => {
                         ) : (
                             <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl overflow-hidden">
                                 <div className="divide-y divide-slate-50">
-                                    {plannedItems.map((item) => (
+                                    {visibleShoppingItems.map((item) => (
                                         <div
                                             key={item.id}
                                             onClick={() => togglePurchased(item.id)}
-                                            className={`flex items-center gap-5 px-6 py-5 cursor-pointer transition-all select-none ${item.isPurchased ? 'bg-slate-50/60 opacity-50' : 'hover:bg-slate-50'}`}
+                                            className={`flex items-center gap-5 px-6 py-5 cursor-pointer transition-all duration-300 select-none ${item.isPurchased ? 'bg-slate-50/60 opacity-0 scale-[0.97]' : 'hover:bg-slate-50'} ${exitingPurchasedIds.includes(item.id) ? 'bg-emerald-50 opacity-40 scale-[0.98]' : ''}`}
                                         >
                                             <div className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-all flex-shrink-0 ${item.isPurchased ? 'bg-emerald-500 text-white shadow-md shadow-emerald-200' : 'bg-slate-100 text-slate-400'}`}>
                                                 {item.isPurchased ? (
@@ -312,6 +338,19 @@ const PublicShoppingPortal = () => {
                                 </div>
                             </div>
                         )}
+                    </div>
+                )}
+
+                {isFinalizingConfirmOpen && (
+                    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+                        <div className="bg-white w-full max-w-md rounded-[2rem] p-6 space-y-4 shadow-2xl">
+                            <h3 className="text-lg font-black text-slate-900">Finalizar Compras</h3>
+                            <p className="text-sm text-slate-500 font-medium">Isto limpará os itens planejados/comprados desta rodada. Continuar?</p>
+                            <div className="flex gap-3">
+                                <button onClick={() => setIsFinalizingConfirmOpen(false)} className="flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-500 bg-slate-100 hover:bg-slate-200 transition-all">Cancelar</button>
+                                <button onClick={async () => { await finalizeShopping(); setIsFinalizingConfirmOpen(false); }} className="flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-white bg-emerald-600 hover:bg-emerald-700 transition-all">Confirmar</button>
+                            </div>
+                        </div>
                     </div>
                 )}
             </main>

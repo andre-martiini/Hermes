@@ -240,30 +240,57 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     // --- HEALTH LOGIC ---
     const sortedWeights = useMemo(() => [...healthWeights].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [healthWeights]);
 
+    const hasWeightData = sortedWeights.length > 0;
+    const hasWeightTrendData = sortedWeights.length > 1;
     const currentWeight = sortedWeights[0]?.weight || 0;
     const initialWeight = sortedWeights[sortedWeights.length - 1]?.weight || 0;
-    const totalWeightLost = initialWeight > 0 ? initialWeight - currentWeight : 0;
+    const weightDelta = initialWeight > 0 ? initialWeight - currentWeight : 0; // + perda | - ganho
+    const weightDeltaAbs = Math.abs(weightDelta);
+    const isWeightLoss = weightDelta > 0.05;
+    const isWeightGain = weightDelta < -0.05;
+    const weightDeltaLabel = isWeightLoss ? 'Eliminado' : isWeightGain ? 'Ganho' : 'Variação';
+    const weightDeltaPrefix = isWeightGain ? '+' : isWeightLoss ? '-' : '';
+    const weightDeltaColor = isWeightGain ? 'text-rose-500' : isWeightLoss ? 'text-emerald-500' : 'text-slate-500';
 
     const healthProjection = useMemo(() => {
-        if (healthWeights.length < 2) return null;
-        const oldest = healthWeights[healthWeights.length - 1];
-        const newest = healthWeights[0];
+        if (sortedWeights.length < 2) return null;
+        const oldest = sortedWeights[sortedWeights.length - 1];
+        const newest = sortedWeights[0];
         const diffWeight = oldest.weight - newest.weight;
         const diffDays = (new Date(newest.date).getTime() - new Date(oldest.date).getTime()) / (1000 * 60 * 60 * 24);
-        
-        if (diffDays <= 0 || diffWeight <= 0) return null;
-        
-        const lostPerDay = diffWeight / diffDays;
+
+        if (diffDays <= 0) return null;
+
+        const trendPerDay = diffWeight / diffDays;
+        const trendPerWeek = trendPerDay * 7;
         const target = healthSettings?.targetWeight || 0;
-        
-        if (!target || newest.weight <= target) return 'Meta atingida!';
-        
+
+        if (!target) {
+            return {
+                eta: trendPerDay < 0 ? 'Peso em alta' : 'Defina uma meta',
+                trendPerWeek
+            };
+        }
+
+        if (newest.weight <= target) return { eta: 'Meta atingida!', trendPerWeek };
+
+        if (trendPerDay <= 0) {
+            return {
+                eta: 'Sem previsão (peso em alta)',
+                trendPerWeek
+            };
+        }
+
         const remainingToGoal = newest.weight - target;
-        const daysUntilGoal = remainingToGoal / lostPerDay;
+        const daysUntilGoal = remainingToGoal / trendPerDay;
         const goalDate = new Date();
         goalDate.setDate(goalDate.getDate() + daysUntilGoal);
-        return goalDate.toLocaleDateString('pt-BR');
-    }, [healthWeights, healthSettings]);
+
+        return {
+            eta: goalDate.toLocaleDateString('pt-BR'),
+            trendPerWeek
+        };
+    }, [sortedWeights, healthSettings?.targetWeight]);
 
     const habitStreak = useMemo(() => {
         let streak = 0;
@@ -367,19 +394,33 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                             <div>
                                 <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5 md:mb-1">Peso vs Meta</p>
                                 <div className="text-lg md:text-2xl font-black text-slate-900">
-                                    {currentWeight.toFixed(1)} <span className="text-slate-300 text-xs md:text-base">/ {healthSettings?.targetWeight || '--'} kg</span>
+                                    {hasWeightData ? currentWeight.toFixed(1) : '--'} <span className="text-slate-300 text-xs md:text-base">/ {healthSettings?.targetWeight || '--'} kg</span>
                                 </div>
                             </div>
                             <div className="text-right">
-                                <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5 md:mb-1">Eliminado</p>
-                                <div className="text-lg md:text-xl font-black text-emerald-500">-{totalWeightLost.toFixed(1)} kg</div>
+                                <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5 md:mb-1">{weightDeltaLabel}</p>
+                                <div className={`text-lg md:text-xl font-black ${weightDeltaColor}`}>
+                                    {hasWeightTrendData ? `${weightDeltaPrefix}${weightDeltaAbs.toFixed(1)} kg` : '--'}
+                                </div>
                             </div>
                         </div>
                         <div className="bg-slate-900 p-3 md:p-4 rounded-xl md:rounded-2xl text-white shadow-lg relative overflow-hidden group">
                             <div className="absolute top-0 right-0 w-20 h-20 bg-blue-500/10 rounded-full blur-2xl -mr-10 -mt-10 group-hover:bg-blue-500/20 transition-all"></div>
                             <p className="text-[7px] md:text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5 relative z-10">Previsão (ETA)</p>
-                            <div className="text-lg md:text-xl font-black text-blue-400 relative z-10">{healthProjection || '--'}</div>
+                            <div className="text-lg md:text-xl font-black text-blue-400 relative z-10">{healthProjection?.eta || '--'}</div>
+                            {healthProjection?.trendPerWeek !== undefined && (
+                                <p className={`text-[8px] font-bold uppercase mt-1 relative z-10 ${healthProjection.trendPerWeek < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
+                                    Ritmo: {healthProjection.trendPerWeek < 0 ? '+' : '-'}{Math.abs(healthProjection.trendPerWeek).toFixed(2)}kg/sem
+                                </p>
+                            )}
                         </div>
+                        {isWeightGain && hasWeightTrendData && (
+                            <div className="bg-rose-50 border border-rose-200 rounded-xl px-2 py-1.5">
+                                <p className="text-[9px] font-bold text-rose-700">
+                                    Atenção: houve ganho de {weightDeltaAbs.toFixed(1)} kg desde o início do registro.
+                                </p>
+                            </div>
+                        )}
                         <div>
                             <div className="flex justify-between items-center mb-2">
                                 <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Ofensiva de Hábitos</p>

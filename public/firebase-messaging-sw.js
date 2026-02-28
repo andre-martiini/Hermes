@@ -16,12 +16,27 @@ const messaging = firebase.messaging();
 messaging.onBackgroundMessage((payload) => {
   console.log('[firebase-messaging-sw.js] Received background message ', payload);
 
-  const notificationTitle = payload.notification?.title || payload.data?.title || 'Hermes';
+  // If browser already renders a notification payload, skip manual display.
+  if (payload.notification?.title && payload.notification?.body && !payload.data?.title && !payload.data?.message) {
+    return;
+  }
+
+  const notificationTitle = payload.data?.title || payload.notification?.title || 'Hermes';
   const notificationOptions = {
-    body: payload.notification?.body || payload.data?.message || '',
+    body: payload.data?.message || payload.notification?.body || '',
     icon: '/logo.png',
     data: payload.data
   };
 
   self.registration.showNotification(notificationTitle, notificationOptions);
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const link = event.notification?.data?.link;
+  if (!link) {
+    event.waitUntil(clients.openWindow('/'));
+    return;
+  }
+  event.waitUntil(clients.openWindow(link));
 });

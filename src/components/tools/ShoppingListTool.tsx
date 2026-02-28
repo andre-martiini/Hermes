@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot, addDoc, deleteDoc, updateDoc, doc, writeBatch, setDoc } from 'firebase/firestore';
 import { db } from '@/firebase';
 import { ShoppingItem } from '@/types';
+import { getVisibleShoppingItems } from '@/src/utils/shoppingTransitions';
 
 export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, showToast: (msg: string, type: 'success' | 'error' | 'info') => void }) => {
   const [items, setItems] = useState<ShoppingItem[]>([]);
@@ -16,6 +17,10 @@ export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, sh
   const [editValue, setEditValue] = useState('');
   const [isPortalConfigOpen, setIsPortalConfigOpen] = useState(false);
   const [externalToken, setExternalToken] = useState('');
+  const [pendingDeleteItemId, setPendingDeleteItemId] = useState<string | null>(null);
+  const [isClearPlanningPending, setIsClearPlanningPending] = useState(false);
+  const [isFinalizingConfirmOpen, setIsFinalizingConfirmOpen] = useState(false);
+  const [exitingPurchasedIds, setExitingPurchasedIds] = useState<string[]>([]);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'shopping_items'), (snapshot) => {
@@ -88,8 +93,14 @@ export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, sh
   };
 
   const handleDeleteItem = async (id: string) => {
+    if (pendingDeleteItemId !== id) {
+      setPendingDeleteItemId(id);
+      window.setTimeout(() => setPendingDeleteItemId(current => current === id ? null : current), 3500);
+      return;
+    }
     try {
       await deleteDoc(doc(db, 'shopping_items', id));
+      setPendingDeleteItemId(null);
     } catch (e) {
       showToast('Erro ao excluir.', 'error');
     }
@@ -171,11 +182,32 @@ export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, sh
     } catch (e) { showToast('Erro ao limpar.', 'error'); }
   };
 
+  const handleClearPlanningClick = async () => {
+    if (!isClearPlanningPending) {
+      setIsClearPlanningPending(true);
+      window.setTimeout(() => setIsClearPlanningPending(false), 3500);
+      return;
+    }
+    setIsClearPlanningPending(false);
+    await handleUnplanAll();
+  };
+
   // --- Shopping actions ---
   const togglePurchased = async (id: string) => {
     const item = items.find(i => i.id === id);
     if (!item) return;
     try {
+      if (!item.isPurchased) {
+        setExitingPurchasedIds(prev => prev.includes(id) ? prev : [...prev, id]);
+        window.setTimeout(async () => {
+          try {
+            await updateDoc(doc(db, 'shopping_items', id), { isPurchased: true });
+          } finally {
+            setExitingPurchasedIds(prev => prev.filter(itemId => itemId !== id));
+          }
+        }, 320);
+        return;
+      }
       await updateDoc(doc(db, 'shopping_items', id), { isPurchased: !item.isPurchased });
     } catch(e) { console.error(e); }
   };
@@ -211,6 +243,7 @@ export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, sh
     [items]);
 
   const purchasedCount = plannedItems.filter(i => i.isPurchased).length;
+  const visibleShoppingItems = useMemo(() => getVisibleShoppingItems(plannedItems, exitingPurchasedIds), [plannedItems, exitingPurchasedIds]);
 
   const categories = useMemo(() => {
     const cats = new Set(items.map(i => i.categoria));
@@ -218,30 +251,30 @@ export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, sh
   }, [items]);
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6 pb-32">
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6 pb-32 px-2 md:px-0">
       {/* Header */}
-      <div className="flex items-center gap-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
         <button onClick={onBack} className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-400 hover:text-slate-900 border border-slate-200 hover:border-slate-900 transition-all shadow-sm">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
         </button>
         <div className="flex-1">
-          <h2 className="text-3xl font-black text-slate-900 tracking-tighter">Lista de Compras</h2>
+          <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tighter">Lista de Compras</h2>
           <p className="text-slate-500 font-medium text-sm">{items.length} itens cadastrados · {plannedItems.length} planejados</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
           <button
             onClick={() => setIsPortalConfigOpen(prev => !prev)}
-            className={`h-11 px-4 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition-all ${isPortalConfigOpen ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800 hover:border-slate-300'}`}
+            className={`h-11 px-3 md:px-4 rounded-2xl border text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${isPortalConfigOpen ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800 hover:border-slate-300'}`}
           >
             Portal Externo
           </button>
           {/* Tab selector */}
-          <div className="flex bg-slate-100 p-1 rounded-2xl gap-0.5">
+          <div className="flex-1 min-w-0 flex bg-slate-100 p-1 rounded-2xl gap-0.5">
             {(['catalog', 'planning', 'shopping'] as const).map(tab => {
               const labels: Record<string, string> = { catalog: 'Cadastro', planning: 'Planejar', shopping: 'Comprar' };
               return (
                 <button key={tab} onClick={() => setView(tab)}
-                  className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all relative ${view === tab ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
+                  className={`flex-1 px-2 md:px-4 py-2.5 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all relative ${view === tab ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
                   {labels[tab]}
                   {tab === 'planning' && plannedItems.length > 0 && (
                     <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">{plannedItems.length}</span>
@@ -295,17 +328,17 @@ export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, sh
           {/* Add form */}
           <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl p-6 space-y-4">
             <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Novo Item</h3>
-            <form onSubmit={handleAddItem} className="flex items-center gap-3">
+            <form onSubmit={handleAddItem} className="flex flex-col md:flex-row md:items-center gap-3">
               <input
                 type="text"
                 placeholder="Nome do item..."
-                className="flex-[2] bg-slate-50 border border-slate-100 rounded-2xl px-5 py-3 text-slate-800 font-bold outline-none focus:ring-2 focus:ring-blue-100 transition-all"
+                className="w-full md:flex-[2] bg-slate-50 border border-slate-100 rounded-2xl px-5 py-3 text-slate-800 font-bold outline-none focus:ring-2 focus:ring-blue-100 transition-all"
                 value={newItemName}
                 onChange={e => setNewItemName(e.target.value)}
                 autoFocus
               />
               <select
-                className="flex-1 bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-slate-700 font-bold outline-none focus:ring-2 focus:ring-blue-100 transition-all"
+                className="w-full md:flex-1 bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-slate-700 font-bold outline-none focus:ring-2 focus:ring-blue-100 transition-all"
                 value={newItemCategoria}
                 onChange={e => setNewItemCategoria(e.target.value)}
               >
@@ -314,12 +347,14 @@ export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, sh
                 ))}
                 <option value="Nova...">+ Nova categoria</option>
               </select>
-              <button type="submit" className="bg-blue-600 text-white h-12 w-12 rounded-2xl flex items-center justify-center hover:bg-blue-700 transition-all shadow-lg active:scale-95 flex-shrink-0">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
-              </button>
-              <button type="button" onClick={() => setIsImportModalOpen(true)} title="Importar em lote" className="h-12 w-12 rounded-2xl border border-slate-200 flex items-center justify-center text-slate-400 hover:text-blue-500 hover:border-blue-200 transition-all flex-shrink-0">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0l-4-4m4 4v12" /></svg>
-              </button>
+              <div className="flex items-center gap-3">
+                <button type="submit" className="bg-blue-600 text-white h-12 w-12 rounded-2xl flex items-center justify-center hover:bg-blue-700 transition-all shadow-lg active:scale-95 flex-shrink-0">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+                </button>
+                <button type="button" onClick={() => setIsImportModalOpen(true)} title="Importar em lote" className="h-12 w-12 rounded-2xl border border-slate-200 flex items-center justify-center text-slate-400 hover:text-blue-500 hover:border-blue-200 transition-all flex-shrink-0">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0l-4-4m4 4v12" /></svg>
+                </button>
+              </div>
             </form>
           </div>
 
@@ -361,8 +396,12 @@ export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, sh
                             <p onClick={() => startEdit(item.id, 'categoria', item.categoria)} className="text-[10px] font-black text-slate-400 uppercase tracking-widest cursor-pointer hover:text-blue-500 transition-colors mt-0.5">{item.categoria}</p>
                           )}
                         </div>
-                        <button onClick={() => handleDeleteItem(item.id)} className="opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        <button onClick={() => handleDeleteItem(item.id)} className={`opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 rounded-xl transition-all ${pendingDeleteItemId === item.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-300 hover:text-rose-500 hover:bg-rose-50'}`}>
+                          {pendingDeleteItemId === item.id ? (
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                          ) : (
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          )}
                         </button>
                       </div>
                     ))}
@@ -382,9 +421,9 @@ export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, sh
               <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
               <input type="text" placeholder="Filtrar itens..." className="flex-1 bg-transparent outline-none text-sm font-bold text-slate-700 placeholder:text-slate-300" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
             </div>
-            <button onClick={handleUnplanAll} title="Limpar planejamento" className="group h-12 px-4 bg-white border border-slate-100 rounded-2xl shadow-sm flex items-center gap-2 text-slate-400 hover:text-rose-500 hover:border-rose-200 hover:bg-rose-50 transition-all">
+            <button onClick={handleClearPlanningClick} title="Limpar planejamento" className={`group h-12 px-3 border rounded-2xl shadow-sm flex items-center gap-2 transition-all ${isClearPlanningPending ? 'bg-rose-500 border-rose-600 text-white' : 'bg-white border-slate-100 text-slate-400 hover:text-rose-500 hover:border-rose-200 hover:bg-rose-50'}`}>
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-              <span className="text-[9px] font-black uppercase tracking-widest">Limpar</span>
+              <span className="text-[8px] font-black uppercase tracking-widest">{isClearPlanningPending ? 'Confirma limpeza' : 'Limpar Planejamento'}</span>
             </button>
           </div>
 
@@ -456,7 +495,7 @@ export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, sh
                 <h3 className="text-xl font-black text-slate-900">Comprando</h3>
                 <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-0.5">{purchasedCount} de {plannedItems.length} comprados</p>
               </div>
-              <button onClick={finalizeShopping} className="bg-emerald-500 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-100">Finalizar</button>
+              <button onClick={() => setIsFinalizingConfirmOpen(true)} className="bg-emerald-500 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-100">Finalizar</button>
             </div>
             <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
               <div className="bg-emerald-500 h-2 rounded-full transition-all duration-500"
@@ -472,9 +511,9 @@ export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, sh
           ) : (
             <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl overflow-hidden">
               <div className="divide-y divide-slate-50">
-                {plannedItems.map(item => (
+                {visibleShoppingItems.map(item => (
                   <div key={item.id} onClick={() => togglePurchased(item.id)}
-                    className={`flex items-center gap-5 px-6 py-5 cursor-pointer transition-all select-none ${item.isPurchased ? 'bg-slate-50/60 opacity-50' : 'hover:bg-slate-50'}`}>
+                    className={`flex items-center gap-5 px-6 py-5 cursor-pointer transition-all duration-300 select-none ${item.isPurchased ? 'bg-slate-50/60 opacity-0 scale-[0.97]' : 'hover:bg-slate-50'} ${exitingPurchasedIds.includes(item.id) ? 'bg-emerald-50 opacity-40 scale-[0.98]' : ''}`}>
                     <div className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-all flex-shrink-0 ${item.isPurchased ? 'bg-emerald-500 text-white shadow-md shadow-emerald-200' : 'bg-slate-100 text-slate-400'}`}>
                       {item.isPurchased
                         ? <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
@@ -522,6 +561,19 @@ export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, sh
                   Importar {importText.split('\n').filter(l => l.trim()).length} Itens
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isFinalizingConfirmOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-[2rem] p-6 space-y-4 shadow-2xl">
+            <h3 className="text-lg font-black text-slate-900">Finalizar Compras</h3>
+            <p className="text-sm text-slate-500 font-medium">Isto limpará os itens planejados/comprados desta rodada. Continuar?</p>
+            <div className="flex gap-3">
+              <button onClick={() => setIsFinalizingConfirmOpen(false)} className="flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-500 bg-slate-100 hover:bg-slate-200 transition-all">Cancelar</button>
+              <button onClick={async () => { await finalizeShopping(); setIsFinalizingConfirmOpen(false); }} className="flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-white bg-emerald-600 hover:bg-emerald-700 transition-all">Confirmar</button>
             </div>
           </div>
         </div>

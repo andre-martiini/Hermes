@@ -3,6 +3,7 @@ import { FinanceTransaction, FinanceGoal, FinanceSettings, FixedBill, BillRubric
 import { storage, db } from './firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, setDoc } from 'firebase/firestore';
+import { resolveTwoStepAction } from './src/utils/destructiveActions';
 
 interface FinanceViewProps {
     transactions: FinanceTransaction[];
@@ -140,6 +141,18 @@ const FinanceView = ({
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [editingAmountId, setEditingAmountId] = useState<string | null>(null);
     const [tempAmount, setTempAmount] = useState<string>('');
+    const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
+
+    const handleTwoStepDelete = (key: string, action: () => void | Promise<void>) => {
+        const decision = resolveTwoStepAction(pendingDeleteKey, key);
+        if (!decision.confirmed) {
+            setPendingDeleteKey(decision.pendingKey);
+            window.setTimeout(() => setPendingDeleteKey((current) => (current === key ? null : current)), 3500);
+            return;
+        }
+        setPendingDeleteKey(decision.pendingKey);
+        void action();
+    };
 
     const today = new Date();
     const isCurrentMonth = today.getMonth() === currentMonth && today.getFullYear() === currentYear;
@@ -624,7 +637,7 @@ const FinanceView = ({
                                                         <button onClick={() => setEditingTransaction(t)} className="p-1 text-slate-300 hover:text-blue-500 transition-colors">
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                                         </button>
-                                                        <button onClick={() => onDeleteTransaction(t.id)} className="p-1 text-slate-300 hover:text-rose-500 transition-colors">
+                                                        <button onClick={() => handleTwoStepDelete(`transaction_${t.id}`, () => onDeleteTransaction(t.id))} className={`p-1 rounded-md transition-colors ${pendingDeleteKey === `transaction_${t.id}` ? 'bg-rose-500 text-white' : 'text-slate-300 hover:text-rose-500'}`}>
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                                         </button>
                                                     </div>
@@ -726,7 +739,7 @@ const FinanceView = ({
                                                                 <button onClick={() => setEditingGoal(goal)} className="p-1 text-slate-300 hover:text-blue-500 transition-colors">
                                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                                                 </button>
-                                                                <button onClick={() => onDeleteGoal(goal.id)} className="p-1 text-slate-300 hover:text-rose-500 transition-colors">
+                                                                <button onClick={() => handleTwoStepDelete(`goal_${goal.id}`, () => onDeleteGoal(goal.id))} className={`p-1 rounded-md transition-colors ${pendingDeleteKey === `goal_${goal.id}` ? 'bg-rose-500 text-white' : 'text-slate-300 hover:text-rose-500'}`}>
                                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                                                 </button>
                                                                 <div className="ml-2 bg-slate-100 text-slate-500 text-[8px] font-black px-2 py-1 rounded-lg uppercase tracking-widest shrink-0">P{idx + 1}</div>
@@ -925,7 +938,7 @@ const FinanceView = ({
                                                 >
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                                 </button>
-                                                <button onClick={() => onDeleteIncomeRubric(rubric.id)} className="p-2 text-emerald-200/20 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100">
+                                                <button onClick={() => handleTwoStepDelete(`income_rubric_${rubric.id}`, () => onDeleteIncomeRubric(rubric.id))} className={`p-2 rounded-lg transition-colors opacity-0 group-hover:opacity-100 ${pendingDeleteKey === `income_rubric_${rubric.id}` ? 'bg-rose-500 text-white opacity-100' : 'text-emerald-200/20 hover:text-rose-400'}`}>
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                                 </button>
                                             </div>
@@ -1102,7 +1115,7 @@ const FinanceView = ({
                                             </div>
                                             <div className="flex items-center gap-4">
                                                 <div className="text-lg font-black text-emerald-600 tracking-tighter">R$ {entry.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                                                <button onClick={() => onDeleteIncomeEntry(entry.id)} className="p-2 text-slate-200 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100">
+                                                <button onClick={() => handleTwoStepDelete(`income_entry_${entry.id}`, () => onDeleteIncomeEntry(entry.id))} className={`p-2 rounded-lg transition-colors opacity-0 group-hover:opacity-100 ${pendingDeleteKey === `income_entry_${entry.id}` ? 'bg-rose-500 text-white opacity-100' : 'text-slate-200 hover:text-rose-400'}`}>
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                                 </button>
                                             </div>
@@ -1166,7 +1179,7 @@ const FinanceView = ({
                                                 >
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                                 </button>
-                                                <button onClick={() => onDeleteRubric(rubric.id)} className="p-2 text-white/20 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100">
+                                                <button onClick={() => handleTwoStepDelete(`rubric_${rubric.id}`, () => onDeleteRubric(rubric.id))} className={`p-2 rounded-lg transition-colors opacity-0 group-hover:opacity-100 ${pendingDeleteKey === `rubric_${rubric.id}` ? 'bg-rose-500 text-white opacity-100' : 'text-white/20 hover:text-rose-400'}`}>
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                                 </button>
                                             </div>
@@ -1442,7 +1455,7 @@ const FinanceView = ({
                                                     )}
                                                 </div>
 
-                                                <button onClick={() => onDeleteBill(bill.id)} className="p-2 text-slate-200 hover:text-rose-400 transition-colors opacity-0 group-hover:opacity-100">
+                                                <button onClick={() => handleTwoStepDelete(`bill_${bill.id}`, () => onDeleteBill(bill.id))} className={`p-2 rounded-lg transition-colors opacity-0 group-hover:opacity-100 ${pendingDeleteKey === `bill_${bill.id}` ? 'bg-rose-500 text-white opacity-100' : 'text-slate-200 hover:text-rose-400'}`}>
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                                 </button>
                                             </div>

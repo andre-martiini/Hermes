@@ -501,14 +501,15 @@ def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapsh
     message = notif.get('message', '')
     db = get_db()
     tokens_docs = db.collection('fcm_tokens').stream()
-    tokens = [doc.id for doc in tokens_docs]
+    tokens = list({doc.id for doc in tokens_docs if doc.id})
     if not tokens:
         print("Nenhum token FCM encontrado para enviar push.")
         return
     push_message = messaging.MulticastMessage(
-        notification=messaging.Notification(title=title, body=message),
         data={
             'id': str(notif.get('id', '')),
+            'title': str(title),
+            'message': str(message),
             'link': str(notif.get('link', '')),
             'type': str(notif.get('type', 'info'))
         },

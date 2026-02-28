@@ -1206,6 +1206,9 @@ const App: React.FC = () => {
         t.notas && /Tag:\s*GASTO\s*SEMANAL/i.test(t.notas)
       );
 
+      let syncedLaunches = 0;
+      let syncedMovement = 0;
+
       for (const task of financeTasks) {
         const valueMatch = task.notas?.match(/Valor:\s*R\$\s*([\d\.,]+)/i);
         if (valueMatch) {
@@ -1240,6 +1243,8 @@ const App: React.FC = () => {
               const hasChanged = existingTransaction.amount !== amount ||
                 existingTransaction.date !== transactionDate ||
                 existingTransaction.originalTaskId !== task.id;
+              const hasMovementChange = existingTransaction.amount !== amount ||
+                existingTransaction.date !== transactionDate;
 
               if (hasChanged) {
                 await updateDoc(doc(db, 'finance_transactions', existingTransaction.id), {
@@ -1250,8 +1255,9 @@ const App: React.FC = () => {
                   originalTaskId: task.id // Atualiza o vínculo para a tarefa mais recente
                 });
 
-                if (existingTransaction.amount !== amount) {
-                  showToast(`Valor atualizado: R$ ${amount.toLocaleString('pt-BR')}`, 'info');
+                if (hasMovementChange) {
+                  syncedLaunches += 1;
+                  syncedMovement += amount;
                 }
               }
             } else {
@@ -1264,6 +1270,8 @@ const App: React.FC = () => {
                 category: 'Gasto Semanal',
                 originalTaskId: task.id
               });
+              syncedLaunches += 1;
+              syncedMovement += amount;
 
               // Marca como concluída apenas se ainda não estiver
               if (normalizeStatus(task.status) !== 'concluido') {
@@ -1271,13 +1279,21 @@ const App: React.FC = () => {
                   status: 'concluído',
                   data_conclusao: formatDateLocalISO(new Date())
                 });
-                showToast(`Gasto processado: R$ ${amount.toLocaleString('pt-BR')}`, 'success');
               }
             }
           } catch (error) {
             console.error("Erro ao processar tarefa financeira:", error);
           }
         }
+      }
+
+      if (syncedLaunches === 1) {
+        showToast(`Lançamento sincronizado: R$ ${syncedMovement.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 'success');
+      } else if (syncedLaunches > 1) {
+        showToast(
+          `${syncedLaunches} lançamentos sincronizados. Movimentação total: R$ ${syncedMovement.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
+          'info'
+        );
       }
     };
 
@@ -1622,21 +1638,29 @@ const App: React.FC = () => {
 
     setupFCM();
 
+    const seenPushIds = new Set<string>();
+
     const unsubscribe = onMessage(messaging!, (payload) => {
       console.log('Mensagem PUSH recebida em primeiro plano:', payload);
-      if (payload.notification) {
-        const newNotif: HermesNotification = {
-          id: Math.random().toString(36).substr(2, 9),
-          title: payload.notification.title || 'Hermes',
-          message: payload.notification.body || '',
-          type: 'info',
-          timestamp: new Date().toISOString(),
-          isRead: false,
-          link: (payload.data as any)?.link || ""
-        };
-        setNotifications(prev => [newNotif, ...prev]);
-        setActivePopup(newNotif);
-      }
+      const payloadData = (payload.data || {}) as Record<string, string>;
+      const pushId = payloadData.id || payload.messageId || `${payloadData.link || ''}_${payloadData.title || ''}_${payloadData.message || ''}`;
+      if (seenPushIds.has(pushId)) return;
+      seenPushIds.add(pushId);
+      window.setTimeout(() => seenPushIds.delete(pushId), 15000);
+
+      const title = payload.notification?.title || payloadData.title || 'Hermes';
+      const message = payload.notification?.body || payloadData.message || '';
+      const newNotif: HermesNotification = {
+        id: pushId,
+        title,
+        message,
+        type: 'info',
+        timestamp: new Date().toISOString(),
+        isRead: false,
+        link: payloadData.link || ""
+      };
+      setNotifications(prev => prev.some(n => n.id === newNotif.id) ? prev : [newNotif, ...prev]);
+      setActivePopup(newNotif);
     });
 
     return () => unsubscribe();
@@ -2395,7 +2419,14 @@ const App: React.FC = () => {
 
       if (count > 0) {
         await batch.commit();
-        showToast(`${count} iten${count !== 1 ? 's' : ''} adicionado${count !== 1 ? 's' : ''} ao planejamento!`, 'success', { label: 'Ver Lista', onClick: () => setActiveFerramenta('shopping') });
+        showToast(`${count} iten${count !== 1 ? 's' : ''} adicionado${count !== 1 ? 's' : ''} ao planejamento!`, 'success', {
+          label: 'Ver Lista',
+          onClick: () => {
+            setActiveModule('acoes');
+            setViewMode('ferramentas');
+            setActiveFerramenta('shopping');
+          }
+        });
       } else {
         showToast('Nenhum item atualizado.', 'info');
       }
