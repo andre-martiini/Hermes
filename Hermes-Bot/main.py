@@ -123,24 +123,40 @@ def consultar_hermes(colecao: str, campo: str = None, valor: str = None, limite:
     except Exception as e:
         return f"Erro na consulta: {str(e)}"
 
-def registrar_tarefa_hermes(titulo: str, projeto: str = "Geral", notas: str = "", prioridade: str = "Média", data_limite: str = None):
+def registrar_tarefa_hermes(titulo: str, projeto: str = "Geral", notas: str = "", prioridade: str = "Média", data_limite: str = None, horario_inicio: str = None):
     """
     Registra uma nova tarefa no sistema.
     """
     try:
         agora = datetime.datetime.now()
+
+        # If not provided, data_limite is today, horario_inicio is now + 5 min
+        if not data_limite:
+            data_limite = agora.strftime("%Y-%m-%d")
+
+        if not horario_inicio:
+            horario_futuro = agora + datetime.timedelta(minutes=5)
+            horario_inicio = horario_futuro.strftime("%H:%M")
+
         nova_tarefa = {
             "titulo": titulo,
             "projeto": projeto,
-            "data_limite": data_limite or agora.strftime("%Y-%m-%d"),
+            "data_limite": data_limite,
             "status": "em andamento",
             "prioridade": prioridade,
             "notas": notas,
-            "horario_inicio": agora.strftime("%H:%M"),
+            "horario_inicio": horario_inicio,
+            "origem": "telegram_bot",
             "pool_dados": [],
             "created_at": firestore.SERVER_TIMESTAMP
         }
         res = db.collection("tarefas").add(nova_tarefa)
+
+        # Trigger sync
+        db.collection("system").document("sync_trigger").set({
+            "timestamp": firestore.SERVER_TIMESTAMP
+        })
+
         return f"Tarefa '{titulo}' registrada com sucesso (ID: {res[1].id})."
     except Exception as e:
         return f"Erro: {str(e)}"
@@ -186,6 +202,177 @@ def registrar_saude(tipo: str, valor: any, notas: str = ""):
     except Exception as e:
         return f"Erro saúde: {str(e)}"
 
+def atualizar_cronograma_tarefa(termo_busca: str, data_limite: str = None, horario_inicio: str = None):
+    """
+    Atualiza o cronograma (data limite e horário) de uma tarefa existente.
+    Suporta comandos de adiar ou antecipar.
+    DICA PARA O LLM: 'data_limite' deve estar no formato 'YYYY-MM-DD' e 'horario_inicio' no formato 'HH:MM'.
+    Extraia apenas a palavra-chave principal para 'termo_busca'.
+    """
+    try:
+        # Busca a tarefa mais provável
+        docs = db.collection("tarefas").order_by("created_at", direction=firestore.Query.DESCENDING).limit(50).stream()
+
+        tarefa_encontrada = None
+        palavras_chave = [p.lower() for p in termo_busca.split() if len(p) > 2]
+        if not palavras_chave:
+            palavras_chave = [termo_busca.lower()]
+
+        for doc in docs:
+            data = doc.to_dict()
+            titulo = data.get("titulo", "").lower()
+            if any(palavra in titulo for palavra in palavras_chave):
+                tarefa_encontrada = doc
+                break
+
+        if not tarefa_encontrada:
+            return f"André, não encontrei nenhuma tarefa correspondente a '{termo_busca}' para atualizar."
+
+        atualizacao = {}
+        if data_limite:
+            atualizacao["data_limite"] = data_limite
+        if horario_inicio:
+            atualizacao["horario_inicio"] = horario_inicio
+
+        if not atualizacao:
+            return "Nenhuma data ou horário fornecido para atualização."
+
+        db.collection("tarefas").document(tarefa_encontrada.id).update(atualizacao)
+
+        # Trigger sync
+        db.collection("system").document("sync_trigger").set({
+            "timestamp": firestore.SERVER_TIMESTAMP
+        })
+
+        titulo_real = tarefa_encontrada.to_dict().get("titulo", "")
+        return f"Cronograma da tarefa '{titulo_real}' atualizado com sucesso."
+    except Exception as e:
+        return f"Erro ao atualizar cronograma: {str(e)}"
+
+def cancelar_tarefa(termo_busca: str):
+    """
+    Exclui ou cancela uma tarefa (altera o status para 'excluído').
+    DICA PARA O LLM: Extraia apenas a palavra-chave principal para 'termo_busca'.
+    """
+    try:
+        # Busca a tarefa mais provável
+        docs = db.collection("tarefas").order_by("created_at", direction=firestore.Query.DESCENDING).limit(50).stream()
+
+        tarefa_encontrada = None
+        palavras_chave = [p.lower() for p in termo_busca.split() if len(p) > 2]
+        if not palavras_chave:
+            palavras_chave = [termo_busca.lower()]
+
+        for doc in docs:
+            data = doc.to_dict()
+            titulo = data.get("titulo", "").lower()
+            if any(palavra in titulo for palavra in palavras_chave):
+                tarefa_encontrada = doc
+                break
+
+        if not tarefa_encontrada:
+            return f"André, não encontrei nenhuma tarefa correspondente a '{termo_busca}' para cancelar."
+
+        db.collection("tarefas").document(tarefa_encontrada.id).update({
+            "status": "excluído"
+        })
+
+        # Trigger sync
+        db.collection("system").document("sync_trigger").set({
+            "timestamp": firestore.SERVER_TIMESTAMP
+        })
+
+        titulo_real = tarefa_encontrada.to_dict().get("titulo", "")
+        return f"A tarefa '{titulo_real}' foi cancelada/excluída com sucesso."
+    except Exception as e:
+        return f"Erro ao cancelar tarefa: {str(e)}"
+
+def diario_de_bordo(data: str = None):
+    """
+    Busca o 'Diário de Bordo', que consiste nas tarefas concluídas em uma determinada data.
+    Extrai e retorna as anotações (notas) das tarefas finalizadas.
+    DICA PARA O LLM: 'data' deve ser no formato 'YYYY-MM-DD'. Se não fornecida, use a data de hoje.
+    """
+    try:
+        if not data:
+            data = datetime.datetime.now().strftime("%Y-%m-%d")
+
+        docs = db.collection("tarefas").where("status", "==", "concluído").where("data_limite", "==", data).stream()
+
+        resultados = []
+        for doc in docs:
+            d = doc.to_dict()
+            titulo = d.get("titulo", "")
+            notas = d.get("notas", "")
+            resultados.append(f"✅ *{titulo}*\nNotas: {notas if notas else 'Nenhuma anotação.'}")
+
+        if not resultados:
+            return f"André, não encontrei nenhuma tarefa concluída ('Diário de Bordo') para a data {data}."
+
+        return f"📖 *Diário de Bordo ({data}):*\n\n" + "\n\n".join(resultados)
+    except Exception as e:
+        return f"Erro ao buscar o diário de bordo: {str(e)}"
+
+def briefing(data_inicio: str = None, data_fim: str = None):
+    """
+    Agrega e lista as pendências de um período específico.
+    Consulta simultaneamente as coleções de tarefas (pendentes) e eventos do calendário.
+    DICA PARA O LLM: 'data_inicio' e 'data_fim' no formato 'YYYY-MM-DD'.
+    Se omitido, trará o briefing do dia de hoje.
+    """
+    try:
+        hoje = datetime.datetime.now().strftime("%Y-%m-%d")
+        if not data_inicio:
+            data_inicio = hoje
+        if not data_fim:
+            data_fim = data_inicio
+
+        # 1. Busca Tarefas Pendentes
+        # Ajustamos o limite pois onde for status=="em andamento" pode haver muitas
+        # (mas filtramos no código se faltar índice para a data)
+        docs_tarefas = db.collection("tarefas").where("status", "==", "em andamento").stream()
+
+        tarefas_pendentes = []
+        for doc in docs_tarefas:
+            d = doc.to_dict()
+            dl = d.get("data_limite", "")
+            # Checa se a data limite cai no intervalo
+            if data_inicio <= dl <= data_fim:
+                horario = d.get("horario_inicio", "")
+                titulo = d.get("titulo", "")
+                h_str = f" ({horario})" if horario else ""
+                tarefas_pendentes.append(f"• {titulo}{h_str}")
+
+        # 2. Busca Eventos do Google Calendar
+        docs_eventos = db.collection("google_calendar_events").stream()
+        eventos = []
+        for doc in docs_eventos:
+            d = doc.to_dict()
+            di = d.get("data_inicio", "")
+            if di:
+                di_date = di.split("T")[0]
+                if data_inicio <= di_date <= data_fim:
+                    titulo = d.get("titulo", "")
+
+                    # Tenta extrair horario se houver "T"
+                    horario = ""
+                    if "T" in di:
+                        # Pega o HH:MM
+                        time_part = di.split("T")[1]
+                        horario = time_part[:5]
+
+                    h_str = f" ({horario})" if horario else ""
+                    eventos.append(f"• [Evento] {titulo}{h_str}")
+
+        res_tarefas = "\n".join(tarefas_pendentes) if tarefas_pendentes else "Nenhuma tarefa pendente."
+        res_eventos = "\n".join(eventos) if eventos else "Nenhum evento agendado."
+
+        periodo_str = f"{data_inicio} até {data_fim}" if data_inicio != data_fim else data_inicio
+
+        return f"📋 *Briefing para {periodo_str}:*\n\n*Eventos (Calendário):*\n{res_eventos}\n\n*Tarefas Pendentes:*\n{res_tarefas}"
+    except Exception as e:
+        return f"Erro ao gerar briefing: {str(e)}"
+
 def buscar_documentos_tarefa(termo_busca: str):
     """
     Busca documentos (links do Drive) de uma tarefa. 
@@ -227,7 +414,13 @@ def buscar_documentos_tarefa(termo_busca: str):
         if not pool:
             return f"André, encontrei a tarefa '{titulo_encontrado}', mas ela não possui documentos vinculados no pool_dados."
             
-        links = [f"- {item.get('nome', 'Arquivo')}: {item.get('valor')}" for item in pool]
+        # Priorize webViewLink se disponivel, caso contrário fallback para 'valor'
+        links = []
+        for item in pool:
+            nome = item.get('nome', 'Arquivo')
+            link = item.get('webViewLink') or item.get('valor', '')
+            links.append(f"- {nome}: {link}")
+
         return f"André, localizei a tarefa '{titulo_encontrado}'. Aqui estão os documentos:\n" + "\n".join(links)
         
     except Exception as e:
@@ -239,7 +432,11 @@ tools_list = [
     registrar_tarefa_hermes, 
     registrar_transacao_financeira, 
     registrar_saude,
-    buscar_documentos_tarefa
+    buscar_documentos_tarefa,
+    atualizar_cronograma_tarefa,
+    cancelar_tarefa,
+    diario_de_bordo,
+    briefing
 ]
 
 # Cria o chat com a configuração correta de ferramentas
