@@ -19,81 +19,85 @@ const PublicFinancePortal = () => {
         const urlParams = new URLSearchParams(window.location.search);
         const tokenParam = urlParams.get('token');
 
-        if (tokenParam) {
-            // Validate against public config doc to prevent data leak
-            const unsubSettings = onSnapshot(doc(db, 'public_configs', 'finance_portal'), (docSnap) => {
-                if (docSnap.exists()) {
-                    const data = docSnap.data();
-
-                    if (data.token && data.token === tokenParam) {
-                        setIsValid(true);
-                        // Map public data to settings structure for UI compatibility
-                        setSettings({
-                            externalSpendingLimit: data.limit,
-                            externalToken: data.token
-                        } as any);
-                    } else {
-                        setIsValid(false);
-                    }
-                } else {
-                    setIsValid(false);
-                }
-                setLoading(false);
-            });
-
-            return () => unsubSettings();
-        } else {
+        if (!tokenParam) {
             setIsValid(false);
             setLoading(false);
+            return;
         }
+
+        const unsubSettings = onSnapshot(doc(db, 'public_configs', 'finance_portal'), (docSnap) => {
+            if (!docSnap.exists()) {
+                setIsValid(false);
+                setLoading(false);
+                return;
+            }
+
+            const data = docSnap.data();
+            const isTokenValid = data.token && data.token === tokenParam;
+            setIsValid(!!isTokenValid);
+
+            if (isTokenValid) {
+                setSettings({
+                    externalSpendingLimit: Number(data.limit || 0),
+                    externalToken: data.token
+                } as FinanceSettings);
+            }
+
+            setLoading(false);
+        });
+
+        return () => unsubSettings();
     }, []);
 
     useEffect(() => {
-        if (isValid && settings) {
-            const now = new Date();
-            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-            const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+        if (!isValid) {
+            setExternalTransactions([]);
+            return;
+        }
 
-            const q = query(
-                collection(db, 'finance_transactions'),
-                where('origin', '==', 'external'),
-                where('date', '>=', startOfMonth),
-                where('date', '<', startOfNextMonth)
-            );
+        // Realtime stream of all external entries. We intentionally avoid date-range filters
+        // here to prevent index-related failures and keep UI always synchronized.
+        const q = query(collection(db, 'finance_transactions'), where('origin', '==', 'external'));
 
-            const unsubTransactions = onSnapshot(q, (snapshot) => {
-                const currentMonthExternal = snapshot.docs
-                    .map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as FinanceTransaction))
-                    .filter(transaction => transaction.status !== 'deleted')
+        const unsubTransactions = onSnapshot(
+            q,
+            (snapshot) => {
+                const externalEntries = snapshot.docs
+                    .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as FinanceTransaction))
+                    .filter((transaction) => transaction.status !== 'deleted')
                     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-                setExternalTransactions(currentMonthExternal);
-            });
+                setExternalTransactions(externalEntries);
+            },
+            (error) => {
+                console.error('Erro ao ouvir gastos externos:', error);
+                setExternalTransactions([]);
+            }
+        );
 
-            return () => unsubTransactions();
-        }
-    }, [isValid, settings]);
+        return () => unsubTransactions();
+    }, [isValid]);
 
     const spentAmount = useMemo(
-        () => externalTransactions.reduce((acc, transaction) => acc + transaction.amount, 0),
+        () => externalTransactions.reduce((acc, transaction) => acc + Number(transaction.amount || 0), 0),
         [externalTransactions]
     );
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!description || !amount) return;
+        if (!description.trim() || !amount) return;
 
         setSubmitting(true);
         try {
             const numAmount = parseFloat(amount.replace(',', '.'));
-            if (isNaN(numAmount)) throw new Error('Valor invalido');
+            if (isNaN(numAmount)) throw new Error('Valor inválido');
 
             const now = new Date();
             const day = now.getDate();
             const sprint = day < 8 ? 1 : day < 15 ? 2 : day < 22 ? 3 : 4;
 
             const newTransaction: Omit<FinanceTransaction, 'id'> = {
-                description,
+                description: description.trim(),
                 amount: numAmount,
                 date: now.toISOString(),
                 sprint,
@@ -109,7 +113,7 @@ const PublicFinancePortal = () => {
             setSuccessMessage('Gasto registrado com sucesso!');
             setTimeout(() => setSuccessMessage(null), 3000);
         } catch (error) {
-            console.error('Error adding transaction:', error);
+            console.error('Erro ao registrar gasto externo:', error);
             alert('Erro ao registrar gasto. Tente novamente.');
         } finally {
             setSubmitting(false);
@@ -132,7 +136,7 @@ const PublicFinancePortal = () => {
                         <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                     </div>
                     <h2 className="text-xl font-black text-slate-900 mb-2">Acesso Negado</h2>
-                    <p className="text-slate-500">Token invalido ou expirado. Solicite um novo link de acesso.</p>
+                    <p className="text-slate-500">Token inválido ou expirado. Solicite um novo link de acesso.</p>
                 </div>
             </div>
         );
@@ -173,16 +177,16 @@ const PublicFinancePortal = () => {
                 </div>
 
                 <div className="bg-white rounded-[2rem] p-6 shadow-lg border border-slate-100">
-                    <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-6 border-l-4 border-blue-500 pl-3">Novo Lancamento</h2>
+                    <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-6 border-l-4 border-blue-500 pl-3">Novo Lançamento</h2>
 
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div className="space-y-2">
-                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Descricao</label>
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Descrição</label>
                             <input
                                 type="text"
                                 value={description}
                                 onChange={(e) => setDescription(e.target.value)}
-                                placeholder="O que voce comprou?"
+                                placeholder="O que você comprou?"
                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                                 required
                             />
@@ -213,10 +217,10 @@ const PublicFinancePortal = () => {
                 </div>
 
                 <div className="bg-white rounded-[2rem] p-6 shadow-lg border border-slate-100">
-                    <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-4 border-l-4 border-emerald-500 pl-3">Gastos do Mes</h2>
+                    <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-4 border-l-4 border-emerald-500 pl-3">Lançamentos Externos</h2>
 
                     {externalTransactions.length === 0 ? (
-                        <p className="text-sm text-slate-400 font-bold">Nenhum gasto registrado neste mes.</p>
+                        <p className="text-sm text-slate-400 font-bold">Nenhum gasto externo registrado ainda.</p>
                     ) : (
                         <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                             {externalTransactions.map((transaction) => (
@@ -226,7 +230,7 @@ const PublicFinancePortal = () => {
                                             {transaction.description}
                                         </p>
                                         <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-1">
-                                            {new Date(transaction.date).toLocaleDateString('pt-BR')} · {new Date(transaction.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                            {new Date(transaction.date).toLocaleDateString('pt-BR')} - {new Date(transaction.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                                         </p>
                                     </div>
                                     <p className="text-sm font-black text-rose-500 whitespace-nowrap">
