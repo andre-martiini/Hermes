@@ -1,5 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { ConhecimentoItem, formatDate, Tarefa, WorkItem } from './types';
+import { computeFolderStructure, filterCurrentItems } from './src/utils/knowledgeLogic';
+import * as idb from 'idb-keyval';
 
 import { AutoExpandingTextarea } from './src/components/ui/UIComponents';
 
@@ -27,6 +29,25 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
     const [newTag, setNewTag] = useState('');
     const [pendingDeleteItemId, setPendingDeleteItemId] = useState<string | null>(null);
 
+    // Desktop UX State
+    const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+    const [contextMenu, setContextMenu] = useState<{ x: number, y: number, itemId: string | null } | null>(null);
+    const [scrollTop, setScrollTop] = useState(0);
+    const [isAddressEditing, setIsAddressEditing] = useState(false);
+    const [addressInput, setAddressInput] = useState('');
+    const [editOcrText, setEditOcrText] = useState<string | null>(null);
+    const [clipboard, setClipboard] = useState<{ type: 'copy'|'cut', ids: string[] }>({ type: 'copy', ids: [] });
+    const [renamingItemId, setRenamingItemId] = useState<string | null>(null);
+    const [lassoStart, setLassoStart] = useState<{ x: number, y: number } | null>(null);
+    const [lassoCurrent, setLassoCurrent] = useState<{ x: number, y: number } | null>(null);
+    const [undoStackLocal, setUndoStackLocal] = useState<{action: string, data: any}[]>([]);
+
+    // Virtual Scrolling Variables
+    const [containerWidth, setContainerWidth] = useState(1000);
+    const gridCols = containerWidth < 768 ? 2 : containerWidth < 1024 ? 4 : containerWidth < 1280 ? 5 : 6;
+    const itemHeightGrid = 160;
+    const itemHeightList = 64;
+
     // Modals State
     const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
     const [linkUrl, setLinkUrl] = useState('');
@@ -40,14 +61,18 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
     }, [items, selectedItem]);
 
     const folderStructure = useMemo(() => {
-        const folders = items.filter(i => i.is_folder);
-        // Build a tree if needed, but for now flat list + parent_id is enough for rendering
-        return folders;
-    }, [items]);
+        return computeFolderStructure(items, allTasks);
+    }, [items, allTasks]);
 
     const breadcrumbs = useMemo(() => {
         const path: { id: string | null, name: string }[] = [{ id: null, name: 'Raiz' }];
         if (!currentFolderId) return path;
+
+        // Check if the current folder is a virtual task folder
+        const taskFolder = allTasks.find(t => t.id === currentFolderId);
+        if (taskFolder) {
+            return [...path, { id: taskFolder.id, name: taskFolder.titulo }];
+        }
 
         let current = items.find(i => i.id === currentFolderId);
         const tempPath: { id: string, name: string }[] = [];
@@ -60,30 +85,150 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
     }, [currentFolderId, items]);
 
     const currentItems = useMemo(() => {
-        let filtered = items.filter(item => {
-            // If searching, show all matching items regardless of folder
-            if (searchTerm) {
-                return (
-                    item.titulo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                    (item.tags && item.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()))) ||
-                    (item.texto_bruto && item.texto_bruto.toLowerCase().includes(searchTerm.toLowerCase()))
-                );
+        return filterCurrentItems(items, allTasks, folderStructure, currentFolderId, searchTerm);
+    }, [items, currentFolderId, searchTerm, allTasks, folderStructure]);
+
+    // Handle Desktop Keyboard Shortcuts
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Ignore if typing in an input or textarea
+            if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+            if (e.key === 'F2') {
+                e.preventDefault();
+                if (selectedItems.size === 1) {
+                    setRenamingItemId(Array.from(selectedItems)[0]);
+                }
             }
 
-            // Otherwise show items in current folder
-            if (currentFolderId === null) {
-                return !item.parent_id;
+            if (e.key === 'Delete') {
+                if (selectedItems.size > 0) {
+                    if (window.confirm(`Tem certeza que deseja deletar ${selectedItems.size} item(s)?`)) {
+                        selectedItems.forEach(id => onDeleteItem(id));
+                        setSelectedItems(new Set());
+                    }
+                } else if (selectedItem && !selectedItem.is_folder) {
+                    if (window.confirm(`Tem certeza que deseja deletar ${selectedItem.titulo}?`)) {
+                        onDeleteItem(selectedItem.id);
+                        setSelectedItem(null);
+                    }
+                }
             }
-            return item.parent_id === currentFolderId;
-        });
 
-        // Sort: Folders first, then files by date
-        return filtered.sort((a, b) => {
-            if (a.is_folder && !b.is_folder) return -1;
-            if (!a.is_folder && b.is_folder) return 1;
-            return new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime();
-        });
-    }, [items, searchTerm, currentFolderId]);
+            if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                setSelectedItems(new Set(currentItems.map(i => i.id)));
+            }
+
+            if (e.key === 'c' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                if (selectedItems.size > 0) {
+                    setClipboard({ type: 'copy', ids: Array.from(selectedItems) });
+                    alert(`${selectedItems.size} item(s) copiado(s).`);
+                }
+            }
+
+            if (e.key === 'x' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                if (selectedItems.size > 0) {
+                    setClipboard({ type: 'cut', ids: Array.from(selectedItems) });
+                    alert(`${selectedItems.size} item(s) recortado(s).`);
+                }
+            }
+
+            if (e.key === 'v' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                if (clipboard.ids.length > 0 && onSaveItem) {
+                    clipboard.ids.forEach(id => {
+                        const original = items.find(i => i.id === id);
+                        if (original) {
+                            if (clipboard.type === 'copy') {
+                                // Duplicate
+                                const newId = `copy_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+                                const copy = { ...original, id: newId, titulo: `${original.titulo} (Cópia)`, parent_id: currentFolderId };
+                                onSaveItem(copy);
+                                setUndoStackLocal(prev => [...prev, { action: 'copy', data: newId }]);
+                            } else {
+                                // Move (Cut)
+                                onSaveItem({ id: id, parent_id: currentFolderId });
+                                setUndoStackLocal(prev => [...prev, { action: 'move', data: { id, oldParent: original.parent_id } }]);
+                            }
+                        }
+                    });
+                    if (clipboard.type === 'cut') setClipboard({ type: 'copy', ids: [] });
+                }
+            }
+
+            if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                if (undoStackLocal.length > 0) {
+                    const lastAction = undoStackLocal[undoStackLocal.length - 1];
+                    if (lastAction.action === 'copy') {
+                        onDeleteItem(lastAction.data);
+                    } else if (lastAction.action === 'move' && onSaveItem) {
+                        onSaveItem({ id: lastAction.data.id, parent_id: lastAction.data.oldParent });
+                    }
+                    setUndoStackLocal(prev => prev.slice(0, -1));
+                }
+            }
+
+            if (e.key === 'Escape') {
+                setSelectedItems(new Set());
+                setContextMenu(null);
+                setRenamingItemId(null);
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [selectedItem, selectedItems, currentItems, onDeleteItem, clipboard, items, currentFolderId, onSaveItem, undoStackLocal]);
+
+    const handleItemClick = (e: React.MouseEvent, item: ConhecimentoItem) => {
+        e.stopPropagation();
+        setContextMenu(null);
+
+        if (e.ctrlKey || e.metaKey) {
+            const newSelected = new Set(selectedItems);
+            if (newSelected.has(item.id)) {
+                newSelected.delete(item.id);
+            } else {
+                newSelected.add(item.id);
+            }
+            setSelectedItems(newSelected);
+        } else if (e.shiftKey && selectedItems.size > 0) {
+            // Basic range selection (first to current)
+            const itemsArray = currentItems.map(i => i.id);
+            const lastSelected = Array.from(selectedItems).pop()!;
+            const startIdx = itemsArray.indexOf(lastSelected);
+            const endIdx = itemsArray.indexOf(item.id);
+
+            if (startIdx !== -1 && endIdx !== -1) {
+                const [min, max] = [Math.min(startIdx, endIdx), Math.max(startIdx, endIdx)];
+                const newSelected = new Set(selectedItems);
+                for (let i = min; i <= max; i++) {
+                    newSelected.add(itemsArray[i]);
+                }
+                setSelectedItems(newSelected);
+            }
+        } else {
+            if (item.is_folder) {
+                setCurrentFolderId(item.id);
+                setSelectedItems(new Set());
+            } else {
+                setSelectedItem(item);
+                setSelectedItems(new Set([item.id]));
+            }
+        }
+    };
+
+    const handleContextMenu = (e: React.MouseEvent, item: ConhecimentoItem) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!selectedItems.has(item.id)) {
+            setSelectedItems(new Set([item.id]));
+        }
+        setContextMenu({ x: e.clientX, y: e.clientY, itemId: item.id });
+    };
 
     const handleCopyToClipboard = (text: string) => {
         navigator.clipboard.writeText(text);
@@ -158,7 +303,19 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
         const itemId = e.dataTransfer.getData("text/plain");
         if (itemId && onSaveItem) {
             if (itemId === targetFolderId) return; // Can't move folder into itself (simple check)
-            onSaveItem({ id: itemId, parent_id: targetFolderId });
+
+            // Check if target is a virtual task folder
+            const isTargetVirtualFolder = allTasks.some(t => t.id === targetFolderId);
+
+            if (isTargetVirtualFolder && targetFolderId) {
+                onSaveItem({
+                    id: itemId,
+                    origem: { modulo: 'acoes', id_origem: targetFolderId },
+                    parent_id: null // Unlink from any real folder when moving to a task
+                });
+            } else {
+                onSaveItem({ id: itemId, parent_id: targetFolderId });
+            }
         }
     };
 
@@ -168,6 +325,67 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
         const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    };
+
+    const handleLocalSync = async () => {
+        try {
+            if (!('showDirectoryPicker' in window)) {
+                alert('A File System Access API não é suportada no seu navegador.');
+                return;
+            }
+
+            const directoryHandle = await (window as any).showDirectoryPicker({
+                mode: 'readwrite'
+            });
+
+            if (!onSaveItem) return;
+
+            // Simple shallow sync for demonstration purposes
+            for await (const entry of directoryHandle.values()) {
+                if (entry.kind === 'file') {
+                    const fileHandle = entry as any;
+                    const file = await fileHandle.getFile();
+
+                    // Create a virtual local item
+                    // Check if we already have it to avoid duplicates? Simple implementation generates new IDs
+                    const newId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                    const ext = file.name.split('.').pop()?.toLowerCase() || 'txt';
+                    let type = 'doc';
+                    if (['pdf'].includes(ext)) type = 'pdf';
+                    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) type = 'imagem';
+                    if (['mp4', 'mov', 'avi', 'webm', 'mkv'].includes(ext)) type = 'video';
+                    if (['mp3', 'wav', 'm4a', 'ogg'].includes(ext)) type = 'audio';
+
+                    // Read text content if it's a doc to populate texto_bruto for editing
+                    let textContent = '';
+                    if (type === 'doc') {
+                        try {
+                            textContent = await file.text();
+                        } catch (e) {
+                            console.error("Failed to read text from file", e);
+                        }
+                    }
+
+                    // Save the file handle to IndexedDB instead of passing it to Firestore via onSaveItem
+                    await idb.set(`fileHandle_${newId}`, fileHandle);
+
+                    await onSaveItem({
+                        id: newId,
+                        titulo: file.name,
+                        tipo_arquivo: type,
+                        url_drive: URL.createObjectURL(file), // blob url for local preview
+                        tamanho: file.size,
+                        data_criacao: new Date(file.lastModified).toISOString(),
+                        is_folder: false,
+                        parent_id: currentFolderId,
+                        texto_bruto: textContent,
+                        fileHandle: true // Just a boolean flag for the UI to know it's a local file
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('Error syncing local directory:', error);
+        }
     };
 
     return (
@@ -206,6 +424,13 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
 
                 <div className="p-6 border-t border-slate-50 space-y-3">
                     <button
+                        onClick={handleLocalSync}
+                        className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3"
+                    >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                        Sincronizar Pasta
+                    </button>
+                    <button
                         onClick={() => setIsNewFolderModalOpen(true)}
                         className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3"
                     >
@@ -231,19 +456,47 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
             <main className="flex-1 flex flex-col min-w-0 bg-slate-50">
                 {/* Search Header */}
                 <header className="p-8 bg-white border-b border-slate-100 flex items-center justify-between gap-8">
-                    {/* Breadcrumbs */}
-                    <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
-                        {breadcrumbs.map((crumb, idx) => (
-                            <React.Fragment key={crumb.id || 'root'}>
-                                {idx > 0 && <span className="text-slate-300">/</span>}
-                                <button
-                                    onClick={() => setCurrentFolderId(crumb.id)}
-                                    className={`text-sm whitespace-nowrap ${idx === breadcrumbs.length - 1 ? 'font-black text-slate-900' : 'font-medium text-slate-500 hover:text-blue-600'}`}
-                                >
-                                    {crumb.name}
-                                </button>
-                            </React.Fragment>
-                        ))}
+                    {/* Breadcrumbs / Address Bar */}
+                    <div className="flex-1 flex items-center gap-2 overflow-x-auto no-scrollbar" onDoubleClick={() => {
+                        setIsAddressEditing(true);
+                        setAddressInput(breadcrumbs.map(c => c.name).join('/'));
+                    }}>
+                        {isAddressEditing ? (
+                            <input
+                                autoFocus
+                                type="text"
+                                className="w-full text-sm font-medium text-slate-900 bg-slate-50 border border-blue-200 rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-blue-500"
+                                value={addressInput}
+                                onChange={(e) => setAddressInput(e.target.value)}
+                                onBlur={() => setIsAddressEditing(false)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        const parts = addressInput.split('/').map(p => p.trim());
+                                        const targetName = parts[parts.length - 1];
+                                        const targetFolder = folderStructure.find(f => f.titulo === targetName);
+                                        if (targetFolder) {
+                                            setCurrentFolderId(targetFolder.id);
+                                        } else if (targetName.toLowerCase() === 'raiz') {
+                                            setCurrentFolderId(null);
+                                        }
+                                        setIsAddressEditing(false);
+                                    }
+                                    if (e.key === 'Escape') setIsAddressEditing(false);
+                                }}
+                            />
+                        ) : (
+                            breadcrumbs.map((crumb, idx) => (
+                                <React.Fragment key={crumb.id || 'root'}>
+                                    {idx > 0 && <span className="text-slate-300">/</span>}
+                                    <button
+                                        onClick={() => setCurrentFolderId(crumb.id)}
+                                        className={`text-sm whitespace-nowrap ${idx === breadcrumbs.length - 1 ? 'font-black text-slate-900' : 'font-medium text-slate-500 hover:text-blue-600'}`}
+                                    >
+                                        {crumb.name}
+                                    </button>
+                                </React.Fragment>
+                            ))
+                        )}
                     </div>
 
                     <div className="flex-1 max-w-md relative">
@@ -275,25 +528,101 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
 
                 {/* Items Grid/List */}
                 <div
-                    className="flex-1 overflow-y-auto p-8 custom-scrollbar"
+                    className="flex-1 overflow-y-auto p-8 custom-scrollbar relative select-none"
+                    onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+                    ref={(el) => {
+                        if (el && el.clientWidth !== containerWidth) {
+                            setContainerWidth(el.clientWidth);
+                        }
+                    }}
+                    onMouseDown={(e) => {
+                        if (e.target === e.currentTarget || (e.target as HTMLElement).className.includes('grid') || (e.target as HTMLElement).className.includes('custom-scrollbar')) {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setLassoStart({ x: e.clientX - rect.left, y: e.clientY - rect.top + e.currentTarget.scrollTop });
+                            setLassoCurrent({ x: e.clientX - rect.left, y: e.clientY - rect.top + e.currentTarget.scrollTop });
+                            if (!e.ctrlKey && !e.metaKey && !e.shiftKey) setSelectedItems(new Set());
+                        }
+                    }}
+                    onMouseMove={(e) => {
+                        if (lassoStart) {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const currentY = e.clientY - rect.top + e.currentTarget.scrollTop;
+                            setLassoCurrent({ x: e.clientX - rect.left, y: currentY });
+
+                            // Intersect items logic:
+                            const top = Math.min(lassoStart.y, currentY);
+                            const bottom = Math.max(lassoStart.y, currentY);
+                            const left = Math.min(lassoStart.x, e.clientX - rect.left);
+                            const right = Math.max(lassoStart.x, e.clientX - rect.left);
+
+                            // Fast approximate intersection logic for grid items
+                            if (viewMode === 'grid') {
+                                const newSelected = new Set(selectedItems);
+                                currentItems.forEach((item, idx) => {
+                                    const row = Math.floor(idx / gridCols);
+                                    const col = idx % gridCols;
+                                    const itemX = 32 + col * (containerWidth / gridCols); // approximation
+                                    const itemY = row * itemHeightGrid;
+
+                                    if (itemY >= top && itemY <= bottom && itemX >= left && itemX <= right) {
+                                        newSelected.add(item.id);
+                                    }
+                                });
+                                setSelectedItems(newSelected);
+                            }
+                        }
+                    }}
+                    onMouseUp={() => {
+                        setLassoStart(null);
+                        setLassoCurrent(null);
+                    }}
+                    onMouseLeave={() => {
+                        setLassoStart(null);
+                        setLassoCurrent(null);
+                    }}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => {
-                        // Drop on empty space (not folder) does nothing or moves to current folder?
-                        // If dropping from another folder to current folder space, update parent_id to currentFolderId
                         const itemId = e.dataTransfer.getData("text/plain");
                         if (itemId && onSaveItem) {
-                            if (itemId === currentFolderId) return; // Prevent move to self (if current is folder)
+                            if (itemId === currentFolderId) return;
                             onSaveItem({ id: itemId, parent_id: currentFolderId });
                         }
                     }}
                 >
-                    {viewMode === 'grid' ? (
-                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                            {currentItems.map(item => (
-                                <div
+                    {lassoStart && lassoCurrent && (
+                        <div
+                            className="absolute bg-blue-500/20 border border-blue-500 pointer-events-none z-[100]"
+                            style={{
+                                left: Math.min(lassoStart.x, lassoCurrent.x),
+                                top: Math.min(lassoStart.y, lassoCurrent.y),
+                                width: Math.abs(lassoCurrent.x - lassoStart.x),
+                                height: Math.abs(lassoCurrent.y - lassoStart.y)
+                            }}
+                        />
+                    )}
+                    {viewMode === 'grid' ? (() => {
+                        const totalRows = Math.ceil(currentItems.length / gridCols);
+                        const startRow = Math.max(0, Math.floor(scrollTop / itemHeightGrid) - 2);
+                        const endRow = Math.min(totalRows, startRow + Math.ceil(800 / itemHeightGrid) + 4);
+                        const visibleItems = currentItems.slice(startRow * gridCols, endRow * gridCols);
+                        const topSpacer = startRow * itemHeightGrid;
+                        const bottomSpacer = Math.max(0, (totalRows - endRow) * itemHeightGrid);
+
+                        return (
+                            <div style={{ paddingBottom: '4rem' }}>
+                                <div style={{ height: topSpacer }} />
+                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                                    {visibleItems.map(item => (
+                                        <div
                                     key={item.id}
                                     draggable
-                                    onDragStart={(e) => e.dataTransfer.setData("text/plain", item.id)}
+                                    onDragStart={(e) => {
+                                        e.dataTransfer.setData("text/plain", item.id);
+                                        if (!item.fileHandle && item.url_drive && !item.is_folder) {
+                                            const ext = item.titulo.includes('.') ? '' : '.pdf'; // simplified fallback
+                                            e.dataTransfer.setData('DownloadURL', `application/octet-stream:${item.titulo}${ext}:${item.url_drive}`);
+                                        }
+                                    }}
                                     onDragOver={(e) => item.is_folder ? e.preventDefault() : null}
                                     onDrop={(e) => {
                                         if (item.is_folder) {
@@ -301,36 +630,74 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                             e.stopPropagation();
                                         }
                                     }}
-                                    onClick={() => item.is_folder ? setCurrentFolderId(item.id) : setSelectedItem(item)}
-                                    className={`bg-white p-4 rounded-2xl border border-slate-100 shadow-sm hover:shadow-lg hover:border-blue-200 transition-all cursor-pointer group flex flex-col items-center text-center gap-3 relative ${item.is_folder ? 'bg-amber-50/10' : ''}`}
+                                    onClick={(e) => handleItemClick(e, item)}
+                                    onContextMenu={(e) => handleContextMenu(e, item)}
+                                    className={`bg-white p-4 rounded-2xl border ${selectedItems.has(item.id) ? 'border-blue-500 shadow-md ring-2 ring-blue-100' : 'border-slate-100 shadow-sm hover:shadow-lg hover:border-blue-200'} transition-all cursor-pointer group flex flex-col items-center text-center gap-3 relative ${item.is_folder ? 'bg-amber-50/10' : ''}`}
                                 >
                                     <div className={`p-3 rounded-2xl transition-colors ${item.is_folder ? 'text-amber-400' : 'bg-slate-50 group-hover:bg-blue-50'}`}>
                                         {getFileIcon(item)}
                                     </div>
                                     <div className="min-w-0 w-full">
-                                        <h4 className="text-xs font-bold text-slate-700 leading-tight truncate px-2">{item.titulo}</h4>
-                                        <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">{item.is_folder ? `${items.filter(i => i.parent_id === item.id).length} itens` : formatSize(item.tamanho || 0)}</p>
-                                    </div>
+                                        {renamingItemId === item.id ? (
+                                            <input
+                                                autoFocus
+                                                type="text"
+                                                className="w-full text-xs font-bold text-slate-900 bg-white border border-blue-500 rounded px-2 py-1 outline-none text-center"
+                                                defaultValue={item.titulo}
+                                                onBlur={(e) => {
+                                                    if (onSaveItem && e.target.value.trim() !== '' && e.target.value !== item.titulo) {
+                                                        onSaveItem({ id: item.id, titulo: e.target.value.trim() });
+                                                    }
+                                                    setRenamingItemId(null);
+                                                }}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') e.currentTarget.blur();
+                                                    if (e.key === 'Escape') setRenamingItemId(null);
+                                                }}
+                                                onClick={(e) => e.stopPropagation()}
+                                            />
+                                        ) : (
+                                            <h4 className="text-xs font-bold text-slate-700 leading-tight truncate px-2" onDoubleClick={(e) => { e.stopPropagation(); setRenamingItemId(item.id); }}>{item.titulo}</h4>
+                                                )}
+                                                <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">{item.is_folder ? `${items.filter(i => i.parent_id === item.id).length} itens` : formatSize(item.tamanho || 0)}</p>
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm">
-                            <table className="w-full text-left">
-                                <thead className="bg-slate-50 border-b border-slate-100">
-                                    <tr>
-                                        <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Nome</th>
-                                        <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Tamanho</th>
-                                        <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Data</th>
-                                        <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Ações</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-50">
-                                    {currentItems.map(item => (
-                                        <tr
+                                <div style={{ height: bottomSpacer }} />
+                            </div>
+                        );
+                    })() : (() => {
+                        const startRow = Math.max(0, Math.floor(scrollTop / itemHeightList) - 5);
+                        const endRow = Math.min(currentItems.length, startRow + Math.ceil(800 / itemHeightList) + 10);
+                        const visibleItems = currentItems.slice(startRow, endRow);
+                        const topSpacer = startRow * itemHeightList;
+                        const bottomSpacer = Math.max(0, (currentItems.length - endRow) * itemHeightList);
+
+                        return (
+                            <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm">
+                                <table className="w-full text-left" style={{ display: 'block' }}>
+                                    <thead className="bg-slate-50 border-b border-slate-100" style={{ display: 'table', width: '100%', tableLayout: 'fixed' }}>
+                                        <tr>
+                                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Nome</th>
+                                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-32">Tamanho</th>
+                                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-40 hidden md:table-cell">Modificado</th>
+                                            <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-24"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-50" style={{ display: 'block', height: currentItems.length * itemHeightList, position: 'relative' }}>
+                                        {visibleItems.map((item, idx) => (
+                                            <tr
+                                                style={{ position: 'absolute', top: (startRow + idx) * itemHeightList, width: '100%', display: 'table', tableLayout: 'fixed' }}
                                             key={item.id}
                                             draggable
-                                            onDragStart={(e) => e.dataTransfer.setData("text/plain", item.id)}
+                                            onDragStart={(e) => {
+                                                e.dataTransfer.setData("text/plain", item.id);
+                                                if (!item.fileHandle && item.url_drive && !item.is_folder) {
+                                                    const ext = item.titulo.includes('.') ? '' : '.pdf'; // simplified fallback
+                                                    e.dataTransfer.setData('DownloadURL', `application/octet-stream:${item.titulo}${ext}:${item.url_drive}`);
+                                                }
+                                            }}
                                             onDragOver={(e) => item.is_folder ? e.preventDefault() : null}
                                             onDrop={(e) => {
                                                 if (item.is_folder) {
@@ -338,8 +705,9 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                                     e.stopPropagation();
                                                 }
                                             }}
-                                            onClick={() => item.is_folder ? setCurrentFolderId(item.id) : setSelectedItem(item)}
-                                            className="hover:bg-slate-50 transition-colors cursor-pointer group"
+                                            onClick={(e) => handleItemClick(e, item)}
+                                            onContextMenu={(e) => handleContextMenu(e, item)}
+                                            className={`${selectedItems.has(item.id) ? 'bg-blue-50/50' : 'hover:bg-slate-50'} transition-colors cursor-pointer group`}
                                         >
                                             <td className="px-8 py-3">
                                                 <div className="flex items-center gap-3">
@@ -396,7 +764,8 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                 </tbody>
                             </table>
                         </div>
-                    )}
+                        );
+                    })()}
 
                     {currentItems.length === 0 && (
                         <div className="py-20 text-center">
@@ -409,6 +778,45 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                     )}
                 </div>
             </main>
+
+            {/* Context Menu */}
+            {contextMenu && (
+                <div
+                    className="fixed z-[400] bg-white rounded-xl shadow-2xl border border-slate-100 py-2 min-w-[160px] animate-in fade-in zoom-in-95 duration-200"
+                    style={{ top: contextMenu.y, left: contextMenu.x }}
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <div className="px-3 py-1 mb-1 border-b border-slate-50">
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{selectedItems.size} item(s) selecionado(s)</span>
+                    </div>
+                    {selectedItems.size === 1 && (
+                        <button
+                            className="w-full text-left px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-2"
+                            onClick={() => {
+                                const item = items.find(i => i.id === Array.from(selectedItems)[0]);
+                                if (item && !item.is_folder) setSelectedItem(item);
+                                setContextMenu(null);
+                            }}
+                        >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                            Pré-visualizar
+                        </button>
+                    )}
+                    <button
+                        className="w-full text-left px-4 py-2 text-xs font-bold text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2 mt-1"
+                        onClick={() => {
+                            if (window.confirm(`Tem certeza que deseja deletar ${selectedItems.size} item(s)?`)) {
+                                selectedItems.forEach(id => onDeleteItem(id));
+                                setSelectedItems(new Set());
+                            }
+                            setContextMenu(null);
+                        }}
+                    >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        Deletar Seleção
+                    </button>
+                </div>
+            )}
 
             {/* Slide-over Preview (File Details) */}
             {currentItem && !currentItem.is_folder && (
@@ -431,6 +839,19 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                         </header>
 
                         <div className="flex-1 overflow-y-auto p-8 custom-scrollbar space-y-10">
+                            {/* Native Previews for Desktop UX */}
+                            {currentItem.tipo_arquivo === 'pdf' && currentItem.url_drive && (
+                                <section className="h-96 w-full rounded-[2rem] overflow-hidden border border-slate-200 shadow-inner">
+                                    <iframe src={currentItem.url_drive} className="w-full h-full" title="PDF Preview" />
+                                </section>
+                            )}
+
+                            {currentItem.tipo_arquivo === 'imagem' && currentItem.url_drive && (
+                                <section className="flex justify-center bg-slate-100 rounded-[2rem] p-4 border border-slate-200">
+                                    <img src={currentItem.url_drive} alt="Preview" className="max-h-96 object-contain rounded-xl shadow-sm" loading="lazy" />
+                                </section>
+                            )}
+
                             {/* Same content viewers as before */}
                             {currentItem.tipo_arquivo === 'link' && (
                                 <section>
@@ -458,33 +879,90 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                 </section>
                             )}
 
-                            {/* OCR */}
-                            {currentItem.texto_bruto && (
+                            {/* OCR / Editor */}
+                            {(currentItem.texto_bruto || editOcrText !== null || currentItem.fileHandle) && (
                                 <section>
                                     <div className="flex items-center justify-between mb-4 border-l-4 border-slate-900 pl-4">
-                                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Texto Extraído / OCR</h4>
+                                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{editOcrText !== null ? 'Modo Edição' : 'Conteúdo / OCR'}</h4>
                                         <div className="flex gap-2">
-                                            <button
-                                                onClick={() => handleCopyToClipboard(currentItem.texto_bruto || '')}
-                                                className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-all"
-                                                title="Copiar texto"
-                                            >
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
-                                            </button>
-                                            <button
-                                                onClick={() => setIsOcrExpanded(!isOcrExpanded)}
-                                                className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-all font-black text-[9px] uppercase tracking-widest"
-                                            >
-                                                {isOcrExpanded ? 'Recolher' : 'Expandir'}
-                                            </button>
+                                            {editOcrText === null ? (
+                                                <>
+                                                    <button
+                                                        onClick={() => setEditOcrText(currentItem.texto_bruto || '')}
+                                                        className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-600 transition-all"
+                                                        title="Editar texto"
+                                                    >
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleCopyToClipboard(currentItem.texto_bruto || '')}
+                                                        className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-all"
+                                                        title="Copiar texto"
+                                                    >
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setIsOcrExpanded(!isOcrExpanded)}
+                                                        className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-all font-black text-[9px] uppercase tracking-widest"
+                                                    >
+                                                        {isOcrExpanded ? 'Recolher' : 'Expandir'}
+                                                    </button>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <button
+                                                        onClick={() => setEditOcrText(null)}
+                                                        className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 transition-all font-black text-[9px] uppercase tracking-widest"
+                                                    >
+                                                        Cancelar
+                                                    </button>
+                                                    <button
+                                                        onClick={async () => {
+                                                            try {
+                                                                if (onSaveItem) {
+                                                                    await onSaveItem({ id: currentItem.id, texto_bruto: editOcrText });
+                                                                }
+                                                                // Sync back to local OS disk via File System API if linked
+                                                                // To retrieve the original fileHandle we lookup in IndexedDB
+                                                                const handle = await idb.get(`fileHandle_${currentItem.id}`);
+                                                                if (handle) {
+                                                                    // Request permission again if needed
+                                                                    if (await handle.queryPermission({ mode: 'readwrite' }) !== 'granted') {
+                                                                        await handle.requestPermission({ mode: 'readwrite' });
+                                                                    }
+                                                                    const writable = await handle.createWritable();
+                                                                    await writable.write(editOcrText);
+                                                                    await writable.close();
+                                                                    alert('Arquivo local atualizado com sucesso via File System Access API!');
+                                                                }
+                                                                setEditOcrText(null);
+                                                            } catch (err) {
+                                                                console.error("Failed to save", err);
+                                                                alert('Falha ao salvar o arquivo local. Verifique as permissões de acesso ao disco.');
+                                                            }
+                                                        }}
+                                                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all font-black text-[9px] uppercase tracking-widest"
+                                                    >
+                                                        Salvar
+                                                    </button>
+                                                </>
+                                            )}
                                         </div>
                                     </div>
-                                    <div className={`bg-slate-50 p-6 rounded-[2rem] border border-slate-200 text-xs font-medium text-slate-700 leading-relaxed whitespace-pre-wrap font-mono relative overflow-hidden transition-all duration-500 ${isOcrExpanded ? 'max-h-none' : 'max-h-40'}`}>
-                                        {currentItem.texto_bruto}
-                                        {!isOcrExpanded && (
-                                            <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-slate-50 to-transparent pointer-events-none"></div>
-                                        )}
-                                    </div>
+                                    {editOcrText !== null ? (
+                                        <textarea
+                                            value={editOcrText}
+                                            onChange={(e) => setEditOcrText(e.target.value)}
+                                            className="w-full h-96 bg-slate-50 p-6 rounded-[2rem] border border-blue-200 text-sm font-medium text-slate-900 leading-relaxed font-mono outline-none focus:ring-2 focus:ring-blue-500 custom-scrollbar resize-none"
+                                        />
+                                    ) : (
+                                        <div className={`bg-slate-50 p-6 rounded-[2rem] border border-slate-200 text-xs font-medium text-slate-700 leading-relaxed whitespace-pre-wrap font-mono relative overflow-hidden transition-all duration-500 ${isOcrExpanded ? 'max-h-none' : 'max-h-40'}`}>
+                                            {currentItem.texto_bruto || 'Sem conteúdo.'}
+                                            {!isOcrExpanded && (
+                                                <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-slate-50 to-transparent pointer-events-none"></div>
+                                            )}
+                                        </div>
+                                    )}
                                 </section>
                             )}
                         </div>
