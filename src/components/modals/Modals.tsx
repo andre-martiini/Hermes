@@ -306,7 +306,7 @@ export const SettingsModal = ({
                 <div className="flex flex-col p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-amber-200 transition-all gap-4">
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
-                      <p className="text-sm font-bold text-slate-900 mb-1">Audit PGC</p>
+                      <p className="text-sm font-bold text-slate-900 mb-1">Audit PGD</p>
                       <p className="text-[11px] text-slate-500 font-medium">Verificar vÃ­nculos antes do fim do mÃªs</p>
                     </div>
                     <button
@@ -1249,13 +1249,13 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
 
             {(formData.categoria === 'CLC' || formData.categoria === 'ASSISTÃŠNCIA' || formData.categoria === 'ASSISTÃŠNCIA ESTUDANTIL') && (
               <div className="space-y-1 animate-in fade-in slide-in-from-top-2">
-                <label className="text-[9px] font-black text-blue-600 uppercase tracking-widest pl-1">Vincular ao PGC</label>
+                <label className="text-[9px] font-black text-blue-600 uppercase tracking-widest pl-1">Vincular ao PGD</label>
                 <select
                   value={formData.entregas_relacionadas[0] || ''}
                   onChange={e => setFormData({ ...formData, entregas_relacionadas: e.target.value ? [e.target.value] : [] })}
                   className="w-full bg-blue-50 border-blue-100 rounded-xl px-4 py-2 text-[10px] font-bold text-blue-900 focus:ring-2 focus:ring-blue-500 transition-all"
                 >
-                  <option value="">NÃ£o vinculado ao PGC</option>
+                  <option value="">Não vinculado ao PGD</option>
                   {pgcEntregas.map(e => (
                     <option key={e.id} value={e.id}>{e.entrega}</option>
                   ))}

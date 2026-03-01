@@ -57,6 +57,10 @@ export interface AtividadeRealizada {
     entrega_id: string;
     usuario: string;
     status_atividade: string;
+    origem?: 'manual' | 'ia';
+    task_ids?: string[];
+    data_criacao?: string;
+    data_atualizacao?: string;
 }
 
 export interface EntregaInstitucional {

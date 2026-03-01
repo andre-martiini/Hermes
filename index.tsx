@@ -32,9 +32,10 @@ import {
   formatInlineWhatsAppText, detectAreaFromTitle
 } from './src/utils/helpers';
 import {
-  ToastContainer, FilterChip, PgcMiniTaskCard, PgcAuditRow,
+  ToastContainer, FilterChip, PgcMiniTaskCard,
   RowCard, WysiwygEditor, NotificationCenter, AutoExpandingTextarea
 } from './src/components/ui/UIComponents';
+import { PgdAuditRow } from './src/components/ui/PgdAuditRow';
 import {
   HermesModal, SettingsModal, DailyHabitsModal,
   TaskCreateModal, TaskEditModal
@@ -59,6 +60,7 @@ import {
   ROOT_PROJECTS_FOLDER_ID,
   getTaskIdFromActionFolderId
 } from './src/utils/knowledgeLogic';
+import { parseDiaryRichNote } from './src/utils/diaryEntries';
 
 
 type SortOption = 'date-asc' | 'date-desc' | 'priority-high' | 'priority-low';
@@ -927,7 +929,9 @@ const App: React.FC = () => {
   // Estados PGC
   const [atividadesPGC, setAtividadesPGC] = useState<AtividadeRealizada[]>([]);
   const [afastamentos, setAfastamentos] = useState<Afastamento[]>([]);
-  const [pgcSubView, setPgcSubView] = useState<'audit' | 'heatmap' | 'config' | 'plano'>('audit');
+  const [pgcSubView, setPgcSubView] = useState<'audit' | 'heatmap' | 'config' | 'plano' | 'status'>('audit');
+  const [pgdGeneratingByEntrega, setPgdGeneratingByEntrega] = useState<Record<string, boolean>>({});
+  const [pgdRawTextProcessingByEntrega, setPgdRawTextProcessingByEntrega] = useState<Record<string, boolean>>({});
   const [unidades, setUnidades] = useState<{ id: string, nome: string }[]>([]);
   const [sistemasAtivos, setSistemasAtivos] = useState<string[]>([]);
 
@@ -2017,8 +2021,8 @@ const App: React.FC = () => {
       const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
       if ((daysInMonth - now.getDate()) <= appSettings.notifications.pgcAudit.daysBeforeEnd) {
         emitNotification(
-          "Auditoria PGC",
-          "O mês está acabando. Verifique no módulo PGC se todas as entregas possuem ações vinculadas.",
+          "Auditoria PGD",
+          "O mês está acabando. Verifique no módulo PGD se todas as entregas possuem ações vinculadas.",
           'info',
           'pgc',
           `pgc-${todayStr}`
@@ -2812,14 +2816,32 @@ const App: React.FC = () => {
       setAfastamentos(data);
     });
 
-    // Listener para Atividades (Entregas Legado/Config)
-    const qAtividades = query(collection(db, 'atividades'));
-    const unsubscribeAtividades = onSnapshot(qAtividades, (snapshot) => {
-      const dataE = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EntregaInstitucional));
-      setEntregas(dataE);
+    // Listeners para Entregas (coleção atual + legado)
+    let entregasMain: EntregaInstitucional[] = [];
+    let entregasLegacy: EntregaInstitucional[] = [];
+    const syncEntregas = () => {
+      const merged = [...entregasMain, ...entregasLegacy];
+      const dedup = new Map<string, EntregaInstitucional>();
+      merged.forEach((e) => dedup.set(e.id, e));
+      setEntregas(Array.from(dedup.values()));
+    };
+
+    const qEntregas = query(collection(db, 'entregas'));
+    const unsubscribeEntregas = onSnapshot(qEntregas, (snapshot) => {
+      entregasMain = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EntregaInstitucional));
+      syncEntregas();
     }, (err) => {
       console.error(err);
-      setError("Erro ao conectar com o banco de dados (Atividades).");
+      setError("Erro ao conectar com o banco de dados (Entregas).");
+    });
+
+    const qAtividadesLegacy = query(collection(db, 'atividades'));
+    const unsubscribeAtividadesLegacy = onSnapshot(qAtividadesLegacy, (snapshot) => {
+      entregasLegacy = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EntregaInstitucional));
+      syncEntregas();
+    }, (err) => {
+      console.error(err);
+      setError("Erro ao conectar com o banco de dados (Entregas Legado).");
     });
 
 
@@ -2833,7 +2855,8 @@ const App: React.FC = () => {
 
     return () => {
       unsubscribeTarefas();
-      unsubscribeAtividades();
+      unsubscribeEntregas();
+      unsubscribeAtividadesLegacy();
       unsubscribeAtividadesPGC();
       unsubscribeAfastamentos();
       unsubscribeUnidades();
@@ -2940,6 +2963,375 @@ const App: React.FC = () => {
     } catch (err) {
       console.error(err);
       return null;
+    }
+  };
+
+  const normalizeISODate = (value: any, fallback?: string): string => {
+    const text = String(value || '').trim();
+    if (!text) return fallback || formatDateLocalISO(new Date());
+    const direct = text.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (direct) return direct[1];
+
+    const parsed = new Date(text);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.toLocaleDateString('en-CA');
+    }
+
+    const br = text.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (br) return `${br[3]}-${br[2]}-${br[1]}`;
+
+    return fallback || formatDateLocalISO(new Date());
+  };
+
+  const handleCreatePgdActivity = async (entregaId: string, draft: Partial<AtividadeRealizada>) => {
+    if (!entregaId) return;
+    const start = normalizeISODate(draft.data_inicio);
+    const end = normalizeISODate(draft.data_fim || draft.data_inicio || start, start);
+    try {
+      await addDoc(collection(db, 'atividades_pgc'), {
+        entrega_id: entregaId,
+        descricao_atividade: (draft.descricao_atividade || '').trim(),
+        data_inicio: start,
+        data_fim: end,
+        status_atividade: draft.status_atividade || 'rascunho',
+        usuario: user?.displayName || 'Usuário',
+        origem: draft.origem || 'manual',
+        task_ids: draft.task_ids || [],
+        data_criacao: new Date().toISOString(),
+        data_atualizacao: new Date().toISOString()
+      });
+      showToast('Registro PGD adicionado.', 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Erro ao adicionar registro PGD.', 'error');
+    }
+  };
+
+  const handleUpdatePgdActivity = async (id: string, updates: Partial<AtividadeRealizada>) => {
+    try {
+      const payload: Record<string, any> = {
+        data_atualizacao: new Date().toISOString()
+      };
+      if (typeof updates.descricao_atividade === 'string') payload.descricao_atividade = updates.descricao_atividade;
+      if (typeof updates.status_atividade === 'string') payload.status_atividade = updates.status_atividade;
+      if (updates.data_inicio) payload.data_inicio = normalizeISODate(updates.data_inicio);
+      if (updates.data_fim) payload.data_fim = normalizeISODate(updates.data_fim);
+      if (updates.origem) payload.origem = updates.origem;
+      if (updates.task_ids) payload.task_ids = updates.task_ids;
+
+      await updateDoc(doc(db, 'atividades_pgc', id), payload);
+      showToast('Registro PGD atualizado.', 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Erro ao atualizar registro PGD.', 'error');
+    }
+  };
+
+  const handleDeletePgdActivity = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'atividades_pgc', id));
+      showToast('Registro PGD removido.', 'info');
+    } catch (err) {
+      console.error(err);
+      showToast('Erro ao remover registro PGD.', 'error');
+    }
+  };
+
+  const handleGeneratePgdFromDiaries = async (
+    entregaId: string,
+    item: PlanoTrabalhoItem,
+    tarefasRelacionadas: Tarefa[]
+  ) => {
+    if (!entregaId) return;
+    setPgdGeneratingByEntrega(prev => ({ ...prev, [entregaId]: true }));
+    try {
+      const diaryEntries = tarefasRelacionadas.flatMap(task =>
+        (task.acompanhamento || [])
+          .map(entry => ({
+            task_id: task.id,
+            task_titulo: task.titulo,
+            data: normalizeISODate(entry.data),
+            nota: (entry.nota || '').trim()
+          }))
+          .filter(entry => {
+            if (!entry.nota) return false;
+            if (parseDiaryRichNote(entry.nota)) return false;
+            return true;
+          })
+      ).sort((a, b) => a.data.localeCompare(b.data));
+
+      if (diaryEntries.length === 0) {
+        showToast('Sem diário de bordo textual para gerar registros desta entrega.', 'info');
+        return;
+      }
+
+      let apiKey = process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || '';
+      if (!apiKey) {
+        const keyDoc = await getDoc(doc(db, 'system', 'api_keys'));
+        if (keyDoc.exists()) apiKey = keyDoc.data()?.gemini_api_key || '';
+      }
+      if (!apiKey) {
+        showToast('Chave Gemini não configurada para geração PGD.', 'error');
+        return;
+      }
+
+      const payload = diaryEntries.slice(0, 200).map((entry) => {
+        const note = entry.nota.replace(/\s+/g, ' ').slice(0, 450);
+        return `[${entry.data}] tarefa=${entry.task_titulo} | id=${entry.task_id} | nota=${note}`;
+      }).join('\n');
+
+      const prompt = `Você é um assistente de prestação de contas PGD.\n` +
+        `Objetivo: transformar registros de diário de bordo em trabalhos executados para uma entrega institucional.\n\n` +
+        `Entrega: ${item.entrega}\n` +
+        `Descrição da entrega: ${item.descricao}\n` +
+        `Período alvo: ${currentYear}-${String(currentMonth + 1).padStart(2, '0')}\n\n` +
+        `Regras:\n` +
+        `1. Agrupe registros próximos por tema e continuidade (pode ser dia único ou intervalo).\n` +
+        `2. Escreva descrição objetiva e auditável em português.\n` +
+        `3. Datas no formato YYYY-MM-DD.\n` +
+        `4. Não invente fatos fora das notas.\n` +
+        `5. Gere entre 1 e 12 registros.\n\n` +
+        `Entrada:\n${payload}\n\n` +
+        `Responda SOMENTE JSON válido:\n` +
+        `{\n  "registros": [\n    {\n      "descricao_atividade": "texto",\n      "data_inicio": "YYYY-MM-DD",\n      "data_fim": "YYYY-MM-DD",\n      "task_ids": ["id1","id2"]\n    }\n  ]\n}`;
+
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+      const result = await model.generateContent(prompt);
+      const raw = result.response.text().trim();
+      const jsonStr = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+      const parsed = JSON.parse(jsonStr);
+
+      const aiRows = Array.isArray(parsed?.registros) ? parsed.registros : [];
+      const normalizedRows = aiRows
+        .map((r: any) => {
+          const start = normalizeISODate(r?.data_inicio);
+          const end = normalizeISODate(r?.data_fim || r?.data_inicio || start, start);
+          const desc = String(r?.descricao_atividade || '').trim();
+          const taskIds = Array.isArray(r?.task_ids) ? r.task_ids.filter((id: any) => typeof id === 'string') : [];
+          return {
+            descricao_atividade: desc,
+            data_inicio: start,
+            data_fim: end,
+            task_ids: taskIds
+          };
+        })
+        .filter((r: any) => r.descricao_atividade.length >= 12);
+
+      const fallbackRows = diaryEntries.reduce((acc: any[], entry) => {
+        const existing = acc.find(i => i.data_inicio === entry.data && i.data_fim === entry.data);
+        if (existing) {
+          existing.descricao_atividade += `\n- ${entry.nota}`;
+          if (!existing.task_ids.includes(entry.task_id)) existing.task_ids.push(entry.task_id);
+          return acc;
+        }
+        acc.push({
+          descricao_atividade: `Atividades executadas em ${entry.data}:\n- ${entry.nota}`,
+          data_inicio: entry.data,
+          data_fim: entry.data,
+          task_ids: [entry.task_id]
+        });
+        return acc;
+      }, []).slice(0, 12);
+
+      const finalRows = normalizedRows.length > 0 ? normalizedRows : fallbackRows;
+      if (finalRows.length === 0) {
+        showToast('Não foi possível gerar registros PGD para esta entrega.', 'error');
+        return;
+      }
+
+      const batch = writeBatch(db);
+      atividadesPGC
+        .filter(a => a.entrega_id === entregaId && a.origem === 'ia')
+        .forEach(a => batch.delete(doc(db, 'atividades_pgc', a.id)));
+
+      finalRows.forEach((row: any) => {
+        const ref = doc(collection(db, 'atividades_pgc'));
+        batch.set(ref, {
+          entrega_id: entregaId,
+          descricao_atividade: row.descricao_atividade,
+          data_inicio: row.data_inicio,
+          data_fim: row.data_fim,
+          status_atividade: 'rascunho',
+          usuario: user?.displayName || 'Usuário',
+          origem: 'ia',
+          task_ids: row.task_ids || [],
+          data_criacao: new Date().toISOString(),
+          data_atualizacao: new Date().toISOString()
+        });
+      });
+
+      await batch.commit();
+      showToast(`${finalRows.length} registro(s) PGD gerado(s) com IA.`, 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Erro ao gerar registros PGD com IA.', 'error');
+    } finally {
+      setPgdGeneratingByEntrega(prev => ({ ...prev, [entregaId]: false }));
+    }
+  };
+
+  const parsePgdRawTextFallback = (rawText: string) => {
+    const lines = rawText
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean);
+
+    const groupedByDate = new Map<string, string[]>();
+    let currentDate = '';
+
+    lines.forEach((line) => {
+      const dateMatch = line.match(/^(\d{2}\/\d{2}\/\d{4})/);
+      if (dateMatch) {
+        currentDate = normalizeISODate(dateMatch[1]);
+        if (!groupedByDate.has(currentDate)) groupedByDate.set(currentDate, []);
+        return;
+      }
+      if (!currentDate) return;
+      const cleaned = line.replace(/^[-*•]\s*/, '').trim();
+      if (!cleaned) return;
+      groupedByDate.get(currentDate)!.push(cleaned);
+    });
+
+    return Array.from(groupedByDate.entries())
+      .map(([date, tasks]) => {
+        const items = tasks.filter(t => t.length > 3);
+        const descricao = items.length <= 1 ? (items[0] || '') : items.map(t => `- ${t}`).join('\n');
+        return {
+          descricao_atividade: descricao,
+          data_inicio: date,
+          data_fim: date
+        };
+      })
+      .filter(r => r.descricao_atividade.length > 6)
+      .sort((a, b) => a.data_inicio.localeCompare(b.data_inicio));
+  };
+
+  const collapsePgdRowsByPeriod = (rows: { descricao_atividade: string; data_inicio: string; data_fim: string }[]) => {
+    const grouped = new Map<string, { data_inicio: string; data_fim: string; items: string[] }>();
+
+    rows.forEach((row) => {
+      const start = normalizeISODate(row.data_inicio);
+      const end = normalizeISODate(row.data_fim || row.data_inicio || start, start);
+      const desc = String(row.descricao_atividade || '').trim();
+      if (!desc) return;
+
+      const key = `${start}|${end}`;
+      if (!grouped.has(key)) {
+        grouped.set(key, { data_inicio: start, data_fim: end, items: [] });
+      }
+      grouped.get(key)!.items.push(desc);
+    });
+
+    return Array.from(grouped.values())
+      .map((g) => {
+        const uniqueItems = Array.from(new Set(g.items.map(i => i.trim()).filter(Boolean)));
+        const descricao = uniqueItems.length <= 1 ? (uniqueItems[0] || '') : uniqueItems.map(i => `- ${i}`).join('\n');
+        return {
+          descricao_atividade: descricao,
+          data_inicio: g.data_inicio,
+          data_fim: g.data_fim
+        };
+      })
+      .filter(r => r.descricao_atividade.length > 6)
+      .sort((a, b) => {
+        const k1 = `${a.data_inicio}|${a.data_fim}`;
+        const k2 = `${b.data_inicio}|${b.data_fim}`;
+        return k1.localeCompare(k2);
+      });
+  };
+
+  const handleGeneratePgdFromRawText = async (
+    entregaId: string,
+    item: PlanoTrabalhoItem,
+    rawText: string
+  ) => {
+    if (!entregaId || !rawText.trim()) return;
+    setPgdRawTextProcessingByEntrega(prev => ({ ...prev, [entregaId]: true }));
+
+    try {
+      let apiKey = process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || '';
+      if (!apiKey) {
+        const keyDoc = await getDoc(doc(db, 'system', 'api_keys'));
+        if (keyDoc.exists()) apiKey = keyDoc.data()?.gemini_api_key || '';
+      }
+
+      let finalRows: { descricao_atividade: string; data_inicio: string; data_fim: string }[] = [];
+      if (apiKey) {
+        try {
+          const prompt = `Você é um assistente para prestação de contas PGD.\n` +
+            `Converta o texto bruto abaixo em registros estruturados de execução.\n\n` +
+            `Entrega: ${item.entrega}\n` +
+            `Descrição da entrega: ${item.descricao}\n\n` +
+            `Regras obrigatórias:\n` +
+            `1. Identifique corretamente cada data presente no texto.\n` +
+            `2. Se houver várias tarefas no mesmo dia, AGRUPE tudo em um único registro desse dia.\n` +
+            `3. Quando houver continuidade natural entre dias, você PODE usar intervalo (data_inicio e data_fim diferentes).\n` +
+            `4. Refine a descrição para ficar objetiva e auditável.\n` +
+            `5. Não invente fatos fora do texto.\n` +
+            `6. Datas devem estar no formato YYYY-MM-DD.\n` +
+            `7. Evite fragmentar em muitos registros curtos.\n\n` +
+            `Texto bruto:\n${rawText}\n\n` +
+            `Responda APENAS JSON válido:\n` +
+            `{\n  "registros": [\n    {\n      "descricao_atividade": "texto objetivo",\n      "data_inicio": "YYYY-MM-DD",\n      "data_fim": "YYYY-MM-DD"\n    }\n  ]\n}`;
+
+          const genAI = new GoogleGenerativeAI(apiKey);
+          const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+          const result = await model.generateContent(prompt);
+          const raw = result.response.text().trim();
+          const jsonStr = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+          const parsed = JSON.parse(jsonStr);
+
+          const aiRows = Array.isArray(parsed?.registros) ? parsed.registros : [];
+          finalRows = aiRows
+            .map((r: any) => {
+              const start = normalizeISODate(r?.data_inicio);
+              const end = normalizeISODate(r?.data_fim || r?.data_inicio || start, start);
+              const descricao = String(r?.descricao_atividade || '').trim();
+              return { descricao_atividade: descricao, data_inicio: start, data_fim: end };
+            })
+            .filter((r: any) => r.descricao_atividade.length >= 8);
+        } catch (aiErr) {
+          console.error(aiErr);
+        }
+      }
+
+      if (finalRows.length === 0) finalRows = parsePgdRawTextFallback(rawText);
+      finalRows = collapsePgdRowsByPeriod(finalRows);
+
+      if (finalRows.length === 0) {
+        showToast('Não foi possível extrair registros do texto enviado.', 'error');
+        return;
+      }
+
+      const batch = writeBatch(db);
+      atividadesPGC
+        .filter(a => a.entrega_id === entregaId && a.origem === 'ia')
+        .forEach(a => batch.delete(doc(db, 'atividades_pgc', a.id)));
+
+      finalRows.forEach((row) => {
+        const ref = doc(collection(db, 'atividades_pgc'));
+        batch.set(ref, {
+          entrega_id: entregaId,
+          descricao_atividade: row.descricao_atividade,
+          data_inicio: row.data_inicio,
+          data_fim: row.data_fim,
+          status_atividade: 'rascunho',
+          usuario: user?.displayName || 'Usuário',
+          origem: 'ia',
+          task_ids: [],
+          data_criacao: new Date().toISOString(),
+          data_atualizacao: new Date().toISOString()
+        });
+      });
+
+      await batch.commit();
+      showToast(`${finalRows.length} registro(s) gerado(s) a partir do texto bruto.`, 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Erro ao processar texto bruto.', 'error');
+    } finally {
+      setPgdRawTextProcessingByEntrega(prev => ({ ...prev, [entregaId]: false }));
     }
   };
 
@@ -3334,6 +3726,111 @@ const App: React.FC = () => {
     return { gaps, totalWorkDays: workDays.length };
   }, [atividadesPGC, afastamentos]);
 
+  const pgdStatus = useMemo(() => {
+    const planKey = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+    const currentPlan = planosTrabalho.find(p => p.mes_ano === planKey);
+    const planItems = currentPlan?.itens || [];
+
+    const entregaStatus = planItems.map((item, index) => {
+      const entregaEntity = pgcEntregas.find(e => e.entrega === item.entrega);
+      const entregaId = entregaEntity?.id;
+      const tarefasCount = entregaId ? pgcTasks.filter(t => t.entregas_relacionadas?.includes(entregaId)).length : 0;
+      const registrosCount = entregaId ? atividadesPGC.filter(a => a.entrega_id === entregaId).length : 0;
+
+      return {
+        key: `${index}-${item.entrega}`,
+        entrega: item.entrega,
+        unidade: item.unidade,
+        percentual: item.percentual,
+        entregaId,
+        tarefasCount,
+        registrosCount
+      };
+    });
+
+    const entregaIds = new Set(
+      entregaStatus
+        .map(s => s.entregaId)
+        .filter((id): id is string => !!id)
+    );
+
+    const scopeActivities = atividadesPGC.filter(a => {
+      if (entregaIds.size === 0) return true;
+      return entregaIds.has(a.entrega_id);
+    });
+
+    const workDaysInMonth = getMonthWorkDays(currentYear, currentMonth);
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const isCurrentMonth = now.getFullYear() === currentYear && now.getMonth() === currentMonth;
+
+    const consideredWorkDays = workDaysInMonth.filter(day => {
+      if (!isCurrentMonth) return true;
+      return day <= now;
+    });
+
+    const expectedDays = consideredWorkDays.filter(day => {
+      const dayStr = formatDateLocalISO(day);
+      const isAfastado = afastamentos.some(af => {
+        const start = af.data_inicio.split('T')[0];
+        const end = af.data_fim.split('T')[0];
+        return dayStr >= start && dayStr <= end;
+      });
+      return !isAfastado;
+    });
+
+    const volumeByDayMap = new Map<string, number>();
+    scopeActivities.forEach((a) => {
+      const startIso = (a.data_inicio || '').split('T')[0];
+      const endIso = (a.data_fim || a.data_inicio || '').split('T')[0];
+      if (!startIso) return;
+
+      const cursor = new Date(`${startIso}T00:00:00`);
+      const end = new Date(`${endIso}T00:00:00`);
+      if (isNaN(cursor.getTime()) || isNaN(end.getTime())) return;
+
+      while (cursor <= end) {
+        if (cursor.getFullYear() === currentYear && cursor.getMonth() === currentMonth) {
+          const dayStr = formatDateLocalISO(cursor);
+          volumeByDayMap.set(dayStr, (volumeByDayMap.get(dayStr) || 0) + 1);
+        }
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    });
+
+    const volumeByDay = expectedDays.map((day) => {
+      const dayStr = formatDateLocalISO(day);
+      return {
+        dayStr,
+        label: day.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+        volume: volumeByDayMap.get(dayStr) || 0
+      };
+    });
+
+    const workedDays = volumeByDay.filter(d => d.volume > 0);
+    const notWorkedDays = volumeByDay.filter(d => d.volume === 0);
+    const coveragePct = expectedDays.length > 0
+      ? Math.round((workedDays.length / expectedDays.length) * 100)
+      : 100;
+    const maxVolume = Math.max(1, ...volumeByDay.map(d => d.volume));
+
+    return {
+      hasPlan: !!currentPlan,
+      planItemsCount: planItems.length,
+      totalWorkDaysInMonth: workDaysInMonth.length,
+      expectedDaysCount: expectedDays.length,
+      workedDaysCount: workedDays.length,
+      notWorkedDaysCount: notWorkedDays.length,
+      coveragePct,
+      maxVolume,
+      volumeByDay,
+      notWorkedDays,
+      entregasSemVinculo: entregaStatus.filter(s => s.tarefasCount === 0),
+      entregasSemRegistros: entregaStatus.filter(s => s.registrosCount === 0),
+      entregasSemCadastro: entregaStatus.filter(s => !s.entregaId)
+    };
+  }, [planosTrabalho, currentYear, currentMonth, pgcEntregas, pgcTasks, atividadesPGC, afastamentos]);
+
   if (authLoading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
@@ -3595,7 +4092,7 @@ const App: React.FC = () => {
                       onClick={() => setViewMode('pgc')}
                       className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pgc' ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
                     >
-                      PGC
+                      PGD
                     </button>
                   </div>
                 )}
@@ -3721,7 +4218,7 @@ const App: React.FC = () => {
                         >
                           Ações
                         </button>
-                        <button onClick={() => setViewMode('pgc')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pgc' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>PGC</button>
+                        <button onClick={() => setViewMode('pgc')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pgc' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>PGD</button>
                       </nav>
                     )}
                   </div>
@@ -3855,7 +4352,7 @@ const App: React.FC = () => {
                       { label: 'Dashboard', active: viewMode === 'dashboard', onClick: () => { setActiveModule('dashboard'); setViewMode('dashboard'); } },
                       { label: 'Ações', active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'licitacoes' || viewMode === 'assistencia'), onClick: () => { setActiveModule('acoes'); setViewMode('gallery'); } },
                       { label: 'Projetos', active: activeModule === 'projetos' && viewMode === 'projects', onClick: () => { setActiveModule('projetos'); setViewMode('projects'); } },
-                      { label: 'PGC', active: activeModule === 'acoes' && viewMode === 'pgc', onClick: () => { setActiveModule('acoes'); setViewMode('pgc'); } },
+                      { label: 'PGD', active: activeModule === 'acoes' && viewMode === 'pgc', onClick: () => { setActiveModule('acoes'); setViewMode('pgc'); } },
                       { label: 'Financeiro', active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
                       { label: 'Saúde', active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
                       { label: 'Sistemas', active: viewMode === 'sistemas-dev', onClick: () => { setActiveModule('acoes'); setViewMode('sistemas-dev'); } },
@@ -5313,7 +5810,7 @@ const App: React.FC = () => {
                   <div className="space-y-3 md:space-y-10">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 md:gap-6 bg-white p-3 md:p-8 rounded-none md:rounded-[2rem] border border-slate-200 shadow-xl">
                       <div className="hidden md:block">
-                        <h3 className="text-4xl font-black text-slate-900 tracking-tighter">Gestão PGC</h3>
+                        <h3 className="text-4xl font-black text-slate-900 tracking-tighter">Gestão PGD</h3>
                         <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(new Date(currentYear, currentMonth))}</p>
                       </div>
                       <div className="flex items-center gap-3 md:gap-4">
@@ -5351,6 +5848,12 @@ const App: React.FC = () => {
                         className={`px-2 py-3 md:py-4 text-[10px] font-black uppercase tracking-[0.2em] transition-all border-b-4 ${pgcSubView === 'plano' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
                       >
                         Plano
+                      </button>
+                      <button
+                        onClick={() => setPgcSubView('status')}
+                        className={`px-2 py-3 md:py-4 text-[10px] font-black uppercase tracking-[0.2em] transition-all border-b-4 ${pgcSubView === 'status' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                      >
+                        Status PGD
                       </button>
                     </div>
 
@@ -5393,7 +5896,7 @@ const App: React.FC = () => {
 
                                 return (
                                   <React.Fragment key={String(index)}>
-                                    <PgcAuditRow
+                                    <PgdAuditRow
                                       item={item}
                                       entregaEntity={entregaEntity}
                                       atividadesRelacionadas={atividadesRelacionadas}
@@ -5408,6 +5911,22 @@ const App: React.FC = () => {
                                       }}
                                       onUnlinkTarefa={handleUnlinkTarefa}
                                       onSelectTask={setSelectedTask}
+                                      onCreateActivity={(draft) => {
+                                        if (!entregaId) return;
+                                        handleCreatePgdActivity(entregaId, draft);
+                                      }}
+                                      onUpdateActivity={handleUpdatePgdActivity}
+                                      onDeleteActivity={handleDeletePgdActivity}
+                                      onGenerateWithAI={() => {
+                                        if (!entregaId) return;
+                                        handleGeneratePgdFromDiaries(entregaId, item, tarefasRelacionadas);
+                                      }}
+                                      onProcessRawText={(rawText) => {
+                                        if (!entregaId) return;
+                                        handleGeneratePgdFromRawText(entregaId, item, rawText);
+                                      }}
+                                      isGeneratingAI={entregaId ? !!pgdGeneratingByEntrega[entregaId] : false}
+                                      isProcessingRawText={entregaId ? !!pgdRawTextProcessingByEntrega[entregaId] : false}
                                     />
                                   </React.Fragment>
                                 );
@@ -5415,6 +5934,113 @@ const App: React.FC = () => {
                             })()}
                           </div>
                         </div>
+                      </div>
+                    )}
+
+                    {pgcSubView === 'status' && (
+                      <div className="animate-in space-y-6">
+                        {!pgdStatus.hasPlan ? (
+                          <div className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] p-10 text-center shadow-xl">
+                            <p className="text-slate-300 font-black text-sm uppercase tracking-widest italic">
+                              Nenhum plano de trabalho encontrado para este período.
+                            </p>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Dias úteis (mês)</p>
+                                <p className="mt-2 text-2xl font-black text-slate-900">{pgdStatus.totalWorkDaysInMonth}</p>
+                                <p className="text-[10px] text-slate-500">Previstos para prestação</p>
+                              </div>
+                              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Dias esperados</p>
+                                <p className="mt-2 text-2xl font-black text-slate-900">{pgdStatus.expectedDaysCount}</p>
+                                <p className="text-[10px] text-slate-500">Descontando afastamentos</p>
+                              </div>
+                              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Dias com registro</p>
+                                <p className="mt-2 text-2xl font-black text-emerald-600">{pgdStatus.workedDaysCount}</p>
+                                <p className="text-[10px] text-slate-500">Com atividade PGD registrada</p>
+                              </div>
+                              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Cobertura</p>
+                                <p className="mt-2 text-2xl font-black text-blue-600">{pgdStatus.coveragePct}%</p>
+                                <p className="text-[10px] text-slate-500">{pgdStatus.notWorkedDaysCount} dia(s) sem registro</p>
+                              </div>
+                            </div>
+
+                            <div className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] p-5 md:p-7 shadow-xl">
+                              <div className="flex items-center justify-between mb-4">
+                                <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Volume de trabalho por dia</h4>
+                                <span className="text-[10px] font-black text-slate-400 uppercase">
+                                  {pgdStatus.volumeByDay.length} dia(s) monitorados
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 xl:grid-cols-9 gap-2">
+                                {pgdStatus.volumeByDay.map((d) => {
+                                  const widthPct = Math.round((d.volume / pgdStatus.maxVolume) * 100);
+                                  return (
+                                    <div key={d.dayStr} className="border border-slate-200 rounded-xl p-2 bg-slate-50/50">
+                                      <p className="text-[10px] font-black text-slate-600">{d.label}</p>
+                                      <div className="mt-2 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                                        <div
+                                          className={`h-full rounded-full ${d.volume > 0 ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                                          style={{ width: `${widthPct}%` }}
+                                        />
+                                      </div>
+                                      <p className="mt-1 text-[10px] font-bold text-slate-500">{d.volume} registro(s)</p>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                                <h5 className="text-[10px] font-black uppercase tracking-widest text-rose-600">Entregas sem vínculo</h5>
+                                <p className="text-[10px] text-slate-400 mt-1">Sem ações vinculadas</p>
+                                <div className="mt-3 space-y-2 max-h-64 overflow-y-auto pr-1">
+                                  {pgdStatus.entregasSemVinculo.length === 0 ? (
+                                    <p className="text-[11px] text-slate-400">Nenhuma pendência.</p>
+                                  ) : pgdStatus.entregasSemVinculo.map((e) => (
+                                    <div key={`v-${e.key}`} className="p-2 rounded-lg border border-slate-200 bg-slate-50">
+                                      <p className="text-[11px] font-bold text-slate-700">{e.entrega}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                                <h5 className="text-[10px] font-black uppercase tracking-widest text-amber-600">Entregas sem registro</h5>
+                                <p className="text-[10px] text-slate-400 mt-1">Sem execução PGD registrada</p>
+                                <div className="mt-3 space-y-2 max-h-64 overflow-y-auto pr-1">
+                                  {pgdStatus.entregasSemRegistros.length === 0 ? (
+                                    <p className="text-[11px] text-slate-400">Nenhuma pendência.</p>
+                                  ) : pgdStatus.entregasSemRegistros.map((e) => (
+                                    <div key={`r-${e.key}`} className="p-2 rounded-lg border border-slate-200 bg-slate-50">
+                                      <p className="text-[11px] font-bold text-slate-700">{e.entrega}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                                <h5 className="text-[10px] font-black uppercase tracking-widest text-blue-600">Dias úteis sem registro</h5>
+                                <p className="text-[10px] text-slate-400 mt-1">Até o dia atual</p>
+                                <div className="mt-3 flex flex-wrap gap-2 max-h-64 overflow-y-auto pr-1">
+                                  {pgdStatus.notWorkedDays.length === 0 ? (
+                                    <p className="text-[11px] text-slate-400">Nenhum dia pendente.</p>
+                                  ) : pgdStatus.notWorkedDays.map((d) => (
+                                    <span key={d.dayStr} className="px-2 py-1 rounded-lg border border-slate-200 bg-slate-50 text-[10px] font-black text-slate-600">
+                                      {d.label}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          </>
+                        )}
                       </div>
                     )}
 
