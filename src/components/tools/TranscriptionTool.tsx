@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+﻿import React, { useState, useRef, useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/firebase';
 
@@ -46,7 +46,7 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
         if (pastedFile.type.startsWith('audio/') || pastedFile.type.startsWith('video/')) {
           handleFileSelection(pastedFile);
         } else {
-          showToast("Arquivo colado não é áudio ou vídeo.", "error");
+          showToast("Arquivo colado não Ã© áudio ou vÃ­deo.", "error");
         }
       }
     };
@@ -72,14 +72,14 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
     const updatedHistory = history.filter(h => h.id !== id);
     setHistory(updatedHistory);
     localStorage.setItem(TRANSCRIPTION_HISTORY_KEY, JSON.stringify(updatedHistory));
-    showToast("Transcrição removida do histórico.", "info");
+    showToast("TranscriÃ§ão removida do histórico.", "info");
   };
 
   const loadFromHistory = (entry: TranscriptionHistoryEntry) => {
     setTranscription({ raw: entry.raw, refined: entry.refined });
     setFile(null);
     setAudioUrl(null);
-    showToast("Transcrição carregada do histórico.", "success");
+    showToast("TranscriÃ§ão carregada do histórico.", "success");
   };
 
   const handleFileSelection = (selectedFile: File) => {
@@ -124,7 +124,7 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
           const data = response.data as { raw: string, refined: string };
           setTranscription(data);
           saveToHistory(data, file.name, file.size);
-          showToast("Transcrição concluída!", "success");
+          showToast("TranscriÃ§ão concluÃ­da!", "success");
         } catch (error) {
           console.error("Erro ao transcrever:", error);
           showToast("Erro ao processar áudio.", "error");
@@ -158,7 +158,7 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
         </button>
         <div className="flex-1">
-          <h2 className="text-3xl font-black text-slate-900 tracking-tighter">Transcrição de Áudio</h2>
+          <h2 className="text-3xl font-black text-slate-900 tracking-tighter">TranscriÃ§ão de Ãudio</h2>
           <p className="text-slate-500 font-medium">Transcreva áudios do WhatsApp e outros formatos com IA.</p>
         </div>
       </div>
@@ -224,14 +224,9 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
                     <div>
                       <p className="text-lg font-black text-slate-900">Arraste e solte o áudio aqui</p>
                       <p className="text-slate-400 text-sm font-medium">Ou clique para selecionar (MP3, OGG, WAV, MP4)</p>
-                      <p className="text-slate-300 text-xs font-bold mt-2">Você também pode colar (Ctrl+V) o arquivo direto.</p>
+                      <p className="text-slate-300 text-xs font-bold mt-2">VocÃª tambÃ©m pode colar (Ctrl+V) o arquivo direto.</p>
                     </div>
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="px-8 py-3 bg-white border border-slate-200 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:border-blue-400 hover:text-blue-600 transition-all"
-                    >
-                      Selecionar Arquivo
-                    </button>
+                    <label className="px-8 py-3 bg-white border border-slate-200 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:border-blue-400 hover:text-blue-600 transition-all cursor-pointer select-none"><input type="file" className="hidden" accept="audio/*,video/mp4,video/mpeg" onChange={(e) => { if (e.target.files && e.target.files.length > 0) handleFileSelection(e.target.files[0]); }} />Selecionar Arquivo</label>
                   </>
                 )}
               </div>
@@ -260,14 +255,14 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
                    </div>
 
                    <div className="pt-6 border-t border-slate-100 space-y-2 opacity-60 hover:opacity-100 transition-opacity">
-                     <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Transcrição Bruta</label>
+                     <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest">TranscriÃ§ão Bruta</label>
                      <p className="text-slate-500 text-sm leading-relaxed whitespace-pre-wrap">{transcription.raw}</p>
                    </div>
                  </div>
                ) : (
                  <div className="flex-1 flex flex-col items-center justify-center text-center space-y-4 opacity-40">
                    <svg className="w-16 h-16 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-                   <p className="text-slate-400 font-bold">A transcrição aparecerá aqui.</p>
+                   <p className="text-slate-400 font-bold">A transcriÃ§ão aparecerá aqui.</p>
                  </div>
                )}
             </div>
@@ -289,7 +284,7 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
                     <div className="flex-1 min-w-0 pr-8">
                       <p className="text-sm font-black text-slate-900 truncate">{entry.fileName}</p>
                       <p className="text-[10px] font-bold text-slate-400">
-                        {new Date(entry.date).toLocaleDateString('pt-BR')} • {(entry.fileSize / 1024 / 1024).toFixed(2)} MB
+                        {new Date(entry.date).toLocaleDateString('pt-BR')} â€¢ {(entry.fileSize / 1024 / 1024).toFixed(2)} MB
                       </p>
                     </div>
                     <button
@@ -331,7 +326,7 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center text-center opacity-40 py-10">
                 <svg className="w-12 h-12 text-slate-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                <p className="text-xs font-bold text-slate-400">Nenhum histórico disponível.</p>
+                <p className="text-xs font-bold text-slate-400">Nenhum histórico disponÃ­vel.</p>
               </div>
             )}
           </div>
@@ -340,3 +335,4 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
     </div>
   );
 };
+

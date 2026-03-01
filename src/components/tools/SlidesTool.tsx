@@ -26,7 +26,7 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast }) => 
   });
 
   const saveToHistory = (data: any, draft: string, existingId?: string | null) => {
-    const title = data?.slides?.[0]?.titulo || 'ApresentaÃ§Ã£o';
+    const title = data?.slides?.[0]?.titulo || 'ApresentaÃ§ão';
     const entry: SlideHistoryEntry = {
       id: existingId || `slides_${Date.now()}`,
       title,
@@ -67,7 +67,7 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast }) => 
       }
       setPresentation(data);
       setCurrentHistoryId(saveToHistory(data, rascunho));
-      showToast("ApresentaÃ§Ã£o gerada com sucesso!", "success");
+      showToast("ApresentaÃ§ão gerada com sucesso!", "success");
     } catch (err) { console.error(err); showToast("Erro ao gerar slides.", "error"); }
     finally { setIsGenerating(false); }
   };
@@ -111,7 +111,7 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast }) => 
   };
 
   const addTopico = (si: number) => {
-    const novo = 'Novo tÃ³pico';
+    const novo = 'Novo tópico';
     const updated = { ...presentation, slides: presentation.slides.map((s: any, i: number) => i !== si ? s : { ...s, topicos: [...(s.topicos || []), novo] }) };
     setPresentation(updated); syncHistory(updated);
     startEditing(si, updated.slides[si].topicos.length - 1, novo);
@@ -138,7 +138,7 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast }) => 
         <div className="flex justify-between items-start mb-8">
           <span className="text-[10px] font-black text-white/30 uppercase tracking-[0.3em]">Slide {slide.numero} â€¢ {slide.layout}</span>
           <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button onClick={() => addTopico(idx)} title="Adicionar tÃ³pico" className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/60 hover:text-white transition-all">
+            <button onClick={() => addTopico(idx)} title="Adicionar tópico" className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/60 hover:text-white transition-all">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
             </button>
             <button onClick={() => { navigator.clipboard.writeText(`${slide.titulo}\n${slide.topicos.join('\n')}`); showToast("Copiado!", "success"); }} className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/60 hover:text-white transition-all">
@@ -194,12 +194,12 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast }) => 
         </button>
         <div className="flex-1">
           <h2 className="text-3xl font-black text-slate-900 tracking-tighter">Gerador de Slides IA</h2>
-          <p className="text-slate-500 font-medium">Transforme textos complexos em apresentaÃ§Ãµes profissionais.</p>
+          <p className="text-slate-500 font-medium">Transforme textos complexos em apresentações profissionais.</p>
         </div>
         <div className="flex bg-slate-100 p-1 rounded-2xl">
           <button onClick={() => setView('editor')} className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${view === 'editor' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>Editor</button>
           <button onClick={() => setView('history')} className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${view === 'history' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
-            HistÃ³rico
+            Histórico
             {history.length > 0 && <span className="bg-orange-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full">{history.length}</span>}
           </button>
         </div>
@@ -211,7 +211,7 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast }) => 
           {history.length === 0 ? (
             <div className="py-24 flex flex-col items-center justify-center text-slate-300 space-y-4">
               <svg className="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              <p className="font-black uppercase tracking-widest text-sm">Nenhuma apresentaÃ§Ã£o salva ainda</p>
+              <p className="font-black uppercase tracking-widest text-sm">Nenhuma apresentaÃ§ão salva ainda</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -234,7 +234,7 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast }) => 
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                       Editar
                     </button>
-                    <button onClick={() => { if (pendingDeleteHistoryId === entry.id) { setPendingDeleteHistoryId(null); deleteFromHistory(entry.id); } else { setPendingDeleteHistoryId(entry.id); window.setTimeout(() => setPendingDeleteHistoryId((current) => (current === entry.id ? null : current)), 3500); } }} title="Excluir do histÃ³rico" className={`p-2 rounded-xl transition-all ${pendingDeleteHistoryId === entry.id ? 'bg-rose-500 text-white' : 'text-slate-300 hover:text-rose-500 hover:bg-rose-50'}`}>
+                    <button onClick={() => { if (pendingDeleteHistoryId === entry.id) { setPendingDeleteHistoryId(null); deleteFromHistory(entry.id); } else { setPendingDeleteHistoryId(entry.id); window.setTimeout(() => setPendingDeleteHistoryId((current) => (current === entry.id ? null : current)), 3500); } }} title="Excluir do histórico" className={`p-2 rounded-xl transition-all ${pendingDeleteHistoryId === entry.id ? 'bg-rose-500 text-white' : 'text-slate-300 hover:text-rose-500 hover:bg-rose-50'}`}>
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                     </button>
                   </div>
@@ -256,7 +256,7 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast }) => 
                   }
                 }}
                   className={`w-full mt-4 py-3 text-[9px] font-black uppercase tracking-widest transition-colors ${isConfirmingClearHistory ? 'text-rose-500' : 'text-slate-300 hover:text-rose-500'}`}
-                >Limpar todo o histÃ³rico
+                >Limpar todo o histórico
                 </button>
               )}
             </div>
@@ -272,7 +272,7 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast }) => 
               <div>
                 <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 ml-1">ConteÃºdo Base (Texto Bruto)</label>
                 <AutoExpandingTextarea className="w-full bg-slate-50 border border-slate-100 rounded-[1.5rem] p-6 text-slate-800 font-bold leading-relaxed outline-none focus:ring-4 focus:ring-orange-100 transition-all min-h-[300px]"
-                  placeholder="Cole aqui o texto, atas de reuniÃ£o, artigos ou tÃ³picos que deseja transformar em slides..."
+                  placeholder="Cole aqui o texto, atas de reunião, artigos ou tópicosque deseja transformar em slides..."
                   value={rascunho} onChange={e => setRascunho(e.target.value)} />
               </div>
               <div className="flex items-end gap-6">
@@ -281,7 +281,7 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast }) => 
                   <input type="number" min="1" max="20" className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-slate-800 font-black outline-none focus:ring-4 focus:ring-orange-100 transition-all" value={qtdSlides} onChange={e => setQtdSlides(parseInt(e.target.value))} />
                 </div>
                 <button onClick={handleGenerate} disabled={isGenerating} className={`flex-[2] h-14 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-3 shadow-xl transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:grayscale ${isGenerating ? 'animate-pulse' : ''}`}>
-                  {isGenerating ? (<><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>Processando...</>) : (<><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>Gerar ApresentaÃ§Ã£o</>)}
+                  {isGenerating ? (<><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>Processando...</>) : (<><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>Gerar ApresentaÃ§ão</>)}
                 </button>
               </div>
             </div>
@@ -290,7 +290,7 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast }) => 
               <div className="bg-white p-5 rounded-[2rem] border border-slate-200 shadow-lg flex items-center justify-between gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div>
                   <p className="text-xs font-black text-slate-900">{presentation.slides?.length} slides gerados</p>
-                  <p className="text-[10px] text-slate-400 font-medium">Clique em qualquer tÃ­tulo ou tÃ³pico para editar</p>
+                  <p className="text-[10px] text-slate-400 font-medium">Clique em qualquer tÃ­tulo ou tópico para editar</p>
                 </div>
                 <div className="flex gap-3">
                   <button onClick={() => { const t = presentation.slides.map((s: any) => `${s.titulo}\n${(s.topicos || []).join('\n')}`).join('\n\n'); navigator.clipboard.writeText(t); showToast("ConteÃºdo copiado!", "success"); }}
@@ -319,8 +319,8 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast }) => 
               <div className="h-full flex flex-col items-center justify-center space-y-6 text-slate-200">
                 <svg className="w-24 h-24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
                 <div className="text-center space-y-3">
-                  <p className="font-bold">Nenhuma apresentaÃ§Ã£o gerada.<br /><span className="text-sm font-medium opacity-60">Seus slides aparecerÃ£o aqui.</span></p>
-                  {history.length > 0 && <button onClick={() => setView('history')} className="text-[10px] font-black uppercase tracking-widest text-orange-400 hover:text-orange-500 transition-colors">Ver {history.length} apresentaÃ§Ã£o{history.length > 1 ? 'Ãµes' : ''} salva{history.length > 1 ? 's' : ''} â†’</button>}
+                  <p className="font-bold">Nenhuma apresentaÃ§ão gerada.<br /><span className="text-sm font-medium opacity-60">Seus slides aparecerão aqui.</span></p>
+                  {history.length > 0 && <button onClick={() => setView('history')} className="text-[10px] font-black uppercase tracking-widest text-orange-400 hover:text-orange-500 transition-colors">Ver {history.length} apresentaÃ§ão{history.length > 1 ? 'ões' : ''} salva{history.length > 1 ? 's' : ''} â†’</button>}
                 </div>
               </div>
             )}

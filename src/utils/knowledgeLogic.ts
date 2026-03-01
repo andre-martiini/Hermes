@@ -250,7 +250,8 @@ export function filterCurrentItems(
                     ROOT_FOLDER_ORDER.indexOf(a.id as typeof ROOT_FOLDER_ORDER[number]) -
                     ROOT_FOLDER_ORDER.indexOf(b.id as typeof ROOT_FOLDER_ORDER[number])
             );
-        return roots;
+        const bibliotecaItems = sortItems(items.filter(item => item.parent_id === 'biblioteca' || item.parent_id === null));
+        return [...roots, ...bibliotecaItems];
     }
 
     if (currentFolderId === ROOT_ACTIONS_FOLDER_ID) {

@@ -18,7 +18,7 @@ import { AutoExpandingTextarea } from './src/components/ui/UIComponents';
 
 interface KnowledgeViewProps {
     items: ConhecimentoItem[];
-    onUploadFile: (file: File, destinationFolderId?: string | null) => void;
+    onUploadFile: (file: File, destinationFolderId?: string | null) => Promise<ConhecimentoItem | null> | Promise<void> | void;
     onAddLink?: (url: string, title: string, destinationFolderId?: string | null) => Promise<void>;
     onSaveItem?: (item: Partial<ConhecimentoItem>) => Promise<void>;
     onRenameAction?: (taskId: string, title: string) => Promise<void>;
@@ -35,9 +35,13 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
     const [searchTerm, setSearchTerm] = useState('');
     const [searchMode, setSearchMode] = useState<KnowledgeSearchMode>('all');
     const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+    const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
+    const [moveTargetFolderId, setMoveTargetFolderId] = useState<string | null>(null);
     const [selectedItem, setSelectedItem] = useState<ConhecimentoItem | null>(null);
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
     const [isProcessingAI, setIsProcessingAI] = useState(false);
+    const [isUploading, setIsUploading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const [isOcrExpanded, setIsOcrExpanded] = useState(false);
     const [newTag, setNewTag] = useState('');
     const [pendingDeleteItemId, setPendingDeleteItemId] = useState<string | null>(null);
@@ -729,9 +733,18 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                         <input
                             type="file"
                             className="hidden"
-                            onChange={(e) => {
+                            ref={fileInputRef}
+                            onChange={async (e) => {
                                 const file = e.target.files?.[0];
-                                if (file) onUploadFile(file, currentFolderId);
+                                if (file) {
+                                    setIsUploading(true);
+                                    try {
+                                        await onUploadFile(file, currentFolderId);
+                                    } finally {
+                                        setIsUploading(false);
+                                        if (fileInputRef.current) fileInputRef.current.value = '';
+                                    }
+                                }
                             }}
                         />
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
@@ -787,6 +800,57 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                         )}
                     </div>
 
+                    {selectedItems.size > 0 ? (
+                        <div className="flex-1 flex items-center justify-end gap-3 animate-in fade-in duration-200">
+                            <span className="text-xs font-bold text-slate-500 mr-2">{selectedItems.size} selecionado(s)</span>
+                            {selectedItems.size === 1 && (
+                                <button
+                                    onClick={() => {
+                                        const item = items.find(i => i.id === Array.from(selectedItems)[0]);
+                                        if (item && !item.is_folder) {
+                                            setSelectedItem(item);
+                                        } else if (item && item.is_folder && !isVirtualItem(item)) {
+                                            startItemRename(item);
+                                        }
+                                    }}
+                                    className="p-2 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-[10px] font-black uppercase tracking-widest transition-colors flex items-center gap-2"
+                                >
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                    Editar
+                                </button>
+                            )}
+                            <button
+                                onClick={() => {
+                                    setMoveTargetFolderId(currentFolderId);
+                                    setIsMoveModalOpen(true);
+                                }}
+                                className="p-2 bg-purple-50 text-purple-600 hover:bg-purple-100 rounded-lg text-[10px] font-black uppercase tracking-widest transition-colors flex items-center gap-2"
+                            >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg>
+                                Mover
+                            </button>
+                            <button
+                                onClick={() => {
+                                    const persistedSelectedIds = Array.from(selectedItems).filter(id => items.some(item => item.id === id));
+                                    if (window.confirm(`Tem certeza que deseja deletar ${persistedSelectedIds.length} item(s)?`)) {
+                                        persistedSelectedIds.forEach(id => onDeleteItem(id));
+                                        setSelectedItems(new Set());
+                                    }
+                                }}
+                                className="p-2 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-[10px] font-black uppercase tracking-widest transition-colors flex items-center gap-2"
+                            >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                Excluir
+                            </button>
+                            <button
+                                onClick={() => setSelectedItems(new Set())}
+                                className="p-2 text-slate-400 hover:text-slate-600 rounded-lg transition-colors ml-2"
+                                title="Limpar Seleção"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+                    ) : (
                     <div className="flex-1 max-w-xl flex items-center gap-3">
                         <div className="flex-1 relative">
                             <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
@@ -820,6 +884,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                             </button>
                         </div>
                     </div>
+                    )}
 
                     <div className="flex bg-slate-100 p-1 rounded-xl">
                         <button
@@ -959,6 +1024,21 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                     onContextMenu={(e) => handleContextMenu(e, item)}
                                     className={`bg-white p-4 rounded-2xl border ${selectedItems.has(item.id) ? 'border-blue-500 shadow-md ring-2 ring-blue-100' : 'border-slate-100 shadow-sm hover:shadow-lg hover:border-blue-200'} transition-all cursor-pointer group flex flex-col items-center text-center gap-3 relative ${item.is_folder ? 'bg-amber-50/10' : ''}`}
                                 >
+                                    <div className={`absolute top-3 left-3 z-10 transition-opacity flex items-center shrink-0 ${selectedItems.has(item.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                                        <input 
+                                            type="checkbox"
+                                            checked={selectedItems.has(item.id)}
+                                            onChange={(e) => {
+                                                e.stopPropagation();
+                                                const next = new Set(selectedItems);
+                                                if (e.target.checked) next.add(item.id);
+                                                else next.delete(item.id);
+                                                setSelectedItems(next);
+                                            }}
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                        />
+                                    </div>
                                     <div className={`p-3 rounded-2xl transition-colors ${item.is_folder ? 'text-amber-400' : 'bg-slate-50 group-hover:bg-blue-50'}`}>
                                         {getFileIcon(item)}
                                     </div>
@@ -1045,7 +1125,22 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                         >
                                             <td className="pl-6 pr-3 py-3">
                                                 <div className="flex items-center gap-3 min-w-0">
-                                                    <div className="w-8 h-8 flex items-center justify-center shrink-0">
+                                                    <div className={`transition-opacity flex items-center shrink-0 ${selectedItems.has(item.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                                                        <input 
+                                                            type="checkbox"
+                                                            checked={selectedItems.has(item.id)}
+                                                            onChange={(e) => {
+                                                                e.stopPropagation();
+                                                                const next = new Set(selectedItems);
+                                                                if (e.target.checked) next.add(item.id);
+                                                                else next.delete(item.id);
+                                                                setSelectedItems(next);
+                                                            }}
+                                                            onClick={(e) => e.stopPropagation()}
+                                                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                                        />
+                                                    </div>
+                                                    <div className={`w-8 h-8 flex items-center justify-center shrink-0 transition-opacity ${selectedItems.has(item.id) ? 'hidden' : 'group-hover:hidden'}`}>
                                                         {getFileIcon(item)}
                                                     </div>
                                                     {renamingItemId === item.id ? (
@@ -1206,8 +1301,17 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                         <div className="flex-1 overflow-y-auto p-8 custom-scrollbar space-y-10">
                             {/* Native Previews for Desktop UX */}
                             {currentItem.tipo_arquivo === 'pdf' && currentItem.url_drive && (
-                                <section className="h-96 w-full rounded-[2rem] overflow-hidden border border-slate-200 shadow-inner">
-                                    <iframe src={currentItem.url_drive} className="w-full h-full" title="PDF Preview" />
+                                <section className="w-full bg-slate-50 rounded-[2rem] p-8 border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-center gap-4">
+                                    <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mb-2">
+                                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                    </div>
+                                    <div>
+                                        <h4 className="text-lg font-black text-slate-800">Visualização de Documento</h4>
+                                        <p className="text-sm font-bold text-slate-500 max-w-sm mt-2">Para visualizar o arquivo com segurança e evitar bloqueios de permissão do Google Drive, abra-o em uma nova guia.</p>
+                                    </div>
+                                    <a href={currentItem.url_drive} target="_blank" rel="noopener noreferrer" className="mt-2 bg-blue-600 text-white px-8 py-4 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all flex items-center gap-2">
+                                        Abrir no Google Drive
+                                    </a>
                                 </section>
                             )}
 
@@ -1458,6 +1562,90 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                             >
                                 Salvar
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Move Modal */}
+            {isMoveModalOpen && (
+                <div className="fixed inset-0 z-[300] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-300">
+                    <div className="bg-white w-full max-w-lg rounded-[2rem] shadow-2xl p-8 animate-in zoom-in-95 flex flex-col max-h-[80vh]">
+                        <h3 className="text-xl font-black text-slate-900 tracking-tight mb-6">Mover {selectedItems.size} item(s)</h3>
+                        <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                            <div className="space-y-1">
+                                <button
+                                    onClick={() => setMoveTargetFolderId(null)}
+                                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl transition-all mb-1 ${moveTargetFolderId === null ? 'bg-slate-100 text-slate-900 font-bold' : 'text-slate-500 hover:bg-slate-50'}`}
+                                >
+                                    <svg className="w-4 h-4 text-amber-400" fill="currentColor" viewBox="0 0 24 24"><path d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" /></svg>
+                                    <span className="text-[11px] font-medium">Biblioteca</span>
+                                </button>
+                                {(sidebarChildrenByParent.get(null) || [])
+                                    .map(folder => {
+                                        // A simple recursive renderer just for the move modal
+                                        const renderMoveFolder = (f: ConhecimentoItem, depth: number) => {
+                                            const children = sidebarChildrenByParent.get(f.id) || [];
+                                            const isSelected = moveTargetFolderId === f.id;
+                                            // Do not show folders that are currently selected to be moved
+                                            if (selectedItems.has(f.id)) return null;
+
+                                            return (
+                                                <div key={f.id}>
+                                                    <button
+                                                        onClick={() => setMoveTargetFolderId(f.id)}
+                                                        style={{ marginLeft: `${depth * 12}px` }}
+                                                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl transition-all mb-1 ${isSelected ? 'bg-slate-100 text-slate-900 font-bold' : 'text-slate-500 hover:bg-slate-50'}`}
+                                                    >
+                                                        <span className="w-4 h-4 min-w-[16px] shrink-0 flex items-center justify-center text-amber-400">
+                                                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" /></svg>
+                                                        </span>
+                                                        <span className="text-[11px] truncate">{f.titulo}</span>
+                                                    </button>
+                                                    {children.map(child => renderMoveFolder(child, depth + 1))}
+                                                </div>
+                                            );
+                                        };
+                                        return renderMoveFolder(folder, 0);
+                                    })}
+                            </div>
+                        </div>
+                        <div className="flex gap-4 mt-8 pt-4 border-t border-slate-100 shrink-0">
+                            <button onClick={() => setIsMoveModalOpen(false)} className="flex-1 py-4 text-[10px] font-black uppercase text-slate-400 hover:bg-slate-50 rounded-2xl">Cancelar</button>
+                            <button
+                                onClick={async () => {
+                                    if (onSaveItem) {
+                                        for (const id of Array.from(selectedItems)) {
+                                            const item = items.find(i => i.id === id);
+                                            // Make sure we are not moving a file onto itself or a folder onto its own children... simple check for self
+                                            if (item && item.id !== moveTargetFolderId) {
+                                                await onSaveItem({ id: item.id, parent_id: moveTargetFolderId === 'biblioteca' ? null : moveTargetFolderId });
+                                            }
+                                        }
+                                    }
+                                    setSelectedItems(new Set());
+                                    setIsMoveModalOpen(false);
+                                }}
+                                className="flex-1 bg-purple-600 text-white py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-purple-700 transition-all"
+                            >
+                                Mover para Aqui
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Upload Modal Overlay */}
+            {isUploading && (
+                <div className="fixed inset-0 z-[500] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center animate-in fade-in">
+                    <div className="bg-white p-8 rounded-[2rem] shadow-2xl flex flex-col items-center gap-6 animate-in zoom-in-95">
+                        <svg className="w-12 h-12 animate-spin text-blue-600" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <div className="text-center">
+                            <p className="text-sm font-black text-slate-800 uppercase tracking-widest mb-1">Enviando Arquivo</p>
+                            <p className="text-xs font-bold text-slate-500">Por favor, aguarde...</p>
                         </div>
                     </div>
                 </div>

@@ -946,7 +946,7 @@ const App: React.FC = () => {
   const [isImportPlanOpen, setIsImportPlanOpen] = useState(false);
   const [isCompletedTasksOpen, setIsCompletedTasksOpen] = useState(false);
   const [brainstormIdeas, setBrainstormIdeas] = useState<BrainstormIdea[]>([]);
-  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | 'shopping' | 'transcription' | null>(null);
+  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | null>(null);
   const [isBrainstormingAddingText, setIsBrainstormingAddingText] = useState(false);
   const [confirmDeleteLogId, setConfirmDeleteLogId] = useState<string | null>(null);
   const [convertingIdea, setConvertingIdea] = useState<BrainstormIdea | null>(null);
@@ -2256,7 +2256,7 @@ const App: React.FC = () => {
   const resolveKnowledgeDestinationMetadata = (
     destinationFolderId?: string | null
   ): { parent_id: string | null; categoria?: string; origem?: ConhecimentoItem['origem'] } => {
-    if (!destinationFolderId) return { parent_id: null as string | null };
+    if (!destinationFolderId || destinationFolderId === 'biblioteca') return { parent_id: 'biblioteca' };
 
     if (destinationFolderId === ROOT_ACTIONS_FOLDER_ID) {
       return { parent_id: null as string | null, categoria: 'Ações' };
@@ -2280,7 +2280,7 @@ const App: React.FC = () => {
     return { parent_id: destinationFolderId };
   };
 
-  const handleUploadKnowledgeFile = async (file: File, destinationFolderId?: string | null) => {
+  const handleUploadKnowledgeFile = async (file: File, destinationFolderId?: string | null): Promise<ConhecimentoItem | null> => {
     const item = await handleFileUploadToDrive(file);
     if (item) {
       const destinationMetadata = resolveKnowledgeDestinationMetadata(destinationFolderId);
@@ -2297,7 +2297,9 @@ const App: React.FC = () => {
       };
       await setDoc(doc(db, 'conhecimento', item.id), knowledgeItem);
       showToast("Arquivo enviado e indexação iniciada.", "success");
+      return knowledgeItem;
     }
+    return null;
   };
 
   const handleProcessarIA = async (itemId: string) => {
@@ -4894,6 +4896,8 @@ const App: React.FC = () => {
                     setIsAddingText={setIsBrainstormingAddingText}
                     showToast={showToast}
                     showAlert={showAlert}
+                    knowledgeItems={knowledgeItems}
+                    onUploadFile={handleUploadKnowledgeFile}
                   />
                 ) : viewMode === 'projects' ? (
                   <ProjectsView
@@ -6475,3 +6479,4 @@ if (container) {
   }
   window.__hermesReactRoot.render(<App />);
 }
+

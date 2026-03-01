@@ -1,11 +1,12 @@
-import React, { useState, useRef } from 'react';
+﻿import React, { useState, useRef } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/firebase';
-import { BrainstormIdea, formatDate } from '@/types';
+import { BrainstormIdea, formatDate, ConhecimentoItem } from '@/types';
 import { AutoExpandingTextarea } from '../ui/UIComponents';
 import { SlidesTool } from './SlidesTool';
 import { ShoppingListTool } from './ShoppingListTool';
 import { TranscriptionTool } from './TranscriptionTool';
+import { ChoirRehearsalsTool } from './ChoirRehearsalsTool';
 
 interface FerramentasViewProps {
   ideas: BrainstormIdea[];
@@ -15,12 +16,14 @@ interface FerramentasViewProps {
   onUpdateIdea: (id: string, text: string) => void;
   onConvertToLog: (idea: BrainstormIdea) => void;
   onConvertToTask: (idea: BrainstormIdea) => void;
-  activeTool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | null;
-  setActiveTool: (tool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | null) => void;
+  activeTool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | null;
+  setActiveTool: (tool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | null) => void;
   isAddingText: boolean;
   setIsAddingText: (val: boolean) => void;
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
   showAlert: (title: string, msg: string) => void;
+  knowledgeItems: ConhecimentoItem[];
+  onUploadFile: (file: File) => Promise<ConhecimentoItem | null>;
 }
 
 export const FerramentasView: React.FC<FerramentasViewProps> = ({
@@ -36,7 +39,9 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   isAddingText,
   setIsAddingText,
   showToast,
-  showAlert
+  showAlert,
+  knowledgeItems,
+  onUploadFile
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [textInput, setTextInput] = useState('');
@@ -91,6 +96,15 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
     return <TranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} />;
   }
 
+  if (activeTool === 'choir_rehearsals') {
+    return <ChoirRehearsalsTool 
+             onBack={() => setActiveTool(null)} 
+             showToast={showToast} 
+             knowledgeItems={knowledgeItems} 
+             onUploadFile={onUploadFile} 
+           />;
+  }
+
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -107,7 +121,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
       setIsRecording(true);
     } catch (err) {
       console.error("Erro ao acessar microfone:", err);
-      showAlert("Erro", "Permissão de microfone negada ou não disponível.");
+      showAlert("Erro", "Permissão de microfone negada ou não disponÃ­vel.");
     }
   };
 
@@ -199,6 +213,19 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
             <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Transcreva e refine áudios do WhatsApp e outros.</p>
           </div>
         </button>
+
+        <button
+          onClick={() => setActiveTool('choir_rehearsals')}
+          className={toolCardClass}
+        >
+          <div className="w-12 h-12 md:w-16 md:h-16 bg-rose-50 rounded-none md:rounded-2xl flex items-center justify-center text-rose-600 group-hover:bg-rose-600 group-hover:text-white transition-all flex-shrink-0">
+            <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
+          </div>
+          <div>
+            <h3 className="text-lg md:text-2xl font-black text-slate-900 tracking-tighter mb-1 md:mb-2">Ensaios do Coral</h3>
+            <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Gestão de repertório, partituras e áudios.</p>
+          </div>
+        </button>
       </div>
     );
   }
@@ -235,7 +262,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
           <div className="w-full animate-in slide-in-from-top-2 duration-500">
             <div className="bg-white p-2 rounded-none md:rounded-[2rem] border-2 border-slate-100 shadow-none md:shadow-xl flex items-center gap-4 focus-within:border-blue-500 transition-all">
               <button
-                onClick={isRecording ? startRecording : startRecording}
+                onClick={isRecording ? stopRecording : startRecording}
                 disabled={isProcessing}
                 className={`p-4 rounded-none md:rounded-2xl transition-all flex-shrink-0 ${isRecording
                   ? 'bg-rose-600 text-white animate-pulse shadow-lg'
@@ -326,7 +353,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
           {activeIdeas.length === 0 && !isProcessing && (
             <div className="col-span-full py-20 text-center border-4 border-dashed border-slate-100 rounded-none md:rounded-none md:rounded-[3rem]">
               <p className="text-slate-300 font-black text-xl uppercase tracking-widest">Nenhuma nota ativa</p>
-              <p className="text-slate-400 text-sm font-medium mt-2">Grave ou digite uma nota para começar.</p>
+              <p className="text-slate-400 text-sm font-medium mt-2">Grave ou digite uma nota para comeÃ§ar.</p>
             </div>
           )}
         </div>
@@ -381,3 +408,4 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
     </>
   );
 };
+

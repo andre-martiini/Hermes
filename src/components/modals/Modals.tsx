@@ -96,7 +96,7 @@ export const SettingsModal = ({
         <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex flex-col gap-6 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-2xl font-black text-slate-900 tracking-tight">ConfiguraÃ§Ãµes</h3>
+              <h3 className="text-2xl font-black text-slate-900 tracking-tight">Configurações</h3>
               <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Painel de PreferÃªncias</p>
             </div>
             <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
@@ -108,7 +108,7 @@ export const SettingsModal = ({
             <button
               onClick={() => setActiveTab('notifications')}
               className={`flex-1 py-4 rounded-lg md:rounded-xl flex items-center justify-center transition-all ${activeTab === 'notifications' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
-              title="NotificaÃ§Ãµes"
+              title="Notificações"
             >
               <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
             </button>
@@ -155,8 +155,8 @@ export const SettingsModal = ({
 
                 <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-blue-200 transition-all">
                   <div className="flex-1">
-                    <p className="text-sm font-bold text-slate-900 mb-1">HÃ¡bitos de Hoje</p>
-                    <p className="text-[11px] text-slate-500 font-medium">Abrir lembrete para marcar hÃ¡bitos cumpridos</p>
+                    <p className="text-sm font-bold text-slate-900 mb-1">Hábitos de Hoje</p>
+                    <p className="text-[11px] text-slate-500 font-medium">Abrir lembrete para marcar hábitos cumpridos</p>
                   </div>
                   <div className="flex items-center gap-4">
                     <input
@@ -239,7 +239,7 @@ export const SettingsModal = ({
                         <option value={3}>Quarta</option>
                         <option value={4}>Quinta</option>
                         <option value={5}>Sexta</option>
-                        <option value={6}>SÃ¡bado</option>
+                        <option value={6}>Sábado</option>
                       </select>
                       <input
                         type="time"
@@ -258,16 +258,16 @@ export const SettingsModal = ({
                 </div>
               </div>
 
-              {/* Financeiro / AÃ§Ãµes Section */}
+              {/* Financeiro / ações Section */}
               <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500 delay-100">
                 <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
                   <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
-                  Financeiro / AÃ§Ãµes
+                  Financeiro / ações
                 </h4>
 
                 <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-emerald-200 transition-all">
                   <div className="flex-1">
-                    <p className="text-sm font-bold text-slate-900 mb-1">Risco OrÃ§amentÃ¡rio</p>
+                    <p className="text-sm font-bold text-slate-900 mb-1">Risco OrÃ§amentário</p>
                     <p className="text-[11px] text-slate-500 font-medium">Avisar se gastos estiverem acima do esperado</p>
                   </div>
                   <button
@@ -286,7 +286,7 @@ export const SettingsModal = ({
 
                 <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-blue-200 transition-all">
                   <div className="flex-1">
-                    <p className="text-sm font-bold text-slate-900 mb-1">AÃ§Ãµes Vencidas</p>
+                    <p className="text-sm font-bold text-slate-900 mb-1">ações Vencidas</p>
                     <p className="text-[11px] text-slate-500 font-medium">Alertar sobre tarefas fora do prazo</p>
                   </div>
                   <button
@@ -345,7 +345,7 @@ export const SettingsModal = ({
                 </div>
               </div>
 
-              {/* NotificaÃ§Ãµes Personalizadas Section */}
+              {/* Notificações Personalizadas Section */}
               <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500 delay-150">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                   <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] flex items-center gap-2">
@@ -360,12 +360,12 @@ export const SettingsModal = ({
                   </button>
                 </div>
 
-                {/* Form de AdiÃ§Ã£o */}
+                {/* Form de AdiÃ§ão */}
                 {isAddingCustom && (
                   <div className="bg-slate-50 p-4 rounded-xl border border-blue-100 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2">
                     <input
                       type="text"
-                      placeholder="Mensagem da notificaÃ§Ã£o..."
+                      placeholder="Mensagem da notificaÃ§ão..."
                       className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none"
                       value={newCustom.message || ''}
                       onChange={e => setNewCustom({ ...newCustom, message: e.target.value })}
@@ -376,7 +376,7 @@ export const SettingsModal = ({
                         value={newCustom.frequency}
                         onChange={e => setNewCustom({ ...newCustom, frequency: e.target.value as any })}
                       >
-                        <option value="daily">DiÃ¡ria</option>
+                        <option value="daily">Diária</option>
                         <option value="weekly">Semanal</option>
                         <option value="monthly">Mensal</option>
                       </select>
@@ -445,12 +445,12 @@ export const SettingsModal = ({
                       }}
                       className="bg-blue-600 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-colors disabled:opacity-50"
                     >
-                      Salvar NotificaÃ§Ã£o
+                      Salvar NotificaÃ§ão
                     </button>
                   </div>
                 )}
 
-                {/* Lista de NotificaÃ§Ãµes Custom */}
+                {/* Lista de Notificações Custom */}
                 <div className="grid grid-cols-1 gap-3">
                   {(localSettings.notifications.custom || []).map(notif => (
                     <div key={notif.id} className="p-4 bg-white border border-slate-100 rounded-xl flex items-center justify-between group hover:border-purple-200 transition-all shadow-sm">
@@ -461,7 +461,7 @@ export const SettingsModal = ({
                             {notif.time}
                           </span>
                           <span className="text-[9px] font-black text-slate-400 uppercase">
-                            {notif.frequency === 'daily' ? 'DiÃ¡ria' :
+                            {notif.frequency === 'daily' ? 'Diária' :
                              notif.frequency === 'weekly' ? `Semanal (${notif.daysOfWeek?.length} dias)` :
                              `Mensal (Dia ${notif.dayOfMonth})`}
                           </span>
@@ -493,7 +493,7 @@ export const SettingsModal = ({
                   ))}
                   {(localSettings.notifications.custom || []).length === 0 && !isAddingCustom && (
                     <div className="text-center py-6 text-slate-300 text-[10px] font-black uppercase tracking-widest italic border-2 border-dashed border-slate-50 rounded-xl">
-                      Nenhuma notificaÃ§Ã£o personalizada
+                      Nenhuma notificaÃ§ão personalizada
                     </div>
                   )}
                 </div>
@@ -508,7 +508,7 @@ export const SettingsModal = ({
 
                 <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-indigo-200 transition-all">
                   <div className="flex-1">
-                    <p className="text-sm font-bold text-slate-900 mb-1">NotificaÃ§Ãµes Push</p>
+                    <p className="text-sm font-bold text-slate-900 mb-1">Notificações Push</p>
                     <p className="text-[11px] text-slate-500 font-medium">Receber alertas no celular (mesmo com app fechado)</p>
                   </div>
                   <button
@@ -528,7 +528,7 @@ export const SettingsModal = ({
 
             </>
           ) : activeTab === 'context' ? (
-            /* Unidades / Ã¡reas e Palavras-Chave TAB */
+            /* Unidades / áreas e Palavras-Chave TAB */
             <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
               <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
                 <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
@@ -625,7 +625,7 @@ export const SettingsModal = ({
                 </h4>
 
                 <p className="text-xs text-slate-500 font-medium">
-                  Cadastre os sistemas que vocÃª estÃ¡ desenvolvendo para gerenciÃ¡-los no mÃ³dulo Sistemas.
+                  Cadastre os sistemas que vocÃª está desenvolvendo para gerenciá-los no mÃ³dulo Sistemas.
                 </p>
 
                 {/* Lista de Sistemas */}
@@ -670,7 +670,7 @@ export const SettingsModal = ({
                   )}
                 </div>
 
-                {/* FormulÃ¡rio para adicionar novo sistema */}
+                {/* Formulário para adicionar novo sistema */}
                 <div className="bg-gradient-to-br from-violet-50 to-purple-50 border-2 border-violet-200 rounded-none md:rounded-2xl p-6">
                   <p className="text-[10px] font-black text-violet-600 uppercase tracking-widest text-center mb-4">Cadastrar Novo Sistema</p>
                   <div className="flex gap-2">
@@ -701,7 +701,7 @@ export const SettingsModal = ({
                       </svg>
                     </button>
                   </div>
-                  <p className="text-[9px] text-violet-600 font-medium mt-2 text-center">Pressione Enter ou clique no botÃ£o + para adicionar</p>
+                  <p className="text-[9px] text-violet-600 font-medium mt-2 text-center">Pressione Enter ou clique no botão + para adicionar</p>
                 </div>
               </div>
             </div>
@@ -709,13 +709,13 @@ export const SettingsModal = ({
             <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
               <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
                 <span className="w-2 h-2 bg-rose-500 rounded-full"></span>
-                ConfiguraÃ§Ãµes do Pomodoro
+                Configurações do Pomodoro
               </h4>
 
               <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-rose-200 transition-all">
                 <div className="flex-1">
                   <p className="text-sm font-bold text-slate-900 mb-1">Ativar Pomodoro</p>
-                  <p className="text-[11px] text-slate-500 font-medium">Habilitar ciclos de trabalho e descanso na execuÃ§Ã£o</p>
+                  <p className="text-[11px] text-slate-500 font-medium">Habilitar ciclos de trabalho e descanso na execuÃ§ão</p>
                 </div>
                 <button
                   onClick={() => setLocalSettings({
@@ -781,12 +781,12 @@ export const SettingsModal = ({
             <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
               <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
                 <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
-                IntegraÃ§Ã£o Google Drive
+                IntegraÃ§ão Google Drive
               </h4>
 
               <div className="p-6 bg-slate-50 rounded-none md:rounded-[2rem] border border-slate-100 space-y-4 shadow-sm">
                 <p className="text-xs text-slate-500 font-medium">
-                  Configure a pasta do Google Drive onde os arquivos do Pool de Dados serÃ£o armazenados.
+                  Configure a pasta do Google Drive onde os arquivos do Pool de Dados serão armazenados.
                 </p>
 
                 <div className="space-y-2">
@@ -808,9 +808,9 @@ export const SettingsModal = ({
                 <div className="flex gap-3">
                   <svg className="w-5 h-5 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
                   <div>
-                    <p className="text-xs font-bold text-amber-800 uppercase tracking-wider mb-1">Nota sobre PermissÃµes</p>
+                    <p className="text-xs font-bold text-amber-800 uppercase tracking-wider mb-1">Nota sobre Permissões</p>
                     <p className="text-[10px] text-amber-700 leading-relaxed">
-                      Ao adicionar novos escopos (como Google Drive), pode ser necessÃ¡rio re-autenticar o sistema usando o <strong>setup_credentials.bat</strong> para que o Hermes tenha permissÃ£o de escrita.
+                      Ao adicionar novos escopos (como Google Drive), pode ser necessário re-autenticar o sistema usando o <strong>setup_credentials.bat</strong> para que o Hermes tenha permissão de escrita.
                     </p>
                   </div>
                 </div>
@@ -828,7 +828,7 @@ export const SettingsModal = ({
             }}
             className="flex-1 bg-blue-600 text-white px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
           >
-            Salvar AlteraÃ§Ãµes
+            Salvar Alterações
           </button>
         </div>
       </div>
@@ -858,9 +858,9 @@ export const DailyHabitsModal = ({
           <div>
             <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3">
               <span className="w-2 h-8 bg-amber-500 rounded-full"></span>
-              HÃ¡bitos de Hoje
+              Hábitos de Hoje
             </h3>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Lembrete DiÃ¡rio</p>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Lembrete Diário</p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
             <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -944,7 +944,7 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
       <div className="bg-white w-full h-auto max-h-[95vh] md:max-w-md rounded-2xl md:rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col">
         <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between flex-shrink-0">
-          <h3 className="text-lg font-black text-slate-900 tracking-tight">Nova AÃ§Ã£o</h3>
+          <h3 className="text-lg font-black text-slate-900 tracking-tight">Nova AÃ§ão</h3>
           <button onClick={onClose} className="p-1.5 hover:bg-slate-200 rounded-full transition-colors">
             <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
@@ -965,7 +965,7 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
                 setFormData({
                   ...formData,
                   titulo: newTitulo,
-                  // SÃ³ atualiza a categoria automaticamente se ainda nÃ£o foi manualmente alterada
+                  // SÃ³ atualiza a categoria automaticamente se ainda não foi manualmente alterada
                   categoria: autoClassified ? formData.categoria : detectedArea
                 });
               }}
@@ -1062,17 +1062,17 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Tag (ClassificaÃ§Ã£o)</label>
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Tag (ClassificaÃ§ão)</label>
               <select
                 value={formData.categoria}
                 onChange={e => {
                   setFormData({ ...formData, categoria: e.target.value as Categoria });
-                  setAutoClassified(true); // Marca que o usuÃ¡rio alterou manualmente
+                  setAutoClassified(true); // Marca que o usuário alterou manualmente
                 }}
                 className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
               >
                 <option value="GERAL">Geral</option>
-                <option value="NÃƒO CLASSIFICADA">NÃ£o Classificada</option>
+                <option value="NÃƒO CLASSIFICADA">Não Classificada</option>
                 <option value="CLC">CLC</option>
                 <option value="ASSISTÃŠNCIA">AssistÃªncia Estudantil</option>
                 {unidades.filter(u => u.nome !== 'CLC' && u.nome !== 'AssistÃªncia Estudantil').map(u => (
@@ -1088,13 +1088,13 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
           <button
             onClick={() => {
               if (!formData.titulo || !formData.data_limite) {
-                showAlert("AtenÃ§Ã£o", "Preencha o tÃ­tulo e o prazo final.");
+                showAlert("AtenÃ§ão", "Preencha o tÃ­tulo e o prazo final.");
                 return;
               }
 
               // Validation
               if (!formData.is_single_day && formData.data_inicio > formData.data_limite) {
-                showAlert("AtenÃ§Ã£o", "A data de inÃ­cio deve ser anterior ou igual ao prazo final.");
+                showAlert("AtenÃ§ão", "A data de inÃ­cio deve ser anterior ou igual ao prazo final.");
                 return;
               }
 
@@ -1113,7 +1113,7 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
             }}
             className="flex-1 bg-blue-600 text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
           >
-            Criar AÃ§Ã£o
+            Criar AÃ§ão
           </button>
         </div>
       </div>
@@ -1231,14 +1231,14 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
 
           <div className="grid grid-cols-1 gap-3">
             <div className="space-y-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Tag (ClassificaÃ§Ã£o)</label>
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Tag (ClassificaÃ§ão)</label>
               <select
                 value={formData.categoria}
                 onChange={e => setFormData({ ...formData, categoria: e.target.value as Categoria })}
                 className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
               >
                 <option value="GERAL">Geral</option>
-                <option value="NÃƒO CLASSIFICADA">NÃ£o Classificada</option>
+                <option value="NÃƒO CLASSIFICADA">Não Classificada</option>
                 <option value="CLC">CLC</option>
                 <option value="ASSISTÃŠNCIA">AssistÃªncia Estudantil</option>
                 {unidades.filter(u => u.nome !== 'CLC' && u.nome !== 'AssistÃªncia Estudantil').map(u => (
@@ -1269,11 +1269,11 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
           <button
             onClick={() => {
               if (!formData.titulo || !formData.data_limite) {
-                showAlert("AtenÃ§Ã£o", "Preencha o tÃ­tulo e o prazo final.");
+                showAlert("AtenÃ§ão", "Preencha o tÃ­tulo e o prazo final.");
                 return;
               }
               if (!formData.is_single_day && formData.data_inicio > formData.data_limite) {
-                showAlert("AtenÃ§Ã£o", "A data de inÃ­cio deve ser anterior ou igual ao prazo final.");
+                showAlert("AtenÃ§ão", "A data de inÃ­cio deve ser anterior ou igual ao prazo final.");
                 return;
               }
               onSave(task.id, formData);
@@ -1281,13 +1281,13 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
             }}
             className="w-full md:flex-1 bg-slate-900 text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all order-1 md:order-2"
           >
-            Salvar AlteraÃ§Ãµes
+            Salvar Alterações
           </button>
 
           <div className="flex gap-2 order-2">
             <button
               onClick={() => {
-                showConfirm("Confirmar ExclusÃ£o", "Deseja realmente excluir esta tarefa?", () => {
+                showConfirm("Confirmar Exclusão", "Deseja realmente excluir esta tarefa?", () => {
                    onDelete(task.id);
                    onClose();
                 });
