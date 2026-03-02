@@ -6581,19 +6581,56 @@ const App: React.FC = () => {
                         } else {
                           // Parser para o formato de tabela de texto
                           const lines = rawText.split('\n').map(l => l.trim()).filter(l => l !== '');
+                          const originMarkers = new Set([
+                            'Própria Unidade',
+                            'Outra Unidade',
+                            'Não vinculadas a entregas'
+                          ]);
+                          const skipMarkers = new Set([
+                            'Curtir',
+                            'Origem / Unidade',
+                            'Entrega Institucional',
+                            'Descrição',
+                            '% Carga Horária',
+                            'Detalhe/Descreva os trabalhos'
+                          ]);
+                          const isPercentLine = (value: string) => /^\d+(?:[.,]\d+)?%$/.test(value);
+                          const parsePercent = (value: string) => parseFloat(value.replace('%', '').replace(',', '.')) || 0;
+
                           for (let i = 0; i < lines.length; i++) {
                             const line = lines[i];
-                            if (line === 'Própria Unidade' || line === 'Outra Unidade') {
-                              const item: Partial<PlanoTrabalhoItem> = { origem: line };
-                              item.unidade = lines[++i] || '';
-                              item.entrega = lines[++i] || '';
-                              // Opcional: pular "Curtir"
-                              if (lines[i + 1] === 'Curtir') i++;
-                              const pctStr = lines[++i] || '0';
-                              item.percentual = parseFloat(pctStr.replace('%', '')) || 0;
-                              item.descricao = lines[++i] || '';
-                              items.push(item as PlanoTrabalhoItem);
+                            if (!originMarkers.has(line)) continue;
+
+                            const item: Partial<PlanoTrabalhoItem> = {
+                              origem: line,
+                              unidade: '',
+                              entrega: '',
+                              percentual: 0,
+                              descricao: ''
+                            };
+
+                            if (line === 'Não vinculadas a entregas') {
+                              item.entrega = line;
+                            } else {
+                              if (lines[i + 1] && !originMarkers.has(lines[i + 1]) && !isPercentLine(lines[i + 1]) && !skipMarkers.has(lines[i + 1])) {
+                                item.unidade = lines[++i] || '';
+                              }
+                              if (lines[i + 1] && !originMarkers.has(lines[i + 1]) && !isPercentLine(lines[i + 1]) && !skipMarkers.has(lines[i + 1])) {
+                                item.entrega = lines[++i] || '';
+                              }
                             }
+
+                            while (lines[i + 1] && skipMarkers.has(lines[i + 1])) i++;
+                            if (lines[i + 1] && isPercentLine(lines[i + 1])) {
+                              item.percentual = parsePercent(lines[++i]);
+                            }
+
+                            while (lines[i + 1] && skipMarkers.has(lines[i + 1])) i++;
+                            if (lines[i + 1] && !originMarkers.has(lines[i + 1]) && !isPercentLine(lines[i + 1]) && !skipMarkers.has(lines[i + 1])) {
+                              item.descricao = lines[++i] || '';
+                            }
+
+                            items.push(item as PlanoTrabalhoItem);
                           }
                         }
 
