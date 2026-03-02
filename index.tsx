@@ -1801,6 +1801,7 @@ const App: React.FC = () => {
       overdue.forEach(t => {
         batch.update(doc(db, 'tarefas', t.id), {
           data_limite: todayStr,
+          data_inicio: todayStr,
           horario_inicio: null,
           horario_fim: null,
           data_atualizacao: new Date().toISOString()
@@ -1827,6 +1828,7 @@ const App: React.FC = () => {
     try {
       await updateDoc(doc(db, 'tarefas', task.id), {
         data_limite: todayStr,
+        data_inicio: todayStr,
         horario_inicio: null,
         horario_fim: null,
         data_atualizacao: new Date().toISOString()
@@ -2134,9 +2136,25 @@ const App: React.FC = () => {
   const handleUpdateTarefa = async (id: string, updates: Partial<Tarefa>, suppressToast = false) => {
     try {
       const docRef = doc(db, 'tarefas', id);
-      await updateDoc(docRef, {
+      const payload: Record<string, any> = {
         ...updates,
         data_atualizacao: new Date().toISOString()
+      };
+
+      const hasDateLimit = Object.prototype.hasOwnProperty.call(updates, 'data_limite');
+      const hasDateStart = Object.prototype.hasOwnProperty.call(updates, 'data_inicio');
+      if (hasDateLimit || hasDateStart) {
+        const singleDate = (updates.data_limite ?? updates.data_inicio ?? '') as string;
+        payload.data_limite = singleDate;
+        payload.data_inicio = singleDate;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(payload, 'is_single_day')) {
+        delete payload.is_single_day;
+      }
+
+      await updateDoc(docRef, {
+        ...payload
       });
 
       // Mirror to Knowledge base
@@ -2197,12 +2215,12 @@ const App: React.FC = () => {
       const newDate = targetTask.data_limite || formatDateLocalISO(new Date());
       await updateDoc(doc(db, 'tarefas', taskId), {
         data_limite: newDate,
-        data_inicio: draggedTask.horario_inicio ? newDate : (draggedTask.data_inicio || newDate),
+        data_inicio: newDate,
         data_atualizacao: new Date().toISOString()
       });
 
       // Insere na posição correta para o remapeamento de ordem
-      tasksInBucket.splice(newIndex, 0, { ...draggedTask, data_limite: newDate });
+      tasksInBucket.splice(newIndex, 0, { ...draggedTask, data_limite: newDate, data_inicio: newDate });
     }
 
     // Reatribui ordens
@@ -2808,15 +2826,23 @@ const App: React.FC = () => {
   const handleCreateTarefa = async (data: Partial<Tarefa>) => {
     try {
       setLoading(true);
-      const docRef = await addDoc(collection(db, 'tarefas'), {
-        ...data,
+      const { is_single_day: _ignoredSingleDay, ...inputData } = data as any;
+      const singleDate = inputData.data_limite || inputData.data_inicio || formatDateLocalISO(new Date());
+      const taskPayload: Record<string, any> = {
+        ...inputData,
+        data_limite: singleDate,
+        data_inicio: singleDate,
         google_id: "", // Sinaliza que precisa de PUSH
         data_atualizacao: new Date().toISOString(),
         projeto: 'Google Tasks',
         prioridade: 'média',
-        contabilizar_meta: data.categoria === 'CLC' || data.categoria === 'ASSISTÊNCIA',
+        contabilizar_meta: inputData.categoria === 'CLC' || inputData.categoria === 'ASSISTÊNCIA',
         acompanhamento: [],
         entregas_relacionadas: []
+      };
+
+      const docRef = await addDoc(collection(db, 'tarefas'), {
+        ...taskPayload
       });
 
       if (convertingIdea) {
@@ -2830,14 +2856,7 @@ const App: React.FC = () => {
         onClick: () => {
           setSelectedTask({
             id: docRef.id,
-            ...data,
-            google_id: "",
-            data_atualizacao: new Date().toISOString(),
-            projeto: 'Google Tasks',
-            prioridade: 'média',
-            contabilizar_meta: data.categoria === 'CLC' || data.categoria === 'ASSISTÊNCIA',
-            acompanhamento: [],
-            entregas_relacionadas: []
+            ...taskPayload
           } as Tarefa);
           setTaskModalMode('execute');
         }
@@ -2859,8 +2878,34 @@ const App: React.FC = () => {
     // Listener para Tarefas
     const qTarefas = query(collection(db, 'tarefas'));
     const unsubscribeTarefas = onSnapshot(qTarefas, (snapshot) => {
-      const dataT = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Tarefa));
-      setTarefas(dataT);
+      const normalized: Tarefa[] = snapshot.docs.map(taskDoc => {
+        const raw = { id: taskDoc.id, ...taskDoc.data() } as Tarefa;
+        const singleDate = raw.data_limite || raw.data_inicio || '';
+        return {
+          ...raw,
+          data_limite: singleDate,
+          data_inicio: singleDate
+        };
+      });
+      setTarefas(normalized);
+
+      // Migração leve: força dados legados de intervalo para data única (usa término como fonte da verdade)
+      const legacyWithRange = snapshot.docs
+        .map(taskDoc => ({ id: taskDoc.id, ...taskDoc.data() } as Tarefa))
+        .filter(task => !!task.data_limite && task.data_limite !== '-' && task.data_limite !== '0000-00-00' && task.data_limite !== task.data_inicio);
+      if (legacyWithRange.length > 0) {
+        const batch = writeBatch(db);
+        const now = new Date().toISOString();
+        legacyWithRange.forEach(task => {
+          batch.update(doc(db, 'tarefas', task.id), {
+            data_inicio: task.data_limite,
+            data_limite: task.data_limite,
+            data_atualizacao: now
+          });
+        });
+        batch.commit().catch((migrationErr) => console.error('Erro ao normalizar tarefas legadas:', migrationErr));
+      }
+
       setLoading(false);
     }, (err) => {
       console.error(err);
@@ -6797,4 +6842,3 @@ if (container) {
   }
   window.__hermesReactRoot.render(<App />);
 }
-

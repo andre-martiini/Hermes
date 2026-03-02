@@ -36,12 +36,9 @@ export const DayView = ({
 
     // Logic from original DayView:
     const isConcluido = normalizeStatus(t.status) === 'concluido';
-    if (t.horario_inicio && t.data_inicio) {
-       // Allocated. Don't show in sidebar unless filtering logic allows duplicates?
-       // Original DayView filtered out allocated tasks from sidebar.
-       return false;
-    }
-    const end = t.data_limite;
+    const scheduledDate = t.data_limite || t.data_inicio;
+    if (t.horario_inicio && scheduledDate) return false;
+    const end = t.data_limite || t.data_inicio;
     const hasDeadline = end && end !== '-' && end !== '0000-00-00';
     if (!hasDeadline) return true; // Show in sidebar
     if (isConcluido && end < dayStr) return false;
@@ -108,6 +105,7 @@ export const DayView = ({
                 onTaskUpdate(taskItem.id, {
                   horario_inicio: `${hour.toString().padStart(2, '0')}:00`,
                   horario_fim: `${(hour + 1).toString().padStart(2, '0')}:00`,
+                  data_limite: dayStr,
                   data_inicio: dayStr
                 });
                 setIsSidebarOpen(false);

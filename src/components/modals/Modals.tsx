@@ -927,13 +927,11 @@ export const DailyHabitsModal = ({
 export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialData }: { unidades: { id: string, nome: string }[], onSave: (data: Partial<Tarefa>) => void, onClose: () => void, showAlert: (title: string, message: string) => void, initialData?: Partial<Tarefa> }) => {
   const [formData, setFormData] = useState({
     titulo: initialData?.titulo || '',
-    data_inicio: initialData?.data_inicio || formatDateLocalISO(new Date()),
-    data_limite: initialData?.data_limite || '',
+    data_limite: initialData?.data_limite || initialData?.data_inicio || formatDateLocalISO(new Date()),
     data_criacao: new Date().toISOString(), // Actual creation timestamp
     status: initialData?.status || 'em andamento' as Status,
     categoria: initialData?.categoria || 'NÃO CLASSIFICADA' as Categoria,
     notas: initialData?.notas || '',
-    is_single_day: !!initialData?.is_single_day,
     horario_inicio: initialData?.horario_inicio || '',
     horario_fim: initialData?.horario_fim || ''
   });
@@ -980,52 +978,14 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
             )}
           </div>
 
-          <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+          <div className="space-y-1">
+            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Prazo</label>
             <input
-              type="checkbox"
-              id="single-day"
-              checked={formData.is_single_day}
-              onChange={e => {
-                const checked = e.target.checked;
-                setFormData(prev => ({
-                  ...prev,
-                  is_single_day: checked,
-                  data_inicio: checked ? prev.data_limite || prev.data_inicio : prev.data_inicio
-                }));
-              }}
-              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 transition-all cursor-pointer"
+              type="date"
+              value={formData.data_limite}
+              onChange={e => setFormData({ ...formData, data_limite: e.target.value })}
+              className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
             />
-            <label htmlFor="single-day" className="text-[11px] font-bold text-slate-700 cursor-pointer select-none">Tarefa de um dia só (Apenas Prazo Final)</label>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            {!formData.is_single_day && (
-              <div className="space-y-1">
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Início</label>
-                <input
-                  type="date"
-                  value={formData.data_inicio}
-                  onChange={e => setFormData({ ...formData, data_inicio: e.target.value })}
-                  className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
-                />
-              </div>
-            )}
-            <div className={`space-y-1 ${formData.is_single_day ? 'col-span-2' : ''}`}>
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Prazo Final</label>
-              <input
-                type="date"
-                value={formData.data_limite}
-                onChange={e => {
-                  const newLimit = e.target.value;
-                  setFormData(prev => ({
-                    ...prev,
-                    data_limite: newLimit,
-                    data_inicio: prev.is_single_day ? newLimit : prev.data_inicio
-                  }));
-                }}
-                className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
-              />
-            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -1092,12 +1052,6 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
                 return;
               }
 
-              // Validation
-              if (!formData.is_single_day && formData.data_inicio > formData.data_limite) {
-                showAlert("Atenção", "A data de inÃ­cio deve ser anterior ou igual ao prazo final.");
-                return;
-              }
-
               let finalNotes = formData.notas;
               if (formData.categoria !== 'NÃO CLASSIFICADA') {
                 const tagStr = `Tag: ${formData.categoria}`;
@@ -1106,6 +1060,7 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
 
               onSave({
                 ...formData,
+                data_inicio: formData.data_limite,
                 notas: finalNotes,
                 data_criacao: new Date().toISOString()
               });
@@ -1123,13 +1078,11 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
 export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showAlert, showConfirm, pgcEntregas = [] }: { unidades: { id: string, nome: string }[], task: Tarefa, onSave: (id: string, updates: Partial<Tarefa>) => void, onDelete: (id: string) => void, onClose: () => void, showAlert: (title: string, message: string) => void, showConfirm: (title: string, message: string, onConfirm: () => void) => void, pgcEntregas?: EntregaInstitucional[] }) => {
   const [formData, setFormData] = useState({
     titulo: task.titulo,
-    data_inicio: task.data_inicio || (task.data_criacao ? task.data_criacao.split('T')[0] : ''),
-    data_limite: task.data_limite === '-' ? '' : task.data_limite,
+    data_limite: task.data_limite === '-' ? (task.data_inicio || '') : (task.data_limite || task.data_inicio || ''),
     data_criacao: task.data_criacao,
     status: task.status,
     categoria: task.categoria || 'NÃO CLASSIFICADA',
     notas: task.notas || '',
-    is_single_day: !!task.is_single_day,
     entregas_relacionadas: task.entregas_relacionadas || [],
     horario_inicio: task.horario_inicio || '',
     horario_fim: task.horario_fim || ''
@@ -1160,52 +1113,14 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
             />
           </div>
 
-          <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+          <div className="space-y-1">
+            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Prazo</label>
             <input
-              type="checkbox"
-              id="edit-single-day"
-              checked={formData.is_single_day}
-              onChange={e => {
-                const checked = e.target.checked;
-                setFormData(prev => ({
-                  ...prev,
-                  is_single_day: checked,
-                  data_inicio: checked ? prev.data_limite || prev.data_inicio : prev.data_inicio
-                }));
-              }}
-              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 transition-all cursor-pointer"
+              type="date"
+              value={formData.data_limite}
+              onChange={e => setFormData({ ...formData, data_limite: e.target.value })}
+              className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
             />
-            <label htmlFor="edit-single-day" className="text-[11px] font-bold text-slate-700 cursor-pointer select-none">Tarefa de um dia só (Apenas Prazo Final)</label>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            {!formData.is_single_day && (
-              <div className="space-y-1">
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Início</label>
-                <input
-                  type="date"
-                  value={formData.data_inicio}
-                  onChange={e => setFormData({ ...formData, data_inicio: e.target.value })}
-                  className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
-                />
-              </div>
-            )}
-            <div className={`space-y-1 ${formData.is_single_day ? 'col-span-2' : ''}`}>
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Prazo Final</label>
-              <input
-                type="date"
-                value={formData.data_limite}
-                onChange={e => {
-                  const newLimit = e.target.value;
-                  setFormData(prev => ({
-                    ...prev,
-                    data_limite: newLimit,
-                    data_inicio: prev.is_single_day ? newLimit : prev.data_inicio
-                  }));
-                }}
-                className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
-              />
-            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -1272,11 +1187,7 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
                 showAlert("Atenção", "Preencha o tÃ­tulo e o prazo final.");
                 return;
               }
-              if (!formData.is_single_day && formData.data_inicio > formData.data_limite) {
-                showAlert("Atenção", "A data de inÃ­cio deve ser anterior ou igual ao prazo final.");
-                return;
-              }
-              onSave(task.id, formData);
+              onSave(task.id, { ...formData, data_inicio: formData.data_limite });
               onClose();
             }}
             className="w-full md:flex-1 bg-slate-900 text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all order-1 md:order-2"

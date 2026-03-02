@@ -78,7 +78,8 @@ export const TimeGrid = ({
       });
       const dayTasks = tasks.filter(t => {
         if ((t.status as any) === 'excluído') return false;
-        if (t.horario_inicio && t.data_inicio) return t.data_inicio === dayStr;
+        const taskDate = t.data_limite || t.data_inicio;
+        if (t.horario_inicio && taskDate) return taskDate === dayStr;
         return false;
       }).sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
       return { dayStr, googleEvents: dayGoogleEvents, tasks: dayTasks };
@@ -147,6 +148,7 @@ export const TimeGrid = ({
          const timeStr = getTimeFromY(y, hourHeight, step);
 
          onTaskCreate({
+           data_limite: formatDateLocalISO(day),
            data_inicio: formatDateLocalISO(day),
            horario_inicio: timeStr,
            horario_fim: minutesToTime(timeToMinutes(timeStr) + 60)
@@ -184,6 +186,7 @@ export const TimeGrid = ({
 
       const newDate = days[dayIndex];
       onTaskUpdate(taskId, {
+        data_limite: formatDateLocalISO(newDate),
         data_inicio: formatDateLocalISO(newDate),
         horario_inicio: timeStr,
         horario_fim: minutesToTime(timeToMinutes(timeStr) + 60)
@@ -243,8 +246,10 @@ export const TimeGrid = ({
 
            if (newDate) {
              const newDateStr = formatDateLocalISO(newDate);
-             if (Math.abs(deltaMin) > 0 || newDateStr !== formatDateLocalISO(new Date(dragging.task.data_inicio))) {
+             const previousDate = dragging.task.data_limite || dragging.task.data_inicio || '';
+             if (Math.abs(deltaMin) > 0 || newDateStr !== previousDate) {
                 onTaskUpdate(dragging.id, {
+                  data_limite: newDateStr,
                   data_inicio: newDateStr,
                   horario_inicio: minutesToTime(newStartMin),
                   horario_fim: minutesToTime(newStartMin + dragging.duration)

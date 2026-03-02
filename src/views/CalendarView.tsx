@@ -1,6 +1,6 @@
 
 import React, { useEffect, useMemo } from 'react';
-import { Tarefa, GoogleCalendarEvent, formatDate, formatDateLocalISO } from '../../types';
+import { Tarefa, GoogleCalendarEvent, formatDateLocalISO } from '../../types';
 import { DayView } from './DayView';
 import { TimeGrid } from '../components/calendar/TimeGrid';
 import { addDoc, collection } from 'firebase/firestore';
@@ -114,34 +114,13 @@ export const CalendarView = ({
     if (!tasks) return map;
 
     tasks.forEach(t => {
-      if (!t.data_limite || t.data_limite === '-' || t.data_limite === '0000-00-00') return;
+      const taskDate = t.data_limite || t.data_inicio;
+      if (!taskDate || taskDate === '-' || taskDate === '0000-00-00') return;
 
-      const endStr = t.data_limite;
-      const startStr = t.is_single_day ? endStr : (t.data_inicio || endStr);
-
-      let current = new Date(startStr + 'T12:00:00Z');
-      const end = new Date(endStr + 'T12:00:00Z');
-
-      if (isNaN(current.getTime()) || isNaN(end.getTime())) return;
-
-      const diffTime = end.getTime() - current.getTime();
-      const diffDays = diffTime / (1000 * 3600 * 24);
-
-      if (current > end || diffDays > 60) {
-        current = end;
-      }
-
-      let iterations = 0;
-      while (current <= end) {
-        if (iterations > 62) break; 
-        iterations++;
-
-        const dateStr = current.toISOString().split('T')[0];
-        if (!map[dateStr]) map[dateStr] = [];
-        if (!map[dateStr].find(x => x.id === t.id)) {
-          map[dateStr].push(t);
-        }
-        current.setDate(current.getDate() + 1);
+      const dateStr = taskDate.split('T')[0];
+      if (!map[dateStr]) map[dateStr] = [];
+      if (!map[dateStr].find(x => x.id === t.id)) {
+        map[dateStr].push(t);
       }
     });
     return map;
@@ -289,47 +268,19 @@ export const CalendarView = ({
                         {e.titulo}
                       </div>
                     ))}
-                    {dayTasks.map(t => {
-                      const startStr = t.is_single_day ? (t.data_limite || '') : (t.data_inicio || t.data_criacao?.split('T')[0] || t.data_limite || '');
-                      const endStr = t.data_limite || '';
-
-                      const isStart = startStr === dayStr;
-                      const isEnd = endStr === dayStr;
-
-                      const showTitle = isStart || isEnd;
-
-                      if (showTitle) {
-                        return (
-                          <div
-                            key={`${t.id}-${dayStr}`}
-                            onClick={() => onTaskClick(t)}
-                            className={`px-2 py-1.5 rounded-md border text-[9px] font-bold cursor-pointer transition-all active:scale-95 group relative z-10
-                              ${t.categoria === 'CLC' ? 'bg-blue-50 border-blue-100 text-blue-700 hover:border-blue-300' :
-                                t.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-100 text-emerald-700 hover:border-emerald-300' :
-                                  'bg-slate-50 border-slate-100 text-slate-600 hover:border-slate-300'}
-                            `}
-                          >
-                            <div className="line-clamp-2 leading-tight">{t.titulo}</div>
-                            {isStart && endStr && startStr !== endStr && (
-                              <div className="text-[7px] text-slate-400 mt-0.5">→ {formatDate(endStr).split(' ')[0]}</div>
-                            )}
-                          </div>
-                        );
-                      } else {
-                        return (
-                          <div
-                            key={`${t.id}-${dayStr}`}
-                            onClick={() => onTaskClick(t)}
-                            title={t.titulo}
-                            className={`h-1.5 rounded-full cursor-pointer transition-all hover:h-3 w-full my-0.5 relative z-0
-                              ${t.categoria === 'CLC' ? 'bg-blue-300/60 hover:bg-blue-400' :
-                                t.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-300/60 hover:bg-emerald-400' :
-                                  'bg-slate-300/60 hover:bg-slate-400'}
-                            `}
-                          />
-                        );
-                      }
-                    })}
+                    {dayTasks.map(t => (
+                      <div
+                        key={`${t.id}-${dayStr}`}
+                        onClick={() => onTaskClick(t)}
+                        className={`px-2 py-1.5 rounded-md border text-[9px] font-bold cursor-pointer transition-all active:scale-95 group relative z-10
+                          ${t.categoria === 'CLC' ? 'bg-blue-50 border-blue-100 text-blue-700 hover:border-blue-300' :
+                            t.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-100 text-emerald-700 hover:border-emerald-300' :
+                              'bg-slate-50 border-slate-100 text-slate-600 hover:border-slate-300'}
+                        `}
+                      >
+                        <div className="line-clamp-2 leading-tight">{t.titulo}</div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               );

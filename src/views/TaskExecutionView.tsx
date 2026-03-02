@@ -532,33 +532,30 @@ export const TaskExecutionView = ({
           {/* Date/Time Inputs */}
           <div className={`border rounded-2xl p-4 space-y-4 transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
             <h4 className="text-[10px] font-black uppercase tracking-widest opacity-50">Planejamento</h4>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div className="space-y-1">
-                <label className="text-[9px] font-bold uppercase opacity-60">Início</label>
+                <label className="text-[9px] font-bold uppercase opacity-60">Prazo</label>
                 <input
                   type="date"
-                  value={task.data_inicio || ''}
-                  onChange={e => onSave(task.id, { data_inicio: e.target.value })}
+                  value={currentTaskData.data_limite || currentTaskData.data_inicio || ''}
+                  onChange={e => onSave(task.id, { data_limite: e.target.value })}
                   className={`w-full bg-transparent border-b text-xs font-bold outline-none ${isTimerRunning ? 'border-white/20 focus:border-white' : 'border-slate-200 focus:border-blue-500'}`}
                 />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[9px] font-bold uppercase opacity-60">Hora Início</label>
                 <input
                   type="time"
-                  value={task.horario_inicio || ''}
+                  value={currentTaskData.horario_inicio || ''}
                   onChange={e => onSave(task.id, { horario_inicio: e.target.value })}
                   className={`w-full bg-transparent border-b text-xs font-bold outline-none ${isTimerRunning ? 'border-white/20 focus:border-white' : 'border-slate-200 focus:border-blue-500'}`}
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[9px] font-bold uppercase opacity-60">Término</label>
-                <input
-                  type="date"
-                  value={task.data_limite || ''}
-                  onChange={e => onSave(task.id, { data_limite: e.target.value })}
-                  className={`w-full bg-transparent border-b text-xs font-bold outline-none ${isTimerRunning ? 'border-white/20 focus:border-white' : 'border-slate-200 focus:border-blue-500'}`}
-                />
+                <label className="text-[9px] font-bold uppercase opacity-60">Hora Fim</label>
                 <input
                   type="time"
-                  value={task.horario_fim || ''}
+                  value={currentTaskData.horario_fim || ''}
                   onChange={e => onSave(task.id, { horario_fim: e.target.value })}
                   className={`w-full bg-transparent border-b text-xs font-bold outline-none ${isTimerRunning ? 'border-white/20 focus:border-white' : 'border-slate-200 focus:border-blue-500'}`}
                 />
