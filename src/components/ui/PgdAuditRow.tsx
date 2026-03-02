@@ -238,7 +238,7 @@ export const PgdAuditRow = ({
                       data_fim: new Date().toLocaleDateString('en-CA')
                     });
                   }}
-                  disabled={!entregaId || !newRegistro.descricao_atividade.trim()}
+                  disabled={!newRegistro.descricao_atividade.trim()}
                   className="h-11 w-11 self-start rounded-lg bg-emerald-600 text-white text-[14px] font-black uppercase tracking-widest disabled:opacity-40"
                   title="Adicionar registro"
                 >
@@ -252,7 +252,7 @@ export const PgdAuditRow = ({
                 <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Processar texto bruto com datas</p>
                 <button
                   onClick={() => onProcessRawText(rawTextInput)}
-                  disabled={!entregaId || !rawTextInput.trim() || isProcessingRawText}
+                  disabled={!rawTextInput.trim() || isProcessingRawText}
                   className="px-3 py-2 rounded-lg bg-blue-600 text-white text-[9px] font-black uppercase tracking-widest disabled:opacity-40"
                 >
                   {isProcessingRawText ? 'Processando...' : 'Processar texto'}

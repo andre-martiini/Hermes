@@ -904,6 +904,8 @@ const App: React.FC = () => {
   const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
   const [selectedWorkItem, setSelectedWorkItem] = useState<WorkItem | null>(null);
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
+  const [isPgdTerminalOpen, setIsPgdTerminalOpen] = useState(false);
+  const [pgdTerminalLogs, setPgdTerminalLogs] = useState<string[]>([]);
   const [isModalCompletedLogsOpen, setIsModalCompletedLogsOpen] = useState(false);
   const [isQuickLogModalOpen, setIsQuickLogModalOpen] = useState(false);
   const [isShoppingAIModalOpen, setIsShoppingAIModalOpen] = useState(false);
@@ -929,7 +931,7 @@ const App: React.FC = () => {
   // Estados PGC
   const [atividadesPGC, setAtividadesPGC] = useState<AtividadeRealizada[]>([]);
   const [afastamentos, setAfastamentos] = useState<Afastamento[]>([]);
-  const [pgcSubView, setPgcSubView] = useState<'audit' | 'heatmap' | 'config' | 'plano' | 'status'>('audit');
+  const [pgcSubView, setPgcSubView] = useState<'audit' | 'heatmap' | 'config' | 'plano' | 'status' | 'automatizadas'>('audit');
   const [pgdGeneratingByEntrega, setPgdGeneratingByEntrega] = useState<Record<string, boolean>>({});
   const [pgdRawTextProcessingByEntrega, setPgdRawTextProcessingByEntrega] = useState<Record<string, boolean>>({});
   const [unidades, setUnidades] = useState<{ id: string, nome: string }[]>([]);
@@ -1569,7 +1571,10 @@ const App: React.FC = () => {
   // Handle hardware/browser back button
   useEffect(() => {
     const handlePopState = (e: PopStateEvent) => {
-      if (isLogsModalOpen) {
+      if (isPgdTerminalOpen) {
+        setIsPgdTerminalOpen(false);
+        e.preventDefault();
+      } else if (isLogsModalOpen) {
         setIsLogsModalOpen(false);
         e.preventDefault();
       } else if (selectedSystemId) {
@@ -1600,7 +1605,24 @@ const App: React.FC = () => {
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [activeModule, viewMode, selectedSystemId, isLogsModalOpen, activeFerramenta, lastBackPress]);
+  }, [activeModule, viewMode, selectedSystemId, isLogsModalOpen, isPgdTerminalOpen, activeFerramenta, lastBackPress]);
+
+  useEffect(() => {
+    let eventSource: EventSource | null = null;
+    if (isPgdTerminalOpen) {
+      eventSource = new EventSource('http://127.0.0.1:8000/api/automations/logs');
+      eventSource.onmessage = (e) => {
+        setPgdTerminalLogs((prev) => [...prev, e.data]);
+      };
+      eventSource.onerror = () => {
+        // Ignora erros para reconectar suavemente
+      };
+    }
+    return () => {
+      if (eventSource) eventSource.close();
+    };
+  }, [isPgdTerminalOpen]);
+
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [isHabitsReminderOpen, setIsHabitsReminderOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'notifications' | 'context' | 'sistemas'>('notifications');
@@ -3092,7 +3114,8 @@ const App: React.FC = () => {
         `2. Escreva descrição objetiva e auditável em português.\n` +
         `3. Datas no formato YYYY-MM-DD.\n` +
         `4. Não invente fatos fora das notas.\n` +
-        `5. Gere entre 1 e 12 registros.\n\n` +
+        `5. IMPORTANTE: Se os registros de diário de bordo originais mencionarem um NÚMERO DE PROCESSO, você OBRIGATORIAMENTE deve incluir esse número na descricao_atividade do registro correspondente. Caso não mencionem, ignore essa instrução.\n` +
+        `6. Gere entre 1 e 12 registros.\n\n` +
         `Entrada:\n${payload}\n\n` +
         `Responda SOMENTE JSON válido:\n` +
         `{\n  "registros": [\n    {\n      "descricao_atividade": "texto",\n      "data_inicio": "YYYY-MM-DD",\n      "data_fim": "YYYY-MM-DD",\n      "task_ids": ["id1","id2"]\n    }\n  ]\n}`;
@@ -3272,7 +3295,8 @@ const App: React.FC = () => {
             `4. Refine a descrição para ficar objetiva e auditável.\n` +
             `5. Não invente fatos fora do texto.\n` +
             `6. Datas devem estar no formato YYYY-MM-DD.\n` +
-            `7. Evite fragmentar em muitos registros curtos.\n\n` +
+            `7. Evite fragmentar em muitos registros curtos.\n` +
+            `8. IMPORTANTE: Se o texto bruto mencionar um NÚMERO DE PROCESSO, você OBRIGATORIAMENTE deve incluir esse número na descricao_atividade do registro correspondente. Caso não mencione, ignore.\n\n` +
             `Texto bruto:\n${rawText}\n\n` +
             `Responda APENAS JSON válido:\n` +
             `{\n  "registros": [\n    {\n      "descricao_atividade": "texto objetivo",\n      "data_inicio": "YYYY-MM-DD",\n      "data_fim": "YYYY-MM-DD"\n    }\n  ]\n}`;
@@ -5859,6 +5883,12 @@ const App: React.FC = () => {
                       >
                         Status PGD
                       </button>
+                      <button
+                        onClick={() => setPgcSubView('automatizadas')}
+                        className={`px-2 py-3 md:py-4 text-[10px] font-black uppercase tracking-[0.2em] transition-all border-b-4 ${pgcSubView === 'automatizadas' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                      >
+                        Ações Automatizadas
+                      </button>
                     </div>
 
                     {pgcSubView === 'audit' && (
@@ -5915,9 +5945,12 @@ const App: React.FC = () => {
                                       }}
                                       onUnlinkTarefa={handleUnlinkTarefa}
                                       onSelectTask={setSelectedTask}
-                                      onCreateActivity={(draft) => {
-                                        if (!entregaId) return;
-                                        handleCreatePgdActivity(entregaId, draft);
+                                      onCreateActivity={async (draft) => {
+                                        let targetId = entregaId;
+                                        if (!targetId) {
+                                          targetId = await handleCreateEntregaFromPlan(item);
+                                        }
+                                        if (targetId) handleCreatePgdActivity(targetId, draft);
                                       }}
                                       onUpdateActivity={handleUpdatePgdActivity}
                                       onDeleteActivity={handleDeletePgdActivity}
@@ -5925,9 +5958,12 @@ const App: React.FC = () => {
                                         if (!entregaId) return;
                                         handleGeneratePgdFromDiaries(entregaId, item, tarefasRelacionadas);
                                       }}
-                                      onProcessRawText={(rawText) => {
-                                        if (!entregaId) return;
-                                        handleGeneratePgdFromRawText(entregaId, item, rawText);
+                                      onProcessRawText={async (rawText) => {
+                                        let targetId = entregaId;
+                                        if (!targetId) {
+                                          targetId = await handleCreateEntregaFromPlan(item);
+                                        }
+                                        if (targetId) handleGeneratePgdFromRawText(targetId, item, rawText);
                                       }}
                                       isGeneratingAI={entregaId ? !!pgdGeneratingByEntrega[entregaId] : false}
                                       isProcessingRawText={entregaId ? !!pgdRawTextProcessingByEntrega[entregaId] : false}
@@ -6107,6 +6143,209 @@ const App: React.FC = () => {
                               <p className="text-slate-300 font-black text-sm uppercase tracking-widest italic">Nenhum plano de trabalho configurado para este período.</p>
                             </div>
                           )}
+                        </div>
+                      </div>
+                    )}
+
+                    {pgcSubView === 'automatizadas' && (
+                      <div className="animate-in space-y-8">
+                        <div className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl p-6 md:p-10">
+                          <div className="flex items-center justify-between mb-8 pb-6 border-b border-slate-100">
+                            <div>
+                              <h3 className="text-xl font-black text-slate-900 tracking-tight">Painel de Automações</h3>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Scripts e Robôs Auxiliares</p>
+                            </div>
+                            <div className="bg-violet-100 text-violet-600 p-3 rounded-2xl">
+                              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                            {/* Card: Ponto Eletrônico */}
+                            <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50 hover:bg-white hover:shadow-xl transition-all group flex flex-col justify-between h-full relative overflow-hidden">
+                              <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-500 opacity-20 group-hover:opacity-100 transition-opacity"></div>
+                              <div>
+                                <div className="flex items-center gap-3 mb-4">
+                                  <div className="p-2.5 bg-emerald-100 text-emerald-600 rounded-xl">
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                  </div>
+                                  <h4 className="text-sm font-black text-slate-800 uppercase tracking-tight">Ponto Eletrônico</h4>
+                                </div>
+                                <p className="text-xs text-slate-500 font-medium leading-relaxed mb-6">
+                                  Automação que acessa o SIGRH e preenche automaticamente o relógio de ponto do mês logado com a opção de PGD.
+                                </p>
+                              </div>
+                              <button
+                                onClick={async () => {
+                                  showToast('Iniciando automação do ponto eletrônico...', 'info');
+                                  try {
+                                    const response = await fetch('http://127.0.0.1:8000/api/automations/ponto-eletronico', {
+                                      method: 'POST',
+                                    });
+                                    if (response.ok) {
+                                      showToast('Script do Ponto Eletrônico acionado com sucesso!', 'success');
+                                    } else {
+                                      showToast('Erro ao contatar o servidor local de automação.', 'error');
+                                    }
+                                  } catch (e) {
+                                    showToast('O servidor Python de automação (server.py) não está rodando.', 'error');
+                                  }
+                                }}
+                                className="w-full bg-slate-900 text-white py-3.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-md active:scale-95"
+                              >
+                                Preencher Ponto
+                              </button>
+                            </div>
+
+                            {/* Card: Execução PGD (Petrvs) */}
+                            <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50 hover:bg-white hover:shadow-xl transition-all group flex flex-col justify-between h-full relative overflow-hidden">
+                              <div className="absolute top-0 left-0 w-1.5 h-full bg-blue-500 opacity-20 group-hover:opacity-100 transition-opacity"></div>
+                              <div>
+                                <div className="flex items-center gap-3 mb-4">
+                                  <div className="p-2.5 bg-blue-100 text-blue-600 rounded-xl">
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                  </div>
+                                  <h4 className="text-sm font-black text-slate-800 uppercase tracking-tight">Execução PGD</h4>
+                                </div>
+                                <p className="text-xs text-slate-500 font-medium leading-relaxed mb-6">
+                                  Envia os registros de execução salvos diretamente para o Petrvs, preenchendo as entregas institucionais.
+                                </p>
+                                {(() => {
+                                  const currentPlan = planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`);
+                                  if (!currentPlan) return null;
+                                  
+                                  const totalEntregas = currentPlan.itens.length;
+                                  const entregasComRegistro = currentPlan.itens.filter(item => {
+                                    const entregaEntity = pgcEntregas.find(e => e.entrega === item.entrega);
+                                    const registros = entregaEntity ? atividadesPGC.filter(a => a.entrega_id === entregaEntity.id) : [];
+                                    return registros.length > 0;
+                                  }).length;
+
+                                  const faltaRegistros = entregasComRegistro < totalEntregas;
+
+                                  if (faltaRegistros) {
+                                    return (
+                                      <div className="mb-6 p-3 bg-amber-50 border border-amber-100 rounded-xl flex items-start gap-3 animate-pulse">
+                                        <svg className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                        <p className="text-[10px] font-bold text-amber-700 leading-tight">
+                                          Pendente: {totalEntregas - entregasComRegistro} entrega(s) sem nenhum registro de execução. Complete o resumo para liberar.
+                                        </p>
+                                      </div>
+                                    );
+                                  }
+                                  return (
+                                    <div className="mb-6 p-3 bg-emerald-50 border border-emerald-100 rounded-xl flex items-start gap-3">
+                                      <svg className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                                      <p className="text-[10px] font-bold text-emerald-700 leading-tight">
+                                        Tudo pronto! Todas as entregas possuem registros vinculados.
+                                      </p>
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                              <button
+                                onClick={async () => {
+                                  const currentPlan = planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`);
+                                  if (!currentPlan) {
+                                    showToast('Nenhum plano de trabalho encontrado para este mês.', 'error');
+                                    return;
+                                  }
+
+                                  const allDeliveries = currentPlan.itens.map(item => {
+                                    const entregaEntity = pgcEntregas.find(e => e.entrega === item.entrega);
+                                    const registros = entregaEntity ? atividadesPGC.filter(a => a.entrega_id === entregaEntity.id) : [];
+                                    return {
+                                      nome_entrega: item.entrega,
+                                      registros: registros.map(r => ({
+                                        descricao_atividade: r.descricao_atividade,
+                                        data_inicio: r.data_inicio,
+                                        data_fim: r.data_fim
+                                      }))
+                                    };
+                                  });
+
+                                  const missingAny = allDeliveries.some(e => e.registros.length === 0);
+                                  if (missingAny) {
+                                    showToast('Não é possível executar: existem entregas sem registros.', 'error');
+                                    return;
+                                  }
+
+                                  const payload = {
+                                    mes_ano: currentPlan.mes_ano,
+                                    entregas: allDeliveries
+                                  };
+
+                                  showToast('Iniciando automação do PGD no Petrvs...', 'info');
+                                  try {
+                                    const response = await fetch('http://127.0.0.1:8000/api/automations/executar-pgd', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify(payload),
+                                    });
+                                    if (response.ok) {
+                                      showToast('Pacote de dados enviado! Iniciando monitoramento...', 'success');
+                                      setPgdTerminalLogs([]);
+                                      setIsPgdTerminalOpen(true);
+                                    } else {
+                                      showToast('Erro no processamento do servidor de automação.', 'error');
+                                    }
+                                  } catch (e) {
+                                    showToast('Servidor de automação não está respondendo.', 'error');
+                                  }
+                                }}
+                                className={`w-full py-3.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-md active:scale-95 ${
+                                  (() => {
+                                    const currentPlan = planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`);
+                                    const missing = currentPlan?.itens.some(item => {
+                                      const entregaEntity = pgcEntregas.find(e => e.entrega === item.entrega);
+                                      const registros = entregaEntity ? atividadesPGC.filter(a => a.entrega_id === entregaEntity.id) : [];
+                                      return registros.length === 0;
+                                    });
+                                    return missing ? 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-60' : 'bg-slate-900 text-white hover:bg-blue-600';
+                                  })()
+                                }`}
+                              >
+                              </button>
+                              
+                              {isPgdTerminalOpen && (
+                                <div className="mt-6 border border-slate-300 rounded-xl overflow-hidden shadow-2xl relative animate-in zoom-in-95 duration-300">
+                                  <div className="bg-slate-900 border-b border-slate-800 p-3 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <div className="flex gap-1.5 group">
+                                        <div onClick={() => setIsPgdTerminalOpen(false)} className="w-3 h-3 rounded-full bg-red-500 cursor-pointer flex items-center justify-center transition-all hover:bg-red-600">
+                                          <svg className="w-2 h-2 text-red-900 opacity-0 group-hover:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                        </div>
+                                        <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+                                        <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                                      </div>
+                                      <span className="ml-2 text-slate-400 font-mono text-[10px] tracking-wide">petrvs-automation@hermes:~</span>
+                                    </div>
+                                    <button onClick={() => setPgdTerminalLogs([])} className="text-slate-400 hover:text-white transition-colors" title="Limpar Terminal">
+                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                    </button>
+                                  </div>
+                                  <div className="bg-slate-950 p-4 h-[300px] overflow-y-auto font-mono text-[11px] leading-relaxed text-emerald-400 flex flex-col justify-end">
+                                    <div className="flex-1"></div>
+                                    <div className="flex flex-col justify-end">
+                                      {pgdTerminalLogs.length === 0 ? (
+                                        <div className="text-slate-500 flex items-center gap-2">
+                                          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                                          Aguardando boot do motor Python...
+                                        </div>
+                                      ) : (
+                                        pgdTerminalLogs.map((log, i) => (
+                                          <div key={i} className="whitespace-pre-wrap">{log}</div>
+                                        ))
+                                      )}
+                                      <div className="mt-1 text-emerald-400 animate-pulse">_</div>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                          </div>
+
                         </div>
                       </div>
                     )}
