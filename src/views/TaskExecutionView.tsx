@@ -439,12 +439,17 @@ export const TaskExecutionView = ({
         break;
       case 'file_upload':
         if (pendingFiles.length > 0) {
-          await handleFileUpload(
-            pendingFiles.map(file => ({
-              file,
-              customName: pendingFileNames[getPendingFileKey(file)]
-            }))
-          );
+          const filesToUpload = pendingFiles.map(file => ({
+            file,
+            customName: pendingFileNames[getPendingFileKey(file)]
+          }));
+          
+          setModalConfig({ ...modalConfig, isOpen: false });
+          setPendingFiles([]);
+          setPendingFileNames({});
+          
+          handleFileUpload(filesToUpload); // Não usa await aqui para não prender o modal
+          return;
         }
         break;
     }

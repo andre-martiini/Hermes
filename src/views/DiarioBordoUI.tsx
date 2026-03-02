@@ -2,6 +2,7 @@ import React from 'react';
 import { AutoExpandingTextarea } from '../components/ui/UIComponents';
 import { formatWhatsAppText } from '../utils/helpers';
 import { ensureHttpUrl, parseDiaryRichNote } from '../utils/diaryEntries';
+import EmojiPicker from 'emoji-picker-react';
 
 interface DiarioBordoUIProps {
   task: any;
@@ -37,6 +38,8 @@ export const DiarioBordoUI = ({
   diaryEndRef, handleDiaryScroll, handleEditDiaryEntry, handleDeleteDiaryEntry, isUploading,
   notifications = []
 }: DiarioBordoUIProps) => {
+  const [showEmojiPicker, setShowEmojiPicker] = React.useState(false);
+
 
   React.useEffect(() => {
     if (diaryEndRef.current) {
@@ -90,20 +93,39 @@ export const DiarioBordoUI = ({
     if (richEntry?.type === 'FILE') {
       const nome = richEntry.name || 'Arquivo';
       const url = richEntry.value || '#';
+      const ext = nome.split('.').pop()?.toLowerCase() || '';
+      const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext);
+
+      // Conversão do link do Web View do Drive para Embed URL
+      let embedUrl = url;
+      if (isImage && url.includes('drive.google.com')) {
+          const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+          if (match && match[1]) {
+              embedUrl = `https://drive.google.com/uc?id=${match[1]}`;
+          }
+      }
+
       return (
-        <a href={url} target="_blank" rel="noreferrer" className={`group flex items-center gap-2 p-2 rounded-xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-amber-50/50 border-amber-100 hover:bg-amber-50'}`}>
-          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-amber-200 text-amber-600'}`}>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className={`text-[11px] font-bold break-all leading-snug ${isTimerRunning ? 'text-white' : 'text-amber-900'}`}>{nome}</p>
-            <p className={`text-[8px] uppercase font-black tracking-widest mt-0.5 opacity-50 ${isTimerRunning ? 'text-white/40' : 'text-amber-600'}`}>Anexo</p>
+        <a href={url} target="_blank" rel="noreferrer" className={`group flex flex-col p-2 rounded-xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-amber-50/50 border-amber-100 hover:bg-amber-50'} overflow-hidden max-w-sm`}>
+          {isImage && (
+             <div className="w-full h-32 md:h-48 mb-2 bg-slate-900 rounded-lg overflow-hidden flex items-center justify-center">
+                <img src={embedUrl} alt={nome} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
+             </div>
+          )}
+          <div className="flex items-center gap-2">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-amber-200 text-amber-600'}`}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className={`text-[11px] font-bold break-all leading-snug ${isTimerRunning ? 'text-white' : 'text-amber-900'}`}>{nome}</p>
+              <p className={`text-[8px] uppercase font-black tracking-widest mt-0.5 opacity-50 ${isTimerRunning ? 'text-white/40' : 'text-amber-600'}`}>Anexo{isImage ? ' Visual' : ''}</p>
+            </div>
           </div>
         </a>
       );
     }
 
-    return <div className={`text-xs md:text-sm leading-relaxed break-words [overflow-wrap:anywhere] ${isTimerRunning ? 'text-white/90' : 'text-slate-700'}`}>{formatWhatsAppText(text)}</div>;
+    return <div className={`text-xs md:text-sm leading-relaxed break-words [overflow-wrap:anywhere] ${isTimerRunning ? 'text-white/90' : 'text-slate-700'}`}>{formatWhatsAppText(text, isTimerRunning)}</div>;
   };
 
   return (
@@ -227,6 +249,30 @@ export const DiarioBordoUI = ({
                   handleAddFollowUp();
                 }
               }}
+              onPaste={(e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+                const pastedText = e.clipboardData.getData('text');
+                if (pastedText && /\[\d{2}:\d{2}, \d{2}\/\d{2}\/\d{4}\]/.test(pastedText)) {
+                  e.preventDefault();
+                  const cleaned = pastedText.replace(/\[\d{2}:\d{2}, \d{2}\/\d{2}\/\d{4}\][^:]+:\s*/g, '').trim();
+                  setNewFollowUp(newFollowUp ? newFollowUp + '\n' + cleaned : cleaned);
+                  return;
+                }
+                
+                if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+                  e.preventDefault();
+                  try {
+                      const dataTransfer = new DataTransfer();
+                      Array.from(e.clipboardData.files).forEach(file => dataTransfer.items.add(file));
+                      const pseudoEvent = {
+                          target: { files: dataTransfer.files, value: '' },
+                          preventDefault: () => {}
+                      } as unknown as React.ChangeEvent<HTMLInputElement>;
+                      handleFileUploadInput(pseudoEvent);
+                  } catch (err) {
+                      console.error('Erro ao processar ficheiros:', err);
+                  }
+                }
+              }}
               placeholder="Descreva o que foi feito agora..."
               className={`w-full outline-none text-sm leading-relaxed transition-all min-h-[40px] max-h-[120px] overflow-y-auto resize-none ${isTimerRunning
                 ? 'bg-transparent text-white placeholder:text-white/20'
@@ -275,6 +321,27 @@ export const DiarioBordoUI = ({
               <button onClick={() => applyFormatting('_')} className={`w-[20px] h-[20px] flex items-center justify-center rounded text-[10px] italic transition-colors ${isTimerRunning ? 'text-white/30 hover:text-white/70 hover:bg-white/10' : 'text-slate-400 hover:bg-slate-200 hover:text-slate-600'}`}>I</button>
               <button onClick={() => applyFormatting('~')} className={`w-[20px] h-[20px] flex items-center justify-center rounded text-[10px] line-through transition-colors ${isTimerRunning ? 'text-white/30 hover:text-white/70 hover:bg-white/10' : 'text-slate-400 hover:bg-slate-200 hover:text-slate-600'}`}>S</button>
               <button onClick={() => applyFormatting('`')} className={`w-[20px] h-[20px] flex items-center justify-center rounded text-[8px] font-mono transition-colors ${isTimerRunning ? 'text-white/30 hover:text-white/70 hover:bg-white/10' : 'text-slate-400 hover:bg-slate-200 hover:text-slate-600'}`}>{'</>'}</button>
+
+              <div className="relative">
+                <button
+                  onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                  className={`w-[20px] h-[20px] flex items-center justify-center rounded transition-colors ${isTimerRunning ? 'text-white/30 hover:text-white/70 hover:bg-white/10' : 'text-slate-400 hover:bg-slate-200 hover:text-slate-600'}`}
+                  title="Emojis"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                </button>
+                {showEmojiPicker && (
+                  <div className="absolute bottom-8 left-0 z-[100] shadow-2xl rounded-xl">
+                    <EmojiPicker 
+                      onEmojiClick={(emojiData) => {
+                        setNewFollowUp(newFollowUp + emojiData.emoji);
+                        setShowEmojiPicker(false);
+                      }}
+                      theme={isTimerRunning ? 'dark' as any : 'light' as any}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Direita: Botão Mic + Botão Enviar */}

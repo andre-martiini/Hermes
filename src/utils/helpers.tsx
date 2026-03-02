@@ -87,7 +87,7 @@ export const normalizeStatus = (status: string): string => {
     .replace(/[\u0300-\u036f]/g, "");
 };
 
-export const formatWhatsAppText = (text: string) => {
+export const formatWhatsAppText = (text: string, isDarkMode: boolean = false) => {
   if (!text) return text;
 
   // Process block-level elements
@@ -105,21 +105,21 @@ export const formatWhatsAppText = (text: string) => {
   lines.forEach((line, index) => {
     // Lists
     if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
-      currentList.push(<li key={index} className="pl-1">{formatInlineWhatsAppText(line.trim().substring(2))}</li>);
+      currentList.push(<li key={index} className="pl-1">{formatInlineWhatsAppText(line.trim().substring(2), isDarkMode)}</li>);
     } else {
       flushList();
 
       // Blockquote
       if (line.trim().startsWith('>')) {
         processedLines.push(
-          <blockquote key={index} className="border-l-4 border-slate-300 pl-4 py-1 my-2 italic text-slate-500 bg-slate-50/50 rounded-r-lg">
-            {formatInlineWhatsAppText(line.trim().substring(1).trim())}
+          <blockquote key={index} className={`border-l-4 pl-4 py-1 my-2 italic rounded-r-lg ${isDarkMode ? 'border-white/20 text-white/50 bg-white/5' : 'border-slate-300 text-slate-500 bg-slate-50/50'}`}>
+            {formatInlineWhatsAppText(line.trim().substring(1).trim(), isDarkMode)}
           </blockquote>
         );
       } else if (line.trim() === '') {
         processedLines.push(<div key={index} className="h-2"></div>);
       } else {
-        processedLines.push(<div key={index}>{formatInlineWhatsAppText(line)}</div>);
+        processedLines.push(<div key={index}>{formatInlineWhatsAppText(line, isDarkMode)}</div>);
       }
     }
   });
@@ -128,7 +128,7 @@ export const formatWhatsAppText = (text: string) => {
   return <div className="space-y-0.5">{processedLines}</div>;
 };
 
-export const formatInlineWhatsAppText = (text: string) => {
+export const formatInlineWhatsAppText = (text: string, isDarkMode: boolean = false) => {
   let parts: (string | React.JSX.Element)[] = [text];
 
   const applyRegex = (regex: RegExp, formatter: (match: string) => React.JSX.Element) => {
@@ -156,13 +156,13 @@ export const formatInlineWhatsAppText = (text: string) => {
   };
 
   // Monospace ```text``` (do this first to avoid other formatting inside)
-  applyRegex(/```([\s\S]+?)```/g, (inner) => <pre className="bg-slate-100/80 p-3 rounded-lg font-mono text-[11px] my-2 overflow-x-auto border border-slate-200 text-slate-800">{inner}</pre>);
+  applyRegex(/```([\s\S]+?)```/g, (inner) => <pre className={`p-3 rounded-lg font-mono text-[11px] my-2 overflow-x-auto border ${isDarkMode ? 'bg-black/30 border-white/10 text-white/80' : 'bg-slate-100/80 border-slate-200 text-slate-800'}`}>{inner}</pre>);
 
   // Inline Code `text`
-  applyRegex(/`([^`]+?)`/g, (inner) => <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-[11px] text-pink-600 border border-slate-200">{inner}</code>);
+  applyRegex(/`([^`]+?)`/g, (inner) => <code className={`px-1.5 py-0.5 rounded font-mono text-[11px] border ${isDarkMode ? 'bg-black/30 border-white/10 text-pink-400' : 'bg-slate-100 border-slate-200 text-pink-600'}`}>{inner}</code>);
 
   // Bold *text*
-  applyRegex(/\*([^\*]+?)\*/g, (inner) => <strong className="font-black text-slate-900">{inner}</strong>);
+  applyRegex(/\*([^\*]+?)\*/g, (inner) => <strong className={`font-black ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{inner}</strong>);
 
   // Italic _text_
   applyRegex(/_([^_]+?)_/g, (inner) => <em className="italic">{inner}</em>);

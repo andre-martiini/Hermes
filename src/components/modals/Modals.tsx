@@ -190,7 +190,7 @@ export const SettingsModal = ({
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
                       <p className="text-sm font-bold text-slate-900 mb-1">Lembrete de Pesagem</p>
-                      <p className="text-[11px] text-slate-500 font-medium">Registrar peso na balanÃ§a</p>
+                      <p className="text-[11px] text-slate-500 font-medium">Registrar peso na balança</p>
                     </div>
                     <button
                       onClick={() => setLocalSettings({
@@ -235,7 +235,7 @@ export const SettingsModal = ({
                       >
                         <option value={0}>Domingo</option>
                         <option value={1}>Segunda</option>
-                        <option value={2}>TerÃ§a</option>
+                        <option value={2}>Terça</option>
                         <option value={3}>Quarta</option>
                         <option value={4}>Quinta</option>
                         <option value={5}>Sexta</option>
@@ -267,7 +267,7 @@ export const SettingsModal = ({
 
                 <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-emerald-200 transition-all">
                   <div className="flex-1">
-                    <p className="text-sm font-bold text-slate-900 mb-1">Risco OrÃ§amentário</p>
+                    <p className="text-sm font-bold text-slate-900 mb-1">Risco Orçamentário</p>
                     <p className="text-[11px] text-slate-500 font-medium">Avisar se gastos estiverem acima do esperado</p>
                   </div>
                   <button
@@ -307,7 +307,7 @@ export const SettingsModal = ({
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
                       <p className="text-sm font-bold text-slate-900 mb-1">Audit PGD</p>
-                      <p className="text-[11px] text-slate-500 font-medium">Verificar vÃ­nculos antes do fim do mÃªs</p>
+                      <p className="text-[11px] text-slate-500 font-medium">Verificar vÃ­nculos antes do fim do mês</p>
                     </div>
                     <button
                       onClick={() => setLocalSettings({
@@ -360,12 +360,12 @@ export const SettingsModal = ({
                   </button>
                 </div>
 
-                {/* Form de AdiÃ§ão */}
+                {/* Form de Adição */}
                 {isAddingCustom && (
                   <div className="bg-slate-50 p-4 rounded-xl border border-blue-100 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2">
                     <input
                       type="text"
-                      placeholder="Mensagem da notificaÃ§ão..."
+                      placeholder="Mensagem da notificação..."
                       className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none"
                       value={newCustom.message || ''}
                       onChange={e => setNewCustom({ ...newCustom, message: e.target.value })}
@@ -409,7 +409,7 @@ export const SettingsModal = ({
 
                     {newCustom.frequency === 'monthly' && (
                        <div className="flex items-center gap-2">
-                         <span className="text-[10px] font-black text-slate-400 uppercase">Dia do mÃªs:</span>
+                         <span className="text-[10px] font-black text-slate-400 uppercase">Dia do mês:</span>
                          <input
                            type="number"
                            min="1"
@@ -445,7 +445,7 @@ export const SettingsModal = ({
                       }}
                       className="bg-blue-600 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-colors disabled:opacity-50"
                     >
-                      Salvar NotificaÃ§ão
+                      Salvar Notificação
                     </button>
                   </div>
                 )}
@@ -493,7 +493,7 @@ export const SettingsModal = ({
                   ))}
                   {(localSettings.notifications.custom || []).length === 0 && !isAddingCustom && (
                     <div className="text-center py-6 text-slate-300 text-[10px] font-black uppercase tracking-widest italic border-2 border-dashed border-slate-50 rounded-xl">
-                      Nenhuma notificaÃ§ão personalizada
+                      Nenhuma notificação personalizada
                     </div>
                   )}
                 </div>
@@ -537,7 +537,7 @@ export const SettingsModal = ({
 
               <div className="space-y-4">
                 {unidades.map((u) => {
-                  const isProtected = ['CLC', 'ASSISTÃŠNCIA', 'ASSISTÃŠNCIA ESTUDANTIL'].includes(u.nome.toUpperCase());
+                  const isProtected = ['CLC', 'ASSISTÊNCIA', 'ASSISTÊNCIA ESTUDANTIL'].includes(u.nome.toUpperCase());
                   return (
                     <div key={u.id} className={`p-6 bg-slate-50 rounded-none md:rounded-[2rem] border ${isProtected ? 'border-amber-200 bg-amber-50/30' : 'border-slate-100'} space-y-4 shadow-sm`}>
                       <div className="flex items-center justify-between">
@@ -625,7 +625,7 @@ export const SettingsModal = ({
                 </h4>
 
                 <p className="text-xs text-slate-500 font-medium">
-                  Cadastre os sistemas que vocÃª está desenvolvendo para gerenciá-los no mÃ³dulo Sistemas.
+                  Cadastre os sistemas que você está desenvolvendo para gerenciá-los no módulo Sistemas.
                 </p>
 
                 {/* Lista de Sistemas */}
@@ -715,7 +715,7 @@ export const SettingsModal = ({
               <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-rose-200 transition-all">
                 <div className="flex-1">
                   <p className="text-sm font-bold text-slate-900 mb-1">Ativar Pomodoro</p>
-                  <p className="text-[11px] text-slate-500 font-medium">Habilitar ciclos de trabalho e descanso na execuÃ§ão</p>
+                  <p className="text-[11px] text-slate-500 font-medium">Habilitar ciclos de trabalho e descanso na execução</p>
                 </div>
                 <button
                   onClick={() => setLocalSettings({
@@ -764,7 +764,7 @@ export const SettingsModal = ({
               <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-amber-200 transition-all">
                 <div className="flex-1">
                   <p className="text-sm font-bold text-slate-900 mb-1">Alertas Sonoros</p>
-                  <p className="text-[11px] text-slate-500 font-medium">Emitir bipes discretos nos Ãºltimos 3 segundos</p>
+                  <p className="text-[11px] text-slate-500 font-medium">Emitir bipes discretos nos últimos 3 segundos</p>
                 </div>
                 <button
                   onClick={() => setLocalSettings({
@@ -781,7 +781,7 @@ export const SettingsModal = ({
             <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
               <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
                 <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
-                IntegraÃ§ão Google Drive
+                Integração Google Drive
               </h4>
 
               <div className="p-6 bg-slate-50 rounded-none md:rounded-[2rem] border border-slate-100 space-y-4 shadow-sm">
@@ -799,7 +799,7 @@ export const SettingsModal = ({
                     className="w-full bg-white border border-slate-200 rounded-lg md:rounded-xl px-4 py-3 text-xs font-mono text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none"
                   />
                   <p className="text-[9px] text-slate-400 italic">
-                    O ID da pasta Ã© a parte final da URL da pasta no Google Drive.
+                    O ID da pasta é a parte final da URL da pasta no Google Drive.
                   </p>
                 </div>
               </div>
@@ -869,11 +869,11 @@ export const DailyHabitsModal = ({
 
         <div className="p-8 space-y-3">
           {[
-            { id: 'noSugar', label: 'Sem AÃ§Ãºcar', color: 'rose' },
+            { id: 'noSugar', label: 'Sem Açúcar', color: 'rose' },
             { id: 'noAlcohol', label: 'Sem Ãlcool', color: 'purple' },
             { id: 'noSnacks', label: 'Sem Lanches/Delivery', color: 'orange' },
             { id: 'workout', label: 'Treino do Dia', color: 'emerald' },
-            { id: 'eatUntil18', label: 'Comer atÃ© as 18h', color: 'blue' },
+            { id: 'eatUntil18', label: 'Comer até as 18h', color: 'blue' },
             { id: 'eatSlowly', label: 'Comer Devagar', color: 'indigo' }
           ].map((habit) => {
             const colorMap: Record<string, { bg: string, border: string, text: string, dot: string }> = {
@@ -931,7 +931,7 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
     data_limite: initialData?.data_limite || '',
     data_criacao: new Date().toISOString(), // Actual creation timestamp
     status: initialData?.status || 'em andamento' as Status,
-    categoria: initialData?.categoria || 'NÃƒO CLASSIFICADA' as Categoria,
+    categoria: initialData?.categoria || 'NÃO CLASSIFICADA' as Categoria,
     notas: initialData?.notas || '',
     is_single_day: !!initialData?.is_single_day,
     horario_inicio: initialData?.horario_inicio || '',
@@ -944,7 +944,7 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
       <div className="bg-white w-full h-auto max-h-[95vh] md:max-w-md rounded-2xl md:rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col">
         <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between flex-shrink-0">
-          <h3 className="text-lg font-black text-slate-900 tracking-tight">Nova AÃ§ão</h3>
+          <h3 className="text-lg font-black text-slate-900 tracking-tight">Nova Ação</h3>
           <button onClick={onClose} className="p-1.5 hover:bg-slate-200 rounded-full transition-colors">
             <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
@@ -952,7 +952,7 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
 
         <div className="p-4 space-y-3 overflow-y-auto custom-scrollbar flex-1">
           <div className="space-y-1">
-            <label htmlFor="task-title-input" className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">TÃ­tulo da Tarefa</label>
+            <label htmlFor="task-title-input" className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Título da Tarefa</label>
             <input
               id="task-title-input"
               type="text"
@@ -972,7 +972,7 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
               className="w-full bg-slate-100 border-none rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
               placeholder="O que precisa ser feito?"
             />
-            {formData.categoria !== 'NÃƒO CLASSIFICADA' && formData.categoria !== 'GERAL' && !autoClassified && (
+            {formData.categoria !== 'NÃO CLASSIFICADA' && formData.categoria !== 'GERAL' && !autoClassified && (
               <p className="text-[8px] font-bold text-blue-600 pl-1 flex items-center gap-1">
                 <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 Ãrea detectada automaticamente.
@@ -995,13 +995,13 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
               }}
               className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 transition-all cursor-pointer"
             />
-            <label htmlFor="single-day" className="text-[11px] font-bold text-slate-700 cursor-pointer select-none">Tarefa de um dia sÃ³ (Apenas Prazo Final)</label>
+            <label htmlFor="single-day" className="text-[11px] font-bold text-slate-700 cursor-pointer select-none">Tarefa de um dia só (Apenas Prazo Final)</label>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             {!formData.is_single_day && (
               <div className="space-y-1">
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">InÃ­cio</label>
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Início</label>
                 <input
                   type="date"
                   value={formData.data_inicio}
@@ -1030,7 +1030,7 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Hora InÃ­cio</label>
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Hora Início</label>
               <input
                 type="time"
                 value={formData.horario_inicio}
@@ -1058,11 +1058,11 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
                 className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
               >
                 <option value="em andamento">Em Andamento</option>
-                <option value="concluÃ­do">ConcluÃ­do</option>
+                <option value="concluído">Concluído</option>
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Tag (ClassificaÃ§ão)</label>
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Tag (Classificação)</label>
               <select
                 value={formData.categoria}
                 onChange={e => {
@@ -1072,10 +1072,10 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
                 className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
               >
                 <option value="GERAL">Geral</option>
-                <option value="NÃƒO CLASSIFICADA">Não Classificada</option>
+                <option value="NÃO CLASSIFICADA">Não Classificada</option>
                 <option value="CLC">CLC</option>
-                <option value="ASSISTÃŠNCIA">AssistÃªncia Estudantil</option>
-                {unidades.filter(u => u.nome !== 'CLC' && u.nome !== 'AssistÃªncia Estudantil').map(u => (
+                <option value="ASSISTÊNCIA">Assistência Estudantil</option>
+                {unidades.filter(u => u.nome !== 'CLC' && u.nome !== 'Assistência Estudantil').map(u => (
                   <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
                 ))}
               </select>
@@ -1088,18 +1088,18 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
           <button
             onClick={() => {
               if (!formData.titulo || !formData.data_limite) {
-                showAlert("AtenÃ§ão", "Preencha o tÃ­tulo e o prazo final.");
+                showAlert("Atenção", "Preencha o tÃ­tulo e o prazo final.");
                 return;
               }
 
               // Validation
               if (!formData.is_single_day && formData.data_inicio > formData.data_limite) {
-                showAlert("AtenÃ§ão", "A data de inÃ­cio deve ser anterior ou igual ao prazo final.");
+                showAlert("Atenção", "A data de inÃ­cio deve ser anterior ou igual ao prazo final.");
                 return;
               }
 
               let finalNotes = formData.notas;
-              if (formData.categoria !== 'NÃƒO CLASSIFICADA') {
+              if (formData.categoria !== 'NÃO CLASSIFICADA') {
                 const tagStr = `Tag: ${formData.categoria}`;
                 finalNotes = finalNotes ? `${finalNotes}\n\n${tagStr}` : tagStr;
               }
@@ -1113,7 +1113,7 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
             }}
             className="flex-1 bg-blue-600 text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
           >
-            Criar AÃ§ão
+            Criar Ação
           </button>
         </div>
       </div>
@@ -1127,7 +1127,7 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
     data_limite: task.data_limite === '-' ? '' : task.data_limite,
     data_criacao: task.data_criacao,
     status: task.status,
-    categoria: task.categoria || 'NÃƒO CLASSIFICADA',
+    categoria: task.categoria || 'NÃO CLASSIFICADA',
     notas: task.notas || '',
     is_single_day: !!task.is_single_day,
     entregas_relacionadas: task.entregas_relacionadas || [],
@@ -1150,13 +1150,13 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
 
         <div className="p-4 space-y-3 overflow-y-auto custom-scrollbar flex-1">
           <div className="space-y-1">
-            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">TÃ­tulo da Tarefa</label>
+            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Título da Tarefa</label>
             <input
               type="text"
               value={formData.titulo}
               onChange={e => setFormData({ ...formData, titulo: e.target.value })}
               className="w-full bg-slate-100 border-none rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
-              placeholder="TÃ­tulo da demanda..."
+              placeholder="Título da demanda..."
             />
           </div>
 
@@ -1175,13 +1175,13 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
               }}
               className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 transition-all cursor-pointer"
             />
-            <label htmlFor="edit-single-day" className="text-[11px] font-bold text-slate-700 cursor-pointer select-none">Tarefa de um dia sÃ³ (Apenas Prazo Final)</label>
+            <label htmlFor="edit-single-day" className="text-[11px] font-bold text-slate-700 cursor-pointer select-none">Tarefa de um dia só (Apenas Prazo Final)</label>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             {!formData.is_single_day && (
               <div className="space-y-1">
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">InÃ­cio</label>
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Início</label>
                 <input
                   type="date"
                   value={formData.data_inicio}
@@ -1210,7 +1210,7 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Hora InÃ­cio</label>
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Hora Início</label>
               <input
                 type="time"
                 value={formData.horario_inicio}
@@ -1231,23 +1231,23 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
 
           <div className="grid grid-cols-1 gap-3">
             <div className="space-y-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Tag (ClassificaÃ§ão)</label>
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Tag (Classificação)</label>
               <select
                 value={formData.categoria}
                 onChange={e => setFormData({ ...formData, categoria: e.target.value as Categoria })}
                 className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
               >
                 <option value="GERAL">Geral</option>
-                <option value="NÃƒO CLASSIFICADA">Não Classificada</option>
+                <option value="NÃO CLASSIFICADA">Não Classificada</option>
                 <option value="CLC">CLC</option>
-                <option value="ASSISTÃŠNCIA">AssistÃªncia Estudantil</option>
-                {unidades.filter(u => u.nome !== 'CLC' && u.nome !== 'AssistÃªncia Estudantil').map(u => (
+                <option value="ASSISTÊNCIA">Assistência Estudantil</option>
+                {unidades.filter(u => u.nome !== 'CLC' && u.nome !== 'Assistência Estudantil').map(u => (
                   <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
                 ))}
               </select>
             </div>
 
-            {(formData.categoria === 'CLC' || formData.categoria === 'ASSISTÃŠNCIA' || formData.categoria === 'ASSISTÃŠNCIA ESTUDANTIL') && (
+            {(formData.categoria === 'CLC' || formData.categoria === 'ASSISTÊNCIA' || formData.categoria === 'ASSISTÊNCIA ESTUDANTIL') && (
               <div className="space-y-1 animate-in fade-in slide-in-from-top-2">
                 <label className="text-[9px] font-black text-blue-600 uppercase tracking-widest pl-1">Vincular ao PGD</label>
                 <select
@@ -1269,11 +1269,11 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
           <button
             onClick={() => {
               if (!formData.titulo || !formData.data_limite) {
-                showAlert("AtenÃ§ão", "Preencha o tÃ­tulo e o prazo final.");
+                showAlert("Atenção", "Preencha o tÃ­tulo e o prazo final.");
                 return;
               }
               if (!formData.is_single_day && formData.data_inicio > formData.data_limite) {
-                showAlert("AtenÃ§ão", "A data de inÃ­cio deve ser anterior ou igual ao prazo final.");
+                showAlert("Atenção", "A data de inÃ­cio deve ser anterior ou igual ao prazo final.");
                 return;
               }
               onSave(task.id, formData);
