@@ -23,7 +23,7 @@ from google.auth.exceptions import RefreshError
 SCOPES = [
     'https://www.googleapis.com/auth/tasks',
     'https://www.googleapis.com/auth/gmail.readonly',
-    'https://www.googleapis.com/auth/calendar.readonly',
+    'https://www.googleapis.com/auth/calendar',
     'https://www.googleapis.com/auth/drive'
 ]
 
@@ -87,7 +87,18 @@ def get_google_creds():
                 print("ERRO: 'credentials.json' não encontrado. Baixe do Google Cloud Console.")
                 sys.exit(1)
             flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
+            
+            print("\n----- ATENÇÃO -----")
+            print("Seu navegador deve abrir agora. Se você vir a tela 'ERR_CONNECTION_REFUSED', significa que o Google bloqueou portas dinâmicas.")
+            print("Tentando forçar a captura via localhost:8080...")
+            print("-------------------\n")
+            
+            try:
+                # Tenta forçar a porta padrão
+                creds = flow.run_local_server(port=8080)
+            except Exception as e:
+                print(f"Erro ao ligar o servidor local ({e}). Usando modo console. Copie a URL abaixo:")
+                creds = flow.run_console()
 
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
@@ -361,6 +372,9 @@ def push_google_tasks(db, log_list=None, sync_ref=None):
         if not tasklist_id:
             log("ERRO: Lista destino não encontrada.")
             return
+
+        calendar_service = get_calendar_service()
+
         # Pega todas as tarefas do Google (com paginação) para o mapa
         g_tasks_map = {}
         next_page_token = None
@@ -391,11 +405,9 @@ def push_google_tasks(db, log_list=None, sync_ref=None):
                 doc.reference.delete()
                 continue
 
+            sync_to_calendar = bool(t.get('horario_inicio') and t.get('data_limite') and t.get('data_limite') != '-')
+
             due_date = f"{t['data_limite']}T00:00:00Z" if t.get('data_limite') and t.get('data_limite') != '-' else None
-            
-            # Se houver horário de início, tentamos enviar no due
-            if t.get('horario_inicio') and due_date:
-                due_date = f"{t['data_limite']}T{t['horario_inicio']}:00Z"
 
             g_status = 'completed' if t.get('status') == 'concluído' else 'needsAction'
             
@@ -420,7 +432,6 @@ def push_google_tasks(db, log_list=None, sync_ref=None):
                 })
                 log(f"[+] ENVIADA: {t['titulo']}"); count += 1
                 continue
-
             g_task = g_tasks_map.get(g_id)
             if g_task and t.get('data_atualizacao', '') > g_task.get('updated', ''):
                 body = {'id': g_id, 'title': t['titulo'], 'notes': updated_notes, 'status': g_status, 'due': due_date}
@@ -435,6 +446,38 @@ def push_google_tasks(db, log_list=None, sync_ref=None):
                         doc.reference.update({'google_id': None})
                     else:
                         raise e
+            
+            # --- PARTE 2: Sincronia Google Calendar (Se possuir horário) ---
+            cal_id = t.get('google_calendar_id')
+            if sync_to_calendar and g_status == 'needsAction':
+                try:
+                    start_dt = f"{t.get('data_limite')}T{h_inicio}:00-03:00"
+                    end_dt = f"{t.get('data_limite')}T{h_fim}:00-03:00"
+                    event_body = {
+                        'summary': f"Tarefa: {t['titulo']}",
+                        'description': updated_notes,
+                        'start': {'dateTime': start_dt, 'timeZone': 'America/Sao_Paulo'},
+                        'end': {'dateTime': end_dt, 'timeZone': 'America/Sao_Paulo'}
+                    }
+                    if not cal_id:
+                        new_event = calendar_service.events().insert(calendarId='primary', body=event_body).execute()
+                        doc.reference.update({'google_calendar_id': new_event['id']})
+                        log(f"[+] ALOCADA CALENDAR: {t['titulo']}")
+                    else:
+                        try:
+                            calendar_service.events().update(calendarId='primary', eventId=cal_id, body=event_body).execute()
+                        except HttpError as cal_err:
+                            if cal_err.resp.status == 404:
+                                new_event = calendar_service.events().insert(calendarId='primary', body=event_body).execute()
+                                doc.reference.update({'google_calendar_id': new_event['id']})
+                except Exception as ce:
+                    pass
+            elif (not sync_to_calendar or g_status == 'completed') and cal_id:
+                 try:
+                     calendar_service.events().delete(calendarId='primary', eventId=cal_id).execute()
+                 except HttpError as ce: pass
+                 doc.reference.update({'google_calendar_id': None})
+
         log(f"PUSH FINALIZADO: {count} atualizações.", force_ui=True)
     except Exception as e:
         log(f"ERRO PUSH: {e}", force_ui=True)
