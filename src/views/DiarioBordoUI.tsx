@@ -101,7 +101,7 @@ export const DiarioBordoUI = ({
       if (isImage && url.includes('drive.google.com')) {
           const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
           if (match && match[1]) {
-              embedUrl = `https://drive.google.com/uc?id=${match[1]}`;
+              embedUrl = `https://drive.google.com/thumbnail?id=${match[1]}&sz=w800`;
           }
       }
 

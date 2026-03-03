@@ -1317,6 +1317,12 @@ def upload_to_drive(req: https_fn.CallableRequest):
         media = MediaIoBaseUpload(fh, mimetype=mime_type, resumable=True)
 
         file = service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink').execute()
+        
+        # Share the file publicly so frontend preview thumbnails work without 403 errors
+        try:
+            service.permissions().create(fileId=file.get('id'), body={'type': 'anyone', 'role': 'reader'}).execute()
+        except Exception as perm_e:
+            print(f"Aviso: Não foi possível definir a permissão pública: {perm_e}")
 
         return {'fileId': file.get('id'), 'webViewLink': file.get('webViewLink')}
 

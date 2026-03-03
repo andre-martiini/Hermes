@@ -403,20 +403,20 @@ export const TimeGrid = ({
                           });
                         }}
                      >
-                       <div className="flex justify-between items-start gap-1">
-                         <div className="text-[10px] font-bold leading-tight line-clamp-2 flex-1">{taskItem.titulo}</div>
-                         <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 bg-white/50 rounded backdrop-blur-sm">
+                       <div className="flex justify-between items-start gap-1 relative h-full">
+                         <div className="text-[10px] font-bold leading-tight line-clamp-2 flex-1 pr-4">{taskItem.titulo}</div>
+                         <div className="absolute -top-1 -right-1 flex gap-1 md:gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white/95 p-1 rounded-bl-xl shadow-sm backdrop-blur-md z-10 border-b border-l border-slate-200/60">
                             <button
                               onClick={(e) => { e.stopPropagation(); onTaskUpdate(taskItem.id, { status: taskItem.status === 'concluído' ? 'em andamento' : 'concluído' }); }}
-                              className={`p-0.5 rounded hover:bg-black/10 ${taskItem.status === 'concluído' ? 'text-emerald-600' : 'text-slate-400'}`}
+                              className={`p-1.5 md:p-2 rounded-lg hover:scale-105 active:scale-95 transition-all ${taskItem.status === 'concluído' ? 'text-emerald-500 bg-emerald-50 shadow-inner' : 'text-slate-400 bg-slate-50 hover:text-emerald-600 hover:bg-emerald-50 hover:shadow-sm'}`}
                             >
-                              <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                              <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
                             </button>
-                            <button onClick={(e) => { e.stopPropagation(); onExecuteTask(taskItem); }} className="p-0.5 rounded hover:bg-black/10 text-indigo-600">
-                              <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /></svg>
+                            <button onClick={(e) => { e.stopPropagation(); onExecuteTask(taskItem); }} className="p-1.5 md:p-2 rounded-lg text-indigo-500 bg-indigo-50 hover:bg-indigo-100 hover:scale-105 active:scale-95 transition-all hover:shadow-sm" title="Executar">
+                              <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /></svg>
                             </button>
-                            <button onClick={(e) => { e.stopPropagation(); onTaskClick(taskItem); }} className="p-0.5 rounded hover:bg-black/10 text-slate-500">
-                              <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                            <button onClick={(e) => { e.stopPropagation(); onTaskClick(taskItem); }} className="p-1.5 md:p-2 rounded-lg text-blue-500 bg-blue-50 hover:bg-blue-100 hover:scale-105 active:scale-95 transition-all hover:shadow-sm" title="Editar">
+                              <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                             </button>
                          </div>
                        </div>
