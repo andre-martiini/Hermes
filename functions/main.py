@@ -44,7 +44,7 @@ def get_google_creds():
 
         'https://www.googleapis.com/auth/gmail.readonly',
 
-        'https://www.googleapis.com/auth/calendar.readonly',
+        'https://www.googleapis.com/auth/calendar',  # Modificado para leitura e escrita na nova regra
 
         'https://www.googleapis.com/auth/drive'
 
@@ -384,7 +384,7 @@ from googleapiclient.errors import HttpError
 
 
 
-def sync_google_tasks_push(service, sync_ref, logs):
+def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
 
     db = get_db()
 
@@ -394,7 +394,13 @@ def sync_google_tasks_push(service, sync_ref, logs):
 
         tasklist_id = next((item['id'] for item in results.get('items', []) if 'tarefa' in item['title'].lower()), None)
 
-        if not tasklist_id: return
+
+
+        if not tasklist_id: 
+            # Verifica se há list default
+            default_list = service.tasklists().get(tasklist='@default').execute()
+            tasklist_id = default_list.get('id')
+            if not tasklist_id: return
 
         
 
@@ -453,18 +459,15 @@ def sync_google_tasks_push(service, sync_ref, logs):
             
 
             g_status = 'completed' if t.get('status') == 'concluído' else 'needsAction'
-
-            g_due = f"{t.get('data_limite')}T00:00:00Z" if t.get('data_limite') and t.get('data_limite') != '-' else None
-
             
+            # Decisão: se houver horario_inicio, enviaremos pro CALENDAR como EVENTO também!
+            sync_to_calendar = bool(t.get('horario_inicio') and t.get('data_limite') and t.get('data_limite') != '-')
 
-            # Se houver horário de início, tentamos enviar no due
-
-            if t.get('horario_inicio') and g_due:
-
-                g_due = f"{t.get('data_limite')}T{t['horario_inicio']}:00Z"
-
-
+            if t.get('data_limite') and t.get('data_limite') != '-':
+                # Pro Tasks, precisa ser 00:00:00.000Z por limitacao da API.
+                g_due = f"{t.get('data_limite')}T00:00:00.000Z"
+            else:
+                g_due = None
 
             # Atualiza as notas com o horário para garantir a sincronia
 
@@ -486,47 +489,66 @@ def sync_google_tasks_push(service, sync_ref, logs):
 
             updated_notes = update_notes_with_time(t.get('notas', ''), h_inicio, h_fim)
 
-
-
+            # --- PARTE 1: Sincronia Padrão do Google Tasks (sempre) ---
             if not g_id:
-
                 body = {'title': title, 'notes': updated_notes, 'status': g_status}
-
                 if g_due: body['due'] = g_due
-
                 new_task = service.tasks().insert(tasklist=tasklist_id, body=body).execute()
-
                 doc.reference.update({'google_id': new_task['id'], 'data_atualizacao': new_task.get('updated'), 'notas': updated_notes, 'horario_fim': h_fim if not t.get('horario_fim') else t.get('horario_fim')})
-
-                log_to_firestore(sync_ref, logs, f"[+] ENVIADA: {title}")
-
+                log_to_firestore(sync_ref, logs, f"[+] ENVIADA TASKS: {title}")
+                g_id = new_task['id'] # Para usar no Calendar se precisar
             elif g_id in g_tasks_map and t.get('data_atualizacao', '') > g_tasks_map[g_id].get('updated', ''):
-
                 body = {'id': g_id, 'title': title, 'notes': updated_notes, 'status': g_status}
-
                 if g_due: body['due'] = g_due
-
                 try:
-
                     service.tasks().update(tasklist=tasklist_id, task=g_id, body=body).execute()
-
-                    log_to_firestore(sync_ref, logs, f"[^] ATUALIZADA NO GOOGLE: {title}")
-
+                    log_to_firestore(sync_ref, logs, f"[^] ATUALIZADA NO TASKS: {title}")
                     if updated_notes != t.get('notas', ''):
-
                         doc.reference.update({'notas': updated_notes})
-
                 except HttpError as e:
-
                     if e.resp.status == 404:
-
-                        log_to_firestore(sync_ref, logs, f"[!] Task {g_id} não encontrada no Google - Limpando ID local.")
-
                         doc.reference.update({'google_id': None})
-
+            
+            # --- PARTE 2: Sincronia Google Calendar (Se possuir horário) ---
+            cal_id = t.get('google_calendar_id')
+            if sync_to_calendar and g_status == 'needsAction': # Só agenda eventos não concluídos
+                # Prepara o Evento
+                from datetime import datetime, timezone
+                try:
+                    # Converte pra ISO 8601 string para API (Timezone default da máquina rodando)
+                    start_dt = f"{t.get('data_limite')}T{h_inicio}:00-03:00"
+                    end_dt = f"{t.get('data_limite')}T{h_fim}:00-03:00"
+                    
+                    event_body = {
+                        'summary': f"Tarefa: {title}",
+                        'description': updated_notes,
+                        'start': {'dateTime': start_dt, 'timeZone': 'America/Sao_Paulo'},
+                        'end': {'dateTime': end_dt, 'timeZone': 'America/Sao_Paulo'}
+                    }
+                    
+                    if not cal_id:
+                        # Cria novo
+                        new_event = calendar_service.events().insert(calendarId='primary', body=event_body).execute()
+                        doc.reference.update({'google_calendar_id': new_event['id']})
+                        log_to_firestore(sync_ref, logs, f"[+] ALOCADA CALENDAR: {title}")
                     else:
+                        # Atualiza
+                        try:
+                            calendar_service.events().update(calendarId='primary', eventId=cal_id, body=event_body).execute()
+                        except HttpError as cal_err:
+                            if cal_err.resp.status == 404:
+                                new_event = calendar_service.events().insert(calendarId='primary', body=event_body).execute()
+                                doc.reference.update({'google_calendar_id': new_event['id']})
+                except Exception as ce:
+                    pass # Se falhar o calendar, não derruba o rest
+            elif (not sync_to_calendar or g_status == 'completed') and cal_id:
+                 # Tem ID no cal, mas perdeu horario ou foi completada - Remove do Calendar
+                 try:
+                     calendar_service.events().delete(calendarId='primary', eventId=cal_id).execute()
+                 except HttpError as ce: pass
+                 doc.reference.update({'google_calendar_id': None})
+                 
 
-                        raise e
 
     except Exception as e:
 
@@ -1334,8 +1356,23 @@ def upload_to_drive(req: https_fn.CallableRequest):
 
 
 
-@firestore_fn.on_document_updated(document="tarefas/{taskId}")
+@firestore_fn.on_document_written(document="tarefas/{taskId}")
+def on_tarefa_written(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot]]):
+    """Trigger disparado quando uma tarefa é atualizada, para monitorar processo_sei e horário"""
+    if not event.data or not event.data.after or not event.data.after.exists: return
 
+    after = event.data.after.to_dict() or {}
+    before = event.data.before.to_dict() if event.data.before and event.data.before.exists else {}
+
+    taskId = event.params['taskId']
+    db = get_db()
+
+    # Checa alteração de horário de início/limite para forçar trigger pro Google Tasks
+    if after.get('horario_inicio') != before.get('horario_inicio') or after.get('data_limite') != before.get('data_limite'):
+        sync_ref = db.collection('system').document('sync')
+        db.collection('system').document('sync').update({'status': 'requested'})
+    
+@firestore_fn.on_document_updated(document="tarefas/{taskId}")
 def on_processo_updated(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot]]):
 
     """Trigger disparado quando uma tarefa é atualizada, para monitorar processo_sei"""

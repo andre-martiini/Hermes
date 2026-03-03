@@ -638,6 +638,7 @@ export const TaskExecutionView = ({
                 handleDeleteDiaryEntry={(index) => setModalConfig({ type: 'confirm_delete', data: { index }, isOpen: true })}
                 isUploading={isUploading}
                 notifications={notifications}
+                handleProcessAudio={handleProcessAudio}
               />
           </div>
         </div>

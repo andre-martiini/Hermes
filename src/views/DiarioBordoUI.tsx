@@ -29,6 +29,7 @@ interface DiarioBordoUIProps {
   handleDeleteDiaryEntry: (idx: number) => void;
   isUploading: boolean;
   notifications?: any[];
+  handleProcessAudio?: (audioBlob: Blob) => void;
 }
 
 export const DiarioBordoUI = ({
@@ -36,7 +37,7 @@ export const DiarioBordoUI = ({
   isRecording, startRecording, stopRecording, isProcessingTranscription, showAttachMenu, setShowAttachMenu,
   fileInputRef, handleFileUploadInput, setModalConfig, applyFormatting, isTimerRunning,
   diaryEndRef, handleDiaryScroll, handleEditDiaryEntry, handleDeleteDiaryEntry, isUploading,
-  notifications = []
+  notifications = [], handleProcessAudio
 }: DiarioBordoUIProps) => {
   const [showEmojiPicker, setShowEmojiPicker] = React.useState(false);
 
@@ -261,13 +262,29 @@ export const DiarioBordoUI = ({
                 if (e.clipboardData.files && e.clipboardData.files.length > 0) {
                   e.preventDefault();
                   try {
-                      const dataTransfer = new DataTransfer();
-                      Array.from(e.clipboardData.files).forEach(file => dataTransfer.items.add(file));
-                      const pseudoEvent = {
-                          target: { files: dataTransfer.files, value: '' },
-                          preventDefault: () => {}
-                      } as unknown as React.ChangeEvent<HTMLInputElement>;
-                      handleFileUploadInput(pseudoEvent);
+                      const filesArray = Array.from(e.clipboardData.files);
+                      const oggFile = filesArray.find(f => f.type === 'audio/ogg' || f.name.endsWith('.ogg'));
+                      if (oggFile && handleProcessAudio) {
+                          handleProcessAudio(oggFile);
+                          const remainingFiles = filesArray.filter(f => f !== oggFile);
+                          if (remainingFiles.length > 0) {
+                              const dataTransfer = new DataTransfer();
+                              remainingFiles.forEach(file => dataTransfer.items.add(file));
+                              const pseudoEvent = {
+                                  target: { files: dataTransfer.files, value: '' },
+                                  preventDefault: () => {}
+                              } as unknown as React.ChangeEvent<HTMLInputElement>;
+                              handleFileUploadInput(pseudoEvent);
+                          }
+                      } else {
+                          const dataTransfer = new DataTransfer();
+                          filesArray.forEach(file => dataTransfer.items.add(file));
+                          const pseudoEvent = {
+                              target: { files: dataTransfer.files, value: '' },
+                              preventDefault: () => {}
+                          } as unknown as React.ChangeEvent<HTMLInputElement>;
+                          handleFileUploadInput(pseudoEvent);
+                      }
                   } catch (err) {
                       console.error('Erro ao processar ficheiros:', err);
                   }
