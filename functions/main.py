@@ -937,7 +937,7 @@ def run_full_sync():
 
         ts, gs, cs = get_tasks_service(), get_gmail_service(), get_calendar_service()
 
-        sync_google_tasks_push(ts, sync_ref, logs)
+        sync_google_tasks_push(ts, cs, sync_ref, logs)
 
         sync_google_tasks_pull(ts, sync_ref, logs)
 
