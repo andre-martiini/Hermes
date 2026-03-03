@@ -6548,11 +6548,16 @@ const App: React.FC = () => {
                       <span>Processando transações em tempo real...</span>
                     </div>
                   )}
-                  {!isSyncing && syncData?.status === 'completed' && (
-                    <div className="pt-4 border-t border-white/5 text-emerald-400 font-bold">
-                      ? SINCROIZAÇÃO CONCLUÍDA COM SUCESSO.
-                    </div>
-                  )}
+                  {!isSyncing && syncData?.status === 'completed' && (() => {
+                    const hasSyncError = (syncData?.logs || []).some((log: string) =>
+                      typeof log === 'string' && log.toUpperCase().includes('ERRO')
+                    );
+                    return (
+                      <div className={`pt-4 border-t border-white/5 font-bold ${hasSyncError ? 'text-amber-400' : 'text-emerald-400'}`}>
+                        {hasSyncError ? '? SINCRONIZAÇÃO CONCLUÍDA COM ERROS.' : '? SINCRONIZAÇÃO CONCLUÍDA COM SUCESSO.'}
+                      </div>
+                    );
+                  })()}
                   {syncData?.status === 'error' && (
                     <div className="pt-4 border-t border-white/5 text-rose-500 font-bold">
                       ? FALHA NO PROCESSAMENTO: {syncData.error_message}

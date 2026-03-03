@@ -10,6 +10,8 @@ from firebase_admin import initialize_app, firestore, messaging
 
 initialize_app()
 
+DEFAULT_GOOGLE_CALENDAR_ID = 'cf4953b9512ee2e85a7e064f9d5ce4eaf6e3634564c91e5c7ee2bb01fd46782a@group.calendar.google.com'
+
 
 
 def get_db():
@@ -97,6 +99,46 @@ def get_drive_service():
     from googleapiclient.discovery import build
 
     return build('drive', 'v3', credentials=get_google_creds())
+
+
+def get_target_calendar_id(db=None):
+
+    db = db or get_db()
+
+    try:
+
+        cfg_doc = db.collection('system').document('config').get()
+
+        if cfg_doc.exists:
+
+            cfg = cfg_doc.to_dict() or {}
+
+            calendar_id = (
+                cfg.get('googleCalendarId')
+                or cfg.get('google_calendar_id')
+                or cfg.get('calendarId')
+            )
+
+            if isinstance(calendar_id, str) and calendar_id.strip():
+
+                return calendar_id.strip()
+
+    except Exception:
+
+        pass
+
+    return DEFAULT_GOOGLE_CALENDAR_ID
+
+
+def get_sync_calendar_ids(db=None):
+
+    target_calendar_id = get_target_calendar_id(db)
+    calendar_ids = ['primary']
+
+    if target_calendar_id and target_calendar_id != 'primary':
+        calendar_ids.append(target_calendar_id)
+
+    return calendar_ids
 
 
 
@@ -387,6 +429,7 @@ from googleapiclient.errors import HttpError
 def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
 
     db = get_db()
+    calendar_id = get_target_calendar_id(db)
 
     try:
 
@@ -430,7 +473,7 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
 
             cat = t.get('categoria', '')
 
-            if cat.startswith('SISTEMA:') or cat == 'SISTEMAS': continue
+            if cat == 'SISTEMAS': continue
 
 
 
@@ -528,23 +571,23 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
                     
                     if not cal_id:
                         # Cria novo
-                        new_event = calendar_service.events().insert(calendarId='primary', body=event_body).execute()
+                        new_event = calendar_service.events().insert(calendarId=calendar_id, body=event_body).execute()
                         doc.reference.update({'google_calendar_id': new_event['id']})
                         log_to_firestore(sync_ref, logs, f"[+] ALOCADA CALENDAR: {title}")
                     else:
                         # Atualiza
                         try:
-                            calendar_service.events().update(calendarId='primary', eventId=cal_id, body=event_body).execute()
+                            calendar_service.events().update(calendarId=calendar_id, eventId=cal_id, body=event_body).execute()
                         except HttpError as cal_err:
                             if cal_err.resp.status == 404:
-                                new_event = calendar_service.events().insert(calendarId='primary', body=event_body).execute()
+                                new_event = calendar_service.events().insert(calendarId=calendar_id, body=event_body).execute()
                                 doc.reference.update({'google_calendar_id': new_event['id']})
                 except Exception as ce:
-                    pass # Se falhar o calendar, não derruba o rest
+                    log_to_firestore(sync_ref, logs, f"[CAL][!] Falha ao sincronizar evento da tarefa '{title}': {ce}")
             elif (not sync_to_calendar or g_status == 'completed') and cal_id:
                  # Tem ID no cal, mas perdeu horario ou foi completada - Remove do Calendar
                  try:
-                     calendar_service.events().delete(calendarId='primary', eventId=cal_id).execute()
+                     calendar_service.events().delete(calendarId=calendar_id, eventId=cal_id).execute()
                  except HttpError as ce: pass
                  doc.reference.update({'google_calendar_id': None})
                  
@@ -561,6 +604,7 @@ def sync_google_calendar(service, sync_ref, logs):
     from datetime import datetime, timedelta, timezone
 
     db = get_db()
+    calendar_ids = get_sync_calendar_ids(db)
 
     try:
 
@@ -570,59 +614,63 @@ def sync_google_calendar(service, sync_ref, logs):
 
         time_max = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat().replace('+00:00', 'Z')
 
-
-
-        events_result = service.events().list(
-
-            calendarId='primary', timeMin=time_min, timeMax=time_max,
-
-            singleEvents=True, orderBy='startTime'
-
-        ).execute()
-
-        events = events_result.get('items', [])
-
-
-
         count = 0
 
         seen_ids = set()
 
-        for event in events:
+        for calendar_id in calendar_ids:
 
-            event_id = event['id']
+            try:
 
-            seen_ids.add(event_id)
+                events_result = service.events().list(
 
-            summary = event.get('summary', '(Sem título)')
+                    calendarId=calendar_id, timeMin=time_min, timeMax=time_max,
 
-            start = event['start'].get('dateTime', event['start'].get('date'))
+                    singleEvents=True, orderBy='startTime'
 
-            end = event['end'].get('dateTime', event['end'].get('date'))
+                ).execute()
 
+                events = events_result.get('items', [])
 
+            except Exception as cal_err:
 
-            db.collection('google_calendar_events').document(event_id).set({
+                log_to_firestore(sync_ref, logs, f"[CAL][!] Falha ao listar agenda '{calendar_id}': {cal_err}")
 
-                'google_id': event_id,
+                continue
 
-                'titulo': summary,
+            for event in events:
 
-                'data_inicio': start,
+                event_id = event['id']
 
-                'data_fim': end,
+                doc_id = f"{calendar_id}__{event_id}"
 
-                'last_sync': datetime.now().isoformat()
+                seen_ids.add(doc_id)
 
-            }, merge=True)
+                summary = event.get('summary', '(Sem titulo)')
 
-            count += 1
+                start = event['start'].get('dateTime', event['start'].get('date'))
 
+                end = event['end'].get('dateTime', event['end'].get('date'))
 
+                db.collection('google_calendar_events').document(doc_id).set({
 
-        # Limpeza de eventos deletados no Google Calendar
+                    'google_id': event_id,
 
-        # Buscamos apenas eventos no Firestore que estão dentro do período sincronizado para evitar stream total
+                    'calendar_id': calendar_id,
+
+                    'titulo': summary,
+
+                    'data_inicio': start,
+
+                    'data_fim': end,
+
+                    'last_sync': datetime.now().isoformat()
+
+                }, merge=True)
+
+                count += 1
+
+        # Limpeza de eventos deletados no Google Calendar (somente janela sincronizada)
 
         docs = db.collection('google_calendar_events')\
             .where('data_inicio', '>=', time_min)\
@@ -639,15 +687,11 @@ def sync_google_calendar(service, sync_ref, logs):
 
                 deleted_count += 1
 
-
-
-        log_to_firestore(sync_ref, logs, f"[CAL] {count} eventos sincronizados. {deleted_count} removidos.")
+        log_to_firestore(sync_ref, logs, f"[CAL] {count} eventos sincronizados em {len(calendar_ids)} agenda(s). {deleted_count} removidos.")
 
     except Exception as e:
 
         log_to_firestore(sync_ref, logs, f"ERRO CAL: {e}")
-
-
 
 def sync_pix_emails(service, sync_ref, logs):
 
@@ -2476,3 +2520,4 @@ def transcrever_audio(req: https_fn.CallableRequest):
                 os.remove(temp_path)
             except OSError:
                 pass
+
