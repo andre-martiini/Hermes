@@ -979,13 +979,27 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
           </div>
 
           <div className="space-y-1">
-            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Prazo</label>
+            <div className="flex items-center justify-between gap-3 pl-1">
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Prazo</label>
+              {formData.status === 'stand-by' && (
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, data_limite: '' })}
+                  className="text-[9px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-900"
+                >
+                  Sem prazo
+                </button>
+              )}
+            </div>
             <input
               type="date"
               value={formData.data_limite}
               onChange={e => setFormData({ ...formData, data_limite: e.target.value })}
               className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
             />
+            {formData.status === 'stand-by' && (
+              <p className="text-[10px] font-bold text-slate-400 pl-1">Ações em stand-by podem ficar sem data definida.</p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -1018,6 +1032,7 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
                 className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
               >
                 <option value="em andamento">Em Andamento</option>
+                <option value="stand-by">Stand-by</option>
                 <option value="concluído">Concluído</option>
               </select>
             </div>
@@ -1047,8 +1062,8 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
           <button onClick={onClose} className="flex-1 px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all border border-slate-200">Cancelar</button>
           <button
             onClick={() => {
-              if (!formData.titulo || !formData.data_limite) {
-                showAlert("Atenção", "Preencha o tÃ­tulo e o prazo final.");
+              if (!formData.titulo || (!formData.data_limite && formData.status !== 'stand-by')) {
+                showAlert("Atenção", "Preencha o título e o prazo final, ou use stand-by para ações sem prazo.");
                 return;
               }
 
@@ -1060,7 +1075,7 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
 
               onSave({
                 ...formData,
-                data_inicio: formData.data_limite,
+                data_inicio: formData.data_limite || '',
                 notas: finalNotes,
                 data_criacao: new Date().toISOString()
               });
@@ -1114,13 +1129,21 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
           </div>
 
           <div className="space-y-1">
-            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Prazo</label>
+            <div className="flex items-center justify-between gap-3 pl-1">
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Prazo</label>
+              {formData.status === 'stand-by' && (
+                <button type="button" onClick={() => setFormData({ ...formData, data_limite: '' })} className="text-[9px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-900">Sem prazo</button>
+              )}
+            </div>
             <input
               type="date"
               value={formData.data_limite}
               onChange={e => setFormData({ ...formData, data_limite: e.target.value })}
               className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
             />
+            {formData.status === 'stand-by' && (
+              <p className="text-[10px] font-bold text-slate-400 pl-1">Ações em stand-by podem ficar sem data definida.</p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -1142,6 +1165,19 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
                 className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
               />
             </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Status</label>
+            <select
+              value={formData.status}
+              onChange={e => setFormData({ ...formData, status: e.target.value as Status })}
+              className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
+            >
+              <option value="em andamento">Em Andamento</option>
+              <option value="stand-by">Stand-by</option>
+              <option value="concluído">Concluído</option>
+            </select>
           </div>
 
           <div className="grid grid-cols-1 gap-3">
@@ -1183,11 +1219,11 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
         <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-col md:flex-row gap-2 flex-shrink-0">
           <button
             onClick={() => {
-              if (!formData.titulo || !formData.data_limite) {
-                showAlert("Atenção", "Preencha o tÃ­tulo e o prazo final.");
+              if (!formData.titulo || (!formData.data_limite && formData.status !== 'stand-by')) {
+                showAlert("Atenção", "Preencha o título e o prazo final, ou use stand-by para ações sem prazo.");
                 return;
               }
-              onSave(task.id, { ...formData, data_inicio: formData.data_limite });
+              onSave(task.id, { ...formData, data_inicio: formData.data_limite || '' });
               onClose();
             }}
             className="w-full md:flex-1 bg-slate-900 text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all order-1 md:order-2"

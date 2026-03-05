@@ -30,7 +30,7 @@ import ProjectsView from './ProjectsView';
 import {
   DEFAULT_APP_SETTINGS, getDaysInMonth, isWorkDay, callScrapeSipac,
   getMonthWorkDays, normalizeStatus, formatWhatsAppText,
-  formatInlineWhatsAppText, detectAreaFromTitle
+  formatInlineWhatsAppText, detectAreaFromTitle, isStandbyStatus
 } from './src/utils/helpers';
 import {
   ToastContainer, FilterChip, PgcMiniTaskCard,
@@ -54,7 +54,7 @@ import { SlidesTool } from './src/components/tools/SlidesTool';
 import { FerramentasView } from './src/components/tools/FerramentasView';
 import { QuickNoteModal } from './src/components/modals/QuickNoteModal';
 import { SpeedDialMenu } from './src/components/ui/SpeedDialMenu';
-import { generateMarkdown, downloadMarkdown } from './src/utils/markdownGenerator';
+import { generateMarkdown, generateActionsMarkdown, downloadMarkdown } from './src/utils/markdownGenerator';
 import {
   ROOT_ACTIONS_FOLDER_ID,
   ROOT_HEALTH_FOLDER_ID,
@@ -1057,6 +1057,19 @@ const App: React.FC = () => {
     showToast(`Desfeito: ${action.label}`, "info");
   };
 
+  const getUndoToastAction = () => ({
+    label: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 10h10a4 4 0 110 8H9" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 10l4-4m-4 4l4 4" />
+      </svg>
+    ),
+    onClick: () => {
+      void handleUndo();
+    }
+  });
+
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
@@ -1380,15 +1393,14 @@ const App: React.FC = () => {
   }, [billRubrics, fixedBills, currentMonth, currentYear]);
 
 
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success', action?: { label: string, onClick: () => void }, actions?: { label: string | React.ReactNode, onClick: () => void }[]) => {
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success', action?: { label: string | React.ReactNode, onClick: () => void }, actions?: { label: string | React.ReactNode, onClick: () => void }[]) => {
     const id = Math.random().toString(36).substring(2, 9);
     setToasts(prev => {
-      // Evitar duplicatas exatas de mensagens ativas
-      if (prev.some(t => t.message === message)) return prev;
+      const hasInteractiveAction = Boolean(action || (actions && actions.length > 0));
 
-      // Consolidar fluxo: se a nova mensagem for muito similar à última, substitui
-      // Ex: "Enviando arquivo A...", "Enviando arquivo B..."
-      if (prev.length > 0) {
+      if (!hasInteractiveAction && prev.some(t => t.message === message)) return prev;
+
+      if (prev.length > 0 && !hasInteractiveAction) {
         const last = prev[prev.length - 1];
         const lastPrefix = last.message.split(' ')[0];
         const newPrefix = message.split(' ')[0];
@@ -1397,15 +1409,15 @@ const App: React.FC = () => {
         }
       }
 
-      // Limitar a no máximo 2 toasts simultâneos para não poluir a tela
       const base = prev.length >= 2 ? prev.slice(1) : prev;
       return [...base, { id, message, type, action, actions }];
     });
 
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
-    }, 5000);
+    }, action || (actions && actions.length > 0) ? 8000 : 5000);
   };
+
 
   const removeToast = (id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
@@ -1459,12 +1471,7 @@ const App: React.FC = () => {
        );
        filename = 'hermes_saude';
     } else if (viewMode === 'gallery') {
-       md = generateMarkdown(
-         'Módulo de Ações',
-         'Tarefas e atividades.',
-         { 'Titulo': 'Nome da tarefa', 'Status': 'Estado atual' },
-         [{ title: 'Tarefas', data: tarefas.map(t => ({ Titulo: t.titulo, Status: t.status, Prazo: t.data_limite })) }]
-       );
+       md = generateActionsMarkdown(tarefas.filter(t => t.status !== 'excluído' as any));
        filename = 'hermes_acoes';
     } else if (viewMode === 'sistemas-dev') {
         const sys = selectedSystemId ? unidades.find(u => u.id === selectedSystemId)?.nome : 'Todos os Sistemas';
@@ -1564,7 +1571,7 @@ const App: React.FC = () => {
     }
   }, [tarefas, selectedTask]);
   const [planosTrabalho, setPlanosTrabalho] = useState<PlanoTrabalho[]>([]);
-  const [statusFilter, setStatusFilter] = useState<Status[]>(['em andamento']);
+  const [statusFilter, setStatusFilter] = useState<Status[]>(['em andamento', 'stand-by']);
   const [areaFilter, setAreaFilter] = useState<string>('TODAS');
   const [sortOption, setSortOption] = useState<SortOption>('date-asc');
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
@@ -2170,11 +2177,14 @@ const App: React.FC = () => {
 
 
   const handleUpdateTarefa = async (id: string, updates: Partial<Tarefa>, suppressToast = false) => {
+    const previousTask = tarefas.find(t => t.id === id);
+
     try {
       const docRef = doc(db, 'tarefas', id);
+      const now = new Date().toISOString();
       const payload: Record<string, any> = {
         ...updates,
-        data_atualizacao: new Date().toISOString()
+        data_atualizacao: now
       };
 
       const hasDateLimit = Object.prototype.hasOwnProperty.call(updates, 'data_limite');
@@ -2192,11 +2202,29 @@ const App: React.FC = () => {
         payload.titulo = normalizeTaskTitle(payload.titulo);
       }
 
+      const oldStatusNormalized = normalizeStatus(previousTask?.status || '');
+      const newStatusNormalized = Object.prototype.hasOwnProperty.call(payload, 'status') ? normalizeStatus(String(payload.status)) : oldStatusNormalized;
+      const statusChanged = Boolean(previousTask && Object.prototype.hasOwnProperty.call(payload, 'status') && newStatusNormalized !== oldStatusNormalized);
+
+      if (statusChanged) {
+        if (newStatusNormalized === 'concluido' && !Object.prototype.hasOwnProperty.call(payload, 'data_conclusao')) {
+          payload.data_conclusao = now;
+        }
+        if (newStatusNormalized !== 'concluido' && oldStatusNormalized === 'concluido' && !Object.prototype.hasOwnProperty.call(payload, 'data_conclusao')) {
+          payload.data_conclusao = null;
+        }
+        if (newStatusNormalized === 'stand-by' && !hasDateLimit && !hasDateStart) {
+          payload.data_limite = '';
+          payload.data_inicio = '';
+          payload.horario_inicio = null;
+          payload.horario_fim = null;
+        }
+      }
+
       await updateDoc(docRef, {
         ...payload
       });
 
-      // Mirror to Knowledge base
       if (updates.pool_dados && updates.pool_dados.length > 0) {
         for (const item of updates.pool_dados) {
           const knowledgeItem: ConhecimentoItem = {
@@ -2213,12 +2241,34 @@ const App: React.FC = () => {
         }
       }
 
-      if (!suppressToast) showToast("Tarefa atualizada!", 'success');
+      if (statusChanged && previousTask) {
+        pushToUndoStack(newStatusNormalized === 'concluido' ? 'Conclusão da ação' : 'Alteração de status', async () => {
+          await updateDoc(doc(db, 'tarefas', id), {
+            status: previousTask.status,
+            data_conclusao: previousTask.data_conclusao || null,
+            data_limite: previousTask.data_limite || '',
+            data_inicio: previousTask.data_inicio || '',
+            horario_inicio: previousTask.horario_inicio || null,
+            horario_fim: previousTask.horario_fim || null,
+            data_atualizacao: new Date().toISOString()
+          });
+        });
+
+        if (!suppressToast) {
+          if (newStatusNormalized === 'concluido') showToast('Tarefa concluída!', 'success', getUndoToastAction());
+          else if (newStatusNormalized === 'stand-by') showToast('Ação movida para stand-by.', 'info', getUndoToastAction());
+          else showToast('Tarefa reaberta!', 'success', getUndoToastAction());
+        }
+        return;
+      }
+
+      if (!suppressToast) showToast('Tarefa atualizada!', 'success');
     } catch (err) {
-      console.error("Erro ao atualizar tarefa:", err);
-      showToast("Erro ao salvar alterações.", 'error');
+      console.error('Erro ao atualizar tarefa:', err);
+      showToast('Erro ao salvar alterações.', 'error');
     }
   };
+
 
   const handleReorderTasks = async (taskId: string, targetTaskId: string, label?: string) => {
     let currentLabel = label;
@@ -2277,36 +2327,11 @@ const App: React.FC = () => {
   };
 
   const handleToggleTarefaStatus = async (id: string, currentStatus: string) => {
-    const tarefa = tarefas.find(t => t.id === id);
-    if (!tarefa) return;
-    const oldStatus = tarefa.status;
-    const oldDataConclusao = tarefa.data_conclusao || null;
-
-    try {
-      const isConcluido = normalizeStatus(currentStatus) === 'concluido';
-      const newStatus = isConcluido ? 'em andamento' : 'concluído';
-      const now = new Date().toISOString();
-
-      await updateDoc(doc(db, 'tarefas', id), {
-        status: newStatus,
-        data_conclusao: !isConcluido ? now : null,
-        data_atualizacao: now
-      });
-
-      pushToUndoStack(isConcluido ? "Alterar Status" : "Concluir Tarefa", async () => {
-        await updateDoc(doc(db, 'tarefas', id), {
-          status: oldStatus,
-          data_conclusao: oldDataConclusao,
-          data_atualizacao: new Date().toISOString()
-        });
-      });
-
-      showToast(isConcluido ? "Tarefa reaberta!" : "Tarefa concluída!", 'success');
-    } catch (err) {
-      console.error(err);
-      showToast("Erro ao alterar status.", 'error');
-    }
+    const isConcluido = normalizeStatus(currentStatus) === 'concluido';
+    const newStatus: Status = isConcluido ? 'em andamento' : 'concluído';
+    await handleUpdateTarefa(id, { status: newStatus });
   };
+
 
   const handleDeleteTarefa = async (id: string) => {
     const tarefa = tarefas.find(t => t.id === id);
@@ -2866,7 +2891,8 @@ const App: React.FC = () => {
     try {
       setLoading(true);
       const { is_single_day: _ignoredSingleDay, ...inputData } = data as any;
-      const singleDate = inputData.data_limite || inputData.data_inicio || formatDateLocalISO(new Date());
+      const isStandByTask = normalizeStatus(inputData.status || 'em andamento') === 'stand-by';
+      const singleDate = inputData.data_limite || inputData.data_inicio || (isStandByTask ? '' : formatDateLocalISO(new Date()));
       const normalizedTitle = normalizeTaskTitle(inputData.titulo || '');
       const taskPayload: Record<string, any> = {
         ...inputData,
@@ -3559,6 +3585,7 @@ const App: React.FC = () => {
   const stats = useMemo(() => ({
     total: tarefas.length,
     emAndamento: tarefas.filter(t => normalizeStatus(t.status) === 'em andamento').length,
+    standBy: tarefas.filter(t => normalizeStatus(t.status) === 'stand-by').length,
     concluidas: tarefas.filter(t => normalizeStatus(t.status) === 'concluido').length,
     clc: tarefas.filter(t => t.categoria === 'CLC' && normalizeStatus(t.status) !== 'concluido').length,
     assistencia: tarefas.filter(t => t.categoria === 'ASSISTÊNCIA' && normalizeStatus(t.status) !== 'concluido').length,
@@ -3660,6 +3687,7 @@ const App: React.FC = () => {
       estaSemana: [] as Tarefa[],
       esteMes: [] as Tarefa[],
       semData: [] as Tarefa[],
+      standBy: [] as Tarefa[],
       concluidas: [] as Tarefa[]
     };
     const mesesFuturos: Record<string, { label: string, tasks: Tarefa[] }> = {};
@@ -3686,6 +3714,11 @@ const App: React.FC = () => {
       // Se a tarefa está concluída, vai para o bucket de concluídas (útil na pesquisa)
       if (normalizeStatus(t.status) === 'concluido') {
         buckets.concluidas.push(t);
+        return;
+      }
+
+      if (isStandbyStatus(t.status)) {
+        buckets.standBy.push(t);
         return;
       }
 

@@ -1,4 +1,4 @@
-
+﻿
 import { Status, Prioridade } from './types';
 
 export const STATUS_COLORS: Record<string, string> = {

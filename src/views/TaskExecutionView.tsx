@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Tarefa, AppSettings, PoolItem, ConhecimentoItem, Acompanhamento,
   formatDate, formatDateLocalISO
 } from '../../types';
 import { normalizeStatus } from '../utils/helpers';
-import { buildDiaryRichNote, ensureHttpUrl, getRenamedFileName } from '../utils/diaryEntries';
+import { buildDiaryRichNote, ensureHttpUrl, getRenamedFileName, parseDiaryRichNote } from '../utils/diaryEntries';
 import { AutoExpandingTextarea, NotificationCenter } from '../components/ui/UIComponents';
 import { db, functions } from '../../firebase';
 import { httpsCallable } from 'firebase/functions';
@@ -285,12 +285,37 @@ export const TaskExecutionView = ({
   };
 
   const handleCopyAllHistory = () => {
-    if (!task.acompanhamento) return;
-    const history = task.acompanhamento
-      .map(entry => `[${new Date(entry.data).toLocaleString('pt-BR')}] ${entry.nota}`)
-      .join('\n\n');
+    const entries = currentTaskData.acompanhamento || [];
+    const assets = currentTaskData.pool_dados || [];
+    if (entries.length === 0 && assets.length === 0) {
+      showToast('Nenhum histórico para copiar.', 'info');
+      return;
+    }
+
+    const history = [
+      `Ação: ${currentTaskData.titulo}`,
+      `Status: ${currentTaskData.status}`,
+      `Prazo: ${currentTaskData.data_limite || 'Sem prazo definido'}`,
+      '',
+      'DIÁRIO DE BORDO',
+      entries.length > 0
+        ? entries.map(entry => {
+            const parsed = parseDiaryRichNote(entry.nota || '');
+            const content = parsed
+              ? `${parsed.type}: ${parsed.name || parsed.value}${parsed.value ? ` (${parsed.value})` : ''}`
+              : entry.nota;
+            return `[${new Date(entry.data).toLocaleString('pt-BR')}] ${content}`;
+          }).join('\n\n')
+        : 'Sem registros.',
+      '',
+      'ARQUIVOS E ITENS VINCULADOS',
+      assets.length > 0
+        ? assets.map(item => `- ${item.nome || 'Sem nome'} | tipo: ${item.tipo} | criado em: ${item.data_criacao ? new Date(item.data_criacao).toLocaleString('pt-BR') : 'N/I'} | referência: ${item.valor || 'N/I'}`).join('\n')
+        : 'Nenhum item vinculado.'
+    ].join('\n');
+
     navigator.clipboard.writeText(history);
-    showToast("Histórico completo copiado!", "success");
+    showToast('Diário de bordo copiado!', 'success');
   };
 
   const handleFileUpload = async (files: Array<{ file: File; customName?: string }>) => {

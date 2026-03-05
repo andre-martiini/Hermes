@@ -1,7 +1,7 @@
-
+﻿
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Tarefa, GoogleCalendarEvent, formatDateLocalISO } from '../../../types';
-import { normalizeStatus } from '../../utils/helpers';
+import { normalizeStatus, isStandbyStatus } from '../../utils/helpers';
 import { timeToMinutes, minutesToTime, getYFromTime, getTimeFromY, snapToGrid, getColumnFromX } from '../../utils/calendarUtils';
 import { PROJECT_COLORS } from '../../../constants';
 
@@ -78,6 +78,7 @@ export const TimeGrid = ({
       });
       const dayTasks = tasks.filter(t => {
         if ((t.status as any) === 'excluído') return false;
+        if (isStandbyStatus(t.status)) return false;
         const taskDate = t.data_limite || t.data_inicio;
         if (t.horario_inicio && taskDate) return taskDate === dayStr;
         return false;
@@ -407,7 +408,7 @@ export const TimeGrid = ({
                          <div className="text-[10px] font-bold leading-tight line-clamp-2 flex-1 pr-4">{taskItem.titulo}</div>
                          <div className="absolute -top-1 -right-1 flex gap-1 md:gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white/95 p-1 rounded-bl-xl shadow-sm backdrop-blur-md z-10 border-b border-l border-slate-200/60">
                             <button
-                              onClick={(e) => { e.stopPropagation(); onTaskUpdate(taskItem.id, { status: taskItem.status === 'concluído' ? 'em andamento' : 'concluído' }); }}
+                              onClick={(e) => { e.stopPropagation(); onTaskUpdate(taskItem.id, { status: normalizeStatus(taskItem.status) === 'concluido' ? 'em andamento' : 'concluído' }); }}
                               className={`p-1.5 md:p-2 rounded-lg hover:scale-105 active:scale-95 transition-all ${taskItem.status === 'concluído' ? 'text-emerald-500 bg-emerald-50 shadow-inner' : 'text-slate-400 bg-slate-50 hover:text-emerald-600 hover:bg-emerald-50 hover:shadow-sm'}`}
                             >
                               <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>

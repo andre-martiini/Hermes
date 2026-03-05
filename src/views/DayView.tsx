@@ -1,7 +1,7 @@
-
+﻿
 import React, { useState, useMemo } from 'react';
 import { Tarefa, GoogleCalendarEvent, formatDateLocalISO } from '../../types';
-import { normalizeStatus } from '../utils/helpers';
+import { normalizeStatus, isStandbyStatus } from '../utils/helpers';
 import { TimeGrid } from '../components/calendar/TimeGrid';
 import { PROJECT_COLORS } from '../../constants';
 import { addDoc, collection } from 'firebase/firestore';
@@ -36,7 +36,9 @@ export const DayView = ({
 
     // Logic from original DayView:
     const isConcluido = normalizeStatus(t.status) === 'concluido';
+    const isStandBy = isStandbyStatus(t.status);
     const scheduledDate = t.data_limite || t.data_inicio;
+    if (isStandBy) return false;
     if (t.horario_inicio && scheduledDate) return false;
     const end = t.data_limite || t.data_inicio;
     const hasDeadline = end && end !== '-' && end !== '0000-00-00';

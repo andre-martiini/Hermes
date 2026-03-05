@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { AppSettings, Categoria } from '../../types';
 import { functions } from '../../firebase';
 import { httpsCallable } from 'firebase/functions';
@@ -86,6 +86,9 @@ export const normalizeStatus = (status: string): string => {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 };
+
+export const isStandbyStatus = (status?: string | null) => normalizeStatus(status || '') === 'stand-by';
+export const isCompletedStatus = (status?: string | null) => normalizeStatus(status || '') === 'concluido';
 
 export const formatWhatsAppText = (text: string, isDarkMode: boolean = false) => {
   if (!text) return text;

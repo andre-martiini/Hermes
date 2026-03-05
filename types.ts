@@ -1,5 +1,5 @@
-
-export type Status = 'em andamento' | 'concluído';
+﻿
+export type Status = 'em andamento' | 'stand-by' | 'concluído';
 export type Prioridade = 'alta' | 'média' | 'baixa';
 
 export interface Acompanhamento {
@@ -29,6 +29,7 @@ export interface Tarefa {
     categoria: Categoria;
     contabilizar_meta: boolean;
     data_criacao: string;
+    data_atualizacao?: string;
     data_conclusao?: string | null;
     notas?: string;
     sistema?: string;

@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { AutoExpandingTextarea } from '../components/ui/UIComponents';
 import { formatWhatsAppText } from '../utils/helpers';
 import { ensureHttpUrl, parseDiaryRichNote } from '../utils/diaryEntries';
@@ -361,8 +361,15 @@ export const DiarioBordoUI = ({
               </div>
             </div>
 
-            {/* Direita: Botão Mic + Botão Enviar */}
+            {/* Direita: Ações rápidas + envio */}
             <div className="flex items-center gap-2">
+              <button
+                onClick={handleCopyAllHistory}
+                className={`w-8 h-8 flex items-center justify-center rounded-full transition-all active:scale-90 shadow-sm ${isTimerRunning ? 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'}`}
+                title="Copiar diário de bordo"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6" /></svg>
+              </button>
               
               {/* Botão de Gravação de Áudio */}
               <button
