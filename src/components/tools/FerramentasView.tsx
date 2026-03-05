@@ -7,6 +7,7 @@ import { SlidesTool } from './SlidesTool';
 import { ShoppingListTool } from './ShoppingListTool';
 import { TranscriptionTool } from './TranscriptionTool';
 import { ChoirRehearsalsTool } from './ChoirRehearsalsTool';
+import { MeetingTranscriptionTool } from './MeetingTranscriptionTool';
 
 interface FerramentasViewProps {
   ideas: BrainstormIdea[];
@@ -16,8 +17,8 @@ interface FerramentasViewProps {
   onUpdateIdea: (id: string, text: string) => void;
   onConvertToLog: (idea: BrainstormIdea) => void;
   onConvertToTask: (idea: BrainstormIdea) => void;
-  activeTool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | null;
-  setActiveTool: (tool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | null) => void;
+  activeTool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | null;
+  setActiveTool: (tool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | null) => void;
   isAddingText: boolean;
   setIsAddingText: (val: boolean) => void;
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
@@ -103,6 +104,10 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
              knowledgeItems={knowledgeItems} 
              onUploadFile={onUploadFile} 
            />;
+  }
+
+  if (activeTool === 'meeting_transcription') {
+    return <MeetingTranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} />;
   }
 
   const startRecording = async () => {
@@ -224,6 +229,19 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
           <div>
             <h3 className="text-lg md:text-2xl font-black text-slate-900 tracking-tighter mb-1 md:mb-2">Ensaios do Coral</h3>
             <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Gestão de repertório, partituras e áudios.</p>
+          </div>
+        </button>
+
+        <button
+          onClick={() => setActiveTool('meeting_transcription')}
+          className={toolCardClass}
+        >
+          <div className="w-12 h-12 md:w-16 md:h-16 bg-indigo-50 rounded-none md:rounded-2xl flex items-center justify-center text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-all flex-shrink-0">
+            <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" /></svg>
+          </div>
+          <div>
+            <h3 className="text-lg md:text-2xl font-black text-slate-900 tracking-tighter mb-1 md:mb-2">Reuniões em Tempo Real</h3>
+            <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Transcreva com áudio duplo e chat IA.</p>
           </div>
         </button>
       </div>
