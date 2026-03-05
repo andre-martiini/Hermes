@@ -348,6 +348,84 @@ def normalize_task_title(title):
     return ' '.join(words)
 
 
+def parse_iso_datetime(value):
+
+    from datetime import datetime
+
+    if not isinstance(value, str):
+        return None
+
+    text = value.strip()
+    if not text:
+        return None
+
+    # Google APIs frequentemente retornam UTC com sufixo "Z"
+    if text.endswith('Z'):
+        text = f"{text[:-1]}+00:00"
+
+    try:
+        return datetime.fromisoformat(text)
+    except Exception:
+        return None
+
+
+def is_remote_calendar_newer(remote_updated, local_updated):
+
+    remote_dt = parse_iso_datetime(remote_updated)
+    local_dt = parse_iso_datetime(local_updated)
+
+    if remote_dt and local_dt:
+        return remote_dt > local_dt
+    if remote_dt and not local_dt:
+        return True
+    return False
+
+
+def extract_schedule_from_calendar_event(event, tz_name='America/Sao_Paulo'):
+
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+
+    start_info = event.get('start', {}) or {}
+    end_info = event.get('end', {}) or {}
+
+    start_dt = parse_iso_datetime(start_info.get('dateTime'))
+    end_dt = parse_iso_datetime(end_info.get('dateTime'))
+
+    if start_dt:
+        tz = ZoneInfo(tz_name)
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.replace(tzinfo=tz)
+        start_local = start_dt.astimezone(tz)
+
+        if end_dt:
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=tz)
+            end_local = end_dt.astimezone(tz)
+        else:
+            end_local = start_local + timedelta(hours=1)
+
+        return {
+            'data_inicio': start_local.date().isoformat(),
+            'data_limite': start_local.date().isoformat(),
+            'horario_inicio': start_local.strftime('%H:%M'),
+            'horario_fim': end_local.strftime('%H:%M')
+        }
+
+    # Eventos "dia inteiro" (sem horário) - mantém data e limpa horários
+    start_date = start_info.get('date')
+    if isinstance(start_date, str) and start_date.strip():
+        single_date = start_date.strip()
+        return {
+            'data_inicio': single_date,
+            'data_limite': single_date,
+            'horario_inicio': None,
+            'horario_fim': None
+        }
+
+    return None
+
+
 def sync_google_tasks_pull(service, sync_ref, logs):
 
     from datetime import datetime
@@ -675,6 +753,13 @@ def sync_google_calendar(service, sync_ref, logs):
 
         seen_ids = set()
 
+        linked_tasks_by_event_id = {}
+        for task_doc in db.collection('tarefas').stream():
+            task_data = task_doc.to_dict() or {}
+            linked_event_id = task_data.get('google_calendar_id')
+            if isinstance(linked_event_id, str) and linked_event_id.strip():
+                linked_tasks_by_event_id.setdefault(linked_event_id.strip(), []).append((task_doc.reference, task_data))
+
         for calendar_id in calendar_ids:
 
             try:
@@ -726,6 +811,49 @@ def sync_google_calendar(service, sync_ref, logs):
                 }, merge=True)
 
                 count += 1
+
+                # Sincronia inversa: evento do Calendar (criado pelo Hermes) atualiza data/horário da tarefa
+                linked_tasks = linked_tasks_by_event_id.get(event_id, [])
+                if not linked_tasks:
+                    continue
+
+                schedule = extract_schedule_from_calendar_event(event)
+                if not schedule:
+                    continue
+
+                event_updated = event.get('updated', '')
+                for task_ref, task_data in linked_tasks:
+                    local_updated = task_data.get('data_atualizacao', '')
+                    if not is_remote_calendar_newer(event_updated, local_updated):
+                        continue
+
+                    local_date = task_data.get('data_limite') or task_data.get('data_inicio')
+                    local_start = task_data.get('horario_inicio')
+                    local_end = task_data.get('horario_fim')
+                    has_schedule_change = (
+                        local_date != schedule.get('data_limite')
+                        or local_start != schedule.get('horario_inicio')
+                        or local_end != schedule.get('horario_fim')
+                    )
+
+                    if not has_schedule_change:
+                        continue
+
+                    updated_notes = update_notes_with_time(
+                        task_data.get('notas', ''),
+                        schedule.get('horario_inicio'),
+                        schedule.get('horario_fim')
+                    )
+
+                    task_updates = {
+                        **schedule,
+                        'notas': updated_notes,
+                        # Usa "agora" para garantir que o push subsequente preserve esse ajuste no Tasks/Calendar
+                        'data_atualizacao': datetime.now().isoformat()
+                    }
+                    task_ref.update(task_updates)
+                    task_data.update(task_updates)
+                    log_to_firestore(sync_ref, logs, f"[CAL->HERMES] Horário atualizado pela agenda: {task_data.get('titulo', '(Sem titulo)')}")
 
         # Limpeza de eventos deletados no Google Calendar (somente janela sincronizada)
 
@@ -1038,11 +1166,12 @@ def run_full_sync():
 
         ts, gs, cs = get_tasks_service(), get_gmail_service(), get_calendar_service()
 
+        # Primeiro puxa o Calendar para permitir sincronia inversa (agenda -> Hermes) antes do push
+        sync_google_calendar(cs, sync_ref, logs)
+
         sync_google_tasks_push(ts, cs, sync_ref, logs)
 
         sync_google_tasks_pull(ts, sync_ref, logs)
-
-        sync_google_calendar(cs, sync_ref, logs)
 
         sync_pix_emails(gs, sync_ref, logs)
 
@@ -2581,4 +2710,192 @@ def transcrever_audio(req: https_fn.CallableRequest):
                 os.remove(temp_path)
             except OSError:
                 pass
+
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=120
+)
+def askChatbot(req: https_fn.CallableRequest):
+    """
+    Responde perguntas sobre o contexto da reunião usando Gemini.
+    """
+    import google.generativeai as genai
+
+    prompt = (req.data or {}).get('prompt')
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="Prompt é obrigatório."
+        )
+
+    try:
+        db = get_db()
+        keys_doc = db.collection('system').document('api_keys').get()
+        gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+        if not gemini_key:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                message="Chave Gemini não configurada."
+            )
+
+        genai.configure(api_key=gemini_key)
+        model = genai.GenerativeModel("gemini-3.1-flash-lite-preview")
+        response = model.generate_content(
+            [
+                "Você é um assistente de reunião em pt-BR. Responda com objetividade, "
+                "baseando-se no contexto recebido. Se o contexto estiver incompleto, "
+                "deixe claro que a resposta é parcial.",
+                prompt.strip(),
+            ]
+        )
+
+        result = (response.text or "").strip()
+        if not result:
+            result = "Não consegui gerar uma resposta com o contexto atual da reunião."
+        return {"result": result}
+
+    except https_fn.HttpsError:
+        raise
+    except Exception as e:
+        print(f"Erro em askChatbot: {e}")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message="Falha ao processar sua solicitação no assistente de reunião."
+        )
+
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=120
+)
+def salvarTranscricaoReuniao(req: https_fn.CallableRequest):
+    """
+    Salva a transcrição consolidada de uma reunião no Google Drive e registra no módulo conhecimento.
+    """
+    import io
+    from datetime import datetime
+    from googleapiclient.http import MediaIoBaseUpload
+
+    data = req.data or {}
+    content = data.get('content')
+    started_at = data.get('startedAt')
+    ended_at = data.get('endedAt')
+    file_name = data.get('fileName')
+
+    if not isinstance(content, str) or not content.strip():
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="Conteúdo da transcrição é obrigatório."
+        )
+
+    def _parse_iso_date(value: str | None) -> datetime | None:
+        if not value or not isinstance(value, str):
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except Exception:
+            return None
+
+    started_dt = _parse_iso_date(started_at) or datetime.now()
+    ended_dt = _parse_iso_date(ended_at) or datetime.now()
+
+    if not file_name:
+        file_name = f"Reuniao_{started_dt.strftime('%Y-%m-%d_%H-%M')}.txt"
+
+    try:
+        db = get_db()
+        service = get_drive_service()
+
+        root_folder_id = None
+        try:
+            config_doc = db.collection('system').document('config').get()
+            if config_doc.exists:
+                root_folder_id = (config_doc.to_dict() or {}).get('googleDriveFolderId')
+        except Exception as config_err:
+            print(f"Aviso: não foi possível ler system/config: {config_err}")
+
+        # Garante a pasta "Reuniões" na raiz configurada para o conhecimento.
+        folder_query = (
+            "mimeType='application/vnd.google-apps.folder' "
+            "and trashed=false "
+            "and name='Reuniões'"
+        )
+        if root_folder_id:
+            folder_query += f" and '{root_folder_id}' in parents"
+
+        folders = service.files().list(
+            q=folder_query,
+            fields='files(id, name)',
+            pageSize=1
+        ).execute().get('files', [])
+
+        if folders:
+            reunioes_folder_id = folders[0]['id']
+        else:
+            folder_metadata = {
+                'name': 'Reuniões',
+                'mimeType': 'application/vnd.google-apps.folder'
+            }
+            if root_folder_id:
+                folder_metadata['parents'] = [root_folder_id]
+
+            folder = service.files().create(
+                body=folder_metadata,
+                fields='id'
+            ).execute()
+            reunioes_folder_id = folder.get('id')
+
+        payload = content.encode('utf-8')
+        media = MediaIoBaseUpload(io.BytesIO(payload), mimetype='text/plain', resumable=True)
+
+        uploaded = service.files().create(
+            body={'name': file_name, 'parents': [reunioes_folder_id]},
+            media_body=media,
+            fields='id, webViewLink, size'
+        ).execute()
+
+        file_id = uploaded.get('id')
+        web_link = uploaded.get('webViewLink')
+
+        try:
+            service.permissions().create(
+                fileId=file_id,
+                body={'type': 'anyone', 'role': 'reader'}
+            ).execute()
+        except Exception as perm_e:
+            print(f"Aviso: não foi possível definir permissão pública no arquivo de reunião: {perm_e}")
+
+        db.collection('conhecimento').document(file_id).set({
+            'id': file_id,
+            'titulo': file_name,
+            'tipo_arquivo': 'txt',
+            'url_drive': web_link,
+            'tamanho': int(uploaded.get('size') or len(payload)),
+            'data_criacao': datetime.now().isoformat(),
+            'origem': {'modulo': 'reunioes', 'id_origem': started_dt.isoformat()},
+            'categoria': 'Reuniões',
+            'parent_id': 'biblioteca',
+            'meeting_started_at': started_dt.isoformat(),
+            'meeting_ended_at': ended_dt.isoformat()
+        }, merge=True)
+
+        return {
+            'success': True,
+            'fileId': file_id,
+            'webViewLink': web_link,
+            'fileName': file_name,
+            'folderId': reunioes_folder_id
+        }
+
+    except https_fn.HttpsError:
+        raise
+    except Exception as e:
+        print(f"Erro ao salvar transcrição de reunião: {e}")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message="Falha ao salvar transcrição da reunião no Google Drive."
+        )
 

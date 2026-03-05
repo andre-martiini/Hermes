@@ -4213,6 +4213,8 @@ const App: React.FC = () => {
                       onOpenShopping={() => { setIsShoppingAIModalOpen(true); setIsMobileMenuOpen(false); }}
                       onOpenTranscription={() => { setIsTranscriptionAIModalOpen(true); setIsMobileMenuOpen(false); }}
                       onOpenMeetingTranscription={() => {
+                        setActiveModule('acoes');
+                        setViewMode('ferramentas');
                         setActiveFerramenta('meeting_transcription');
                         setIsMobileMenuOpen(false);
                       }}
@@ -4494,6 +4496,8 @@ const App: React.FC = () => {
                     onOpenShopping={() => setIsShoppingAIModalOpen(true)}
                     onOpenTranscription={() => setIsTranscriptionAIModalOpen(true)}
                     onOpenMeetingTranscription={() => {
+                      setActiveModule('acoes');
+                      setViewMode('ferramentas');
                       setActiveFerramenta('meeting_transcription');
                     }}
                     onToggleNotifications={() => setIsNotificationCenterOpen(prev => !prev)}
@@ -6533,7 +6537,10 @@ const App: React.FC = () => {
                 onOpenShopping={() => setIsShoppingAIModalOpen(true)}
                 onOpenTranscription={() => setIsTranscriptionAIModalOpen(true)}
                 onOpenMeetingTranscription={() => {
+                  setActiveModule('acoes');
+                  setViewMode('ferramentas');
                   setActiveFerramenta('meeting_transcription');
+                  setSelectedTask(null);
                 }}
                 onToggleNotifications={() => setIsNotificationCenterOpen(prev => !prev)}
                 onSync={handleSync}
