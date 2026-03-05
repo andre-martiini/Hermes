@@ -4623,7 +4623,7 @@ const App: React.FC = () => {
                     {dashboardViewMode === 'calendar' ? (
                       <CalendarView
                         tasks={filteredAndSortedTarefas}
-                        googleEvents={googleCalendarEvents}
+                        googleEvents={[]}
                         viewMode={calendarViewMode}
                         currentDate={calendarDate}
                         onDateChange={setCalendarDate}

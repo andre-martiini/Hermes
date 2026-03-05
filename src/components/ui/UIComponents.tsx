@@ -286,7 +286,7 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
         e.dataTransfer.effectAllowed = 'move';
       }}
       title={task.data_criacao ? `Criada em: ${formatDate(task.data_criacao.split('T')[0])}` : ''}
-      className={`group w-full px-4 md:px-6 py-4 md:py-3 border-b border-slate-100 hover:bg-slate-50/80 transition-all flex flex-col sm:flex-row sm:items-center gap-4 md:gap-6 animate-in cursor-pointer relative ${isCompleted ? 'opacity-60 grayscale-[0.5]' : ''} ${highlighted ? 'bg-gradient-to-r from-amber-50 to-white border-l-4 border-l-amber-500 py-7 md:py-6 shadow-md ring-1 ring-amber-200/50' : 'bg-white'}`}
+      className={`group w-full px-4 md:px-6 py-5 md:py-4 border-b border-slate-100 hover:bg-slate-50/80 transition-all flex flex-col sm:flex-row sm:items-start gap-4 md:gap-6 animate-in cursor-pointer relative ${isCompleted ? 'opacity-60 grayscale-[0.5]' : ''} ${highlighted ? 'bg-gradient-to-r from-amber-50 to-white border-l-4 border-l-amber-500 py-8 md:py-7 shadow-md ring-1 ring-amber-200/50' : 'bg-white'}`}
     >
       {/* Esquerda: Checkbox + Título */}
       <div className="flex items-center gap-4 flex-1 min-w-0">
@@ -307,14 +307,14 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
               <span className="text-[9px] font-black text-amber-600 uppercase tracking-[0.2em]">Prioridade Máxima • Ação do Dia</span>
             </div>
           )}
-          <div className={`${highlighted ? 'text-base md:text-xl font-black text-amber-950' : 'text-sm md:text-base font-bold text-[#1a202c]'} leading-tight transition-colors ${isCompleted ? 'line-through text-slate-400' : (highlighted ? 'group-hover:text-amber-700' : 'group-hover:text-blue-600')} line-clamp-2 sm:line-clamp-1`}>
+          <div className={`${highlighted ? 'text-[15px] md:text-lg font-black text-amber-950' : 'text-[13px] md:text-[15px] font-bold text-[#1a202c]'} leading-snug transition-colors whitespace-normal break-words ${isCompleted ? 'line-through text-slate-400' : (highlighted ? 'group-hover:text-amber-700' : 'group-hover:text-blue-600')}`}>
             {task.titulo}
           </div>
         </div>
       </div>
 
       {/* Centro/Direita: Tags + Data + Ações */}
-      <div className="flex items-center justify-between sm:justify-end gap-4 md:gap-6 flex-wrap sm:flex-nowrap">
+      <div className="flex items-start justify-between sm:justify-end sm:self-start gap-4 md:gap-6 flex-wrap sm:flex-nowrap">
         <div className="flex items-center gap-2 flex-wrap">
           {task.categoria && task.categoria !== 'NÃO CLASSIFICADA' && (
             <span className={`text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded-full border whitespace-nowrap ${getTagStyle(task.categoria, 'category')}`}>

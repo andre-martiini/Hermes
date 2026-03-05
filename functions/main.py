@@ -1411,8 +1411,12 @@ def on_tarefa_written(event: firestore_fn.Event[firestore_fn.Change[firestore_fn
     taskId = event.params['taskId']
     db = get_db()
 
-    # Checa alteração de horário de início/limite para forçar trigger pro Google Tasks
-    if after.get('horario_inicio') != before.get('horario_inicio') or after.get('data_limite') != before.get('data_limite'):
+    # Checa alteração de horário de início/fim ou prazo para forçar trigger pro Google Tasks/Calendar
+    if (
+        after.get('horario_inicio') != before.get('horario_inicio')
+        or after.get('horario_fim') != before.get('horario_fim')
+        or after.get('data_limite') != before.get('data_limite')
+    ):
         sync_ref = db.collection('system').document('sync')
         db.collection('system').document('sync').update({'status': 'requested'})
     
