@@ -13,6 +13,7 @@ import {
   ShoppingItem, Projeto, SlideHistoryEntry
 } from './types';
 import HealthView from './HealthView';
+import { MeetingTranscriptionTool } from './src/components/tools/MeetingTranscriptionTool';
 import { STATUS_COLORS, PROJECT_COLORS, SLIDES_HISTORY_KEY } from './constants';
 import { db, functions, messaging, auth, googleProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
@@ -973,7 +974,7 @@ const App: React.FC = () => {
   const [isImportPlanOpen, setIsImportPlanOpen] = useState(false);
   const [isCompletedTasksOpen, setIsCompletedTasksOpen] = useState(false);
   const [brainstormIdeas, setBrainstormIdeas] = useState<BrainstormIdea[]>([]);
-  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | null>(null);
+  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | null>(null);
   const [isBrainstormingAddingText, setIsBrainstormingAddingText] = useState(false);
   const [confirmDeleteLogId, setConfirmDeleteLogId] = useState<string | null>(null);
   const [convertingIdea, setConvertingIdea] = useState<BrainstormIdea | null>(null);
@@ -4211,6 +4212,10 @@ const App: React.FC = () => {
                       onOpenLog={() => { setIsQuickLogModalOpen(true); setIsMobileMenuOpen(false); }}
                       onOpenShopping={() => { setIsShoppingAIModalOpen(true); setIsMobileMenuOpen(false); }}
                       onOpenTranscription={() => { setIsTranscriptionAIModalOpen(true); setIsMobileMenuOpen(false); }}
+                      onOpenMeetingTranscription={() => {
+                        setActiveFerramenta('meeting_transcription');
+                        setIsMobileMenuOpen(false);
+                      }}
                       onToggleNotifications={() => setIsNotificationCenterOpen(prev => !prev)}
                       onSync={handleSync}
                       onOpenSettings={() => setIsSettingsModalOpen(true)}
@@ -4488,6 +4493,9 @@ const App: React.FC = () => {
                     onOpenLog={() => setIsQuickLogModalOpen(true)}
                     onOpenShopping={() => setIsShoppingAIModalOpen(true)}
                     onOpenTranscription={() => setIsTranscriptionAIModalOpen(true)}
+                    onOpenMeetingTranscription={() => {
+                      setActiveFerramenta('meeting_transcription');
+                    }}
                     onToggleNotifications={() => setIsNotificationCenterOpen(prev => !prev)}
                     onSync={handleSync}
                     onOpenSettings={() => setIsSettingsModalOpen(true)}
@@ -6524,6 +6532,9 @@ const App: React.FC = () => {
                 onOpenLog={() => setIsQuickLogModalOpen(true)}
                 onOpenShopping={() => setIsShoppingAIModalOpen(true)}
                 onOpenTranscription={() => setIsTranscriptionAIModalOpen(true)}
+                onOpenMeetingTranscription={() => {
+                  setActiveFerramenta('meeting_transcription');
+                }}
                 onToggleNotifications={() => setIsNotificationCenterOpen(prev => !prev)}
                 onSync={handleSync}
                 onOpenSettings={() => setIsSettingsModalOpen(true)}

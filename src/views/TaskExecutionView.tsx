@@ -30,6 +30,7 @@ interface TaskExecutionViewProps {
   onOpenLog: () => void;
   onOpenShopping: () => void;
   onOpenTranscription: () => void;
+  onOpenMeetingTranscription: () => void;
   onToggleNotifications: () => void;
   onSync: () => void;
   onOpenSettings: () => void;
@@ -53,6 +54,7 @@ export const TaskExecutionView = ({
   onOpenLog,
   onOpenShopping,
   onOpenTranscription,
+  onOpenMeetingTranscription,
   onToggleNotifications,
   onSync,
   onOpenSettings,
@@ -682,6 +684,7 @@ export const TaskExecutionView = ({
           onOpenLog={onOpenLog}
           onOpenShopping={onOpenShopping}
           onOpenTranscription={onOpenTranscription}
+          onOpenMeetingTranscription={onOpenMeetingTranscription}
           onToggleNotifications={onToggleNotifications}
           onSync={onSync}
           onOpenSettings={onOpenSettings}
