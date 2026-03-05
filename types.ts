@@ -368,6 +368,7 @@ export interface AjusteSistema {
 export interface GoogleCalendarEvent {
     id: string;
     google_id: string;
+    calendar_id?: string;
     titulo: string;
     data_inicio: string;
     data_fim: string;

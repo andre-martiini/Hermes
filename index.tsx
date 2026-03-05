@@ -3811,6 +3811,10 @@ const App: React.FC = () => {
     return e.mes === currentMonth && e.ano === currentYear;
   }), [entregas, currentMonth, currentYear]);
 
+  const primaryCalendarEvents = useMemo(() => {
+    return googleCalendarEvents.filter(event => !event.calendar_id || event.calendar_id === 'primary');
+  }, [googleCalendarEvents]);
+
   const pgcTasksAguardando: Tarefa[] = useMemo(() => {
     const currentDeliveryIds = pgcEntregas.map(e => e.id);
     const norm = (val: any) => (val || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
@@ -4663,7 +4667,7 @@ const App: React.FC = () => {
                     {dashboardViewMode === 'calendar' ? (
                       <CalendarView
                         tasks={filteredAndSortedTarefas}
-                        googleEvents={[]}
+                        googleEvents={primaryCalendarEvents}
                         viewMode={calendarViewMode}
                         currentDate={calendarDate}
                         onDateChange={setCalendarDate}
