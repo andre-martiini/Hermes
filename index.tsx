@@ -2132,6 +2132,41 @@ const App: React.FC = () => {
     }
   };
 
+  const normalizeTaskTitle = (value?: string) => {
+    if (typeof value !== 'string') return value;
+    const compact = value.trim().replace(/\s+/g, ' ');
+    if (!compact) return compact;
+
+    const smallWords = new Set([
+      'de', 'da', 'do', 'das', 'dos',
+      'e', 'em', 'na', 'no', 'nas', 'nos',
+      'a', 'o', 'as', 'os',
+      'para', 'por', 'com'
+    ]);
+
+    const capitalizeToken = (token: string, isFirst: boolean) => {
+      if (!token) return token;
+      if (/^[A-Z0-9]{2,5}$/.test(token)) return token; // Preserve short acronyms (CLC, SEI, IFES, etc.)
+      const lower = token.toLocaleLowerCase('pt-BR');
+      if (!isFirst && smallWords.has(lower)) return lower;
+      return lower.charAt(0).toLocaleUpperCase('pt-BR') + lower.slice(1);
+    };
+
+    return compact
+      .split(' ')
+      .map((word, wordIndex) => {
+        const parts = word.split(/([/-])/);
+        let pieceIndex = 0;
+        return parts.map((part) => {
+          if (part === '/' || part === '-') return part;
+          const normalized = capitalizeToken(part, wordIndex === 0 && pieceIndex === 0);
+          pieceIndex += 1;
+          return normalized;
+        }).join('');
+      })
+      .join(' ');
+  };
+
 
   const handleUpdateTarefa = async (id: string, updates: Partial<Tarefa>, suppressToast = false) => {
     try {
@@ -2151,6 +2186,9 @@ const App: React.FC = () => {
 
       if (Object.prototype.hasOwnProperty.call(payload, 'is_single_day')) {
         delete payload.is_single_day;
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, 'titulo') && typeof payload.titulo === 'string') {
+        payload.titulo = normalizeTaskTitle(payload.titulo);
       }
 
       await updateDoc(docRef, {
@@ -2828,8 +2866,10 @@ const App: React.FC = () => {
       setLoading(true);
       const { is_single_day: _ignoredSingleDay, ...inputData } = data as any;
       const singleDate = inputData.data_limite || inputData.data_inicio || formatDateLocalISO(new Date());
+      const normalizedTitle = normalizeTaskTitle(inputData.titulo || '');
       const taskPayload: Record<string, any> = {
         ...inputData,
+        titulo: normalizedTitle,
         data_limite: singleDate,
         data_inicio: singleDate,
         google_id: "", // Sinaliza que precisa de PUSH

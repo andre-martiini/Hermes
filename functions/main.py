@@ -304,6 +304,50 @@ def update_notes_with_time(notes, start, end):
 
 
 
+def normalize_task_title(title):
+
+    import re
+
+    if not isinstance(title, str):
+        return title
+
+    compact = re.sub(r'\s+', ' ', title).strip()
+    if not compact:
+        return compact
+
+    small_words = {
+        'de', 'da', 'do', 'das', 'dos',
+        'e', 'em', 'na', 'no', 'nas', 'nos',
+        'a', 'o', 'as', 'os',
+        'para', 'por', 'com'
+    }
+
+    def normalize_piece(piece, is_first):
+        if not piece:
+            return piece
+        if re.fullmatch(r'[A-Z0-9]{2,5}', piece):
+            return piece
+        lower = piece.lower()
+        if (not is_first) and lower in small_words:
+            return lower
+        return lower[:1].upper() + lower[1:]
+
+    words = []
+    for word_index, word in enumerate(compact.split(' ')):
+        parts = re.split(r'([/-])', word)
+        normalized_parts = []
+        part_index = 0
+        for part in parts:
+            if part in ('/', '-'):
+                normalized_parts.append(part)
+                continue
+            normalized_parts.append(normalize_piece(part, word_index == 0 and part_index == 0))
+            part_index += 1
+        words.append(''.join(normalized_parts))
+
+    return ' '.join(words)
+
+
 def sync_google_tasks_pull(service, sync_ref, logs):
 
     from datetime import datetime
@@ -342,7 +386,10 @@ def sync_google_tasks_pull(service, sync_ref, logs):
 
         for gt in g_tasks:
 
-            g_id, title = gt['id'], gt.get('title', '(Sem Título)')
+            g_id = gt['id']
+            title_raw = gt.get('title', '(Sem Título)')
+            title = normalize_task_title(title_raw)
+            title_was_normalized = title != title_raw
 
             g_updated = gt.get('updated', '')
 
@@ -380,9 +427,11 @@ def sync_google_tasks_pull(service, sync_ref, logs):
 
                 if t_old.get('data_atualizacao', '') < g_updated:
 
+                    applied_updated = datetime.now().isoformat() if title_was_normalized else g_updated
+
                     update_data = {
 
-                        'titulo': title, 'status': status, 'data_atualizacao': g_updated,
+                        'titulo': title, 'status': status, 'data_atualizacao': applied_updated,
 
                         'data_conclusao': gt.get('completed'), 'notas': g_notes,
 
@@ -404,7 +453,7 @@ def sync_google_tasks_pull(service, sync_ref, logs):
 
                     'titulo': title, 'projeto': 'GOOGLE', 'google_id': g_id, 'status': status,
 
-                    'data_criacao': datetime.now().isoformat(), 'data_atualizacao': g_updated,
+                    'data_criacao': datetime.now().isoformat(), 'data_atualizacao': datetime.now().isoformat() if title_was_normalized else g_updated,
 
                     'categoria': cat, 'contabilizar_meta': meta, 'notas': g_notes,
 
@@ -427,6 +476,8 @@ from googleapiclient.errors import HttpError
 
 
 def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
+
+    from datetime import datetime
 
     db = get_db()
     calendar_id = get_target_calendar_id(db)
@@ -477,7 +528,13 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
 
 
 
-            g_id, title = t.get('google_id'), t.get('titulo')
+            g_id = t.get('google_id')
+            raw_title = t.get('titulo') or '(Sem Título)'
+            title = normalize_task_title(raw_title)
+            local_updated = t.get('data_atualizacao', '')
+            if title != raw_title:
+                local_updated = datetime.now().isoformat()
+                doc.reference.update({'titulo': title, 'data_atualizacao': local_updated})
 
             if t.get('status') == 'excluído':
 
@@ -540,7 +597,7 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
                 doc.reference.update({'google_id': new_task['id'], 'data_atualizacao': new_task.get('updated'), 'notas': updated_notes, 'horario_fim': h_fim if not t.get('horario_fim') else t.get('horario_fim')})
                 log_to_firestore(sync_ref, logs, f"[+] ENVIADA TASKS: {title}")
                 g_id = new_task['id'] # Para usar no Calendar se precisar
-            elif g_id in g_tasks_map and t.get('data_atualizacao', '') > g_tasks_map[g_id].get('updated', ''):
+            elif g_id in g_tasks_map and local_updated > g_tasks_map[g_id].get('updated', ''):
                 body = {'id': g_id, 'title': title, 'notes': updated_notes, 'status': g_status}
                 if g_due: body['due'] = g_due
                 try:

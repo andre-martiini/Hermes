@@ -157,6 +157,46 @@ def update_notes_with_time(notes, start, end):
         else:
             return notes
 
+def normalize_task_title(title):
+    if not isinstance(title, str):
+        return title
+
+    compact = re.sub(r'\s+', ' ', title).strip()
+    if not compact:
+        return compact
+
+    small_words = {
+        'de', 'da', 'do', 'das', 'dos',
+        'e', 'em', 'na', 'no', 'nas', 'nos',
+        'a', 'o', 'as', 'os',
+        'para', 'por', 'com'
+    }
+
+    def normalize_piece(piece, is_first):
+        if not piece:
+            return piece
+        if re.fullmatch(r'[A-Z0-9]{2,5}', piece):
+            return piece
+        lower = piece.lower()
+        if (not is_first) and lower in small_words:
+            return lower
+        return lower[:1].upper() + lower[1:]
+
+    words = []
+    for word_index, word in enumerate(compact.split(' ')):
+        parts = re.split(r'([/-])', word)
+        normalized_parts = []
+        part_index = 0
+        for part in parts:
+            if part in ('/', '-'):
+                normalized_parts.append(part)
+                continue
+            normalized_parts.append(normalize_piece(part, word_index == 0 and part_index == 0))
+            part_index += 1
+        words.append(''.join(normalized_parts))
+
+    return ' '.join(words)
+
 def sync_google_tasks(db, log_list=None, sync_ref=None):
     last_ui_update = [0]
     def log(msg, force_ui=False):
@@ -205,7 +245,9 @@ def sync_google_tasks(db, log_list=None, sync_ref=None):
 
         for gt in g_tasks:
             g_id = gt['id']
-            title = gt.get('title', '(Sem Título)')
+            title_raw = gt.get('title', '(Sem Título)')
+            title = normalize_task_title(title_raw)
+            title_was_normalized = title != title_raw
             g_updated = gt.get('updated', '')
             due = gt.get('due', None)
             deadline = due.split('T')[0] if due else '-'
@@ -223,14 +265,16 @@ def sync_google_tasks(db, log_list=None, sync_ref=None):
                 except: pass
 
             categoria, sistema, contabilizar_meta = classify_task(title, g_notes, dynamic_mapping)
-            existing_data = local_tasks.get(g_id) or local_tasks.get(f"title_{title}")
+            existing_data = local_tasks.get(g_id) or local_tasks.get(f"title_{title}") or local_tasks.get(f"title_{title_raw}")
             
             if existing_data:
                 doc_id, t_old = existing_data
                 if not t_old.get('google_id'):
+                    applied_updated = datetime.now().isoformat() if title_was_normalized else g_updated
                     db.collection('tarefas').document(doc_id).update({
+                        'titulo': title,
                         'google_id': g_id, 
-                        'data_atualizacao': g_updated, 
+                        'data_atualizacao': applied_updated, 
                         'notas': g_notes,
                         'horario_inicio': h_inicio,
                         'horario_fim': h_fim
@@ -253,9 +297,10 @@ def sync_google_tasks(db, log_list=None, sync_ref=None):
                                t_old.get('horario_fim') != h_fim)
                 
                 if has_changed:
+                    applied_updated = datetime.now().isoformat() if title_was_normalized else g_updated
                     db.collection('tarefas').document(doc_id).update({
                         'titulo': title, 'data_limite': deadline, 'status': h_status,
-                        'data_conclusao': gt.get('completed'), 'data_atualizacao': g_updated,
+                        'data_conclusao': gt.get('completed'), 'data_atualizacao': applied_updated,
                         'notas': g_notes, 'sync_status': 'updated', 
                         'last_sync_date': datetime.now().isoformat(),
                         'horario_inicio': h_inicio,
@@ -266,10 +311,11 @@ def sync_google_tasks(db, log_list=None, sync_ref=None):
                     else:
                         log(f"[-] ATUALIZADA: {title}")
             else:
+                applied_updated = datetime.now().isoformat() if title_was_normalized else g_updated
                 db.collection('tarefas').add({
                     'titulo': title, 'projeto': 'GOOGLE', 'data_limite': deadline,
                     'google_id': g_id, 'status': h_status, 'data_criacao': datetime.now().isoformat(),
-                    'data_conclusao': gt.get('completed'), 'data_atualizacao': g_updated,
+                    'data_conclusao': gt.get('completed'), 'data_atualizacao': applied_updated,
                     'categoria': categoria, 'contabilizar_meta': contabilizar_meta,
                     'notas': g_notes, 'sync_status': 'new', 'last_sync_date': datetime.now().isoformat(),
                     'horario_inicio': h_inicio, 'horario_fim': h_fim
@@ -391,12 +437,18 @@ def push_google_tasks(db, log_list=None, sync_ref=None):
             t = doc.to_dict()
             g_id = t.get('google_id')
             h_status = t.get('status')
+            raw_title = t.get('titulo') or '(Sem Título)'
+            title = normalize_task_title(raw_title)
+            local_updated = t.get('data_atualizacao', '')
+            if title != raw_title:
+                local_updated = datetime.now().isoformat()
+                doc.reference.update({'titulo': title, 'data_atualizacao': local_updated})
             
             if h_status == 'excluído':
                 if g_id:
                     try: 
                         service.tasks().delete(tasklist=tasklist_id, task=g_id).execute()
-                        log(f"[X] REMOVIDA DO GOOGLE: {t['titulo']}")
+                        log(f"[X] REMOVIDA DO GOOGLE: {title}")
                     except HttpError as e:
                         if e.resp.status == 404:
                             log(f"[!] Task {g_id} já não existia no Google.")
@@ -422,7 +474,7 @@ def push_google_tasks(db, log_list=None, sync_ref=None):
             updated_notes = update_notes_with_time(t.get('notas', ''), h_inicio, h_fim)
 
             if not g_id:
-                body = {'title': t['titulo'], 'notes': updated_notes, 'status': g_status, 'due': due_date}
+                body = {'title': title, 'notes': updated_notes, 'status': g_status, 'due': due_date}
                 new_task = service.tasks().insert(tasklist=tasklist_id, body=body).execute()
                 doc.reference.update({
                     'google_id': new_task['id'], 
@@ -430,14 +482,14 @@ def push_google_tasks(db, log_list=None, sync_ref=None):
                     'notas': updated_notes, 
                     'horario_fim': h_fim if not t.get('horario_fim') else t.get('horario_fim')
                 })
-                log(f"[+] ENVIADA: {t['titulo']}"); count += 1
+                log(f"[+] ENVIADA: {title}"); count += 1
                 continue
             g_task = g_tasks_map.get(g_id)
-            if g_task and t.get('data_atualizacao', '') > g_task.get('updated', ''):
-                body = {'id': g_id, 'title': t['titulo'], 'notes': updated_notes, 'status': g_status, 'due': due_date}
+            if g_task and local_updated > g_task.get('updated', ''):
+                body = {'id': g_id, 'title': title, 'notes': updated_notes, 'status': g_status, 'due': due_date}
                 try:
                     service.tasks().update(tasklist=tasklist_id, task=g_id, body=body).execute()
-                    log(f"[^] ATUALIZADA NO GOOGLE: {t['titulo']}"); count += 1
+                    log(f"[^] ATUALIZADA NO GOOGLE: {title}"); count += 1
                     if updated_notes != t.get('notas', ''):
                         doc.reference.update({'notas': updated_notes})
                 except HttpError as e:
@@ -454,7 +506,7 @@ def push_google_tasks(db, log_list=None, sync_ref=None):
                     start_dt = f"{t.get('data_limite')}T{h_inicio}:00-03:00"
                     end_dt = f"{t.get('data_limite')}T{h_fim}:00-03:00"
                     event_body = {
-                        'summary': f"Tarefa: {t['titulo']}",
+                        'summary': f"Tarefa: {title}",
                         'description': updated_notes,
                         'start': {'dateTime': start_dt, 'timeZone': 'America/Sao_Paulo'},
                         'end': {'dateTime': end_dt, 'timeZone': 'America/Sao_Paulo'}
@@ -462,7 +514,7 @@ def push_google_tasks(db, log_list=None, sync_ref=None):
                     if not cal_id:
                         new_event = calendar_service.events().insert(calendarId='primary', body=event_body).execute()
                         doc.reference.update({'google_calendar_id': new_event['id']})
-                        log(f"[+] ALOCADA CALENDAR: {t['titulo']}")
+                        log(f"[+] ALOCADA CALENDAR: {title}")
                     else:
                         try:
                             calendar_service.events().update(calendarId='primary', eventId=cal_id, body=event_body).execute()
