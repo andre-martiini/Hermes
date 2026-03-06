@@ -142,6 +142,8 @@ const FinanceView = ({
     const [editingAmountId, setEditingAmountId] = useState<string | null>(null);
     const [tempAmount, setTempAmount] = useState<string>('');
     const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
+    const [expandedBillId, setExpandedBillId] = useState<string | null>(null);
+    const [activeBillTabs, setActiveBillTabs] = useState<Record<string, 'codigo' | 'arquivo'>>({});
 
     const handleTwoStepDelete = (key: string, action: () => void | Promise<void>) => {
         const decision = resolveTwoStepAction(pendingDeleteKey, key);
@@ -246,8 +248,9 @@ const FinanceView = ({
             pixCode: newBill.pixCode || '',
             category: newBill.category || (settings.billCategories?.[0] || 'Conta Fixa'),
             isPaid: false,
-            attachmentUrl: newBill.attachmentUrl || null,
-            rubricId: newBill.rubricId || null
+            attachmentUrl: newBill.attachmentUrl || '',
+            pixQrCodeUrl: newBill.pixQrCodeUrl || '',
+            rubricId: newBill.rubricId || ''
         };
 
         await onAddBill(billData);
@@ -1132,20 +1135,20 @@ const FinanceView = ({
                     <FinanceSection title="Obrigações e Despesas">
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                             <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Gerenciamento de pagamentos e compromissos</p>
-                            <div className="flex gap-3 w-full md:w-auto">
-                                <button
-                                    onClick={() => setIsManagingRubrics(!isManagingRubrics)}
-                                    className={`flex-1 md:flex-none px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border ${isManagingRubrics ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
-                                >
-                                    {isManagingRubrics ? 'Fechar Rubricas' : 'Gerenciar Rubricas'}
-                                </button>
-                                <button onClick={() => {
-                                    setNewBill({ category: settings.billCategories?.[0] || 'Conta Fixa' });
-                                    setIsAddingBill(true);
-                                }} className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg hover:shadow-blue-500/20">
-                                    + Registrar Conta
-                                </button>
-                            </div>
+                             <div className="flex gap-3 w-full md:w-auto">
+                                 <button
+                                     onClick={() => setIsManagingRubrics(!isManagingRubrics)}
+                                     className={`flex-1 md:flex-none px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border ${isManagingRubrics ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                                 >
+                                     {isManagingRubrics ? 'Fechar Rubricas' : 'Gerenciar Rubricas'}
+                                 </button>
+                                 <button onClick={() => {
+                                     setNewBill({ category: settings.billCategories?.[0] || 'Conta Fixa' });
+                                     setIsAddingBill(true);
+                                 }} className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg hover:shadow-blue-500/20">
+                                     + Registrar Conta
+                                 </button>
+                             </div>
                         </div>
 
                         {/* Gestão de Rubricas */}
@@ -1279,27 +1282,60 @@ const FinanceView = ({
                                     <input type="text" placeholder="Código Pix (Copia e Cola)" className="px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium" value={newBill.pixCode || ''} onChange={(e) => setNewBill({ ...newBill, pixCode: e.target.value })} />
                                 </div>
 
-                                {/* File Upload */}
-                                <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 flex flex-col items-center justify-center bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => fileInputRef.current?.click()}>
-                                    <input type="file" ref={fileInputRef} className="hidden" accept="image/*,.pdf" onChange={async (e) => {
-                                        if (e.target.files?.[0]) {
-                                            const url = await handleFileUpload(e.target.files[0]);
-                                            if (url) setNewBill({ ...newBill, attachmentUrl: url });
-                                        }
-                                    }} />
-                                    {uploading ? (
-                                        <p className="text-sm font-bold text-blue-500 animate-pulse">Enviando arquivo...</p>
-                                    ) : newBill.attachmentUrl ? (
-                                        <div className="flex items-center gap-2 text-emerald-600 font-bold text-sm">
-                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
-                                            Arquivo Anexado
-                                        </div>
-                                    ) : (
-                                        <div className="text-center text-slate-400">
-                                            <svg className="w-6 h-6 mx-auto mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-                                            <p className="text-xs font-bold uppercase">Clique para anexar Boleto/QR Code</p>
-                                        </div>
-                                    )}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                     {/* File Upload 1: Boleto */}
+                                    <div className={`border-2 border-dashed rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition-all ${newBill.attachmentUrl ? 'border-blue-200 bg-blue-50' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`} onClick={() => {
+                                        const input = document.createElement('input');
+                                        input.type = 'file';
+                                        input.accept = 'image/*,.pdf';
+                                        input.onchange = async (e) => {
+                                            const file = (e.target as HTMLInputElement).files?.[0];
+                                            if (file) {
+                                                const url = await handleFileUpload(file);
+                                                if (url) setNewBill({ ...newBill, attachmentUrl: url });
+                                            }
+                                        };
+                                        input.click();
+                                    }}>
+                                        {newBill.attachmentUrl ? (
+                                            <div className="flex items-center gap-2 text-blue-600 font-bold text-xs uppercase tracking-tighter">
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                                                Boleto Anexado
+                                            </div>
+                                        ) : (
+                                            <div className="text-center text-slate-400">
+                                                <svg className="w-5 h-5 mx-auto mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+                                                <p className="text-[10px] font-black uppercase">Anexar Boleto/PDF</p>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* File Upload 2: PIX QR */}
+                                    <div className={`border-2 border-dashed rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition-all ${newBill.pixQrCodeUrl ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`} onClick={() => {
+                                        const input = document.createElement('input');
+                                        input.type = 'file';
+                                        input.accept = 'image/*';
+                                        input.onchange = async (e) => {
+                                            const file = (e.target as HTMLInputElement).files?.[0];
+                                            if (file) {
+                                                const url = await handleFileUpload(file);
+                                                if (url) setNewBill({ ...newBill, pixQrCodeUrl: url });
+                                            }
+                                        };
+                                        input.click();
+                                    }}>
+                                        {newBill.pixQrCodeUrl ? (
+                                            <div className="flex items-center gap-2 text-emerald-600 font-bold text-xs uppercase tracking-tighter">
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                                                QR PIX Anexado
+                                            </div>
+                                        ) : (
+                                            <div className="text-center text-slate-400">
+                                                <svg className="w-5 h-5 mx-auto mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" /></svg>
+                                                <p className="text-[10px] font-black uppercase">Anexar QR PIX</p>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
 
                                 <div className="flex justify-end gap-3 pt-4">
@@ -1357,112 +1393,296 @@ const FinanceView = ({
                                     const isVariable = bill.amount === 0;
 
                                     return (
-                                        <div key={bill.id} 
-                                            className={`transition-all flex items-center justify-between group p-4 rounded-lg md:rounded-2xl border ${
-                                                bill.isPaid 
-                                                    ? 'border-emerald-100 bg-emerald-50/10' 
-                                                    : isVariable 
-                                                        ? 'border-2 border-dashed border-slate-200 bg-slate-50/30 opacity-60 hover:opacity-100' 
-                                                        : 'border-slate-100 bg-white hover:shadow-md'
+                                        <div key={bill.id}
+                                            className={`transition-all flex flex-col group rounded-xl md:rounded-2xl border ${
+                                                bill.isPaid
+                                                    ? 'border-emerald-100 bg-emerald-50/30'
+                                                    : isVariable
+                                                        ? 'border-dashed border-slate-200 bg-slate-50/50'
+                                                        : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
                                             }`}
                                         >
-                                            <div className="flex items-center gap-4">
-                                                <div className="checkbox-wrapper">
-                                                    <input 
-                                                        type="checkbox" 
-                                                        checked={bill.isPaid} 
-                                                        disabled={isVariable}
-                                                        onChange={() => onUpdateBill({ ...bill, isPaid: !bill.isPaid })} 
-                                                        className={`w-5 h-5 rounded-lg border-slate-300 text-emerald-500 focus:ring-emerald-500 ${isVariable ? 'opacity-10 cursor-not-allowed' : 'cursor-pointer'}`} 
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <div className="flex items-center gap-2 mb-0.5">
-                                                        <div className={`text-[9px] font-black uppercase tracking-widest ${bill.category === 'Poupança' ? 'text-amber-600' : 'text-slate-400'}`}>{bill.category || 'Conta Fixa'}</div>
-                                                        {isVariable && (
-                                                            <span className="text-[7px] font-black text-slate-300 uppercase tracking-tighter">Aguardando Fechamento</span>
-                                                        )}
-                                                    </div>
-                                                    <div className={`text-sm font-black ${bill.isPaid ? 'text-slate-400 line-through' : isVariable ? 'text-slate-400' : 'text-slate-800'} leading-none`}>{bill.description}</div>
-                                                    <div className="text-[10px] text-slate-400 font-bold mt-1 flex items-center gap-2">
-                                                        Vence dia {bill.dueDay}
-                                                        {diff !== 0 && !isVariable && (
-                                                            <span className={`text-[8px] font-black ${diff < 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                                                {diff < 0 ? '↓' : '↑'} R$ {Math.abs(diff).toLocaleString('pt-BR')}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-4">
-                                                <div className="flex gap-2">
-                                                    {!isVariable && bill.barcode && (
-                                                        <button onClick={() => navigator.clipboard.writeText(bill.barcode || '')} className="p-2 text-slate-200 hover:text-blue-500 transition-colors" title="Copiar Código">
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
-                                                        </button>
-                                                    )}
-                                                    {!isVariable && bill.attachmentUrl && (
-                                                        <a href={bill.attachmentUrl} target="_blank" rel="noopener noreferrer" className="p-2 text-slate-200 hover:text-blue-500 transition-colors">
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                                                        </a>
-                                                    )}
-                                                </div>
-                                                
-                                                <div className="flex flex-col items-end">
-                                                    {editingAmountId === bill.id ? (
-                                                        <div className="flex items-center gap-1">
-                                                            <span className="text-[10px] font-black text-slate-400">R$</span>
-                                                            <input
-                                                                autoFocus
-                                                                type="number"
-                                                                className="w-24 bg-white border border-slate-200 rounded-lg px-2 py-1 text-sm font-black text-slate-800 outline-none"
-                                                                value={tempAmount}
-                                                                onChange={e => setTempAmount(e.target.value)}
-                                                                onBlur={() => {
-                                                                    if (tempAmount !== '') {
-                                                                        onUpdateBill({ ...bill, amount: Number(tempAmount) });
-                                                                    }
-                                                                    setEditingAmountId(null);
-                                                                }}
-                                                                onKeyDown={e => {
-                                                                    if (e.key === 'Enter') {
-                                                                        if (tempAmount !== '') {
-                                                                            onUpdateBill({ ...bill, amount: Number(tempAmount) });
-                                                                        }
-                                                                        setEditingAmountId(null);
-                                                                    }
-                                                                    if (e.key === 'Escape') setEditingAmountId(null);
-                                                                }}
-                                                            />
-                                                        </div>
-                                                    ) : (
-                                                        <div 
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setEditingAmountId(bill.id);
-                                                                setTempAmount(isVariable ? '' : String(bill.amount));
-                                                            }}
-                                                            className={`text-lg font-black tracking-tighter cursor-pointer hover:bg-slate-100 px-3 py-1 rounded-xl transition-all ${
-                                                                bill.isPaid 
-                                                                    ? 'text-slate-300' 
-                                                                    : isVariable 
-                                                                        ? 'text-slate-300 text-xs font-bold uppercase border border-slate-100 hover:border-slate-200 hover:text-blue-500' 
-                                                                        : 'text-slate-900'
-                                                            }`}
-                                                        >
-                                                            {isVariable ? 'Lançar Valor' : `R$ ${bill.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
-                                                        </div>
+                                            {/* Header do Card - Design Imagem */}
+                                            <div className="flex flex-col p-4 md:p-5">
+                                                {/* Tags Topo */}
+                                                <div className="flex items-center gap-2 mb-3">
+                                                    <span className="text-[10px] font-bold text-slate-500 bg-slate-50 px-3 py-1 rounded-full uppercase tracking-wider">
+                                                        {bill.category || 'Conta Fixa'}
+                                                    </span>
+                                                    {isVariable && (
+                                                        <span className="text-[10px] font-bold text-slate-500 bg-slate-50 px-3 py-1 rounded-full uppercase tracking-wider">
+                                                            Variável
+                                                        </span>
                                                     )}
                                                 </div>
 
-                                                <button onClick={() => handleTwoStepDelete(`bill_${bill.id}`, () => onDeleteBill(bill.id))} className={`p-2 rounded-lg transition-colors opacity-0 group-hover:opacity-100 ${pendingDeleteKey === `bill_${bill.id}` ? 'bg-rose-500 text-white opacity-100' : 'text-slate-200 hover:text-rose-400'}`}>
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                </button>
+                                                <div className="flex items-start gap-4">
+                                                    {/* Checkbox */}
+                                                    <div className="flex-shrink-0 pt-0.5">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={bill.isPaid}
+                                                            disabled={isVariable}
+                                                            onChange={() => onUpdateBill({ ...bill, isPaid: !bill.isPaid })}
+                                                            className={`w-5 h-5 rounded-[4px] border-slate-300 text-emerald-500 focus:ring-emerald-500 transition-all ${isVariable ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer hover:border-emerald-400'}`}
+                                                        />
+                                                    </div>
+
+                                                    {/* Corpo e Informações */}
+                                                    <div className="flex-1 flex flex-col justify-start">
+                                                        <div className={`text-lg md:text-xl font-bold leading-tight ${bill.isPaid ? 'text-slate-400 line-through' : 'text-slate-900'}`}>
+                                                            {bill.description}
+                                                        </div>
+                                                        <div className="text-sm font-semibold text-slate-500 flex items-center gap-2 mt-1">
+                                                            Vencimento dia {bill.dueDay}
+                                                            {diff !== 0 && !isVariable && (
+                                                                <span className={`font-bold ${diff < 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                                                                    ({diff < 0 ? '↓' : '↑'} R$ {Math.abs(diff).toLocaleString('pt-BR')})
+                                                                </span>
+                                                            )}
+                                                        </div>
+
+                                                        {/* Valor e Ações de Valor */}
+                                                        <div className="mt-4">
+                                                            {editingAmountId === bill.id ? (
+                                                                <div className="flex items-center gap-1.5 w-fit">
+                                                                    <span className="text-xs font-semibold text-slate-400">R$</span>
+                                                                    <input
+                                                                        autoFocus
+                                                                        type="number"
+                                                                        className="w-24 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+                                                                        value={tempAmount}
+                                                                        onChange={e => setTempAmount(e.target.value)}
+                                                                        onBlur={() => {
+                                                                            if (tempAmount !== '') {
+                                                                                onUpdateBill({ ...bill, amount: Number(tempAmount) });
+                                                                            }
+                                                                            setEditingAmountId(null);
+                                                                        }}
+                                                                        onKeyDown={e => {
+                                                                            if (e.key === 'Enter') {
+                                                                                if (tempAmount !== '') {
+                                                                                    onUpdateBill({ ...bill, amount: Number(tempAmount) });
+                                                                                }
+                                                                                setEditingAmountId(null);
+                                                                            }
+                                                                            if (e.key === 'Escape') setEditingAmountId(null);
+                                                                        }}
+                                                                    />
+                                                                </div>
+                                                            ) : (
+                                                                <div
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setEditingAmountId(bill.id);
+                                                                        setTempAmount(isVariable ? '' : String(bill.amount));
+                                                                    }}
+                                                                    className={`w-fit cursor-pointer transition-colors ${bill.isPaid ? 'text-slate-400' : 'text-slate-800'}`}
+                                                                >
+                                                                    {isVariable ? (
+                                                                        <span className="text-xs font-bold text-slate-500 hover:text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-4 py-2 flex rounded-lg transition-colors shadow-sm">
+                                                                            Informar Valor
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span className="text-base font-bold bg-slate-50 border border-slate-200 px-4 py-1.5 rounded-lg shadow-sm">
+                                                                            R$ {bill.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Ações Laterais */}
+                                                    <div className="flex items-center gap-2 border-l border-slate-100 pl-4 py-1 self-start">
+                                                        <button
+                                                            onClick={() => setExpandedBillId(expandedBillId === bill.id ? null : bill.id)}
+                                                            className={`p-1.5 rounded-lg transition-all ${expandedBillId === bill.id ? 'bg-slate-100 text-slate-800' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-50'}`}
+                                                            title="Expandir detalhes"
+                                                        >
+                                                            <svg className={`w-5 h-5 transition-transform duration-300 ${expandedBillId === bill.id ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+                                                            </svg>
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => handleTwoStepDelete(`bill_${bill.id}`, () => onDeleteBill(bill.id))} 
+                                                            className={`p-1.5 rounded-lg transition-colors ${pendingDeleteKey === `bill_${bill.id}` ? 'bg-rose-500 text-white' : 'text-slate-300 hover:text-rose-500 hover:bg-rose-50'}`}
+                                                            title="Excluir"
+                                                        >
+                                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                        </button>
+                                                    </div>
+                                                </div>
                                             </div>
+
+                                            {/* Área Expandida - Tabs Clean */}
+                                            {expandedBillId === bill.id && (
+                                                <div className="px-5 pb-6 pt-3 border-t border-slate-100 animate-in slide-in-from-top-2 duration-200">
+                                                    
+                                                    {/* Tabs Header */}
+                                                    <div className="flex gap-2 mb-5">
+                                                        <button
+                                                            onClick={e => { e.stopPropagation(); setActiveBillTabs(prev => ({ ...prev, [bill.id]: 'codigo' })); }}
+                                                            className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-colors ${activeBillTabs[bill.id] !== 'arquivo' ? 'bg-slate-800 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-800'}`}
+                                                        >
+                                                            Digitar Código
+                                                        </button>
+                                                        <button
+                                                            onClick={e => { e.stopPropagation(); setActiveBillTabs(prev => ({ ...prev, [bill.id]: 'arquivo' })); }}
+                                                            className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-colors ${activeBillTabs[bill.id] === 'arquivo' ? 'bg-slate-800 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-800'}`}
+                                                        >
+                                                            Anexar Arquivo
+                                                        </button>
+                                                    </div>
+
+                                                    <div className="flex flex-col gap-5 max-w-2xl">
+                                                        {activeBillTabs[bill.id] !== 'arquivo' ? (
+                                                            <>
+                                                                {/* Inputs de Texto */}
+                                                                <div>
+                                                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Linha Digitável / Código de Barras</label>
+                                                                    <div className="flex gap-2">
+                                                                        <div className="relative flex-1">
+                                                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                                                <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
+                                                                            </div>
+                                                                            <input
+                                                                                type="text"
+                                                                                placeholder="00000.00000.00000.000000..."
+                                                                                className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 py-2.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono"
+                                                                                defaultValue={bill.barcode || ''}
+                                                                                onBlur={(e) => onUpdateBill({ ...bill, barcode: e.target.value })}
+                                                                            />
+                                                                        </div>
+                                                                        {bill.barcode && (
+                                                                            <button onClick={() => navigator.clipboard.writeText(bill.barcode || '')} className="px-4 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 hover:text-slate-800 transition-colors flex items-center justify-center font-bold text-xs">
+                                                                                Copiar
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+
+                                                                <div>
+                                                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Código PIX</label>
+                                                                    <div className="flex gap-2">
+                                                                        <div className="relative flex-1">
+                                                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                                                <svg className="w-4 h-4 text-emerald-500" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2.5 7.5v9L12 22l9.5-5.5v-9L12 2zm0 2.24l7.5 4.33-7.5 4.33-7.5-4.33L12 4.24zm-8.5 6.1v7.62l7.5 4.33v-8.66l-7.5-4.33zm17 0l-7.5 4.33v8.66l7.5-4.33V10.34z"/></svg>
+                                                                            </div>
+                                                                            <input
+                                                                                type="text"
+                                                                                placeholder="00020126360014BR.GOV.BCB.PIX..."
+                                                                                className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 py-2.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500 transition-all font-mono"
+                                                                                defaultValue={bill.pixCode || ''}
+                                                                                onBlur={(e) => onUpdateBill({ ...bill, pixCode: e.target.value })}
+                                                                            />
+                                                                        </div>
+                                                                        {bill.pixCode && (
+                                                                            <button onClick={() => navigator.clipboard.writeText(bill.pixCode || '')} className="px-4 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 hover:text-slate-800 transition-colors flex items-center justify-center font-bold text-xs">
+                                                                                Copiar
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                {/* Arquivos Relacionados - Empilhados Verticalmente */}
+                                                                <div className="flex flex-col gap-3 mt-2">
+                                                            {/* Dropzone PDF */}
+                                                            <div>
+                                                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Boleto / PDF</label>
+                                                                <div
+                                                                    onClick={() => {
+                                                                        const input = document.createElement('input');
+                                                                        input.type = 'file';
+                                                                        input.accept = 'image/*,.pdf';
+                                                                        input.onchange = async (e) => {
+                                                                            const file = (e.target as HTMLInputElement).files?.[0];
+                                                                            if (file) {
+                                                                                const url = await handleFileUpload(file);
+                                                                                if (url) onUpdateBill({ ...bill, attachmentUrl: url });
+                                                                            }
+                                                                        };
+                                                                        input.click();
+                                                                    }}
+                                                                    className={`flex items-center gap-4 border border-dashed rounded-lg p-4 cursor-pointer transition-colors group ${bill.attachmentUrl ? 'bg-blue-50/50 border-blue-200 hover:border-blue-400' : 'bg-slate-50 border-slate-300 hover:bg-slate-100 hover:border-slate-400'}`}
+                                                                >
+                                                                    <div className={`p-3 rounded-full ${bill.attachmentUrl ? 'bg-blue-100 text-blue-500' : 'bg-slate-200 text-slate-400 group-hover:bg-blue-100 group-hover:text-blue-500'} transition-colors`}>
+                                                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                                                    </div>
+                                                                    <div className="flex-1">
+                                                                        {bill.attachmentUrl ? (
+                                                                            <>
+                                                                                <div className="text-sm font-bold text-blue-700">Arquivo Anexado com Sucesso</div>
+                                                                                <div className="text-[11px] text-blue-500 mt-0.5">Clique para alterar o arquivo</div>
+                                                                            </>
+                                                                        ) : (
+                                                                            <>
+                                                                                <div className="text-sm font-semibold text-slate-600 group-hover:text-slate-800">Anexar Arquivo de Boleto</div>
+                                                                                <div className="text-[11px] text-slate-400 mt-0.5">Faça o upload do PDF ou Imagem</div>
+                                                                            </>
+                                                                        )}
+                                                                    </div>
+                                                                    {bill.attachmentUrl && (
+                                                                        <a href={bill.attachmentUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="px-4 py-2 bg-white border border-blue-200 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-50 transition-colors shadow-sm">
+                                                                            Visualizar
+                                                                        </a>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Dropzone QR PIX */}
+                                                            <div>
+                                                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Imagem do QR Code</label>
+                                                                <div
+                                                                    onClick={() => {
+                                                                        const input = document.createElement('input');
+                                                                        input.type = 'file';
+                                                                        input.accept = 'image/*';
+                                                                        input.onchange = async (e) => {
+                                                                            const file = (e.target as HTMLInputElement).files?.[0];
+                                                                            if (file) {
+                                                                                const url = await handleFileUpload(file);
+                                                                                if (url) onUpdateBill({ ...bill, pixQrCodeUrl: url });
+                                                                            }
+                                                                        };
+                                                                        input.click();
+                                                                    }}
+                                                                    className={`flex items-center gap-4 border border-dashed rounded-lg p-4 cursor-pointer transition-colors group ${bill.pixQrCodeUrl ? 'bg-emerald-50/50 border-emerald-200 hover:border-emerald-400' : 'bg-slate-50 border-slate-300 hover:bg-slate-100 hover:border-slate-400'}`}
+                                                                >
+                                                                    <div className={`p-3 rounded-full ${bill.pixQrCodeUrl ? 'bg-emerald-100 text-emerald-500' : 'bg-slate-200 text-slate-400 group-hover:bg-emerald-100 group-hover:text-emerald-500'} transition-colors`}>
+                                                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" /></svg>
+                                                                    </div>
+                                                                    <div className="flex-1">
+                                                                        {bill.pixQrCodeUrl ? (
+                                                                            <>
+                                                                                <div className="text-sm font-bold text-emerald-700">QR Code Anexado com Sucesso</div>
+                                                                                <div className="text-[11px] text-emerald-500 mt-0.5">Clique para alterar a imagem</div>
+                                                                            </>
+                                                                        ) : (
+                                                                            <>
+                                                                                <div className="text-sm font-semibold text-slate-600 group-hover:text-slate-800">Anexar QR Code do PIX</div>
+                                                                                <div className="text-[11px] text-slate-400 mt-0.5">Faça o upload de uma imagem do código</div>
+                                                                            </>
+                                                                        )}
+                                                                    </div>
+                                                                    {bill.pixQrCodeUrl && (
+                                                                        <a href={bill.pixQrCodeUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="px-4 py-2 bg-white border border-emerald-200 text-emerald-600 rounded-lg text-xs font-bold hover:bg-emerald-50 transition-colors shadow-sm">
+                                                                            Visualizar
+                                                                        </a>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                                </div>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                     );
-                                })
-                            }
+                                })}
                             {fixedBills.filter(b => b.month === currentMonth && b.year === currentYear).length === 0 && billRubrics.length === 0 && (
                                 <div className="col-span-full py-12 text-center border border-dashed border-slate-200 rounded-none md:rounded-[2rem]">
                                     <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">Nenhuma obrigação registrada</p>

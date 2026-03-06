@@ -3,7 +3,14 @@
 from firebase_functions import firestore_fn, scheduler_fn, options, https_fn, pubsub_fn
 
 from firebase_admin import initialize_app, firestore, messaging
-
+import json
+import base64
+import google.generativeai as genai
+from datetime import datetime, timedelta, timezone
+import time
+import re
+import io
+import uuid
 
 
 # Inicializa o Firebase Admin apenas uma vez no escopo global
@@ -1091,94 +1098,256 @@ def sync_pix_emails(service, sync_ref, logs):
                     new_processed_ids.append(msg_id)
 
                     continue
+                    new_processed_ids.append(msg_id)
+                    continue
 
-
-
-                new_record = {
-
-                    'description': description, 'amount': amount, 'date': iso_date,
-
-                    'google_message_id': msg_id, 'pix_id': pix_id, 'status': 'active'
-
-                }
-
-
-
+                # Salva no banco
                 if is_income:
-
-                    new_record.update({
-
-                        'day': dt.day, 'month': dt.month - 1, 'year': dt.year,
-
-                        'category': 'Renda Extra', 'isReceived': True
-
-                    })
-
+                    new_record = {
+                        'description': description, 'amount': amount, 'day': dt.day,
+                        'month': dt.month - 1, 'year': dt.year,
+                        'category': 'Renda Extra', 'isReceived': True, 'date': iso_date,
+                        'google_message_id': msg_id, 'pix_id': pix_id
+                    }
                     db.collection('finance_income').add(new_record)
-
                     existing_income.append({'amount': amount, 'date': dt, 'pix_id': pix_id, 'description': description})
-
                 else:
-
                     sprint = 1 if dt.day < 8 else 2 if dt.day < 15 else 3 if dt.day < 22 else 4
-
-                    new_record.update({
-
-                        'sprint': sprint, 'category': 'Alimentação'
-
-                    })
-
+                    new_record = {
+                        'description': description, 'amount': amount, 'date': iso_date,
+                        'sprint': sprint, 'category': 'Alimentação', # Original was 'Alimentação', keeping it.
+                        'google_message_id': msg_id, 'pix_id': pix_id
+                    }
                     db.collection('finance_transactions').add(new_record)
-
                     existing_transactions.append({'amount': amount, 'date': dt, 'pix_id': pix_id, 'description': description})
-
+                
                 new_processed_ids.append(msg_id)
-
-                log_to_firestore(sync_ref, logs, f"[PIX] {subject} (R$ {amount:.2f})")
-
+                log_to_firestore(sync_ref, logs, f"[PIX] Processado: {description} (R$ {amount:.2f})")
 
 
         if new_processed_ids:
-
-            updated_ids = list(set(processed_ids + new_processed_ids))[-200:]
-
+            updated_ids = list(set(processed_ids + new_processed_ids))[-500:] # Changed from -200 to -500
             db.collection('system').document('processed_emails').set({'ids': updated_ids}, merge=True)
 
     except Exception as e:
-
         log_to_firestore(sync_ref, logs, f"ERRO PIX: {e}")
 
 
+def sync_boletos_gmail(service, sync_ref, logs):
+    """
+    Explora o Gmail em busca de boletos, extraia dados via IA e salva no Firestore (fixed_bills).
+    """
+    db = get_db()
+    
+    log_to_firestore(sync_ref, logs, "Buscando boletos no Gmail via IA...")
+    
+    # Query para emails com anexos PDF ou assuntos de fatura/boleto/pagamento
+    # Pegamos os mais recentes para a sincronia automática
+    query = 'has:attachment filename:pdf (subject:(boleto OR fatura OR bill OR pagamento OR "o seu boleto" OR "sua fatura" OR "vencimento") OR "boleto" OR "fatura")'
+    
+    try:
+        results = service.users().messages().list(userId='me', q=query, maxResults=15).execute()
+        messages = results.get('messages', [])
+        
+        if not messages:
+            log_to_firestore(sync_ref, logs, "Nenhum boleto recente encontrado no Gmail.")
+            return
+
+        # Configurar Gemini
+        keys_doc = db.collection('system').document('api_keys').get()
+        api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+        if not api_key:
+            log_to_firestore(sync_ref, logs, "ERRO: Gemini API Key não encontrada (em system/api_keys).")
+            return
+        
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        
+        processed_count = 0
+        
+        # Cache de boletos existentes para permitir duplicatas ou vinculação
+        existing_bills_cache = []
+        for b in db.collection('fixed_bills').stream():
+            d = b.to_dict()
+            existing_bills_cache.append({
+                'id': b.id,
+                'desc': d.get('description', '').lower(),
+                'amount': d.get('amount'),
+                'month': d.get('month'),
+                'year': d.get('year'),
+                'isPaid': d.get('isPaid', False)
+            })
+
+        processed_emails_doc = db.collection('system').document('processed_emails').get()
+        processed_ids = processed_emails_doc.to_dict().get('ids', []) if processed_emails_doc.exists else []
+        new_processed_ids = []
+
+        for m_info in messages:
+            msg_id = m_info['id']
+            if msg_id in processed_ids: continue
+            
+            msg = service.users().messages().get(userId='me', id=msg_id).execute()
+            snippet = msg.get('snippet', '')
+
+            # Tentar baixar o primeiro PDF encontrado
+            pdf_data = None
+            def find_pdf(part):
+                nonlocal pdf_data
+                if part.get('parts'):
+                    for sub in part['parts']: find_pdf(sub)
+                if part.get('filename', '').lower().endswith('.pdf') and part.get('body', {}).get('attachmentId'):
+                    att = service.users().messages().attachments().get(userId='me', messageId=msg_id, id=part['body']['attachmentId']).execute()
+                    pdf_data = base64.urlsafe_b64decode(att['data'])
+                    return
+            
+            find_pdf(msg['payload'])
+            
+            prompt = """
+            Você é um assistente financeiro de elite. Analise o e-mail/documento anexo e extraia os dados abaixo para um BOLETO ou PAGAMENTO.
+            Campos obrigatórios no JSON:
+            - description: Nome curto da conta (ex: VIVO, Sabesp, Condomínio)
+            - amount: valor numérico do boleto
+            - due_date: data de vencimento (formato YYYY-MM-DD)
+            - barcode: linha digitável ou código de barras (apenas números)
+            - pix_code: código Pix Copia e Cola (geralmente começa com 000201...)
+
+            Responda APENAS em JSON no formato:
+            {
+              "description": "...",
+              "amount": 123.45,
+              "due_date": "YYYY-MM-DD",
+              "barcode": "...",
+              "pix_code": "..."
+            }
+            Se não for um boleto/fatura ou se não encontrar dados, responda {"error": "not_a_bill"}.
+            """
+            
+            content_parts = [prompt, f"E-mail Fragment: {snippet}"]
+            if pdf_data:
+                content_parts.append({"mime_type": "application/pdf", "data": pdf_data})
+            
+            try:
+                response = model.generate_content(content_parts)
+                res_text = response.text.strip()
+                if "```json" in res_text:
+                    res_text = res_text.split("```json")[-1].split("```")[0].strip()
+                elif "```" in res_text:
+                    res_text = res_text.split("```")[-1].split("```")[0].strip()
+                
+                data = json.loads(res_text)
+                if data.get('error'): 
+                    new_processed_ids.append(msg_id)
+                    continue
+                
+                due_dt = datetime.fromisoformat(data['due_date'])
+                month = due_dt.month - 1
+                year = due_dt.year
+                
+                found_existing_id = None
+                is_exact_dup = False
+                name_extracted = data['description'].lower()
+
+                for eb in existing_bills_cache:
+                    if eb['month'] == month and eb['year'] == year:
+                        # Lógica de vinculação inteligente (Pela descrição aproximada)
+                        if name_extracted in eb['desc'] or eb['desc'] in name_extracted:
+                            # Se o valor também for igual, é uma duplicata exata
+                            if abs(eb['amount'] - data['amount']) < 0.01:
+                                is_exact_dup = True
+                                break
+                            # Caso contrário, se o nome bater, vamos vincular a este card (atualizá-lo)
+                            found_existing_id = eb['id']
+                            break # Achamos o card para vincular
+
+                if is_exact_dup:
+                    new_processed_ids.append(msg_id)
+                    continue
+                
+                if found_existing_id:
+                    # VINCULAÇÃO: Atualiza card existente
+                    db.collection('fixed_bills').document(found_existing_id).update({
+                        'amount': data['amount'],
+                        'barcode': data.get('barcode', ''),
+                        'pixCode': data.get('pix_code', ''),
+                        'google_message_id': msg_id,
+                        'updated_at': datetime.now().isoformat()
+                    })
+                    log_to_firestore(sync_ref, logs, f"[BOLETO] Vinculado ao card '{data['description']}': R$ {data['amount']}")
+                    processed_count += 1
+                else:
+                    # CRIAÇÃO: Adiciona novo card
+                    db.collection('fixed_bills').add({
+                        'description': data['description'],
+                        'amount': data['amount'],
+                        'dueDay': due_dt.day,
+                        'month': month,
+                        'year': year,
+                        'barcode': data.get('barcode', ''),
+                        'pixCode': data.get('pix_code', ''),
+                        'isPaid': False,
+                        'category': 'Conta Fixa',
+                        'google_message_id': msg_id,
+                        'created_at': datetime.now().isoformat()
+                    })
+                    log_to_firestore(sync_ref, logs, f"[BOLETO] Importado (Novo Card): {data['description']} (R$ {data['amount']})")
+                    processed_count += 1
+                
+                new_processed_ids.append(msg_id)
+
+            except Exception as e:
+                log_to_firestore(sync_ref, logs, f"Aviso: Erro ao processar mensagem {msg_id}: {e}")
+
+        if new_processed_ids:
+            updated_ids = list(set(processed_ids + new_processed_ids))[-500:]
+            db.collection('system').document('processed_emails').set({'ids': updated_ids}, merge=True)
+
+        if processed_count > 0:
+            log_to_firestore(sync_ref, logs, f"Sincronização de boletos concluída. {processed_count} novos boletos.")
+            emit_notification_backend("Novos Boletos", f"{processed_count} novos boletos foram importados do Gmail.", "success", "financeiro")
+    
+    except Exception as e:
+        log_to_firestore(sync_ref, logs, f"ERRO na busca de boletos: {e}")
+
+
+@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=540)
+def sync_gmail_bills_callable(req: https_fn.CallableRequest):
+    """Executa a sincronização de boletos do Gmail manualmente via app"""
+    db = get_db()
+    sync_ref = db.collection('system').document('sync')
+    logs = [f"[{datetime.now().strftime('%H:%M:%S')}] Iniciando sincronização manual via App..."]
+    
+    try:
+        gs = get_gmail_service()
+        sync_boletos_gmail(gs, sync_ref, logs)
+        
+        sync_ref.update({
+            'status': 'completed',
+            'last_success': datetime.now().isoformat(),
+            'logs': logs
+        })
+        return {"success": True}
+    except Exception as e:
+        error_msg = f"Erro na sincronização manual: {str(e)}"
+        log_to_firestore(sync_ref, logs, error_msg)
+        return {"success": False, "error": error_msg}
 
 def run_full_sync():
-
     """Executa o processo completo de sincronização"""
-
-    from datetime import datetime
-
     db = get_db()
-
     sync_ref = db.collection('system').document('sync')
-
     logs = [f"Iniciando sincronização ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})..."]
-
     try:
-
         ts, gs, cs = get_tasks_service(), get_gmail_service(), get_calendar_service()
-
         # Primeiro puxa o Calendar para permitir sincronia inversa (agenda -> Hermes) antes do push
         sync_google_calendar(cs, sync_ref, logs)
-
         sync_google_tasks_push(ts, cs, sync_ref, logs)
-
         sync_google_tasks_pull(ts, sync_ref, logs)
 
         sync_pix_emails(gs, sync_ref, logs)
 
+        sync_boletos_gmail(gs, sync_ref, logs)
         sync_ref.update({
-
             'status': 'completed',
-
             'last_success': datetime.now().isoformat(),
 
             'logs': logs

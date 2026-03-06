@@ -168,6 +168,7 @@ export interface FixedBill {
     category: string;
     isPaid: boolean;
     attachmentUrl?: string;
+    pixQrCodeUrl?: string;
     rubricId?: string;
 }
 
