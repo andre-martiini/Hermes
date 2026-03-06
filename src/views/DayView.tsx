@@ -31,15 +31,15 @@ export const DayView = ({
 
   const dayTasks = useMemo(() => tasks.filter(t => {
     if ((t.status as any) === 'excluído') return false;
-    // Filter logic handled by TimeGrid for display, but here for sidebar?
-    // Sidebar needs "Unallocated" tasks.
-
-    // Logic from original DayView:
+    
     const isConcluido = normalizeStatus(t.status) === 'concluido';
     const isStandBy = isStandbyStatus(t.status);
+    
+    if (isStandBy) return true; // Stand-by actions always appear in sidebar
+    
     const scheduledDate = t.data_limite || t.data_inicio;
-    if (isStandBy) return false;
     if (t.horario_inicio && scheduledDate) return false;
+    
     const end = t.data_limite || t.data_inicio;
     const hasDeadline = end && end !== '-' && end !== '0000-00-00';
     if (!hasDeadline) return true; // Show in sidebar

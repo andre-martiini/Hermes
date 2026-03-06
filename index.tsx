@@ -1571,7 +1571,7 @@ const App: React.FC = () => {
     }
   }, [tarefas, selectedTask]);
   const [planosTrabalho, setPlanosTrabalho] = useState<PlanoTrabalho[]>([]);
-  const [statusFilter, setStatusFilter] = useState<Status[]>(['em andamento', 'stand-by']);
+  const [statusFilter, setStatusFilter] = useState<Status[]>(['em andamento', 'stand-by', 'cgby' as any]);
   const [areaFilter, setAreaFilter] = useState<string>('TODAS');
   const [sortOption, setSortOption] = useState<SortOption>('date-asc');
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
@@ -2203,6 +2203,11 @@ const App: React.FC = () => {
       }
 
       const oldStatusNormalized = normalizeStatus(previousTask?.status || '');
+      
+      // Auto-reopen if a date is set on a stand-by task
+      if (hasDateLimit && updates.data_limite && updates.data_limite !== "-" && (oldStatusNormalized === 'stand-by' || oldStatusNormalized === 'cgby')) {
+        payload.status = 'em andamento';
+      }
       const newStatusNormalized = Object.prototype.hasOwnProperty.call(payload, 'status') ? normalizeStatus(String(payload.status)) : oldStatusNormalized;
       const statusChanged = Boolean(previousTask && Object.prototype.hasOwnProperty.call(payload, 'status') && newStatusNormalized !== oldStatusNormalized);
 
@@ -2213,7 +2218,7 @@ const App: React.FC = () => {
         if (newStatusNormalized !== 'concluido' && oldStatusNormalized === 'concluido' && !Object.prototype.hasOwnProperty.call(payload, 'data_conclusao')) {
           payload.data_conclusao = null;
         }
-        if (newStatusNormalized === 'stand-by' && !hasDateLimit && !hasDateStart) {
+        if (newStatusNormalized === 'stand-by' || newStatusNormalized === 'cgby') {
           payload.data_limite = '';
           payload.data_inicio = '';
           payload.horario_inicio = null;
@@ -3617,10 +3622,22 @@ const App: React.FC = () => {
       }
     }
     if (statusFilter.length > 0) {
-      result = result.filter(t => 
-        statusFilter.some(sf => normalizeStatus(t.status) === normalizeStatus(sf)) ||
-        (searchTerm && normalizeStatus(t.status) === 'concluido')
-      );
+      result = result.filter(t => {
+        const tStatus = normalizeStatus(t.status);
+        const matchesStatus = statusFilter.some(sf => {
+          const sfStatus = normalizeStatus(sf);
+          if (sfStatus === 'stand-by' || sfStatus === 'cgby') {
+            return tStatus === 'stand-by' || tStatus === 'cgby';
+          }
+          return tStatus === sfStatus;
+        });
+
+        // Se a tarefa não tem data válida, ela é considerada stand-by "na prática"
+        const hasNoDate = !t.data_limite || t.data_limite === "-" || t.data_limite === "0000-00-00" || !/^\d{4}-\d{2}-\d{2}$/.test(t.data_limite);
+        const shouldShowAsStandby = hasNoDate && statusFilter.some(sf => normalizeStatus(sf) === 'stand-by' || normalizeStatus(sf) === 'cgby');
+
+        return matchesStatus || shouldShowAsStandby || (searchTerm && tStatus === 'concluido');
+      });
     }
 
     if (areaFilter !== 'TODAS') {
@@ -3717,20 +3734,8 @@ const App: React.FC = () => {
         return;
       }
 
-      if (isStandbyStatus(t.status)) {
+      if (isStandbyStatus(t.status) || !t.data_limite || t.data_limite === "-" || t.data_limite === "0000-00-00" || !/^\d{4}-\d{2}-\d{2}$/.test(t.data_limite)) {
         buckets.standBy.push(t);
-        return;
-      }
-
-      // Sem Data
-      if (!t.data_limite || t.data_limite === "-" || t.data_limite === "0000-00-00") {
-        buckets.semData.push(t);
-        return;
-      }
-
-      // Check for valid date format to prevent errors
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(t.data_limite)) {
-        buckets.semData.push(t);
         return;
       }
 
@@ -3762,6 +3767,7 @@ const App: React.FC = () => {
     // Build final object preserving desired order
     const finalGroups: Record<string, Tarefa[]> = {};
 
+    finalGroups["Ações em Stand-by"] = buckets.standBy;
     if (buckets.atrasadas.length > 0) finalGroups["Atrasadas"] = buckets.atrasadas;
     if (buckets.hoje.length > 0) finalGroups["Hoje"] = buckets.hoje;
     if (buckets.amanha.length > 0) finalGroups["Amanhã"] = buckets.amanha;
@@ -3773,7 +3779,6 @@ const App: React.FC = () => {
       finalGroups[mesesFuturos[key].label] = mesesFuturos[key].tasks;
     });
 
-    if (buckets.semData.length > 0) finalGroups["Sem Prazo Definido"] = buckets.semData;
     if (buckets.concluidas.length > 0) finalGroups["Concluídas"] = buckets.concluidas;
 
     return finalGroups;
@@ -4864,13 +4869,17 @@ const App: React.FC = () => {
                                   onDrop={(e) => {
                                     e.preventDefault();
                                     e.currentTarget.style.backgroundColor = '';
-                                    const taskId = e.dataTransfer.getData('task-id');
-                                    if (taskId) {
-                                      const date = getBucketStartDate(label);
-                                      if (date || label === 'Sem Prazo Definido') {
-                                        handleUpdateTarefa(taskId, { data_limite: date });
-                                      }
-                                    }
+                                     const taskId = e.dataTransfer.getData('task-id');
+                                     if (taskId) {
+                                       if (label === 'Ações em Stand-by') {
+                                         handleUpdateTarefa(taskId, { status: 'stand-by' as any });
+                                         return;
+                                       }
+                                       const date = getBucketStartDate(label);
+                                       if (date) {
+                                         handleUpdateTarefa(taskId, { data_limite: date });
+                                       }
+                                     }
                                   }}
                                 >
                                   <button
@@ -4888,38 +4897,45 @@ const App: React.FC = () => {
 
                                   {expandedSections.includes(label) && (
                                     <div className="animate-in origin-top">
-                                      {tasks.map(task => (
-                                        <div
-                                          key={task.id}
-                                          draggable
-                                          onDragStart={(e) => {
-                                            e.dataTransfer.setData('task-id', task.id);
-                                            e.currentTarget.style.opacity = '0.5';
-                                          }}
-                                          onDragEnd={(e) => {
-                                            e.currentTarget.style.opacity = '1';
-                                          }}
-                                          onDragOver={(e) => e.preventDefault()}
-                                          onDrop={(e) => {
-                                            e.preventDefault();
-                                            e.stopPropagation();
-                                            const draggedId = e.dataTransfer.getData('task-id');
-                                            if (draggedId && draggedId !== task.id) {
-                                              handleReorderTasks(draggedId, task.id, label);
-                                            }
-                                          }}
-                                        >
-                                          <RowCard
-                                            task={task}
-                                            highlighted={label === 'Hoje' && tasks.filter(t => normalizeStatus(t.status) !== 'concluido')[0]?.id === task.id}
-                                            onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
-                                            onToggle={handleToggleTarefaStatus}
-                                            onDelete={handleDeleteTarefa}
-                                            onEdit={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
-                                            onUpdateToToday={handleUpdateToToday}
-                                          />
-                                        </div>
-                                      ))}
+                                       {tasks.map(task => (
+                                         <div
+                                           key={task.id}
+                                           draggable
+                                           onDragStart={(e) => {
+                                             e.dataTransfer.setData('task-id', task.id);
+                                             e.currentTarget.style.opacity = '0.5';
+                                           }}
+                                           onDragEnd={(e) => {
+                                             e.currentTarget.style.opacity = '1';
+                                           }}
+                                           onDragOver={(e) => e.preventDefault()}
+                                           onDrop={(e) => {
+                                             e.preventDefault();
+                                             e.stopPropagation();
+                                             const draggedId = e.dataTransfer.getData('task-id');
+                                             if (draggedId && draggedId !== task.id) {
+                                               handleReorderTasks(draggedId, task.id, label);
+                                             }
+                                           }}
+                                         >
+                                           <RowCard
+                                             task={task}
+                                             highlighted={label === 'Hoje' && tasks.filter(t => normalizeStatus(t.status) !== 'concluido')[0]?.id === task.id}
+                                             onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
+                                             onToggle={handleToggleTarefaStatus}
+                                             onDelete={handleDeleteTarefa}
+                                             onEdit={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
+                                             onUpdateToToday={handleUpdateToToday}
+                                           />
+                                         </div>
+                                       ))}
+                                       {tasks.length === 0 && (
+                                         <div className="p-8 text-center border-t border-slate-50 bg-slate-50/30">
+                                            <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest italic">
+                                              {label === 'Ações em Stand-by' ? 'Arraste ações aqui para pausar' : 'Nenhuma ação nesta seção'}
+                                            </p>
+                                         </div>
+                                       )}
                                     </div>
                                   )}
                                 </div>

@@ -87,7 +87,10 @@ export const normalizeStatus = (status: string): string => {
     .replace(/[\u0300-\u036f]/g, "");
 };
 
-export const isStandbyStatus = (status?: string | null) => normalizeStatus(status || '') === 'stand-by';
+export const isStandbyStatus = (status?: string | null) => {
+  const normalized = normalizeStatus(status || '');
+  return normalized === 'stand-by' || normalized === 'cgby';
+};
 export const isCompletedStatus = (status?: string | null) => normalizeStatus(status || '') === 'concluido';
 
 export const formatWhatsAppText = (text: string, isDarkMode: boolean = false) => {
