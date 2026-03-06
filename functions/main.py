@@ -1295,7 +1295,12 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 new_processed_ids.append(msg_id)
 
             except Exception as e:
-                log_to_firestore(sync_ref, logs, f"Aviso: Erro ao processar mensagem {msg_id}: {e}")
+                error_msg = str(e)
+                if "The document has no pages" in error_msg:
+                    log_to_firestore(sync_ref, logs, f"Aviso: O PDF da mensagem {msg_id} está vazio. Ignorando.")
+                else:
+                    log_to_firestore(sync_ref, logs, f"Aviso: Erro ao processar mensagem {msg_id}: {e}")
+                new_processed_ids.append(msg_id)
 
         if new_processed_ids:
             updated_ids = list(set(processed_ids + new_processed_ids))[-500:]
