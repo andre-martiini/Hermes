@@ -4,7 +4,7 @@ import { storage, db } from './firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, setDoc } from 'firebase/firestore';
 import { resolveTwoStepAction } from './src/utils/destructiveActions';
-
+import { NFSeGenerator } from './src/components/NFSeGenerator';
 interface FinanceViewProps {
     transactions: FinanceTransaction[];
     goals: FinanceGoal[];
@@ -144,6 +144,9 @@ const FinanceView = ({
     const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
     const [expandedBillId, setExpandedBillId] = useState<string | null>(null);
     const [activeBillTabs, setActiveBillTabs] = useState<Record<string, 'codigo' | 'arquivo'>>({});
+    
+    // NFSe Generator State
+    const [isNFSeGeneratorOpen, setIsNFSeGeneratorOpen] = useState(false);
 
     const handleTwoStepDelete = (key: string, action: () => void | Promise<void>) => {
         const decision = resolveTwoStepAction(pendingDeleteKey, key);
@@ -826,6 +829,10 @@ const FinanceView = ({
             {activeTab === 'fixed' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
 
+                    {isNFSeGeneratorOpen && (
+                        <NFSeGenerator onClose={() => setIsNFSeGeneratorOpen(false)} />
+                    )}
+
                     {/* HUB DE SAÚDE FINANCEIRA (COMPARATIVOS) */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div className="lg:col-span-2 bg-white p-8 rounded-none md:rounded-[2rem] border border-slate-200 shadow-none md:shadow-xl flex flex-col justify-between relative overflow-hidden group">
@@ -896,15 +903,22 @@ const FinanceView = ({
                             <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Fontes de entrada recorrentes e avulsas</p>
                             <div className="flex gap-3 w-full md:w-auto">
                                 <button
+                                    onClick={() => setIsNFSeGeneratorOpen(true)}
+                                    className="flex-1 md:flex-none border border-emerald-500/50 hover:bg-emerald-50 text-emerald-700 px-5 py-2 flex items-center justify-center gap-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                    Gerador NFS-e
+                                </button>
+                                <button
                                     onClick={() => setIsManagingIncomeRubrics(!isManagingIncomeRubrics)}
-                                    className={`flex-1 md:flex-none px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border ${isManagingIncomeRubrics ? 'bg-emerald-900 text-white border-emerald-900' : 'bg-white text-emerald-700 border-emerald-100 hover:bg-emerald-50'}`}
+                                    className={`flex-1 md:flex-none px-5 py-2 flex items-center justify-center rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border ${isManagingIncomeRubrics ? 'bg-emerald-900 text-white border-emerald-900' : 'bg-white text-emerald-700 border-emerald-100 hover:bg-emerald-50'}`}
                                 >
                                     {isManagingIncomeRubrics ? 'Fechar Rubricas' : 'Minhas Fontes'}
                                 </button>
                                 <button onClick={() => {
                                     setNewIncome({ category: settings.incomeCategories?.[0] || 'Renda Principal' });
                                     setIsAddingIncome(true);
-                                }} className="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg hover:shadow-emerald-500/20">
+                                }} className="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 flex items-center justify-center rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg hover:shadow-emerald-500/20">
                                     + Registrar Ganho
                                 </button>
                             </div>
