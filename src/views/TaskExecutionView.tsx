@@ -89,6 +89,8 @@ export const TaskExecutionView = ({
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState(task.titulo);
+  const [editedStatus, setEditedStatus] = useState(task.status);
+  const [editedCategory, setEditedCategory] = useState(task.categoria);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
 
@@ -494,31 +496,85 @@ export const TaskExecutionView = ({
       
       {/* Header - Mais compacto no mobile */}
       <div className="p-3 md:p-10 pb-2 md:pb-4 flex items-center justify-between shrink-0">
-        <div className="flex flex-col">
+        <div className="flex flex-col flex-1 mr-4">
           <span className="text-blue-500 text-[8px] md:text-[10px] font-black uppercase tracking-[0.3em] mb-1 md:mb-2 block">Central de Execução</span>
           {isEditingTitle ? (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col gap-3 w-full max-w-4xl bg-white p-4 rounded-2xl shadow-xl border border-blue-100">
               <input
                 type="text" autoFocus
                 value={editedTitle}
                 onChange={e => setEditedTitle(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') {
-                    onSave(task.id, { titulo: editedTitle });
-                    setIsEditingTitle(false);
-                    showToast("Título atualizado!", "success");
-                  }
-                }}
-                className={`text-xl md:text-2xl lg:text-4xl font-black tracking-tighter bg-transparent border-b-2 outline-none w-full max-w-2xl ${isTimerRunning ? 'text-white border-white/20' : 'text-slate-900 border-slate-200'}`}
+                className="text-xl md:text-2xl font-black tracking-tighter bg-slate-50 border-none outline-none w-full px-4 py-2 rounded-xl text-slate-900"
+                placeholder="Título da Ação"
               />
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[8px] font-black uppercase tracking-widest text-slate-400 ml-1">Status</label>
+                  <select
+                    value={editedStatus}
+                    onChange={e => setEditedStatus(e.target.value as any)}
+                    className="text-[10px] font-black uppercase bg-slate-50 border-none px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="em andamento">Em Andamento</option>
+                    <option value="stand-by">Stand-by</option>
+                    <option value="concluido">Concluído</option>
+                    <option value="cgby">CGBy (Atrasada)</option>
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[8px] font-black uppercase tracking-widest text-slate-400 ml-1">Tag / Categoria</label>
+                  <select
+                    value={editedCategory}
+                    onChange={e => setEditedCategory(e.target.value as any)}
+                    className="text-[10px] font-black uppercase bg-slate-50 border-none px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="CLC">CLC</option>
+                    <option value="ASSISTÊNCIA">Assistência</option>
+                    <option value="GERAL">Geral</option>
+                    <option value="NÃO CLASSIFICADA">Não Classificada</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2 ml-auto">
+                  <button
+                    onClick={() => setIsEditingTitle(false)}
+                    className="px-4 py-2 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={() => {
+                      onSave(task.id, { 
+                        titulo: editedTitle,
+                        status: editedStatus as any,
+                        categoria: editedCategory as any
+                      });
+                      setIsEditingTitle(false);
+                      showToast("Ação atualizada!", "success");
+                    }}
+                    className="px-6 py-2 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
+                  >
+                    Salvar
+                  </button>
+                </div>
+              </div>
             </div>
           ) : (
-            <div className="group flex items-center gap-4">
-              <h1 className={`text-xl md:text-2xl lg:text-4xl font-black tracking-tighter leading-tight ${isTimerRunning ? 'text-white' : 'text-slate-900'}`}>
-                {task.titulo}
-              </h1>
-              <button onClick={() => setIsEditingTitle(true)} className="p-2 opacity-0 group-hover:opacity-100 transition-all text-slate-400 hover:text-blue-500">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" strokeWidth="2" /></svg>
+            <div className="group flex items-center justify-between w-full">
+              <div className="flex flex-col">
+                <h1 className={`text-xl md:text-2xl lg:text-4xl font-black tracking-tighter leading-tight ${isTimerRunning ? 'text-white' : 'text-slate-900'}`}>
+                  {task.titulo}
+                </h1>
+                <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[8px] font-black uppercase tracking-widest px-2 py-0.5 bg-blue-50 text-blue-600 rounded-md border border-blue-100">{task.status}</span>
+                    <span className="text-[8px] font-black uppercase tracking-widest px-2 py-0.5 bg-slate-100 text-slate-500 rounded-md">{task.categoria}</span>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsEditingTitle(true)} 
+                className="px-4 py-2 bg-blue-50 text-blue-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all flex items-center gap-2 shadow-sm border border-blue-100"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" strokeWidth="2.5" /></svg>
+                Editar Ação
               </button>
             </div>
           )}

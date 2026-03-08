@@ -232,13 +232,52 @@ export const PgcAuditRow = ({
     </div>
   );
 };
-export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, onUpdateToToday, highlighted }: {
+
+const DatePickerButton = ({ taskId, onUpdateTask }: { taskId: string, onUpdateTask: (id: string, updates: Partial<Tarefa>) => void }) => {
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <div className="relative" onClick={(e) => e.stopPropagation()}>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          if (inputRef.current) {
+            if (inputRef.current.showPicker) {
+              inputRef.current.showPicker();
+            } else {
+              inputRef.current.click();
+            }
+          }
+        }}
+        className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg md:rounded-xl transition-all"
+        title="Alterar data"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+        </svg>
+      </button>
+      <input
+        ref={inputRef}
+        type="date"
+        className="absolute opacity-0 w-0 h-0 pointer-events-none"
+        tabIndex={-1}
+        onChange={(e) => {
+          e.stopPropagation();
+          const val = e.target.value;
+          if (val) onUpdateTask(taskId, { data_limite: val });
+        }}
+      />
+    </div>
+  );
+};
+
+export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, onUpdateToToday, onUpdateTask, highlighted }: {
   task: Tarefa,
   onClick?: () => void,
   onToggle: (id: string, currentStatus: string) => void,
   onDelete: (id: string) => void,
   onEdit: (t: Tarefa) => void,
   onUpdateToToday?: (t: Tarefa) => void,
+  onUpdateTask?: (id: string, updates: Partial<Tarefa>) => void,
   highlighted?: boolean
 }) => {
   const statusValue = normalizeStatus(task.status);
@@ -286,7 +325,7 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
         e.dataTransfer.effectAllowed = 'move';
       }}
       title={task.data_criacao ? `Criada em: ${formatDate(task.data_criacao.split('T')[0])}` : ''}
-      className={`group w-full px-4 md:px-6 py-5 md:py-4 border-b border-slate-100 hover:bg-slate-50/80 transition-all flex flex-col sm:flex-row sm:items-start gap-4 md:gap-6 animate-in cursor-pointer relative ${isCompleted ? 'opacity-60 grayscale-[0.5]' : ''} ${highlighted ? 'bg-gradient-to-r from-amber-50 to-white border-l-4 border-l-amber-500 py-8 md:py-7 shadow-md ring-1 ring-amber-200/50' : 'bg-white'}`}
+      className={`group w-full px-4 md:px-6 py-5 md:py-4 border-b border-slate-100 hover:bg-slate-50/80 transition-all flex flex-col sm:flex-row sm:items-start gap-4 md:gap-6 animate-in cursor-pointer relative ${isCompleted ? 'opacity-60 grayscale-[0.5]' : ''} ${highlighted ? 'bg-gradient-to-r from-blue-50/50 to-white border-l-4 border-l-blue-600 py-8 md:py-7 shadow-lg ring-1 ring-blue-200/50 scale-[1.01] z-10' : 'bg-white'}`}
     >
       {/* Esquerda: Checkbox + Título */}
       <div className="flex items-center gap-4 flex-1 min-w-0">
@@ -303,8 +342,8 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
         <div className="flex flex-col gap-1 flex-1 min-w-0">
           {highlighted && !isCompleted && (
             <div className="flex items-center gap-1.5 animate-pulse">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-              <span className="text-[9px] font-black text-amber-600 uppercase tracking-[0.2em]">Prioridade Máxima • Ação do Dia</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+              <span className="text-[9px] font-black text-blue-700 uppercase tracking-[0.2em]">Executar Agora • Próxima Ação</span>
             </div>
           )}
           <div className={`${highlighted ? 'text-[15px] md:text-lg font-black text-amber-950' : 'text-[13px] md:text-[15px] font-bold text-[#1a202c]'} leading-snug transition-colors whitespace-normal break-words ${isCompleted ? 'line-through text-slate-400' : (highlighted ? 'group-hover:text-amber-700' : 'group-hover:text-blue-600')}`}>
@@ -331,9 +370,26 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
         </div>
 
         <div className="flex items-center gap-6">
-          <div className="flex items-center gap-1.5 text-slate-400 font-black uppercase text-[9px] md:text-[10px] tracking-widest min-w-[65px]">
+          <div className="flex items-center gap-1.5 text-slate-400 font-black uppercase text-[9px] md:text-[10px] tracking-widest min-w-[65px] relative group/date hover:text-blue-600 transition-all">
             <svg className="w-3 h-3 md:w-3.5 md:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-            {dateDisplay} {task.horario_inicio ? `• ${task.horario_inicio}` : ''}
+            <span>{dateDisplay} {task.horario_inicio ? `• ${task.horario_inicio}` : ''}</span>
+            {onUpdateTask && (
+              <input
+                type="date"
+                className="absolute inset-0 opacity-0 cursor-pointer z-20"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // No mobile, alguns navegadores precisam de um empurrãozinho
+                  if (e.currentTarget.showPicker) e.currentTarget.showPicker();
+                }}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  const val = e.target.value;
+                  if (val) onUpdateTask(task.id, { data_limite: val });
+                }}
+              />
+            )}
           </div>
 
           {/* Ações: Sempre visíveis no mobile (sm:opacity-0), hover no desktop */}
@@ -343,12 +399,16 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
                 <button
                   onClick={(e) => { e.stopPropagation(); onUpdateToToday(task); }}
                   className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg md:rounded-xl transition-all"
-                  title="Atualizar para Hoje (Limpar Horário)"
+                  title="Mover para Hoje"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
                 </button>
+              )}
+
+              {onUpdateTask && (
+                <DatePickerButton taskId={task.id} onUpdateTask={onUpdateTask} />
               )}
 
               <button

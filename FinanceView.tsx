@@ -699,9 +699,13 @@ const FinanceView = ({
                                     <div className="flex justify-end mb-4">
                                         <button
                                             onClick={() => {
-                                                setNewGoalName('');
-                                                setNewGoalTarget('');
-                                                setEditingGoal(null);
+                                                onAddGoal({
+                                                    name: 'Nova Meta',
+                                                    targetAmount: 0,
+                                                    currentAmount: 0,
+                                                    priority: -1,
+                                                    status: 'active'
+                                                });
                                             }}
                                             className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:underline"
                                         >
@@ -712,48 +716,82 @@ const FinanceView = ({
                                     {sortedGoals.length > 0 ? (
                                         <div className="space-y-4">
                                             {sortedGoals.map((goal, idx) => (
-                                                <div key={goal.id} className={`bg-white p-5 rounded-none md:rounded-[2rem] border transition-all relative group ${idx === 0 ? 'border-slate-300 shadow-none md:shadow-md' : 'border-slate-100 opacity-80 hover:opacity-100 shadow-none'}`}>
-                                                    <div className="flex flex-col gap-4">
-                                                        <div className="flex items-start justify-between gap-4">
-                                                            <div className="flex items-start gap-4">
-                                                                <div className="flex flex-col gap-1 mt-1">
-                                                                    <button
-                                                                        onClick={() => swapGoals(idx, idx - 1)}
-                                                                        disabled={idx === 0}
-                                                                        className="p-1 rounded bg-slate-50 hover:bg-slate-100 disabled:opacity-20 transition-all"
-                                                                        title="Mover para cima"
-                                                                    >
-                                                                        <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 15l7-7 7 7" /></svg>
-                                                                    </button>
-                                                                    <button
-                                                                        onClick={() => swapGoals(idx, idx + 1)}
-                                                                        disabled={idx === sortedGoals.length - 1}
-                                                                        className="p-1 rounded bg-slate-50 hover:bg-slate-100 disabled:opacity-20 transition-all"
-                                                                        title="Mover para baixo"
-                                                                    >
-                                                                        <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" /></svg>
-                                                                    </button>
-                                                                </div>
-                                                                <div className="flex-1 min-w-0">
-                                                                    <h5 className="font-black text-slate-900 leading-tight break-words pr-2">{goal.name}</h5>
-                                                                    <div className="text-[10px] font-bold text-slate-400 mt-0.5 uppercase tracking-widest">
-                                                                        R$ {goal.currentAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de {goal.targetAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                            <div className="flex items-center gap-1 shrink-0">
-                                                                <button onClick={() => setEditingGoal(goal)} className="p-1 text-slate-300 hover:text-blue-500 transition-colors">
-                                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                                                                </button>
-                                                                <button onClick={() => handleTwoStepDelete(`goal_${goal.id}`, () => onDeleteGoal(goal.id))} className={`p-1 rounded-md transition-colors ${pendingDeleteKey === `goal_${goal.id}` ? 'bg-rose-500 text-white' : 'text-slate-300 hover:text-rose-500'}`}>
-                                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                                </button>
-                                                                <div className="ml-2 bg-slate-100 text-slate-500 text-[8px] font-black px-2 py-1 rounded-lg uppercase tracking-widest shrink-0">P{idx + 1}</div>
+                                                <div key={goal.id} className={`p-3 md:p-4 rounded-none md:rounded-[1.5rem] border transition-all relative group ${idx === 0 ? 'bg-gradient-to-br from-blue-50/50 to-white border-blue-600 shadow-xl ring-1 ring-blue-100' : 'bg-white border-slate-100 opacity-80 hover:opacity-100 shadow-none'}`}>
+                                                    <div className="flex flex-col gap-2">
+                                                        {/* Setas de reordenação: absolutas à esquerda, só no hover */}
+                                                        <div className="absolute left-2 top-1/2 -translate-y-1/2 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                                            <button
+                                                                onClick={() => swapGoals(idx, idx - 1)}
+                                                                disabled={idx === 0}
+                                                                className="p-0.5 rounded hover:bg-slate-100 disabled:opacity-20 transition-all"
+                                                                title="Mover para cima"
+                                                            >
+                                                                <svg className="w-2.5 h-2.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 15l7-7 7 7" /></svg>
+                                                            </button>
+                                                            <button
+                                                                onClick={() => swapGoals(idx, idx + 1)}
+                                                                disabled={idx === sortedGoals.length - 1}
+                                                                className="p-0.5 rounded hover:bg-slate-100 disabled:opacity-20 transition-all"
+                                                                title="Mover para baixo"
+                                                            >
+                                                                <svg className="w-2.5 h-2.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" /></svg>
+                                                            </button>
+                                                        </div>
+
+                                                        {/* Badge P1 + Lixeira: absolutos à direita, só no hover */}
+                                                        <div className="absolute right-3 top-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                                            <div className="bg-slate-100 text-slate-500 text-[8px] font-black px-1.5 py-0.5 rounded-lg uppercase tracking-widest">{`P${idx + 1}`}</div>
+                                                            <button
+                                                                onClick={() => handleTwoStepDelete(`goal_${goal.id}`, () => onDeleteGoal(goal.id))}
+                                                                className={`p-1.5 rounded-md transition-all ${pendingDeleteKey === `goal_${goal.id}` ? 'bg-rose-500 text-white scale-110' : 'text-slate-300 hover:text-rose-500'}`}
+                                                                title={pendingDeleteKey === `goal_${goal.id}` ? 'Confirmar exclusão' : 'Excluir meta'}
+                                                            >
+                                                                {pendingDeleteKey === `goal_${goal.id}` ? (
+                                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                                ) : (
+                                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                                )}
+                                                            </button>
+                                                        </div>
+
+                                                        {/* Conteúdo principal: textarea + valor alvo */}
+                                                        <div className="w-full">
+                                                            <textarea
+                                                                defaultValue={goal.name}
+                                                                rows={1}
+                                                                className="w-full bg-transparent border-none p-0 font-black text-slate-800 text-sm outline-none focus:ring-1 focus:ring-blue-100 rounded px-1 transition-all resize-none overflow-hidden leading-snug pr-16"
+                                                                onInput={(e) => {
+                                                                    const el = e.currentTarget;
+                                                                    el.style.height = 'auto';
+                                                                    el.style.height = el.scrollHeight + 'px';
+                                                                }}
+                                                                onBlur={(e) => {
+                                                                    if (e.target.value !== goal.name) {
+                                                                        onUpdateGoal({ ...goal, name: e.target.value });
+                                                                    }
+                                                                }}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                            />
+                                                            <div className="flex items-baseline gap-1 mt-1">
+                                                                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">R$ {goal.currentAmount.toLocaleString('pt-BR', { minimumFractionDigits: 0 })} de</span>
+                                                                <input
+                                                                    type="number"
+                                                                    className="bg-transparent border-none p-0 text-[10px] font-black text-slate-700 w-20 outline-none focus:ring-1 focus:ring-blue-200 rounded px-1 transition-all"
+                                                                    defaultValue={goal.targetAmount}
+                                                                    onBlur={(e) => {
+                                                                        const newVal = Number(e.target.value);
+                                                                        if (newVal !== goal.targetAmount) {
+                                                                            onUpdateGoal({ ...goal, targetAmount: newVal });
+                                                                        }
+                                                                    }}
+                                                                />
                                                             </div>
                                                         </div>
-                                                        <div className="h-2 bg-slate-50 rounded-full overflow-hidden w-full">
+
+                                                        {/* Barra de progresso */}
+                                                        <div className="h-1.5 bg-slate-50 rounded-full overflow-hidden w-full">
                                                             <div
-                                                                className={`h-full transition-all duration-1000 ${idx === 0 ? 'bg-slate-600' : 'bg-blue-400'}`}
+                                                                className={`h-full transition-all duration-1000 ${idx === 0 ? 'bg-amber-500' : 'bg-blue-400'}`}
                                                                 style={{ width: `${Math.min((goal.currentAmount / goal.targetAmount) * 100, 100)}%` }}
                                                             ></div>
                                                         </div>
@@ -767,57 +805,6 @@ const FinanceView = ({
                                         </div>
                                     )}
 
-                                    {/* Add/Edit Goal Form */}
-                                    <div className="bg-slate-50 p-6 rounded-none md:rounded-[2rem] border border-slate-200 animate-in slide-in-from-bottom-2">
-                                        <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">{editingGoal ? 'Editar Meta' : 'Adicionar Nova Meta na Fila'}</h5>
-                                        <div className="flex gap-3 mb-3">
-                                            <input
-                                                type="text"
-                                                placeholder="Nome da Meta"
-                                                value={editingGoal ? editingGoal.name : newGoalName}
-                                                onChange={(e) => editingGoal ? setEditingGoal({ ...editingGoal, name: e.target.value }) : setNewGoalName(e.target.value)}
-                                                className="flex-1 text-sm bg-white border border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
-                                            />
-                                            <input
-                                                type="number"
-                                                placeholder="Alvo (R$)"
-                                                value={editingGoal ? editingGoal.targetAmount : newGoalTarget}
-                                                onChange={(e) => editingGoal ? setEditingGoal({ ...editingGoal, targetAmount: Number(e.target.value) }) : setNewGoalTarget(e.target.value)}
-                                                className="w-32 text-sm bg-white border border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
-                                            />
-                                        </div>
-                                        <div className="flex gap-2">
-                                            {editingGoal && (
-                                                <button
-                                                    onClick={() => setEditingGoal(null)}
-                                                    className="flex-1 bg-slate-200 text-slate-600 text-[10px] font-black uppercase py-3 rounded-xl hover:bg-slate-300"
-                                                >
-                                                    Cancelar
-                                                </button>
-                                            )}
-                                            <button
-                                                onClick={() => {
-                                                    if (editingGoal) {
-                                                        onUpdateGoal(editingGoal);
-                                                        setEditingGoal(null);
-                                                    } else if (newGoalName && newGoalTarget) {
-                                                        onAddGoal({
-                                                            name: newGoalName,
-                                                            targetAmount: Number(newGoalTarget),
-                                                            currentAmount: 0,
-                                                            priority: goals.length + 1,
-                                                            status: goals.length === 0 ? 'active' : 'queued'
-                                                        });
-                                                        setNewGoalName('');
-                                                        setNewGoalTarget('');
-                                                    }
-                                                }}
-                                                className="flex-[2] bg-slate-900 text-white text-[10px] font-black uppercase py-3 rounded-xl hover:bg-slate-800 shadow-lg transition-all active:scale-[0.98]"
-                                            >
-                                                {editingGoal ? 'Salvar Alterações' : 'Adicionar Meta'}
-                                            </button>
-                                        </div>
-                                    </div>
                                 </FinanceSection>
                             </div>
                         </div>

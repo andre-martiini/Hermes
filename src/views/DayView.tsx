@@ -33,8 +33,11 @@ export const DayView = ({
     if ((t.status as any) === 'excluído') return false;
     
     const isConcluido = normalizeStatus(t.status) === 'concluido';
+
+    // Tarefas concluídas nunca devem aparecer em "Aguardando Alocação"
+    if (isConcluido) return false;
+
     const isStandBy = isStandbyStatus(t.status);
-    
     if (isStandBy) return true; // Stand-by actions always appear in sidebar
     
     const scheduledDate = t.data_limite || t.data_inicio;
@@ -42,8 +45,7 @@ export const DayView = ({
     
     const end = t.data_limite || t.data_inicio;
     const hasDeadline = end && end !== '-' && end !== '0000-00-00';
-    if (!hasDeadline) return true; // Show in sidebar
-    if (isConcluido && end < dayStr) return false;
+    if (!hasDeadline) return true; // Show in sidebar (sem prazo)
     return dayStr >= end; // Show overdue or today's unallocated
   }).sort((a, b) => (a.ordem || 0) - (b.ordem || 0)), [tasks, dayStr]);
 

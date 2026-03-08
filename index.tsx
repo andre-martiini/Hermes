@@ -3767,7 +3767,8 @@ const App: React.FC = () => {
     // Build final object preserving desired order
     const finalGroups: Record<string, Tarefa[]> = {};
 
-    finalGroups["Ações em Stand-by"] = buckets.standBy;
+    // Stand-by: visual top, but auto-expand ignores it
+    if (buckets.standBy.length > 0) finalGroups["Ações em Stand-by"] = buckets.standBy;
     if (buckets.atrasadas.length > 0) finalGroups["Atrasadas"] = buckets.atrasadas;
     if (buckets.hoje.length > 0) finalGroups["Hoje"] = buckets.hoje;
     if (buckets.amanha.length > 0) finalGroups["Amanhã"] = buckets.amanha;
@@ -3786,7 +3787,15 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!hasAutoExpanded && Object.keys(tarefasAgrupadas).length > 0) {
-      setExpandedSections([Object.keys(tarefasAgrupadas)[0]]);
+        const keys = Object.keys(tarefasAgrupadas);
+      let sectionsToExpand: string[] = [];
+      if (keys.includes("Atrasadas")) sectionsToExpand.push("Atrasadas");
+      if (keys.includes("Hoje")) sectionsToExpand.push("Hoje");
+      if (sectionsToExpand.length === 0) {
+        const fallback = keys.find(k => k !== "Ações em Stand-by" && k !== "Concluídas");
+        if (fallback) sectionsToExpand = [fallback];
+      }
+      setExpandedSections(sectionsToExpand);
       setHasAutoExpanded(true);
     }
   }, [tarefasAgrupadas, hasAutoExpanded]);
@@ -4926,6 +4935,7 @@ const App: React.FC = () => {
                                              onDelete={handleDeleteTarefa}
                                              onEdit={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
                                              onUpdateToToday={handleUpdateToToday}
+                                             onUpdateTask={handleUpdateTarefa}
                                            />
                                          </div>
                                        ))}
