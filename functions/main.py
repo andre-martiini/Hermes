@@ -18,6 +18,9 @@ import uuid
 initialize_app()
 
 DEFAULT_GOOGLE_CALENDAR_ID = 'cf4953b9512ee2e85a7e064f9d5ce4eaf6e3634564c91e5c7ee2bb01fd46782a@group.calendar.google.com'
+SYNC_LOCK_DOC_ID = 'sync_lock'
+SYNC_LOCK_STALE_SECONDS = 15 * 60
+MAX_SYNC_PASSES = 3
 
 
 
@@ -146,6 +149,110 @@ def get_sync_calendar_ids(db=None):
         calendar_ids.append(target_calendar_id)
 
     return calendar_ids
+
+
+def parse_iso_datetime(value):
+
+    if not value or not isinstance(value, str):
+
+        return None
+
+    try:
+
+        normalized = value.replace('Z', '+00:00')
+
+        return datetime.fromisoformat(normalized)
+
+    except Exception:
+
+        return None
+
+
+def build_task_calendar_event_id(task_id):
+
+    stable_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"hermes-task:{task_id}")
+
+    return f"hermes{stable_uuid.hex}"
+
+
+def queue_sync_request(db, reason=None):
+
+    payload = {
+        'pending_request': True,
+        'pending_request_at': datetime.now(timezone.utc).isoformat()
+    }
+
+    if reason:
+
+        payload['pending_reason'] = reason
+
+    db.collection('system').document('sync').set(payload, merge=True)
+
+
+def acquire_sync_lock(db, owner_id):
+
+    lock_ref = db.collection('system').document(SYNC_LOCK_DOC_ID)
+    now = datetime.now(timezone.utc)
+    lock_payload = {
+        'owner_id': owner_id,
+        'started_at': now.isoformat(),
+        'expires_at': (now + timedelta(seconds=SYNC_LOCK_STALE_SECONDS)).isoformat()
+    }
+
+    try:
+
+        lock_ref.create(lock_payload)
+
+        return True
+
+    except Exception:
+
+        pass
+
+    try:
+
+        lock_doc = lock_ref.get()
+
+        if lock_doc.exists:
+
+            lock_data = lock_doc.to_dict() or {}
+            expires_at = parse_iso_datetime(lock_data.get('expires_at'))
+
+            if expires_at and expires_at > now:
+
+                return False
+
+        lock_ref.delete()
+        lock_ref.create(lock_payload)
+
+        return True
+
+    except Exception:
+
+        return False
+
+
+def release_sync_lock(db, owner_id):
+
+    lock_ref = db.collection('system').document(SYNC_LOCK_DOC_ID)
+
+    try:
+
+        lock_doc = lock_ref.get()
+
+        if not lock_doc.exists:
+
+            return
+
+        lock_data = lock_doc.to_dict() or {}
+
+        if lock_data.get('owner_id') == owner_id:
+
+            lock_ref.delete()
+
+    except Exception:
+
+        pass
 
 
 
@@ -696,6 +803,7 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
             
             # --- PARTE 2: Sincronia Google Calendar (Se possuir horário) ---
             cal_id = t.get('google_calendar_id')
+            desired_event_id = build_task_calendar_event_id(doc.id)
             if sync_to_calendar and g_status == 'needsAction': # Só agenda eventos não concluídos
                 # Prepara o Evento
                 from datetime import datetime, timezone
@@ -708,12 +816,24 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
                         'summary': f"Tarefa: {title}",
                         'description': updated_notes,
                         'start': {'dateTime': start_dt, 'timeZone': 'America/Sao_Paulo'},
-                        'end': {'dateTime': end_dt, 'timeZone': 'America/Sao_Paulo'}
+                        'end': {'dateTime': end_dt, 'timeZone': 'America/Sao_Paulo'},
+                        'extendedProperties': {
+                            'private': {
+                                'hermes_task_id': doc.id
+                            }
+                        }
                     }
+                    insert_event_body = dict(event_body)
+                    insert_event_body['id'] = desired_event_id
                     
                     if not cal_id:
                         # Cria novo
-                        new_event = calendar_service.events().insert(calendarId=calendar_id, body=event_body).execute()
+                        try:
+                            new_event = calendar_service.events().insert(calendarId=calendar_id, body=insert_event_body).execute()
+                        except HttpError as cal_err:
+                            if cal_err.resp.status != 409:
+                                raise
+                            new_event = calendar_service.events().get(calendarId=calendar_id, eventId=desired_event_id).execute()
                         doc.reference.update({'google_calendar_id': new_event['id']})
                         log_to_firestore(sync_ref, logs, f"[+] ALOCADA CALENDAR: {title}")
                     else:
@@ -722,7 +842,12 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
                             calendar_service.events().update(calendarId=calendar_id, eventId=cal_id, body=event_body).execute()
                         except HttpError as cal_err:
                             if cal_err.resp.status == 404:
-                                new_event = calendar_service.events().insert(calendarId=calendar_id, body=event_body).execute()
+                                try:
+                                    new_event = calendar_service.events().insert(calendarId=calendar_id, body=insert_event_body).execute()
+                                except HttpError as conflict_err:
+                                    if conflict_err.resp.status != 409:
+                                        raise
+                                    new_event = calendar_service.events().get(calendarId=calendar_id, eventId=desired_event_id).execute()
                                 doc.reference.update({'google_calendar_id': new_event['id']})
                 except Exception as ce:
                     log_to_firestore(sync_ref, logs, f"[CAL][!] Falha ao sincronizar evento da tarefa '{title}': {ce}")
@@ -764,6 +889,8 @@ def sync_google_calendar(service, sync_ref, logs):
         for task_doc in db.collection('tarefas').stream():
             task_data = task_doc.to_dict() or {}
             linked_event_id = task_data.get('google_calendar_id')
+            deterministic_event_id = build_task_calendar_event_id(task_doc.id)
+            linked_tasks_by_event_id.setdefault(deterministic_event_id, []).append((task_doc.reference, task_data))
             if isinstance(linked_event_id, str) and linked_event_id.strip():
                 linked_tasks_by_event_id.setdefault(linked_event_id.strip(), []).append((task_doc.reference, task_data))
 
@@ -1336,30 +1463,64 @@ def sync_gmail_bills_callable(req: https_fn.CallableRequest):
         log_to_firestore(sync_ref, logs, error_msg)
         return {"success": False, "error": error_msg}
 
-def run_full_sync():
+def run_full_sync(trigger_reason='unspecified'):
     """Executa o processo completo de sincronização"""
     db = get_db()
     sync_ref = db.collection('system').document('sync')
-    logs = [f"Iniciando sincronização ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})..."]
+    run_id = uuid.uuid4().hex
+    logs = [f"Iniciando sincronização ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})... Trigger: {trigger_reason}"]
+
+    if not acquire_sync_lock(db, run_id):
+        queue_sync_request(db, f"sync-busy:{trigger_reason}")
+        print(f"Sincronização já em andamento. Pedido enfileirado: {trigger_reason}")
+        return False
+
     try:
-        ts, gs, cs = get_tasks_service(), get_gmail_service(), get_calendar_service()
-        # Primeiro puxa o Calendar para permitir sincronia inversa (agenda -> Hermes) antes do push
-        sync_google_calendar(cs, sync_ref, logs)
-        sync_google_tasks_push(ts, cs, sync_ref, logs)
-        sync_google_tasks_pull(ts, sync_ref, logs)
+        sync_ref.set({
+            'status': 'processing',
+            'active_run_id': run_id,
+            'pending_request': False,
+            'last_trigger': trigger_reason,
+            'started_at': datetime.now(timezone.utc).isoformat(),
+            'logs': logs
+        }, merge=True)
 
-        sync_pix_emails(gs, sync_ref, logs)
+        for current_pass in range(1, MAX_SYNC_PASSES + 1):
+            if current_pass > 1:
+                log_to_firestore(sync_ref, logs, f"[SYNC] Reexecutando sincronização para consolidar alterações pendentes (passo {current_pass}/{MAX_SYNC_PASSES}).", True)
+                sync_ref.set({
+                    'status': 'processing',
+                    'active_run_id': run_id,
+                    'pending_request': False,
+                    'logs': logs
+                }, merge=True)
 
-        sync_boletos_gmail(gs, sync_ref, logs)
-        sync_ref.update({
+            ts, gs, cs = get_tasks_service(), get_gmail_service(), get_calendar_service()
+            # Primeiro puxa o Calendar para permitir sincronia inversa (agenda -> Hermes) antes do push
+            sync_google_calendar(cs, sync_ref, logs)
+            sync_google_tasks_push(ts, cs, sync_ref, logs)
+            sync_google_tasks_pull(ts, sync_ref, logs)
+
+            sync_pix_emails(gs, sync_ref, logs)
+
+            sync_boletos_gmail(gs, sync_ref, logs)
+
+            sync_state = sync_ref.get().to_dict() or {}
+            if not sync_state.get('pending_request'):
+                break
+            if current_pass == MAX_SYNC_PASSES:
+                log_to_firestore(sync_ref, logs, "[SYNC][!] Limite de reexecuções atingido; alterações restantes serão processadas na próxima sincronização.", True)
+
+        sync_ref.set({
             'status': 'completed',
             'last_success': datetime.now().isoformat(),
-
+            'pending_request': False,
+            'active_run_id': None,
             'logs': logs
-
-        })
+        }, merge=True)
 
         print("Sincronização concluída com sucesso.")
+        return True
 
     except Exception as e:
 
@@ -1367,15 +1528,16 @@ def run_full_sync():
 
         print(error_msg)
 
-        sync_ref.update({
-
+        sync_ref.set({
             'status': 'error',
-
             'error_message': error_msg,
-
+            'pending_request': False,
+            'active_run_id': None,
             'logs': logs + [error_msg]
-
-        })
+        }, merge=True)
+        return False
+    finally:
+        release_sync_lock(db, run_id)
 
 
 
@@ -1391,11 +1553,7 @@ def on_sync_request(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.D
 
     if data.get('status') != 'requested': return
 
-    db = get_db()
-
-    db.collection('system').document('sync').update({'status': 'processing'})
-
-    run_full_sync()
+    run_full_sync('firestore-request')
 
 
 
@@ -1405,7 +1563,7 @@ def scheduled_sync(event: scheduler_fn.ScheduledEvent) -> None:
 
     """Trigger agendado para rodar a cada 30 minutos"""
 
-    run_full_sync()
+    run_full_sync('scheduled')
 
 @firestore_fn.on_document_created(document="notificacoes/{notification_id}")
 
@@ -1778,7 +1936,17 @@ def on_tarefa_written(event: firestore_fn.Event[firestore_fn.Change[firestore_fn
         or after.get('data_limite') != before.get('data_limite')
     ):
         sync_ref = db.collection('system').document('sync')
-        db.collection('system').document('sync').update({'status': 'requested'})
+        sync_data = sync_ref.get().to_dict() or {}
+        current_status = sync_data.get('status')
+
+        if current_status in ('processing', 'requested'):
+            queue_sync_request(db, 'task-schedule-change')
+        else:
+            sync_ref.set({
+                'status': 'requested',
+                'requested_at': datetime.now(timezone.utc).isoformat(),
+                'last_trigger': 'task-schedule-change'
+            }, merge=True)
     
 @firestore_fn.on_document_updated(document="tarefas/{taskId}")
 def on_processo_updated(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot]]):
@@ -3072,4 +3240,3 @@ def salvarTranscricaoReuniao(req: https_fn.CallableRequest):
             code=https_fn.FunctionsErrorCode.INTERNAL,
             message="Falha ao salvar transcrição da reunião no Google Drive."
         )
-
