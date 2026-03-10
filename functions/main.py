@@ -33,50 +33,48 @@ def get_db():
 
 
 def get_google_creds():
-
-    """Busca as credenciais OAuth2 do Firestore"""
-
+    """Busca as credenciais OAuth2 do Firestore e renova se necessário"""
     from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
 
     db = get_db()
-
     creds_doc = db.collection('system').document('google_credentials').get()
 
     if not creds_doc.exists:
-
         raise Exception("Credenciais não encontradas no Firestore.")
 
-    
-
     creds_data = creds_doc.to_dict()
-
     SCOPES = [
-
         'https://www.googleapis.com/auth/tasks',
-
         'https://www.googleapis.com/auth/gmail.readonly',
-
-        'https://www.googleapis.com/auth/calendar',  # Modificado para leitura e escrita na nova regra
-
+        'https://www.googleapis.com/auth/calendar',
         'https://www.googleapis.com/auth/drive'
-
     ]
 
-    return Credentials(
-
+    creds = Credentials(
         token=creds_data.get('token'),
-
         refresh_token=creds_data.get('refresh_token'),
-
         token_uri=creds_data.get('token_uri'),
-
         client_id=creds_data.get('client_id'),
-
         client_secret=creds_data.get('client_secret'),
-
         scopes=SCOPES
-
     )
+
+    # Verifica se o token expirou e tenta renovar
+    if creds and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            # Salva o NOVO token de volta no Firestore para evitar falhas futuras
+            db.collection('system').document('google_credentials').update({
+                'token': creds.token,
+                'updated_at': firestore.SERVER_TIMESTAMP
+            })
+            print("Token Google renovado e salvo no Firestore com sucesso.")
+        except Exception as e:
+            print(f"Erro ao renovar token do Google: {e}")
+            
+    return creds
+
 
 
 
@@ -484,15 +482,22 @@ def parse_iso_datetime(value):
 
 
 def is_remote_calendar_newer(remote_updated, local_updated):
-
+    from datetime import timezone
     remote_dt = parse_iso_datetime(remote_updated)
     local_dt = parse_iso_datetime(local_updated)
 
     if remote_dt and local_dt:
+        # Se um for aware e o outro naive, forçamos o naive para UTC para permitir a comparação
+        if remote_dt.tzinfo is not None and local_dt.tzinfo is None:
+            local_dt = local_dt.replace(tzinfo=timezone.utc)
+        elif remote_dt.tzinfo is None and local_dt.tzinfo is not None:
+            remote_dt = remote_dt.replace(tzinfo=timezone.utc)
+            
         return remote_dt > local_dt
     if remote_dt and not local_dt:
         return True
     return False
+
 
 
 def extract_schedule_from_calendar_event(event, tz_name='America/Sao_Paulo'):
