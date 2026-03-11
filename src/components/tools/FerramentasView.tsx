@@ -8,6 +8,9 @@ import { ShoppingListTool } from './ShoppingListTool';
 import { TranscriptionTool } from './TranscriptionTool';
 import { ChoirRehearsalsTool } from './ChoirRehearsalsTool';
 import { MeetingTranscriptionTool } from './MeetingTranscriptionTool';
+import { WhatsAppAssistantTool } from './WhatsAppAssistantTool';
+
+type FerramentaAtiva = 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'whatsapp_assistant' | null;
 
 interface FerramentasViewProps {
   ideas: BrainstormIdea[];
@@ -17,8 +20,8 @@ interface FerramentasViewProps {
   onUpdateIdea: (id: string, text: string) => void;
   onConvertToLog: (idea: BrainstormIdea) => void;
   onConvertToTask: (idea: BrainstormIdea) => void;
-  activeTool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | null;
-  setActiveTool: (tool: 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | null) => void;
+  activeTool: FerramentaAtiva;
+  setActiveTool: (tool: FerramentaAtiva) => void;
   isAddingText: boolean;
   setIsAddingText: (val: boolean) => void;
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
@@ -108,6 +111,10 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
 
   if (activeTool === 'meeting_transcription') {
     return <MeetingTranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} />;
+  }
+
+  if (activeTool === 'whatsapp_assistant') {
+    return <WhatsAppAssistantTool onBack={() => setActiveTool(null)} showToast={showToast} />;
   }
 
   const startRecording = async () => {
@@ -242,6 +249,19 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
           <div>
             <h3 className="text-lg md:text-2xl font-black text-slate-900 tracking-tighter mb-1 md:mb-2">Reuniões em Tempo Real</h3>
             <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Transcreva com áudio duplo e chat IA.</p>
+          </div>
+        </button>
+
+        <button
+          onClick={() => setActiveTool('whatsapp_assistant')}
+          className={toolCardClass}
+        >
+          <div className="w-12 h-12 md:w-16 md:h-16 bg-green-50 rounded-none md:rounded-2xl flex items-center justify-center text-green-600 group-hover:bg-green-600 group-hover:text-white transition-all flex-shrink-0">
+            <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-4l-3 3-3-3z" /></svg>
+          </div>
+          <div>
+            <h3 className="text-lg md:text-2xl font-black text-slate-900 tracking-tighter mb-1 md:mb-2">Assistente WhatsApp</h3>
+            <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Consulta multimodal de mensagens com Gemini.</p>
           </div>
         </button>
       </div>

@@ -40,3 +40,8 @@ __pycache__/
 *.pyc
 
 functions_node/.cache/
+
+# WhatsApp capture local runtime data
+services/whatsapp-capture/.wwebjs_auth/
+services/whatsapp-capture/.wwebjs_cache/
+services/whatsapp-capture/node_modules/
