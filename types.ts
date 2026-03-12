@@ -512,6 +512,8 @@ export interface Projeto {
     nome: string;
     descricao?: string;
     data_criacao: string;
+    public_registration_token?: string;
+    public_registration_updated_at?: string;
     orcamento?: OrcamentoProjeto;
 }
 

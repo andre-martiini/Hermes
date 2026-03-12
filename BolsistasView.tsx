@@ -385,10 +385,28 @@ export const BolsistasView: React.FC<BolsistasViewProps> = ({ projetoId }) => {
                         Importar CSV
                     </button>
                     <button
-                        onClick={() => {
-                            const url = `${window.location.origin}/join/${projetoId}/invite`;
-                            navigator.clipboard.writeText(url);
-                            alert("Link do Portal de Autocadastro copiado!");
+                        onClick={async () => {
+                            try {
+                                const token = project?.public_registration_token || (
+                                    Math.random().toString(36).substring(2, 10) +
+                                    Math.random().toString(36).substring(2, 10)
+                                );
+
+                                if (!project?.public_registration_token) {
+                                    await updateDoc(doc(db, 'projetos', projetoId), {
+                                        public_registration_token: token,
+                                        public_registration_updated_at: new Date().toISOString(),
+                                    });
+                                    setProject((prev) => prev ? { ...prev, public_registration_token: token } as Projeto : prev);
+                                }
+
+                                const url = `${window.location.origin}/join/${projetoId}/${token}`;
+                                await navigator.clipboard.writeText(url);
+                                alert("Link do Portal de Autocadastro copiado!");
+                            } catch (error) {
+                                console.error(error);
+                                alert("Nao foi possivel gerar o link do portal.");
+                            }
                         }}
                         className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all"
                     >

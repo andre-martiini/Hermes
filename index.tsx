@@ -20,7 +20,6 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, onSnapshot, query, orderBy, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, writeBatch, getDoc, getDocs, where } from 'firebase/firestore';
 import { getToken, onMessage } from 'firebase/messaging';
 import { httpsCallable } from 'firebase/functions';
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import FinanceView from './FinanceView';
 import DashboardView from './DashboardView';
 import KnowledgeView from './KnowledgeView';
@@ -578,33 +577,16 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
   ]
 }`;
 
-      let apiKey = process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || '';
-
-      if (!apiKey) {
-        try {
-          const keyDoc = await getDoc(doc(db, 'system', 'api_keys'));
-          if (keyDoc.exists()) {
-            apiKey = keyDoc.data()?.gemini_api_key || '';
-          }
-        } catch (e) {
-          console.error("Erro ao buscar chave de API:", e);
-        }
-      }
-
-      if (!apiKey) {
-        setErrorMsg('Chave do Gemini não configurada no Firestore.');
-        setStep('input');
-        return;
-      }
-
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-      const result = await model.generateContent(prompt);
-      const raw = result.response.text().trim();
-
-      // Parse JSON (strip possible markdown fences)
-      const jsonStr = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
-      const parsed = JSON.parse(jsonStr);
+      const fn = httpsCallable(functions, 'matchShoppingItemsAI');
+      const result = await fn({
+        text,
+        catalogItems: catalogItems.map((item) => ({
+          id: item.id,
+          nome: item.nome,
+          categoria: item.categoria,
+        })),
+      });
+      const parsed = result.data as { itens?: any[] };
 
       const resolved: AIMatchedItem[] = (parsed.itens || []).map((it: any) => {
         const catalogItem = it.catalogId ? catalogItems.find(c => c.id === it.catalogId) : null;
@@ -3248,43 +3230,14 @@ const App: React.FC = () => {
         return;
       }
 
-      let apiKey = process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || '';
-      if (!apiKey) {
-        const keyDoc = await getDoc(doc(db, 'system', 'api_keys'));
-        if (keyDoc.exists()) apiKey = keyDoc.data()?.gemini_api_key || '';
-      }
-      if (!apiKey) {
-        showToast('Chave Gemini não configurada para geração PGD.', 'error');
-        return;
-      }
-
-      const payload = diaryEntries.slice(0, 200).map((entry) => {
-        const note = entry.nota.replace(/\s+/g, ' ').slice(0, 450);
-        return `[${entry.data}] tarefa=${entry.task_titulo} | id=${entry.task_id} | nota=${note}`;
-      }).join('\n');
-
-      const prompt = `Você é um assistente de prestação de contas PGD.\n` +
-        `Objetivo: transformar registros de diário de bordo em trabalhos executados para uma entrega institucional.\n\n` +
-        `Entrega: ${item.entrega}\n` +
-        `Descrição da entrega: ${item.descricao}\n` +
-        `Período alvo: ${currentYear}-${String(currentMonth + 1).padStart(2, '0')}\n\n` +
-        `Regras:\n` +
-        `1. Agrupe registros próximos por tema e continuidade (pode ser dia único ou intervalo).\n` +
-        `2. Escreva descrição objetiva e auditável em português.\n` +
-        `3. Datas no formato YYYY-MM-DD.\n` +
-        `4. Não invente fatos fora das notas.\n` +
-        `5. IMPORTANTE: Se os registros de diário de bordo originais mencionarem um NÚMERO DE PROCESSO, você OBRIGATORIAMENTE deve incluir esse número na descricao_atividade do registro correspondente. Caso não mencionem, ignore essa instrução.\n` +
-        `6. Gere entre 1 e 12 registros.\n\n` +
-        `Entrada:\n${payload}\n\n` +
-        `Responda SOMENTE JSON válido:\n` +
-        `{\n  "registros": [\n    {\n      "descricao_atividade": "texto",\n      "data_inicio": "YYYY-MM-DD",\n      "data_fim": "YYYY-MM-DD",\n      "task_ids": ["id1","id2"]\n    }\n  ]\n}`;
-
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-      const result = await model.generateContent(prompt);
-      const raw = result.response.text().trim();
-      const jsonStr = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
-      const parsed = JSON.parse(jsonStr);
+      const fn = httpsCallable(functions, 'generatePgdFromDiariesAI');
+      const response = await fn({
+        entrega: item.entrega,
+        descricaoEntrega: item.descricao || '',
+        yearMonth: `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`,
+        entries: diaryEntries,
+      });
+      const parsed = response.data as { registros?: any[] };
 
       const aiRows = Array.isArray(parsed?.registros) ? parsed.registros : [];
       const normalizedRows = aiRows
@@ -3434,51 +3387,27 @@ const App: React.FC = () => {
     setPgdRawTextProcessingByEntrega(prev => ({ ...prev, [entregaId]: true }));
 
     try {
-      let apiKey = process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || '';
-      if (!apiKey) {
-        const keyDoc = await getDoc(doc(db, 'system', 'api_keys'));
-        if (keyDoc.exists()) apiKey = keyDoc.data()?.gemini_api_key || '';
-      }
-
       let finalRows: { descricao_atividade: string; data_inicio: string; data_fim: string }[] = [];
-      if (apiKey) {
-        try {
-          const prompt = `Você é um assistente para prestação de contas PGD.\n` +
-            `Converta o texto bruto abaixo em registros estruturados de execução.\n\n` +
-            `Entrega: ${item.entrega}\n` +
-            `Descrição da entrega: ${item.descricao}\n\n` +
-            `Regras obrigatórias:\n` +
-            `1. Identifique corretamente cada data presente no texto.\n` +
-            `2. Se houver várias tarefas no mesmo dia, AGRUPE tudo em um único registro desse dia.\n` +
-            `3. Quando houver continuidade natural entre dias, você PODE usar intervalo (data_inicio e data_fim diferentes).\n` +
-            `4. Refine a descrição para ficar objetiva e auditável.\n` +
-            `5. Não invente fatos fora do texto.\n` +
-            `6. Datas devem estar no formato YYYY-MM-DD.\n` +
-            `7. Evite fragmentar em muitos registros curtos.\n` +
-            `8. IMPORTANTE: Se o texto bruto mencionar um NÚMERO DE PROCESSO, você OBRIGATORIAMENTE deve incluir esse número na descricao_atividade do registro correspondente. Caso não mencione, ignore.\n\n` +
-            `Texto bruto:\n${rawText}\n\n` +
-            `Responda APENAS JSON válido:\n` +
-            `{\n  "registros": [\n    {\n      "descricao_atividade": "texto objetivo",\n      "data_inicio": "YYYY-MM-DD",\n      "data_fim": "YYYY-MM-DD"\n    }\n  ]\n}`;
+      try {
+        const fn = httpsCallable(functions, 'generatePgdFromRawTextAI');
+        const response = await fn({
+          entrega: item.entrega,
+          descricaoEntrega: item.descricao || '',
+          rawText,
+        });
+        const parsed = response.data as { registros?: any[] };
 
-          const genAI = new GoogleGenerativeAI(apiKey);
-          const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-          const result = await model.generateContent(prompt);
-          const raw = result.response.text().trim();
-          const jsonStr = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
-          const parsed = JSON.parse(jsonStr);
-
-          const aiRows = Array.isArray(parsed?.registros) ? parsed.registros : [];
-          finalRows = aiRows
-            .map((r: any) => {
-              const start = normalizeISODate(r?.data_inicio);
-              const end = normalizeISODate(r?.data_fim || r?.data_inicio || start, start);
-              const descricao = String(r?.descricao_atividade || '').trim();
-              return { descricao_atividade: descricao, data_inicio: start, data_fim: end };
-            })
-            .filter((r: any) => r.descricao_atividade.length >= 8);
-        } catch (aiErr) {
-          console.error(aiErr);
-        }
+        const aiRows = Array.isArray(parsed?.registros) ? parsed.registros : [];
+        finalRows = aiRows
+          .map((r: any) => {
+            const start = normalizeISODate(r?.data_inicio);
+            const end = normalizeISODate(r?.data_fim || r?.data_inicio || start, start);
+            const descricao = String(r?.descricao_atividade || '').trim();
+            return { descricao_atividade: descricao, data_inicio: start, data_fim: end };
+          })
+          .filter((r: any) => r.descricao_atividade.length >= 8);
+      } catch (aiErr) {
+        console.error(aiErr);
       }
 
       if (finalRows.length === 0) finalRows = parsePgdRawTextFallback(rawText);

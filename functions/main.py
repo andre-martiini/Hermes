@@ -11,6 +11,8 @@ import time
 import re
 import io
 import uuid
+import secrets
+import security_portals  # noqa: F401
 
 
 # Inicializa o Firebase Admin apenas uma vez no escopo global
