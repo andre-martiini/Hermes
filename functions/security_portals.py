@@ -567,11 +567,14 @@ def askWhatsAppAssistantSecure(req: https_fn.CallableRequest):
         response_context['lastMessageIds'] = message_ids
         response_context['pendingDisambiguation'] = False
 
-        recent_conversation = '\n'.join([
-            f"{'Usuario' if message.get('role') == 'user' else 'Assistente'}: "
-            f"{re.sub(r'\\s+', ' ', str(message.get('text') or '')).strip()[:240]}"
-            for message in conversation_history[-10:] if isinstance(message, dict)
-        ])
+        recent_conversation_lines = []
+        for message in conversation_history[-10:]:
+            if not isinstance(message, dict):
+                continue
+            speaker = 'Usuario' if message.get('role') == 'user' else 'Assistente'
+            message_text = re.sub(r'\s+', ' ', str(message.get('text') or '')).strip()[:240]
+            recent_conversation_lines.append(f"{speaker}: {message_text}")
+        recent_conversation = '\n'.join(recent_conversation_lines)
 
         system_instruction = (
             "Voce e o assistente de consulta de WhatsApp do Hermes.\n"
