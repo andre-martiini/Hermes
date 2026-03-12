@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Tarefa, AppSettings, PoolItem, ConhecimentoItem, Acompanhamento,
   formatDate, formatDateLocalISO
@@ -38,6 +38,13 @@ interface TaskExecutionViewProps {
   onMarkAsRead: (id: string) => void;
   onDismiss: (id: string) => void;
   onCreateAction: () => void;
+  // Global Timer Props
+  isGlobalTimerRunning: boolean;
+  globalTimerSeconds: number;
+  globalPomodoroMode: 'focus' | 'break';
+  onToggleGlobalTimer: () => void;
+  onResetGlobalTimer: () => void;
+  onSkipGlobalPhase: () => void;
 }
 
 export const TaskExecutionView = ({
@@ -61,19 +68,59 @@ export const TaskExecutionView = ({
   onCloseNotifications,
   onMarkAsRead,
   onDismiss,
-  onCreateAction
+  onCreateAction,
+  isGlobalTimerRunning: isTimerRunning,
+  globalTimerSeconds: seconds,
+  globalPomodoroMode: pomodoroMode,
+  onToggleGlobalTimer: handleToggleTimer,
+  onResetGlobalTimer: handleResetTimer,
+  onSkipGlobalPhase: handleSkipPhase
 }: TaskExecutionViewProps) => {
   // --- States ---
   const [newFollowUp, setNewFollowUp] = useState('');
   const [newPoolItem, setNewPoolItem] = useState('');
   const [showPool, setShowPool] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [chatMessages, setChatMessages] = useState<{ role: 'user' | 'assistant', content: string }[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isChatLoading, setIsChatLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
+
+  const handleSendMessage = async () => {
+    if (!chatInput.trim() || isChatLoading) return;
+    
+    const userMsg = chatInput.trim();
+    setChatInput('');
+    setChatMessages(prev => [...prev, { role: 'user', content: userMsg }]);
+    setIsChatLoading(true);
+
+    try {
+      const askFunc = httpsCallable(functions, 'askTaskAssistant');
+      const historyContext = (currentTaskData.acompanhamento || [])
+        .map((a: any) => `[${formatDate(a.data)}] ${a.nota}`)
+        .join('\n');
+        
+      const response = await askFunc({ 
+        prompt: userMsg, 
+        historyContext 
+      });
+      
+      const result = (response.data as any).result;
+      setChatMessages(prev => [...prev, { role: 'assistant', content: result }]);
+    } catch (error) {
+      console.error("Erro no chat:", error);
+      showToast("Erro ao consultar assistente.", "error");
+    } finally {
+      setIsChatLoading(false);
+    }
+  };
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [chatUrl, setChatUrl] = useState(task.chat_gemini_url || '');
-  const [isTimerRunning, setIsTimerRunning] = useState(false);
-  const [pomodoroMode, setPomodoroMode] = useState<'focus' | 'break'>('focus');
-  const [seconds, setSeconds] = useState(0);
   const [modalConfig, setModalConfig] = useState<{
     type: 'link' | 'contact' | 'edit_diary' | 'confirm_delete' | 'reset_timer' | 'file_upload' | 'reminder';
     data?: any;
@@ -85,7 +132,6 @@ export const TaskExecutionView = ({
   const [reminderTime, setReminderTime] = useState('');
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [pendingFileNames, setPendingFileNames] = useState<Record<string, string>>({});
-  const [sessionTotalSeconds, setSessionTotalSeconds] = useState(task.tempo_total_segundos || 0);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState(task.titulo);
@@ -187,85 +233,7 @@ export const TaskExecutionView = ({
     }
   };
 
-  // --- Timer & Pomodoro Logic ---
-  useEffect(() => {
-    let interval: number | null = null;
-    if (isTimerRunning) {
-      interval = window.setInterval(() => {
-        setSeconds(prev => {
-          const next = prev + 1;
-          const pomodoro = appSettings.pomodoro;
-
-          if (pomodoro?.enabled) {
-            const focusTimeSeconds = (pomodoro.focusTime || 10) * 60;
-            const breakTimeSeconds = (pomodoro.breakTime || 5) * 60;
-            const currentTimeTarget = pomodoroMode === 'focus' ? focusTimeSeconds : breakTimeSeconds;
-
-            const remaining = currentTimeTarget - next;
-            if (remaining > 0 && remaining <= 3 && pomodoro.enableBeep) {
-              try {
-                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3');
-                audio.volume = 0.3;
-                audio.play().catch(() => { });
-              } catch (e) { }
-            }
-
-            if (next >= currentTimeTarget) {
-              const newMode = pomodoroMode === 'focus' ? 'break' : 'focus';
-              setPomodoroMode(newMode);
-
-              // Play transition sound
-              try {
-                const audio = new Audio(newMode === 'break'
-                  ? 'https://assets.mixkit.co/active_storage/sfx/1112/1112-preview.mp3' // Success/Break
-                  : 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3'); // Start/Focus
-                audio.volume = 0.5;
-                audio.play().catch(() => {});
-              } catch (e) {}
-
-              if (newMode === 'break') {
-                showToast("Hora do descanso! Relaxe um pouco.", "info");
-              } else {
-                showToast("De volta ao trabalho! Foco total.", "success");
-              }
-              return 0;
-            }
-          }
-          return next;
-        });
-
-        if (!appSettings.pomodoro?.enabled || pomodoroMode === 'focus') {
-          setSessionTotalSeconds(prev => prev + 1);
-        }
-      }, 1000);
-    }
-    return () => { if (interval) clearInterval(interval); };
-  }, [isTimerRunning, pomodoroMode, appSettings.pomodoro, showToast]);
-
-  // --- Action Handlers ---
-  const handleToggleTimer = () => {
-    if (isTimerRunning) {
-      onSave(task.id, { tempo_total_segundos: sessionTotalSeconds });
-    }
-    setIsTimerRunning(!isTimerRunning);
-  };
-
-  const handleSkipPhase = () => {
-    setSeconds(0);
-    const newMode = pomodoroMode === 'focus' ? 'break' : 'focus';
-    setPomodoroMode(newMode);
-
-    // Play sound
-    try {
-      const audio = new Audio(newMode === 'break'
-        ? 'https://assets.mixkit.co/active_storage/sfx/1112/1112-preview.mp3'
-        : 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3');
-      audio.volume = 0.5;
-      audio.play().catch(() => {});
-    } catch (e) {}
-
-    showToast(newMode === 'break' ? "Descanso iniciado (Skip)." : "Foco iniciado (Skip).", "info");
-  };
+  // --- Action Handlers are prop-aliases ---
 
   const formatTime = (totalSeconds: number) => {
     const hrs = Math.floor(totalSeconds / 3600);
@@ -408,10 +376,8 @@ export const TaskExecutionView = ({
   const handleModalConfirm = async () => {
     switch (modalConfig.type) {
       case 'reset_timer':
-        setSeconds(0);
-        setSessionTotalSeconds(0);
+        handleResetTimer();
         onSave(task.id, { tempo_total_segundos: 0 });
-        setIsTimerRunning(false);
         break;
       case 'confirm_delete':
         if (modalConfig.data?.index !== undefined) {
@@ -494,10 +460,10 @@ export const TaskExecutionView = ({
   return (
     <div className={`fixed inset-0 z-[200] flex flex-col overflow-hidden transition-all duration-1000 ${isBreakActive ? 'bg-[#1a0b0b] text-white' : isTimerRunning ? 'bg-[#050505] text-white' : 'bg-[#F2F4F7] text-slate-900'}`}>
       
-      {/* Header - Mais compacto no mobile */}
-      <div className="p-3 md:p-10 pb-2 md:pb-4 flex items-center justify-between shrink-0">
+      {/* Header - Mais compacto */}
+      <div className="p-3 md:p-6 pb-2 md:pb-3 flex items-center justify-between shrink-0">
         <div className="flex flex-col flex-1 mr-4">
-          <span className="text-blue-500 text-[8px] md:text-[10px] font-black uppercase tracking-[0.3em] mb-1 md:mb-2 block">Central de Execução</span>
+          <span className="text-blue-500 text-[8px] md:text-[9px] font-black uppercase tracking-[0.3em] mb-1 block">Central de Execução</span>
           {isEditingTitle ? (
             <div className="flex flex-col gap-3 w-full max-w-4xl bg-white p-4 rounded-2xl shadow-xl border border-blue-100">
               <input
@@ -579,70 +545,176 @@ export const TaskExecutionView = ({
             </div>
           )}
         </div>
-        <button onClick={() => { if (isTimerRunning) handleToggleTimer(); onClose(); }} className="p-3 rounded-xl border border-slate-200 hover:bg-white text-slate-400">
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" strokeWidth="2.5" /></svg>
-        </button>
+        <div className="flex items-center gap-3">
+          {(isTimerRunning || seconds > 0) && (
+            <div className={`flex items-center gap-3 px-3 md:px-5 py-1.5 md:py-2 rounded-xl md:rounded-2xl border transition-all ${isTimerRunning ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' : 'bg-slate-500/10 border-slate-500/20 text-slate-400'}`}>
+              <div className="flex flex-col items-end">
+                <span className="text-[6px] md:text-[8px] font-black uppercase tracking-widest opacity-60">
+                  {pomodoroMode === 'focus' ? 'Foco' : 'Pausa'}
+                </span>
+                <div className="text-sm md:text-2xl font-black tabular-nums leading-none mt-0.5">
+                  {(() => {
+                    const hrs = Math.floor(seconds / 3600);
+                    const mins = Math.floor((seconds % 3600) / 60);
+                    const secs = seconds % 60;
+                    if (hrs > 0) return `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+                    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+                  })()}
+                </div>
+              </div>
+              <button 
+                onClick={handleToggleTimer}
+                className={`p-1 md:p-1.5 rounded-lg md:rounded-xl transition-all ${isTimerRunning ? 'bg-rose-500 text-white hover:bg-rose-600' : 'bg-emerald-500 text-white hover:bg-emerald-600'}`}
+              >
+                {isTimerRunning ? (
+                  <svg className="w-3.5 h-3.5 md:w-5 md:h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+                ) : (
+                  <svg className="w-3.5 h-3.5 md:w-5 md:h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                )}
+              </button>
+            </div>
+          )}
+          <button onClick={onClose} className="p-3 rounded-xl border border-slate-200 hover:bg-white text-slate-400">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" strokeWidth="2.5" /></svg>
+          </button>
+        </div>
       </div>
 
       {/* Main Grid - Otimizado para Mobile: Flex no mobile, Grid no Desktop */}
-      <div className="flex-1 flex flex-col lg:grid lg:grid-cols-12 gap-3 md:gap-6 p-2 md:p-10 pt-0 md:pt-4 overflow-y-auto lg:overflow-hidden">
+      <div className="flex-1 flex flex-col lg:grid lg:grid-cols-12 gap-3 md:gap-6 p-2 md:p-6 pt-0 md:pt-4 overflow-y-auto lg:overflow-hidden">
         
         {/* Control Panel (Ordem 1 no mobile para ficar no topo) */}
-        <div className="lg:col-span-4 flex flex-col gap-3 order-1 lg:order-2 shrink-0">
+        <div className="lg:col-span-3 flex flex-col gap-4 order-1 lg:order-2 lg:h-full lg:overflow-y-auto pr-1">
           <PainelControleUI
             task={currentTaskData}
             chatUrl={chatUrl}
             setChatUrl={setChatUrl}
             handleSaveChatUrl={() => { onSave(task.id, { chat_gemini_url: chatUrl }); showToast("Link salvo!", "success"); }}
-            isTimerRunning={isTimerRunning}
-            sessionTotalSeconds={sessionTotalSeconds}
-            seconds={seconds}
-            pomodoroMode={pomodoroMode}
-            setPomodoroMode={setPomodoroMode}
-            handleToggleTimer={handleToggleTimer}
-            handleResetTimer={() => setModalConfig({ type: 'reset_timer', isOpen: true })}
-            handleSkipPhase={handleSkipPhase}
-            handleCompleteTaskRequest={() => setIsConfirmModalOpen(true)}
-            appSettings={appSettings}
-            currentTime={currentTime}
-            formatTime={formatTime}
-            isBreakActive={isBreakActive}
+            handleCompleteTaskRequest={() => {
+              onSave(task.id, { status: 'concluído' });
+              showToast("Ação concluída!", "success");
+              onClose();
+            }}
             setModalConfig={setModalConfig}
             setReminderDate={setReminderDate}
             setReminderTime={setReminderTime}
+            showToast={showToast}
           />
 
-          {/* Date/Time Inputs */}
-          <div className={`border rounded-2xl p-4 space-y-4 transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
-            <h4 className="text-[10px] font-black uppercase tracking-widest opacity-50">Planejamento</h4>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-1">
-                <label className="text-[9px] font-bold uppercase opacity-60">Prazo</label>
+          {/* Planejamento Redesenhado - Ultra Compactado */}
+          <div className={`border rounded-[1.5rem] p-3 md:p-4 space-y-3 transition-all shadow-lg ${isTimerRunning ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+            <div className="flex items-center justify-between">
+              <h4 className="text-[9px] font-black uppercase tracking-[0.2em] opacity-50">Planejamento</h4>
+              <svg className="w-3.5 h-3.5 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" strokeWidth="2.5" /></svg>
+            </div>
+            
+            <div className="grid grid-cols-1 gap-3">
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <svg className="w-3 h-3 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" strokeWidth="2.5" /></svg>
+                  <label className="text-[9px] font-black uppercase tracking-widest opacity-60">Prazo Final</label>
+                </div>
                 <input
                   type="date"
                   value={currentTaskData.data_limite || currentTaskData.data_inicio || ''}
                   onChange={e => onSave(task.id, { data_limite: e.target.value })}
-                  className={`w-full bg-transparent border-b text-xs font-bold outline-none ${isTimerRunning ? 'border-white/20 focus:border-white' : 'border-slate-200 focus:border-blue-500'}`}
+                  className={`w-full bg-slate-50 border-none px-4 py-2 rounded-xl text-xs font-black outline-none focus:ring-4 focus:ring-blue-500/20 transition-all ${isTimerRunning ? 'bg-white/10 text-white' : 'text-slate-900 border border-slate-100'}`}
                 />
               </div>
-              <div className="space-y-1">
-                <label className="text-[9px] font-bold uppercase opacity-60">Hora Início</label>
-                <input
-                  type="time"
-                  value={currentTaskData.horario_inicio || ''}
-                  onChange={e => onSave(task.id, { horario_inicio: e.target.value })}
-                  className={`w-full bg-transparent border-b text-xs font-bold outline-none ${isTimerRunning ? 'border-white/20 focus:border-white' : 'border-slate-200 focus:border-blue-500'}`}
-                />
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <svg className="w-3 h-3 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" strokeWidth="2.5" /></svg>
+                    <label className="text-[9px] font-black uppercase tracking-widest opacity-60">Início</label>
+                  </div>
+                  <input
+                    type="time"
+                    value={currentTaskData.horario_inicio || ''}
+                    onChange={e => onSave(task.id, { horario_inicio: e.target.value })}
+                    className={`w-full bg-slate-50 border-none px-4 py-2 rounded-xl text-xs font-black outline-none focus:ring-4 focus:ring-blue-500/20 transition-all ${isTimerRunning ? 'bg-white/10 text-white' : 'text-slate-900 border border-slate-100'}`}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <svg className="w-3 h-3 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" strokeWidth="2.5" /></svg>
+                    <label className="text-[9px] font-black uppercase tracking-widest opacity-60">Fim</label>
+                  </div>
+                  <input
+                    type="time"
+                    value={currentTaskData.horario_fim || ''}
+                    onChange={e => onSave(task.id, { horario_fim: e.target.value })}
+                    className={`w-full bg-slate-50 border-none px-4 py-2 rounded-xl text-xs font-black outline-none focus:ring-4 focus:ring-blue-500/20 transition-all ${isTimerRunning ? 'bg-white/10 text-white' : 'text-slate-900 border border-slate-100'}`}
+                  />
+                </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-[9px] font-bold uppercase opacity-60">Hora Fim</label>
-                <input
-                  type="time"
-                  value={currentTaskData.horario_fim || ''}
-                  onChange={e => onSave(task.id, { horario_fim: e.target.value })}
-                  className={`w-full bg-transparent border-b text-xs font-bold outline-none ${isTimerRunning ? 'border-white/20 focus:border-white' : 'border-slate-200 focus:border-blue-500'}`}
-                />
+            </div>
+          </div>
+
+
+          {/* Chatbot Hermes RAG */}
+          <div className={`flex-1 flex flex-col border rounded-[1.5rem] p-4 transition-all shadow-2xl min-h-[250px] max-h-[400px] overflow-hidden ${isTimerRunning ? 'bg-indigo-950/20 border-white/5' : 'bg-white border-blue-100'}`}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-lg">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" strokeWidth="2.5" /></svg>
               </div>
+              <div className="flex flex-col flex-1">
+                <span className="text-[10px] font-black uppercase tracking-widest text-blue-500">Assistente Hermes AI</span>
+                <span className="text-[8px] font-bold text-slate-400">RAG - Diário de Bordo</span>
+              </div>
+              <button 
+                onClick={() => {
+                  setChatInput("Resuma esta ação");
+                  setTimeout(handleSendMessage, 100);
+                }}
+                className={`px-3 py-2 rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all shadow-sm ${isTimerRunning ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-slate-900 text-white hover:bg-black'}`}
+              >
+                Resuma esta ação
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-4 px-2 mb-4 scrollbar-hide">
+              {chatMessages.length === 0 && (
+                <div className="h-full flex flex-col items-center justify-center text-center p-6 opacity-40">
+                  <svg className="w-12 h-12 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" strokeWidth="2" /></svg>
+                  <p className="text-[10px] font-bold uppercase tracking-widest">Olá! Pergunte algo sobre os registros desta ação.</p>
+                </div>
+              )}
+              {chatMessages.map((msg, i) => (
+                <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[85%] px-4 py-3 rounded-[1.5rem] text-xs font-medium shadow-sm ${msg.role === 'user' ? (isTimerRunning ? 'bg-blue-600 text-white' : 'bg-slate-900 text-white') : (isTimerRunning ? 'bg-white/10 text-white' : 'bg-blue-50 text-slate-700')}`}>
+                    {msg.content}
+                  </div>
+                </div>
+              ))}
+              {isChatLoading && (
+                <div className="flex justify-start">
+                  <div className="px-4 py-3 rounded-full bg-blue-50/50 flex gap-1 items-center">
+                    <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce"></span>
+                    <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce delay-75"></span>
+                    <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce delay-150"></span>
+                  </div>
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            <div className="relative group">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
+                placeholder="Dúvida sobre a ação?..."
+                className={`w-full bg-slate-50 border-none px-6 py-4 rounded-[2rem] text-xs font-bold outline-none ring-1 ring-slate-100 focus:ring-4 focus:ring-blue-500/20 group-hover:ring-blue-200 transition-all ${isTimerRunning ? 'bg-white/10 text-white ring-white/10' : 'text-slate-900'}`}
+              />
+              <button 
+                onClick={handleSendMessage}
+                disabled={isChatLoading || !chatInput.trim()}
+                className="absolute right-2 top-2 bottom-2 bg-blue-500 text-white w-10 h-10 rounded-full flex items-center justify-center shadow-lg hover:bg-blue-600 disabled:opacity-50 transition-all"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7" strokeWidth="3" /></svg>
+              </button>
             </div>
           </div>
 
@@ -670,7 +742,7 @@ export const TaskExecutionView = ({
         </div>
 
         {/* Diary Column (Ordem 2 no mobile) */}
-        <div className="lg:col-span-8 flex flex-col gap-3 order-2 lg:order-1 flex-1 min-h-[500px] lg:overflow-hidden">
+        <div className="lg:col-span-9 flex flex-col gap-3 order-2 lg:order-1 flex-1 min-h-[500px] lg:overflow-hidden">
           {/* Data Pool */}
           <div className={`shrink-0 rounded-none md:rounded-2xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
             <button onClick={() => setShowPool(!showPool)} className="w-full flex items-center gap-2 px-4 py-3">

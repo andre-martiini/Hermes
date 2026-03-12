@@ -20,6 +20,8 @@ interface SpeedDialMenuProps {
   onUpdateOverdue?: (id?: string) => void;
   onNavigate?: (link: string) => void;
   onCreateAction: () => void;
+  onToggleTimer?: () => void;
+  isTimerRunning?: boolean;
   direction?: 'up' | 'down';
 }
 
@@ -28,7 +30,7 @@ export const SpeedDialMenu = ({
   onOpenNotes, onOpenLog, onOpenShopping, onOpenTranscription, onOpenMeetingTranscription, onToggleNotifications,
   onSync, onOpenSettings, onCloseNotifications,
   onMarkAsRead, onDismiss, onUpdateOverdue, onNavigate,
-  onCreateAction,
+  onCreateAction, onToggleTimer, isTimerRunning,
   direction = 'down'
 }: SpeedDialMenuProps) => {
   const [open, setOpen] = useState(false);
@@ -45,6 +47,19 @@ export const SpeedDialMenu = ({
   }, []);
 
   const actions = [
+    {
+      label: isTimerRunning ? 'Parar Cronômetro' : 'Iniciar Cronômetro',
+      color: isTimerRunning ? 'text-rose-600' : 'text-emerald-600',
+      badge: isTimerRunning
+        ? <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-emerald-500 border border-white rounded-full animate-pulse" />
+        : null as React.ReactNode,
+      onClick: () => { setOpen(false); onToggleTimer?.(); },
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      ),
+    },
     {
       label: 'Criar Ação',
       color: 'text-blue-600',

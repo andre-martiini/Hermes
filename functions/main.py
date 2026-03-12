@@ -2861,7 +2861,7 @@ def processInvoiceOCR(req: https_fn.CallableRequest):
 
         genai.configure(api_key=GEMINI_API_KEY)
 
-        model = genai.GenerativeModel("gemini-1.5-flash") # Using Flash for speed/cost
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
 
 
 
@@ -3049,8 +3049,8 @@ def transcrever_audio(req: https_fn.CallableRequest):
 
         # 3. Refinamento via Gemini Flash
         genai.configure(api_key=GEMINI_API_KEY)
-        # Usando o modelo solicitado (2.5-flash)
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        # Usando o modelo solicitado (2.5-flash-lite)
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
 
         prompt = f"""
         Atue como um redator especialista. O texto a seguir é uma transcrição de voz bruta.
@@ -3091,6 +3091,75 @@ def transcrever_audio(req: https_fn.CallableRequest):
     memory=options.MemoryOption.GB_1,
     timeout_sec=120
 )
+def askTaskAssistant(req: https_fn.CallableRequest):
+    """
+    Responde perguntas sobre o contexto de uma tarefa específica baseando-se no diário de bordo.
+    """
+    import google.generativeai as genai
+
+    data = req.data or {}
+    prompt = data.get('prompt')
+    history_context = data.get('historyContext') # Texto consolidado do diário de bordo
+
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="O comando é obrigatório."
+        )
+
+    try:
+        db = get_db()
+        keys_doc = db.collection('system').document('api_keys').get()
+        gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+        
+        if not gemini_key:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                message="Chave Gemini não configurada."
+            )
+
+        genai.configure(api_key=gemini_key)
+        # Usando modelo solicitado: gemini-2.5-flash-lite
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+
+        system_instruction = (
+            "Você é o assistente virtual da plataforma Hermes, focado em ajudar na execução de tarefas. "
+            "Sua base de conhecimento é estritamente o DIÁRIO DE BORDO da tarefa atual fornecido no contexto. "
+            "Responda perguntas de forma executiva, objetiva e profissional (pt-BR). "
+            "Se a informação não estiver no diário de bordo, informe que não possui registros sobre isso."
+        )
+
+        full_prompt = f"""
+        CONTEXTO (DIÁRIO DE BORDO):
+        ---
+        {history_context if history_context else 'Nenhum registro encontrado no diário de bordo.'}
+        ---
+
+        COMANDO DO USUÁRIO:
+        {prompt}
+        """
+
+        response = model.generate_content([system_instruction, full_prompt])
+        
+        result = (response.text or "").strip()
+        if not result:
+            result = "Não consegui analisar os logs para responder sua pergunta."
+            
+        return {"result": result}
+
+    except Exception as e:
+        print(f"Erro em askTaskAssistant: {e}")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=f"Erro ao processar consulta da tarefa: {str(e)}"
+        )
+
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=120
+)
 def askChatbot(req: https_fn.CallableRequest):
     """
     Responde perguntas sobre o contexto da reunião usando Gemini.
@@ -3115,7 +3184,7 @@ def askChatbot(req: https_fn.CallableRequest):
             )
 
         genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel("gemini-3.1-flash-lite-preview")
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
         response = model.generate_content(
             [
                 "Você é um assistente de reunião em pt-BR. Responda com objetividade, "

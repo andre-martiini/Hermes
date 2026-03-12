@@ -1,4 +1,4 @@
-﻿
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import {
@@ -1639,6 +1639,84 @@ const App: React.FC = () => {
   }, [isPgdTerminalOpen]);
 
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
+
+  // --- Global Timer State (Persistent) ---
+  const [isGlobalTimerRunning, setIsGlobalTimerRunning] = useState(() => localStorage.getItem('hermes_timer_running') === 'true');
+  const [timerSeconds, setTimerSeconds] = useState(() => Number(localStorage.getItem('hermes_timer_seconds')) || 0);
+  const [pomodoroMode, setPomodoroMode] = useState<'focus' | 'break'>(() => (localStorage.getItem('hermes_pomodoro_mode') as 'focus' | 'break') || 'focus');
+  const [sessionTotalSeconds, setSessionTotalSeconds] = useState(() => Number(localStorage.getItem('hermes_session_total')) || 0);
+
+  // Persist state to localStorage
+  useEffect(() => {
+    localStorage.setItem('hermes_timer_running', String(isGlobalTimerRunning));
+    localStorage.setItem('hermes_timer_seconds', String(timerSeconds));
+    localStorage.setItem('hermes_pomodoro_mode', pomodoroMode);
+    localStorage.setItem('hermes_session_total', String(sessionTotalSeconds));
+  }, [isGlobalTimerRunning, timerSeconds, pomodoroMode, sessionTotalSeconds]);
+
+  // Global Timer Tick
+  useEffect(() => {
+    let interval: any;
+    if (isGlobalTimerRunning) {
+      interval = setInterval(() => {
+        setTimerSeconds(prev => prev + 1);
+        setSessionTotalSeconds(prev => prev + 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isGlobalTimerRunning]);
+
+  // Pomodoro Logic and Transition Sounds
+  useEffect(() => {
+    if (!appSettings.pomodoro?.enabled) return;
+
+    const focusLimit = (appSettings.pomodoro.focusTime || 25) * 60;
+    const breakLimit = (appSettings.pomodoro.breakTime || 5) * 60;
+    const limit = pomodoroMode === 'focus' ? focusLimit : breakLimit;
+
+    // Beeps in last 3 seconds of a cycle
+    const remaining = limit - timerSeconds;
+    if (isGlobalTimerRunning && remaining > 0 && remaining <= 3) {
+      const beep = new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3');
+      beep.volume = 0.3;
+      beep.play().catch(() => { });
+    }
+
+    if (timerSeconds >= limit && isGlobalTimerRunning) {
+      const nextMode = pomodoroMode === 'focus' ? 'break' : 'focus';
+      setPomodoroMode(nextMode);
+      setTimerSeconds(0);
+
+      // Play Strong Transition Sounds
+      const soundUrl = nextMode === 'break'
+        ? 'https://assets.mixkit.co/active_storage/sfx/1112/1112-preview.mp3' // Stronger break sound
+        : 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3'; // Stronger focus sound
+
+      const audio = new Audio(soundUrl);
+      audio.volume = 0.8;
+      audio.play().catch(e => console.warn('Audio play failed:', e));
+
+      // Global Notification
+      emitNotification(
+        nextMode === 'break' ? 'Intervalo Iniciado!' : 'Hora de Focar!',
+        nextMode === 'break' ? 'Você concluiu um ciclo de foco. Descanse um pouco.' : 'O intervalo acabou. Vamos voltar ao trabalho?',
+        nextMode === 'break' ? 'info' : 'success'
+      );
+    }
+  }, [timerSeconds, pomodoroMode, appSettings.pomodoro, isGlobalTimerRunning]);
+
+  const handleToggleGlobalTimer = () => setIsGlobalTimerRunning(prev => !prev);
+  const handleResetGlobalTimer = () => {
+    setTimerSeconds(0);
+    setSessionTotalSeconds(0);
+    setIsGlobalTimerRunning(false);
+  };
+  const handleSkipGlobalPhase = () => {
+    setTimerSeconds(0);
+    setPomodoroMode(prev => prev === 'focus' ? 'break' : 'focus');
+    showToast("Fase do Pomodoro pulada.", "info");
+  };
+
   const [isHabitsReminderOpen, setIsHabitsReminderOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'notifications' | 'context' | 'sistemas'>('notifications');
 
@@ -4208,7 +4286,27 @@ const App: React.FC = () => {
                       onUpdateOverdue={handleUpdateOverdueTasks}
                       onNavigate={handleNotificationNavigate}
                       onCreateAction={() => setIsCreateModalOpen(true)}
+                      isTimerRunning={isGlobalTimerRunning}
+                      onToggleTimer={handleToggleGlobalTimer}
                     />
+                    {(isGlobalTimerRunning || timerSeconds > 0) && (
+                      <div
+                        onClick={handleToggleGlobalTimer}
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border ${isGlobalTimerRunning ? 'bg-blue-50 border-blue-100 text-blue-600' : 'bg-slate-50 border-slate-200 text-slate-400'}`}
+                      >
+                        <div className="text-[10px] font-black tabular-nums">
+                          {(() => {
+                            const hrs = Math.floor(timerSeconds / 3600);
+                            const minutes = Math.floor((timerSeconds % 3600) / 60);
+                            const secs = timerSeconds % 60;
+                            if (hrs > 0) return `${hrs}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+                            return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+                          })()}
+                        </div>
+                        {isGlobalTimerRunning && <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />}
+                      </div>
+                    )}
+
                     {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'projects' && (
                       <button
                         onClick={() => setIsCreateModalOpen(true)}
@@ -4490,7 +4588,48 @@ const App: React.FC = () => {
                     onUpdateOverdue={handleUpdateOverdueTasks}
                     onNavigate={handleNotificationNavigate}
                     onCreateAction={() => setIsCreateModalOpen(true)}
+                    isTimerRunning={isGlobalTimerRunning}
+                    onToggleTimer={handleToggleGlobalTimer}
                   />
+
+                  {/* Cronômetro Global no Header */}
+                  {(isGlobalTimerRunning || timerSeconds > 0) && (
+                    <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 pl-4 pr-2 py-1.5 rounded-2xl animate-in slide-in-from-right duration-500">
+                      <div className="flex flex-col items-end">
+                        <span className={`text-[8px] font-black uppercase tracking-widest leading-none ${pomodoroMode === 'break' ? 'text-rose-500' : 'text-blue-600'}`}>
+                          {pomodoroMode === 'focus' ? 'Foco' : 'Pausa'}
+                        </span>
+                        <div className={`text-sm font-black tabular-nums leading-none mt-0.5 ${isGlobalTimerRunning ? 'text-slate-900' : 'text-slate-400'}`}>
+                          {(() => {
+                            const hours = Math.floor(timerSeconds / 3600);
+                            const minutes = Math.floor((timerSeconds % 3600) / 60);
+                            const secs = timerSeconds % 60;
+                            if (hours > 0) return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+                            return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+                          })()}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={handleToggleGlobalTimer}
+                          className={`p-1.5 rounded-lg transition-all ${isGlobalTimerRunning ? 'bg-rose-100 text-rose-600 hover:bg-rose-200' : 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200'}`}
+                        >
+                          {isGlobalTimerRunning ? (
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+                          ) : (
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                          )}
+                        </button>
+                        <button
+                          onClick={handleResetGlobalTimer}
+                          className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-slate-200 rounded-lg transition-all"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                 </div>
               </div>
 
@@ -6542,6 +6681,12 @@ const App: React.FC = () => {
                 onMarkAsRead={handleMarkNotificationRead}
                 onDismiss={handleDismissNotification}
                 onCreateAction={() => setIsCreateModalOpen(true)}
+                isGlobalTimerRunning={isGlobalTimerRunning}
+                globalTimerSeconds={timerSeconds}
+                globalPomodoroMode={pomodoroMode}
+                onToggleGlobalTimer={handleToggleGlobalTimer}
+                onResetGlobalTimer={handleResetGlobalTimer}
+                onSkipGlobalPhase={handleSkipGlobalPhase}
               />
             ) : (
               <TaskEditModal
