@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => {
         '/proxy-functions': {
           target: 'https://us-central1-gestao-hermes.cloudfunctions.net/',
           changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/proxy-functions/, '').replace(/^\//, ''),
+          rewrite: (path) => path.replace(/^\/proxy-functions/, ''),
           secure: false
         }
       }

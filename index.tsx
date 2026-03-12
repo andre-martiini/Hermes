@@ -1647,6 +1647,11 @@ const App: React.FC = () => {
   // --- Firebase Cloud Messaging (FCM) & Push Notifications ---
   useEffect(() => {
     const setupFCM = async () => {
+      const isLocalhost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+      if (isLocalhost) {
+        console.log('Push desativado em desenvolvimento local.');
+        return;
+      }
       if (!messaging) return;
       try {
         console.log('Iniciando configuração de Push...');
