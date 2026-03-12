@@ -18,7 +18,18 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 if CURRENT_DIR not in sys.path:
     sys.path.insert(0, CURRENT_DIR)
 
-import security_portals  # noqa: F401
+from security_portals import (
+    askWhatsAppAssistantSecure,
+    generatePgdFromDiariesAI,
+    generatePgdFromRawTextAI,
+    getPublicFinancePortal,
+    getPublicScholarshipProject,
+    getPublicShoppingPortal,
+    matchShoppingItemsAI,
+    mutatePublicShoppingPortal,
+    submitPublicFinanceTransaction,
+    submitPublicScholarshipRegistration,
+)
 
 
 # Inicializa o Firebase Admin apenas uma vez no escopo global
