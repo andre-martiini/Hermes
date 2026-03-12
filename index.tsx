@@ -947,6 +947,7 @@ const App: React.FC = () => {
 
   // Knowledge State
   const [knowledgeItems, setKnowledgeItems] = useState<ConhecimentoItem[]>([]);
+  const [masterKnowledge, setMasterKnowledge] = useState<any[]>([]);
   // Shopping State
   const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>([]);
   // Projects State
@@ -1202,6 +1203,14 @@ const App: React.FC = () => {
     const unsubHealthSettings = onSnapshot(doc(db, 'health_settings', 'config'), (doc) => {
       if (doc.exists()) setHealthSettings(doc.data() as HealthSettings);
     });
+    const unsubKnowledge = onSnapshot(collection(db, 'conhecimento'), (snapshot) => {
+      setKnowledgeItems(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ConhecimentoItem)));
+    });
+
+    const unsubMasterKnowledge = onSnapshot(collection(db, 'conhecimento_mestre'), (snapshot) => {
+      setMasterKnowledge(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
     const unsubscribeSistemasAtivos = onSnapshot(doc(db, 'configuracoes', 'sistemas'), (docSnap) => {
       if (docSnap.exists()) {
         setSistemasAtivos(docSnap.data().lista || []);
@@ -1224,6 +1233,8 @@ const App: React.FC = () => {
       unsubHealthWeights();
       unsubHealthHabits();
       unsubHealthSettings();
+      unsubKnowledge();
+      unsubMasterKnowledge();
       unsubscribeSistemasAtivos();
     };
   }, []);
@@ -2504,8 +2515,6 @@ const App: React.FC = () => {
   const handleProcessarIA = async (itemId: string) => {
     try {
       const processarIA = httpsCallable(functions, 'processarArquivoIA');
-      // No front-end limpamos os campos para dar feedback visual imediato se quisermos, 
-      // mas o backend já faz isso. O importante é o feedback de "Solicitando..."
       showToast("Solicitando processamento à IA...", "info");
 
       const result = await processarIA({ itemId });
@@ -2519,6 +2528,24 @@ const App: React.FC = () => {
     } catch (err) {
       console.error(err);
       showToast("Falha na comunicação com a IA.", "error");
+    }
+  };
+
+  const handleAnalysePatterns = async (categoria: string) => {
+    try {
+      showToast(`Iniciando análise de padrões em ${categoria}...`, "info");
+      const analyseFunc = httpsCallable(functions, 'analisarPadroesCategoriaIA');
+      const response = await analyseFunc({ categoria });
+      const data = response.data as any;
+
+      if (data.success) {
+        showToast("Análise concluída! Novos conhecimentos disponíveis no Manual.", "success");
+      } else {
+        showToast(`Aviso: ${data.message || 'Sem novos padrões detectados.'}`, "info");
+      }
+    } catch (error) {
+      console.error("Erro ao analisar padrões:", error);
+      showToast("Erro ao invocar Memória Mestra.", "error");
     }
   };
 
@@ -3633,7 +3660,7 @@ const App: React.FC = () => {
         result = result.filter(t => t.titulo?.toLowerCase().includes(s) || t.projeto?.toLowerCase().includes(s) || t.notas?.toLowerCase().includes(s));
       }
     }
-    if (statusFilter.length > 0) {
+    if (statusFilter.length > 0 && viewMode !== 'licitacoes' && viewMode !== 'assistencia') {
       result = result.filter(t => {
         const tStatus = normalizeStatus(t.status);
         const matchesStatus = statusFilter.some(sf => {
@@ -4461,6 +4488,8 @@ const App: React.FC = () => {
                         >
                           Ações
                         </button>
+                        <button onClick={() => setViewMode('licitacoes')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'licitacoes' ? 'bg-white text-slate-900 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>Licitações</button>
+                        <button onClick={() => setViewMode('assistencia')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'assistencia' ? 'bg-white text-slate-900 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>Assistência</button>
                         <button onClick={() => setViewMode('pgc')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pgc' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>PGD</button>
                       </nav>
                     )}
@@ -5081,6 +5110,7 @@ const App: React.FC = () => {
                     viewMode={viewMode}
                     onSelectTask={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
                     onExecuteTask={(t) => { setSelectedTask(t); setTaskModalMode('execute'); }}
+                    onAnalysePatterns={handleAnalysePatterns}
                   />
                 ) : viewMode === 'sistemas' ? (
                   <div className="animate-in space-y-8">
@@ -5291,6 +5321,8 @@ const App: React.FC = () => {
                       showConfirm={showAlert}
                       allTasks={tarefas}
                       allWorkItems={workItems}
+                      masterKnowledge={masterKnowledge}
+                      onNavigateToOrigin={handleNavigateToOrigin}
                     />
                     <button 
                       onClick={() => setViewMode('dashboard')}

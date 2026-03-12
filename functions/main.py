@@ -3341,3 +3341,94 @@ def salvarTranscricaoReuniao(req: https_fn.CallableRequest):
             code=https_fn.FunctionsErrorCode.INTERNAL,
             message="Falha ao salvar transcrição da reunião no Google Drive."
         )
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=300
+)
+def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
+    """
+    Analisa tarefas de uma categoria específica para identificar padrões e propor artefatos de conhecimento.
+    """
+    import google.generativeai as genai
+    import json
+    import re
+    import traceback
+    
+    data = req.data or {}
+    categoria = data.get('categoria')
+    
+    if not categoria:
+         raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="Categoria é obrigatória."
+        )
+
+    try:
+        db = firestore.client()
+        # Busca tarefas concluídas desta categoria (limite de 15 para análise)
+        tasks_query = db.collection('tarefas')\
+            .where('categoria', '==', categoria)\
+            .where('status', '==', 'concluído')\
+            .limit(15)
+        
+        docs = tasks_query.stream()
+        contexto_tarefas = []
+        for doc in docs:
+            t = doc.to_dict()
+            contexto_tarefas.append(f"Tarefa: {t.get('titulo')}\nNotas: {t.get('notas')}")
+
+        if not contexto_tarefas:
+            return {"success": False, "message": f"Não há tarefas concluídas suficientes em '{categoria}' para analisar padrões."}
+
+        keys_doc = db.collection('system').document('api_keys').get()
+        gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+        
+        if not gemini_key:
+            return {"success": False, "error": "Chave Gemini não configurada no sistema (system/api_keys)."}
+
+        genai.configure(api_key=gemini_key)
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+
+        prompt = f"""
+        Você é o HERMES Master IA. Analise a sequência de tarefas abaixo da categoria '{categoria}'.
+        Sua missão é identificar um PADRÃO de trabalho ou um PROCEDIMENTO que o André segue.
+        
+        Com base nessas tarefas, crie um "Guia de Procedimento Operacional Padrão" para esta categoria.
+        
+        TAREFAS ANALISADAS:
+        {chr(10).join(contexto_tarefas)}
+        
+        Retorne um JSON com:
+        1. titulo: Nome do guia (ex: Procedimento para Licitação de Compras)
+        2. conteudo: O guia detalhado em Markdown (passos, dicas, o que não esquecer).
+        3. insight: Um breve comentário seu sobre por que isso é importante ou o que você notou de especial.
+        """
+
+        response = model.generate_content(prompt)
+        res_text = response.text
+        
+        json_match = re.search(r'\{.*\}', res_text, re.DOTALL)
+        if json_match:
+            result_data = json.loads(json_match.group(0))
+            
+            # Salva no manual automaticamente
+            db.collection("conhecimento_mestre").add({
+                "titulo": result_data.get('titulo'),
+                "conteudo": result_data.get('conteudo'),
+                "categoria": categoria,
+                "insight_ia": result_data.get('insight'),
+                "data_criacao": firestore.SERVER_TIMESTAMP,
+                "tipo": "procedimento_aprendido",
+                "autor": "HERMES_ANALYTICS"
+            })
+            
+            return {"success": True, "data": result_data}
+            
+        return {"success": False, "error": f"Falha ao analisar padrões estruturados. Resposta da IA: {res_text[:200]}"}
+
+    except Exception as e:
+        error_msg = traceback.format_exc()
+        print(f"Erro em analisarPadroesCategoriaIA: {error_msg}")
+        return {"success": False, "error": str(e), "traceback": error_msg}

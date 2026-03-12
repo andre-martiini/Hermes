@@ -28,10 +28,12 @@ interface KnowledgeViewProps {
     onNavigateToOrigin?: (modulo: string, id: string) => void;
     allTasks?: Tarefa[];
     allWorkItems?: WorkItem[];
+    masterKnowledge?: any[];
     showConfirm?: (title: string, message: string, onConfirm: () => void) => void;
 }
 
-const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAddLink, onSaveItem, onRenameAction, onDeleteItem, onProcessWithAI, onNavigateToOrigin, allTasks = [], allWorkItems = [], showConfirm }) => {
+const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAddLink, onSaveItem, onRenameAction, onDeleteItem, onProcessWithAI, onNavigateToOrigin, allTasks = [], allWorkItems = [], masterKnowledge = [], showConfirm }) => {
+    const [activeTab, setActiveTab] = useState<'library' | 'master'>('library');
     const [searchTerm, setSearchTerm] = useState('');
     const [searchMode, setSearchMode] = useState<KnowledgeSearchMode>('all');
     const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -701,15 +703,32 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
 
                 <nav className="flex-1 overflow-y-auto p-4 custom-scrollbar">
                     <button
-                        onClick={() => setCurrentFolderId(null)}
+                        onClick={() => {
+                            setCurrentFolderId(null);
+                            setActiveTab('library');
+                        }}
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => handleDrop(e, null)}
-                        className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl transition-all mb-1 ${currentFolderId === null ? 'bg-slate-100 text-slate-900 font-bold' : 'text-slate-500 hover:bg-slate-50'}`}
+                        className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl transition-all mb-1 ${currentFolderId === null && activeTab === 'library' ? 'bg-slate-100 text-slate-900 font-bold' : 'text-slate-500 hover:bg-slate-50'}`}
                     >
                         <svg className="w-4 h-4 text-amber-400" fill="currentColor" viewBox="0 0 24 24"><path d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" /></svg>
                         <span className="text-[11px]">Biblioteca</span>
                     </button>
-                    {(sidebarChildrenByParent.get(null) || [])
+
+                    <button
+                        onClick={() => setActiveTab('master')}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all mb-4 ${activeTab === 'master' ? 'bg-violet-600 text-white font-bold shadow-lg shadow-violet-200' : 'text-slate-500 hover:bg-slate-50'}`}
+                    >
+                        <div className={`w-5 h-5 rounded-lg flex items-center justify-center ${activeTab === 'master' ? 'bg-white/20' : 'bg-violet-100 text-violet-600'}`}>
+                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                        </div>
+                        <span className="text-[11px]">Manual do HERMES</span>
+                        {masterKnowledge.length > 0 && (
+                            <span className="ml-auto bg-violet-400 text-white text-[8px] px-1.5 py-0.5 rounded-full">{masterKnowledge.length}</span>
+                        )}
+                    </button>
+
+                    {activeTab === 'library' && (sidebarChildrenByParent.get(null) || [])
                         .filter(folder => !visibleSidebarFolderIds || visibleSidebarFolderIds.has(folder.id))
                         .map(folder => renderSidebarFolder(folder, 0))}
                 </nav>
@@ -858,7 +877,10 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                 type="text"
                                 placeholder={searchMode === 'folders' ? 'Buscar pastas...' : searchMode === 'files' ? 'Buscar arquivos...' : 'Buscar pastas e arquivos...'}
                                 value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
+                                onChange={(e) => {
+                                    setSearchTerm(e.target.value);
+                                    if (e.target.value && activeTab !== 'library') setActiveTab('library');
+                                }}
                                 className="w-full bg-slate-50 border-none rounded-xl pl-10 pr-4 py-3 text-xs font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 transition-all outline-none"
                             />
                         </div>
@@ -970,14 +992,70 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                         lassoIsAdditiveRef.current = false;
                     }}
                     onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                        const itemId = e.dataTransfer.getData("text/plain");
-                        if (itemId && onSaveItem) {
-                            if (itemId === currentFolderId) return;
-                            onSaveItem({ id: itemId, ...getDestinationPatch(currentFolderId) });
-                        }
-                    }}
                 >
+                    {activeTab === 'master' ? (
+                        <div className="space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-500 pb-24">
+                            <div className="bg-gradient-to-br from-violet-600 to-indigo-700 p-12 rounded-[2.5rem] text-white shadow-2xl relative overflow-hidden">
+                                <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -mr-20 -mt-20 blur-3xl"></div>
+                                <div className="relative z-10">
+                                    <h2 className="text-4xl font-black tracking-tight mb-4">Manual do HERMES</h2>
+                                    <p className="text-violet-100 font-medium max-w-2xl text-lg leading-relaxed">
+                                        Conhecimentos sintetizados automaticamente pela IA a partir das suas rotinas, processos e documentos.
+                                    </p>
+                                </div>
+                            </div>
+
+                            {masterKnowledge.length === 0 ? (
+                                <div className="py-24 text-center bg-white rounded-[2.5rem] border-2 border-dashed border-slate-100">
+                                    <div className="w-20 h-20 bg-slate-50 text-slate-300 rounded-3xl flex items-center justify-center mx-auto mb-6">
+                                        <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                                    </div>
+                                    <p className="text-slate-400 font-black text-xl uppercase tracking-widest">Nenhum padrão sintetizado ainda</p>
+                                    <p className="text-slate-300 text-sm mt-2 font-medium">Use o botão "Sintetizar Conhecimento IA" em um módulo para começar.</p>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                    {masterKnowledge.map((master) => (
+                                        <div key={master.id} className="bg-white border border-slate-200 rounded-[2.5rem] p-8 shadow-sm hover:shadow-xl transition-all group flex flex-col h-full border-t-8 border-t-violet-500 overflow-hidden relative">
+                                            <div className="absolute top-0 right-0 p-6 text-slate-100 rotate-12 -mr-4 -mt-4 opacity-10 group-hover:rotate-0 group-hover:opacity-20 transition-all">
+                                                 <svg className="w-24 h-24" fill="currentColor" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                            </div>
+                                            <div className="relative z-10 flex flex-col h-full">
+                                                <div className="flex justify-between items-start mb-6">
+                                                    <span className="bg-violet-100 text-violet-700 text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest">
+                                                        {master.categoria}
+                                                    </span>
+                                                    <span className="text-[10px] font-bold text-slate-400 uppercase">{formatDate(master.data_criacao)}</span>
+                                                </div>
+                                                <h3 className="text-2xl font-black text-slate-900 mb-4 group-hover:text-violet-600 transition-colors leading-tight">
+                                                    {master.titulo}
+                                                </h3>
+                                                <div className="prose prose-slate prose-sm max-w-none text-slate-600 font-medium leading-relaxed mb-8 flex-1 overflow-y-auto max-h-[300px]">
+                                                    <div dangerouslySetInnerHTML={{ __html: master.conteudo.replace(/\n/g, '<br/>') }} />
+                                                </div>
+                                                <div className="pt-6 border-t border-slate-50 flex items-center justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="w-8 h-8 rounded-full bg-violet-600 flex items-center justify-center text-white text-xs font-black">H</div>
+                                                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sintetizado por HERMES</span>
+                                                    </div>
+                                                    {onNavigateToOrigin && master.origem && (
+                                                        <button 
+                                                            onClick={() => onNavigateToOrigin(master.origem.modulo, master.origem.id_origem)}
+                                                            className="text-violet-600 hover:text-violet-800 text-[10px] font-black uppercase tracking-widest flex items-center gap-2"
+                                                        >
+                                                            Ver Origem
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                    <>
                     {lassoStart && lassoCurrent && (
                         <div
                             className="absolute bg-blue-500/20 border border-blue-500 pointer-events-none z-[100]"
@@ -1003,64 +1081,64 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
                                     {visibleItems.map(item => (
                                         <div
-                                    key={item.id}
-                                    data-knowledge-item-id={item.id}
-                                    draggable={!isVirtualItem(item)}
-                                    onDragStart={(e) => {
-                                        e.dataTransfer.setData("text/plain", item.id);
-                                        if (!item.fileHandle && item.url_drive && !item.is_folder) {
-                                            const ext = item.titulo.includes('.') ? '' : '.pdf'; // simplified fallback
-                                            e.dataTransfer.setData('DownloadURL', `application/octet-stream:${item.titulo}${ext}:${item.url_drive}`);
-                                        }
-                                    }}
-                                    onDragOver={(e) => item.is_folder ? e.preventDefault() : null}
-                                    onDrop={(e) => {
-                                        if (item.is_folder) {
-                                            handleDrop(e, item.id);
-                                            e.stopPropagation();
-                                        }
-                                    }}
-                                    onClick={(e) => handleItemClick(e, item)}
-                                    onContextMenu={(e) => handleContextMenu(e, item)}
-                                    className={`bg-white p-4 rounded-2xl border ${selectedItems.has(item.id) ? 'border-blue-500 shadow-md ring-2 ring-blue-100' : 'border-slate-100 shadow-sm hover:shadow-lg hover:border-blue-200'} transition-all cursor-pointer group flex flex-col items-center text-center gap-3 relative ${item.is_folder ? 'bg-amber-50/10' : ''}`}
-                                >
-                                    <div className={`absolute top-3 left-3 z-10 transition-opacity flex items-center shrink-0 ${selectedItems.has(item.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                                        <input 
-                                            type="checkbox"
-                                            checked={selectedItems.has(item.id)}
-                                            onChange={(e) => {
-                                                e.stopPropagation();
-                                                const next = new Set(selectedItems);
-                                                if (e.target.checked) next.add(item.id);
-                                                else next.delete(item.id);
-                                                setSelectedItems(next);
+                                            key={item.id}
+                                            data-knowledge-item-id={item.id}
+                                            draggable={!isVirtualItem(item)}
+                                            onDragStart={(e) => {
+                                                e.dataTransfer.setData("text/plain", item.id);
+                                                if (!item.fileHandle && item.url_drive && !item.is_folder) {
+                                                    const ext = item.titulo.includes('.') ? '' : '.pdf';
+                                                    e.dataTransfer.setData('DownloadURL', `application/octet-stream:${item.titulo}${ext}:${item.url_drive}`);
+                                                }
                                             }}
-                                            onClick={(e) => e.stopPropagation()}
-                                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                                        />
-                                    </div>
-                                    <div className={`p-3 rounded-2xl transition-colors ${item.is_folder ? 'text-amber-400' : 'bg-slate-50 group-hover:bg-blue-50'}`}>
-                                        {getFileIcon(item)}
-                                    </div>
-                                    <div className="min-w-0 w-full">
-                                        {renamingItemId === item.id ? (
-                                            <input
-                                                autoFocus
-                                                type="text"
-                                                className="w-full text-xs font-bold text-slate-900 bg-white border border-blue-500 rounded px-2 py-1 outline-none text-center"
-                                                defaultValue={item.titulo}
-                                                onBlur={async (e) => {
-                                                    await handleRenameEntity(item, e.target.value);
-                                                    setRenamingItemId(null);
-                                                }}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') e.currentTarget.blur();
-                                                    if (e.key === 'Escape') setRenamingItemId(null);
-                                                }}
-                                                onClick={(e) => e.stopPropagation()}
-                                            />
-                                        ) : (
-                                            <h4 className="text-xs font-bold text-slate-700 leading-tight truncate px-2" onDoubleClick={(e) => { e.stopPropagation(); startItemRename(item); }}>{item.titulo}</h4>
+                                            onDragOver={(e) => item.is_folder ? e.preventDefault() : null}
+                                            onDrop={(e) => {
+                                                if (item.is_folder) {
+                                                    handleDrop(e, item.id);
+                                                    e.stopPropagation();
+                                                }
+                                            }}
+                                            onClick={(e) => handleItemClick(e, item)}
+                                            onContextMenu={(e) => handleContextMenu(e, item)}
+                                            className={`bg-white p-4 rounded-2xl border ${selectedItems.has(item.id) ? 'border-blue-500 shadow-md ring-2 ring-blue-100' : 'border-slate-100 shadow-sm hover:shadow-lg hover:border-blue-200'} transition-all cursor-pointer group flex flex-col items-center text-center gap-3 relative ${item.is_folder ? 'bg-amber-50/10' : ''}`}
+                                        >
+                                            <div className={`absolute top-3 left-3 z-10 transition-opacity flex items-center shrink-0 ${selectedItems.has(item.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                                                <input 
+                                                    type="checkbox"
+                                                    checked={selectedItems.has(item.id)}
+                                                    onChange={(e) => {
+                                                        e.stopPropagation();
+                                                        const next = new Set(selectedItems);
+                                                        if (e.target.checked) next.add(item.id);
+                                                        else next.delete(item.id);
+                                                        setSelectedItems(next);
+                                                    }}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                                />
+                                            </div>
+                                            <div className={`p-3 rounded-2xl transition-colors ${item.is_folder ? 'text-amber-400' : 'bg-slate-50 group-hover:bg-blue-50'}`}>
+                                                {getFileIcon(item)}
+                                            </div>
+                                            <div className="min-w-0 w-full">
+                                                {renamingItemId === item.id ? (
+                                                    <input
+                                                        autoFocus
+                                                        type="text"
+                                                        className="w-full text-xs font-bold text-slate-900 bg-white border border-blue-500 rounded px-2 py-1 outline-none text-center"
+                                                        defaultValue={item.titulo}
+                                                        onBlur={async (e) => {
+                                                            await handleRenameEntity(item, e.target.value);
+                                                            setRenamingItemId(null);
+                                                        }}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') e.currentTarget.blur();
+                                                            if (e.key === 'Escape') setRenamingItemId(null);
+                                                        }}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                    />
+                                                ) : (
+                                                    <h4 className="text-xs font-bold text-slate-700 leading-tight truncate px-2" onDoubleClick={(e) => { e.stopPropagation(); startItemRename(item); }}>{item.titulo}</h4>
                                                 )}
                                                 <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">{item.is_folder ? `${items.filter(i => i.parent_id === item.id).length} itens` : formatSize(item.tamanho || 0)}</p>
                                             </div>
@@ -1083,148 +1161,115 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                     <thead className="bg-slate-50 border-b border-slate-100" style={{ display: 'table', width: '100%', tableLayout: 'fixed' }}>
                                         <tr>
                                             <th className="pl-6 pr-3 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-left">Nome</th>
-                                            <th
-                                                className="px-3 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right"
-                                                style={{ width: listSizeColWidth }}
-                                            >
-                                                Tamanho
-                                            </th>
-                                            <th
-                                                className="hidden md:table-cell px-3 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right"
-                                                style={{ width: listModifiedColWidth }}
-                                            >
-                                                Modificado
-                                            </th>
+                                            <th className="px-3 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right" style={{ width: listSizeColWidth }}>Tamanho</th>
+                                            <th className="hidden md:table-cell px-3 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right" style={{ width: listModifiedColWidth }}>Modificado</th>
                                             <th style={{ width: listActionsColWidth }} className="pr-6 pl-3 py-4"></th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-50" style={{ display: 'block', height: currentItems.length * itemHeightList, position: 'relative' }}>
                                         {visibleItems.map((item, idx) => (
                                             <tr
+                                                key={item.id}
                                                 data-knowledge-item-id={item.id}
                                                 style={{ position: 'absolute', top: (startRow + idx) * itemHeightList, width: '100%', display: 'table', tableLayout: 'fixed' }}
-                                            key={item.id}
-                                            draggable={!isVirtualItem(item)}
-                                            onDragStart={(e) => {
-                                                e.dataTransfer.setData("text/plain", item.id);
-                                                if (!item.fileHandle && item.url_drive && !item.is_folder) {
-                                                    const ext = item.titulo.includes('.') ? '' : '.pdf'; // simplified fallback
-                                                    e.dataTransfer.setData('DownloadURL', `application/octet-stream:${item.titulo}${ext}:${item.url_drive}`);
-                                                }
-                                            }}
-                                            onDragOver={(e) => item.is_folder ? e.preventDefault() : null}
-                                            onDrop={(e) => {
-                                                if (item.is_folder) {
-                                                    handleDrop(e, item.id);
-                                                    e.stopPropagation();
-                                                }
-                                            }}
-                                            onClick={(e) => handleItemClick(e, item)}
-                                            onContextMenu={(e) => handleContextMenu(e, item)}
-                                            className={`${selectedItems.has(item.id) ? 'bg-blue-50/50' : 'hover:bg-slate-50'} transition-colors cursor-pointer group`}
-                                        >
-                                            <td className="pl-6 pr-3 py-3">
-                                                <div className="flex items-center gap-3 min-w-0">
-                                                    <div className={`transition-opacity flex items-center shrink-0 ${selectedItems.has(item.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                                                        <input 
-                                                            type="checkbox"
-                                                            checked={selectedItems.has(item.id)}
-                                                            onChange={(e) => {
-                                                                e.stopPropagation();
-                                                                const next = new Set(selectedItems);
-                                                                if (e.target.checked) next.add(item.id);
-                                                                else next.delete(item.id);
-                                                                setSelectedItems(next);
-                                                            }}
-                                                            onClick={(e) => e.stopPropagation()}
-                                                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                                                        />
-                                                    </div>
-                                                    <div className={`w-8 h-8 flex items-center justify-center shrink-0 transition-opacity ${selectedItems.has(item.id) ? 'hidden' : 'group-hover:hidden'}`}>
-                                                        {getFileIcon(item)}
-                                                    </div>
-                                                    {renamingItemId === item.id ? (
-                                                        <input
-                                                            autoFocus
-                                                            type="text"
-                                                            className="min-w-0 flex-1 bg-white border border-blue-400 rounded px-2 py-1 text-xs font-bold text-slate-800 outline-none"
-                                                            defaultValue={item.titulo}
-                                                            onBlur={async (e) => {
-                                                                await handleRenameEntity(item, e.target.value);
-                                                                setRenamingItemId(null);
-                                                            }}
-                                                            onKeyDown={(e) => {
-                                                                if (e.key === 'Enter') e.currentTarget.blur();
-                                                                if (e.key === 'Escape') setRenamingItemId(null);
-                                                            }}
-                                                            onClick={(e) => e.stopPropagation()}
-                                                        />
-                                                    ) : (
-                                                        <span
-                                                            title={item.titulo}
-                                                            onDoubleClick={(e) => { e.stopPropagation(); startItemRename(item); }}
-                                                            className="min-w-0 flex-1 truncate whitespace-nowrap text-xs font-bold text-slate-700 group-hover:text-blue-600 transition-colors"
-                                                        >
-                                                            {item.titulo}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td
-                                                className="px-3 py-3 text-[10px] font-bold text-slate-400 text-right whitespace-nowrap"
-                                                style={{ width: listSizeColWidth }}
+                                                draggable={!isVirtualItem(item)}
+                                                onDragStart={(e) => {
+                                                    e.dataTransfer.setData("text/plain", item.id);
+                                                    if (!item.fileHandle && item.url_drive && !item.is_folder) {
+                                                        const ext = item.titulo.includes('.') ? '' : '.pdf';
+                                                        e.dataTransfer.setData('DownloadURL', `application/octet-stream:${item.titulo}${ext}:${item.url_drive}`);
+                                                    }
+                                                }}
+                                                onDragOver={(e) => item.is_folder ? e.preventDefault() : null}
+                                                onDrop={(e) => {
+                                                    if (item.is_folder) {
+                                                        handleDrop(e, item.id);
+                                                        e.stopPropagation();
+                                                    }
+                                                }}
+                                                onClick={(e) => handleItemClick(e, item)}
+                                                onContextMenu={(e) => handleContextMenu(e, item)}
+                                                className={`${selectedItems.has(item.id) ? 'bg-blue-50/50' : 'hover:bg-slate-50'} transition-colors cursor-pointer group`}
                                             >
-                                                {item.is_folder ? '-' : formatSize(item.tamanho || 0)}
-                                            </td>
-                                            <td
-                                                className="hidden md:table-cell px-3 py-3 text-[10px] font-bold text-slate-400 uppercase text-right whitespace-nowrap"
-                                                style={{ width: listModifiedColWidth }}
-                                            >
-                                                {formatDate(item.data_criacao?.split('T')[0])}
-                                            </td>
-                                            <td className="pl-3 pr-6 py-3 text-right" style={{ width: listActionsColWidth }}>
-                                                <div className="flex items-center justify-end gap-2">
-                                                    {!item.is_folder && item.tipo_arquivo !== 'link' && Boolean(item.url_drive) && !isVirtualItem(item) && (
-                                                        <a
-                                                            href={item.url_drive}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            onClick={(e) => e.stopPropagation()}
-                                                            className="p-2 text-slate-300 hover:text-emerald-500 transition-colors"
-                                                            title="Download"
-                                                        >
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                                                        </a>
-                                                    )}
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            if (pendingDeleteItemId !== item.id) {
-                                                                setPendingDeleteItemId(item.id);
-                                                                window.setTimeout(() => setPendingDeleteItemId((current) => (current === item.id ? null : current)), 3500);
-                                                                return;
-                                                            }
-                                                            setPendingDeleteItemId(null);
-                                                            onDeleteItem(item.id);
-                                                        }}
-                                                        className={`p-2 rounded-lg transition-colors ${pendingDeleteItemId === item.id ? 'bg-rose-500 text-white' : 'text-slate-300 hover:text-rose-500'}`}
-                                                        title={pendingDeleteItemId === item.id ? "Confirmar exclusão" : "Excluir"}
-                                                    >
-                                                        {pendingDeleteItemId === item.id ? (
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                <td className="pl-6 pr-3 py-3">
+                                                    <div className="flex items-center gap-3 min-w-0">
+                                                        <div className={`transition-opacity flex items-center shrink-0 ${selectedItems.has(item.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                                                            <input 
+                                                                type="checkbox"
+                                                                checked={selectedItems.has(item.id)}
+                                                                onChange={(e) => {
+                                                                    e.stopPropagation();
+                                                                    const next = new Set(selectedItems);
+                                                                    if (e.target.checked) next.add(item.id);
+                                                                    else next.delete(item.id);
+                                                                    setSelectedItems(next);
+                                                                }}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                                            />
+                                                        </div>
+                                                        <div className={`w-8 h-8 flex items-center justify-center shrink-0 transition-opacity ${selectedItems.has(item.id) ? 'hidden' : 'group-hover:hidden'}`}>
+                                                            {getFileIcon(item)}
+                                                        </div>
+                                                        {renamingItemId === item.id ? (
+                                                            <input
+                                                                autoFocus
+                                                                type="text"
+                                                                className="min-w-0 flex-1 bg-white border border-blue-400 rounded px-2 py-1 text-xs font-bold text-slate-800 outline-none"
+                                                                defaultValue={item.titulo}
+                                                                onBlur={async (e) => {
+                                                                    await handleRenameEntity(item, e.target.value);
+                                                                    setRenamingItemId(null);
+                                                                }}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter') e.currentTarget.blur();
+                                                                    if (e.key === 'Escape') setRenamingItemId(null);
+                                                                }}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                            />
                                                         ) : (
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                            <span title={item.titulo} onDoubleClick={(e) => { e.stopPropagation(); startItemRename(item); }} className="min-w-0 flex-1 truncate whitespace-nowrap text-xs font-bold text-slate-700 group-hover:text-blue-600 transition-colors">
+                                                                {item.titulo}
+                                                            </span>
                                                         )}
-                                                    </button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                                                    </div>
+                                                </td>
+                                                <td className="px-3 py-3 text-[10px] font-bold text-slate-400 text-right whitespace-nowrap" style={{ width: listSizeColWidth }}>{item.is_folder ? '-' : formatSize(item.tamanho || 0)}</td>
+                                                <td className="hidden md:table-cell px-3 py-3 text-[10px] font-bold text-slate-400 uppercase text-right whitespace-nowrap" style={{ width: listModifiedColWidth }}>{formatDate(item.data_criacao?.split('T')[0])}</td>
+                                                <td className="pl-3 pr-6 py-3 text-right" style={{ width: listActionsColWidth }}>
+                                                    <div className="flex items-center justify-end gap-2">
+                                                        {!item.is_folder && item.tipo_arquivo !== 'link' && Boolean(item.url_drive) && !isVirtualItem(item) && (
+                                                            <a href={item.url_drive} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="p-2 text-slate-300 hover:text-emerald-500 transition-colors" title="Download">
+                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                                            </a>
+                                                        )}
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                if (pendingDeleteItemId !== item.id) {
+                                                                    setPendingDeleteItemId(item.id);
+                                                                    window.setTimeout(() => setPendingDeleteItemId((current) => (current === item.id ? null : current)), 3500);
+                                                                    return;
+                                                                }
+                                                                setPendingDeleteItemId(null);
+                                                                onDeleteItem(item.id);
+                                                            }}
+                                                            className={`p-2 rounded-lg transition-colors ${pendingDeleteItemId === item.id ? 'bg-rose-500 text-white' : 'text-slate-300 hover:text-rose-500'}`}
+                                                            title={pendingDeleteItemId === item.id ? "Confirmar exclusão" : "Excluir"}
+                                                        >
+                                                            {pendingDeleteItemId === item.id ? <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                         );
                     })()}
+                    </>
+                    )}
 
                     {currentItems.length === 0 && (
                         <div className="py-20 text-center">

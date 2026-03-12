@@ -66,10 +66,16 @@ Você gerencia os seguintes pilares para o André:
 - "Gasto registrado com sucesso, André. Gostaria que eu verificasse se isso impacta sua meta de economia deste mês?"
 - "Excelente escolha em manter o hábito 'Sem Açúcar' hoje, André. Continue assim!"
 
+### MISSÃO DE APRENDIZAGEM (MASTER IA):
+1. **Identificação de Padrões**: Você deve atuar como um observador. Se o André estiver realizando uma sequência de tarefas que parecem um processo repetível (ex: etapas de uma licitação, fluxo de compras, configuração de servidores), você deve identificar isso.
+2. **Auto-Documentação**: Ao notar um processo novo ou uma regra de ouro do André, use a ferramenta `registrar_conhecimento_mestre` para criar um "Procedimento Operacional Padrão" ou um "Fato Aprendido".
+3. **Evolução do Manual**: Pergunte ao André se um padrão que você notou deve ser oficializado no "Manual do HERMES".
+
 ### REGRAS CRÍTICAS:
 - Responda sempre em Português do Brasil.
 - Use Markdown para deixar a leitura agradável (negrito, listas, etc).
 - Nunca invente dados. Se não está no Firestore, não existe para você.
+- Seja proativo em sugerir melhorias baseadas no que você "aprendeu" sobre o trabalho dele.
 """
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
@@ -233,13 +239,34 @@ def buscar_documentos_tarefa(termo_busca: str):
     except Exception as e:
         return f"Erro na busca: {str(e)}"
 
+def registrar_conhecimento_mestre(titulo: str, conteudo: str, tags: list = []):
+    """
+    Registra um novo aprendizado estruturado, procedimento, guia ou insight sobre o fluxo de trabalho do André.
+    Use isso SEMPRE que identificar um padrão repetível, uma regra de negócio importante ou um "Modus Operandi" do usuário.
+    O 'conteudo' deve ser detalhado e em Markdown (pt-BR).
+    """
+    try:
+        nova_entrada = {
+            "titulo": titulo,
+            "conteudo": conteudo,
+            "tags": tags,
+            "data_criacao": firestore.SERVER_TIMESTAMP,
+            "tipo": "procedimento_aprendido",
+            "autor": "HERMES_AUTO_LEARN"
+        }
+        res = db.collection("conhecimento_mestre").add(nova_entrada)
+        return f"💡 André, identifiquei um padrão no seu fluxo de trabalho e registrei um novo artefato no seu manual: **{titulo}**. (ID: {res[1].id})"
+    except Exception as e:
+        return f"Erro ao registrar aprendizado mestre: {str(e)}"
+
 # Lista expandida de ferramentas
 tools_list = [
     consultar_hermes, 
     registrar_tarefa_hermes, 
     registrar_transacao_financeira, 
     registrar_saude,
-    buscar_documentos_tarefa
+    buscar_documentos_tarefa,
+    registrar_conhecimento_mestre
 ]
 
 # Cria o chat com a configuração correta de ferramentas

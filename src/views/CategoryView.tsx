@@ -2,7 +2,7 @@ import React from 'react';
 import { Tarefa, formatDate, formatDateLocalISO } from '../../types';
 import { normalizeStatus } from '../utils/helpers';
 
-export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask }: { tasks: Tarefa[], viewMode: string, onSelectTask: (t: Tarefa) => void, onExecuteTask: (t: Tarefa) => void }) => {
+export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask, onAnalysePatterns }: { tasks: Tarefa[], viewMode: string, onSelectTask: (t: Tarefa) => void, onExecuteTask: (t: Tarefa) => void, onAnalysePatterns?: (cat: string) => void }) => {
   const isCLC = viewMode === 'licitacoes';
   const categoria = isCLC ? 'CLC' : 'ASSISTÊNCIA';
   const color = isCLC ? 'blue' : 'emerald';
@@ -37,11 +37,21 @@ export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask }: {
     <div className="animate-in grid grid-cols-1 lg:grid-cols-12 gap-10">
       {/* Lado Esquerdo: Ações Pendentes */}
       <div className="lg:col-span-8 flex flex-col gap-6">
-        <div className={`bg-white border-l-8 border-${color}-600 p-8 rounded-none md:rounded-[2rem] shadow-xl`}>
-          <h3 className="text-2xl font-black text-slate-900 tracking-tight flex items-center justify-between">
+        <div className={`bg-white border-l-8 border-${color}-600 p-8 rounded-none md:rounded-[2rem] shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-6`}>
+          <h3 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-4">
             Ações em Aberto - {title}
             <span className={`bg-${color}-100 text-${color}-600 text-[10px] font-black px-4 py-1.5 rounded-full`}>{pendentes.length}</span>
           </h3>
+          <button
+            onClick={() => onAnalysePatterns?.(categoria)}
+            className={`bg-slate-900 hover:bg-${color}-600 text-white px-6 py-3 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 shadow-lg active:scale-95`}
+            title="Pedir para o HERMES aprender com seus processos recentes"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            Sintetizar Conhecimento IA
+          </button>
         </div>
 
         <div className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl">
