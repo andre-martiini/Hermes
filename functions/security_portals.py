@@ -3,7 +3,6 @@ import json
 import re
 import secrets
 
-import google.generativeai as genai
 from firebase_functions import https_fn, options
 from firebase_admin import firestore, get_app, initialize_app
 
@@ -16,6 +15,11 @@ except ValueError:
 
 def get_db():
     return firestore.client()
+
+
+def get_genai_module():
+    import google.generativeai as genai
+    return genai
 
 
 def get_system_api_keys(db=None):
@@ -263,6 +267,7 @@ Responda SOMENTE com JSON valido no formato abaixo, sem markdown, sem explicacoe
 }}"""
 
     try:
+        genai = get_genai_module()
         genai.configure(api_key=gemini_key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         result = model.generate_content(prompt)
@@ -324,6 +329,7 @@ def generatePgdFromDiariesAI(req: https_fn.CallableRequest):
     )
 
     try:
+        genai = get_genai_module()
         genai.configure(api_key=gemini_key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         result = model.generate_content(prompt)
@@ -380,6 +386,7 @@ def generatePgdFromRawTextAI(req: https_fn.CallableRequest):
     )
 
     try:
+        genai = get_genai_module()
         genai.configure(api_key=gemini_key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         result = model.generate_content(prompt)
@@ -483,6 +490,7 @@ def askWhatsAppAssistantSecure(req: https_fn.CallableRequest):
             f"Mensagens encontradas ({len(items)}):\n{context_block or '(sem resultados)'}"
         )
 
+        genai = get_genai_module()
         genai.configure(api_key=gemini_key)
         model = genai.GenerativeModel('gemini-2.5-flash-lite')
         result = model.generate_content(prompt)

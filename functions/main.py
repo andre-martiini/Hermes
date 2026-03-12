@@ -2,27 +2,40 @@
 
 from firebase_functions import firestore_fn, scheduler_fn, options, https_fn, pubsub_fn
 
-from firebase_admin import initialize_app, firestore, messaging
+from firebase_admin import initialize_app, firestore, messaging, get_app
 import json
 import base64
-import google.generativeai as genai
 from datetime import datetime, timedelta, timezone
 import time
 import re
 import io
 import uuid
 import secrets
+import os
+import sys
+
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+if CURRENT_DIR not in sys.path:
+    sys.path.insert(0, CURRENT_DIR)
+
 import security_portals  # noqa: F401
 
 
 # Inicializa o Firebase Admin apenas uma vez no escopo global
-
-initialize_app()
+try:
+    get_app()
+except ValueError:
+    initialize_app()
 
 DEFAULT_GOOGLE_CALENDAR_ID = 'cf4953b9512ee2e85a7e064f9d5ce4eaf6e3634564c91e5c7ee2bb01fd46782a@group.calendar.google.com'
 SYNC_LOCK_DOC_ID = 'sync_lock'
 SYNC_LOCK_STALE_SECONDS = 15 * 60
 MAX_SYNC_PASSES = 3
+
+
+def get_genai_module():
+    import google.generativeai as genai
+    return genai
 
 
 
@@ -1294,6 +1307,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
             log_to_firestore(sync_ref, logs, "ERRO: Gemini API Key não encontrada (em system/api_keys).")
             return
         
+        genai = get_genai_module()
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel("gemini-2.5-flash-lite")
         
