@@ -5,6 +5,18 @@ import secrets
 
 from firebase_functions import https_fn, options
 from firebase_admin import firestore, get_app, initialize_app
+from whatsapp_assistant_logic import (
+    build_chat_candidates as wa_build_chat_candidates,
+    build_chat_disambiguation_markdown as wa_build_chat_disambiguation_markdown,
+    build_no_results_markdown as wa_build_no_results_markdown,
+    build_whatsapp_context as wa_build_whatsapp_context,
+    build_whatsapp_memory_summary as wa_build_whatsapp_memory_summary,
+    filter_messages_by_time_scope as wa_filter_messages_by_time_scope,
+    resolve_search_keywords as wa_resolve_search_keywords,
+    resolve_time_scope as wa_resolve_time_scope,
+    select_relevant_messages as wa_select_relevant_messages,
+    should_prompt_for_chat_confirmation as wa_should_prompt_for_chat_confirmation,
+)
 
 
 try:
@@ -400,14 +412,18 @@ def generatePgdFromRawTextAI(req: https_fn.CallableRequest):
         )
 
 
-@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=120)
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=120
+)
 def askWhatsAppAssistantSecure(req: https_fn.CallableRequest):
     require_authenticated(req)
 
     data = req.data or {}
     command = str(data.get('command') or '').strip()
-    context = data.get('context') or {}
-    conversation_history = data.get('conversationHistory') or []
+    context = data.get('context') if isinstance(data.get('context'), dict) else {}
+    conversation_history = data.get('conversationHistory') if isinstance(data.get('conversationHistory'), list) else []
 
     if not command:
         raise https_fn.HttpsError(
@@ -433,76 +449,173 @@ def askWhatsAppAssistantSecure(req: https_fn.CallableRequest):
 
         selected_chat_id = context.get('selectedChatId')
         selected_chat_name = context.get('selectedChatName')
-        candidates = []
+        previous_keywords = context.get('lastSearchKeywords') or []
         chat_keyword = extract_chat_keyword_from_text(command)
+        candidates = wa_build_chat_candidates(recent, chat_keyword)
 
-        if not selected_chat_id and chat_keyword:
-            by_chat = {}
-            for item in recent:
-                chat_id = item.get('chat_id')
-                chat_name = item.get('chat_name')
-                if not chat_id or not chat_name:
-                    continue
-                score = fuzzy_score(chat_name, chat_keyword)
-                current = by_chat.get(chat_id)
-                if not current or current['score'] < score:
-                    by_chat[chat_id] = {
-                        'chatId': chat_id,
-                        'chatName': chat_name,
-                        'isGroup': bool(item.get('is_group')),
-                        'score': score,
-                    }
-            candidates = sorted(
-                [candidate for candidate in by_chat.values() if candidate['score'] >= 0.32],
-                key=lambda entry: entry['score'],
-                reverse=True
-            )[:6]
-            if candidates:
+        user_requested_chat_switch = bool(chat_keyword and (
+            not selected_chat_name or fuzzy_score(selected_chat_name, chat_keyword) < 0.82
+        ))
+        pending_disambiguation = False
+        assumed_chat = False
+
+        if user_requested_chat_switch:
+            if candidates and not wa_should_prompt_for_chat_confirmation(candidates):
                 selected_chat_id = candidates[0]['chatId']
                 selected_chat_name = candidates[0]['chatName']
+                assumed_chat = True
+            elif candidates:
+                pending_disambiguation = True
+        elif not selected_chat_id and candidates:
+            if not wa_should_prompt_for_chat_confirmation(candidates):
+                selected_chat_id = candidates[0]['chatId']
+                selected_chat_name = candidates[0]['chatName']
+                assumed_chat = True
+            else:
+                pending_disambiguation = True
+
+        keywords = wa_resolve_search_keywords(command, previous_keywords)
+        time_scope = wa_resolve_time_scope(command)
+        scope_label = time_scope['label'] if time_scope else None
+
+        response_context = {
+            'selectedChatId': selected_chat_id,
+            'selectedChatName': selected_chat_name,
+            'candidateChats': candidates,
+            'lastSearchKeywords': keywords,
+            'searchScopeLabel': scope_label,
+            'pendingDisambiguation': pending_disambiguation,
+        }
+
+        if pending_disambiguation:
+            memory_summary = wa_build_whatsapp_memory_summary(
+                selected_chat_name=selected_chat_name,
+                keywords=keywords,
+                scope_label=scope_label,
+                result_count=0,
+                pending_disambiguation=True,
+            )
+            response_context['memorySummary'] = memory_summary
+            response_context['resultCount'] = 0
+            response_context['lastMessageIds'] = []
+            return {
+                'markdown': wa_build_chat_disambiguation_markdown(chat_keyword, candidates),
+                'attachments': [],
+                'context': response_context,
+            }
 
         items = recent
         if selected_chat_id:
             items = [item for item in items if item.get('chat_id') == selected_chat_id]
             if not selected_chat_name and items:
                 selected_chat_name = items[0].get('chat_name')
+                response_context['selectedChatName'] = selected_chat_name
 
-        keywords = extract_search_keywords(command)
-        items = apply_keyword_filter_to_messages(items, keywords)
-        items = items[:70]
+        scoped_items = wa_filter_messages_by_time_scope(items, time_scope)
+        if time_scope and not scoped_items:
+            memory_summary = wa_build_whatsapp_memory_summary(
+                selected_chat_name=selected_chat_name,
+                keywords=keywords,
+                scope_label=scope_label,
+                result_count=0,
+            )
+            response_context['memorySummary'] = memory_summary
+            response_context['resultCount'] = 0
+            response_context['lastMessageIds'] = []
+            return {
+                'markdown': wa_build_no_results_markdown(
+                    selected_chat_name=selected_chat_name,
+                    keywords=keywords,
+                    scope_label=scope_label,
+                ),
+                'attachments': [],
+                'context': response_context,
+            }
 
-        context_block, attachments = build_whatsapp_context(items)
+        search_base = scoped_items if scoped_items else items
+        selected_messages = wa_select_relevant_messages(search_base, keywords, command, max_messages=18)
+
+        if not selected_messages:
+            memory_summary = wa_build_whatsapp_memory_summary(
+                selected_chat_name=selected_chat_name,
+                keywords=keywords,
+                scope_label=scope_label,
+                result_count=0,
+            )
+            response_context['memorySummary'] = memory_summary
+            response_context['resultCount'] = 0
+            response_context['lastMessageIds'] = []
+            return {
+                'markdown': wa_build_no_results_markdown(
+                    selected_chat_name=selected_chat_name,
+                    keywords=keywords,
+                    scope_label=scope_label,
+                ),
+                'attachments': [],
+                'context': response_context,
+            }
+
+        context_block, attachments, message_ids = wa_build_whatsapp_context(selected_messages)
+        memory_summary = wa_build_whatsapp_memory_summary(
+            selected_chat_name=selected_chat_name,
+            keywords=keywords,
+            scope_label=scope_label,
+            result_count=len(selected_messages),
+        )
+        response_context['memorySummary'] = memory_summary
+        response_context['resultCount'] = len(selected_messages)
+        response_context['lastMessageIds'] = message_ids
+        response_context['pendingDisambiguation'] = False
+
         recent_conversation = '\n'.join([
-            f"{'Usuario' if message.get('role') == 'user' else 'Assistente'}: {message.get('text') or ''}"
-            for message in conversation_history[-12:] if isinstance(message, dict)
+            f"{'Usuario' if message.get('role') == 'user' else 'Assistente'}: "
+            f"{re.sub(r'\\s+', ' ', str(message.get('text') or '')).strip()[:240]}"
+            for message in conversation_history[-10:] if isinstance(message, dict)
         ])
 
-        prompt = (
+        system_instruction = (
             "Voce e o assistente de consulta de WhatsApp do Hermes.\n"
-            "Seja objetivo, em pt-BR, e baseie-se apenas nas mensagens fornecidas.\n"
-            "Se houver ambiguidades de grupo, liste as opcoes curtas e peca confirmacao.\n"
-            "Se um grupo foi assumido automaticamente, deixe isso explicito.\n"
-            "Quando houver anexos, cite o referenceId correspondente.\n\n"
-            f"Pergunta do usuario: {command}\n"
-            f"Chat selecionado: {selected_chat_name or 'nenhum'} ({selected_chat_id or 'sem id'})\n"
-            f"Candidatos de chat: {json.dumps(candidates, ensure_ascii=False)}\n"
-            f"Conversa recente:\n{recent_conversation or '(sem historico)'}\n\n"
-            f"Mensagens encontradas ({len(items)}):\n{context_block or '(sem resultados)'}"
+            "Responda apenas com base nas evidencias fornecidas.\n"
+            "Nao invente mensagens, anexos, datas ou participantes.\n"
+            "Se os dados estiverem incompletos, diga isso explicitamente.\n"
+            "Se um grupo foi assumido automaticamente, mencione isso com clareza.\n"
+            "Quando houver anexos, cite o referenceId no formato [ARQ-N].\n"
+            "Prefira markdown leve, objetivo e facil de escanear."
+        )
+        prompt = (
+            f"Pedido atual do usuario: {command}\n"
+            f"Memoria anterior da sessao: {context.get('memorySummary') or '(sem memoria anterior)'}\n"
+            f"Resumo atualizado da sessao: {memory_summary}\n"
+            f"Grupo selecionado: {selected_chat_name or 'nenhum'} ({selected_chat_id or 'sem id'})\n"
+            f"Grupo assumido automaticamente nesta resposta: {'sim' if assumed_chat else 'nao'}\n"
+            f"Candidatos de chat parecidos: {json.dumps(candidates, ensure_ascii=False)}\n"
+            f"Historico recente da conversa:\n{recent_conversation or '(sem historico)'}\n\n"
+            f"Evidencias recuperadas ({len(selected_messages)} mensagens):\n{context_block}\n\n"
+            "Estruture a resposta assim, quando fizer sentido:\n"
+            "1. Resposta direta ao pedido.\n"
+            "2. Pontos de apoio ou resumo curto das mensagens.\n"
+            "3. Incertezas ou proximos passos, somente se realmente houver lacuna.\n"
         )
 
         genai = get_genai_module()
         genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel('gemini-2.5-flash-lite')
-        result = model.generate_content(prompt)
+        generation_config = {
+            'temperature': 0.25,
+            'top_p': 0.9,
+            'max_output_tokens': 900,
+        }
+        try:
+            model = genai.GenerativeModel('gemini-2.5-flash-lite', system_instruction=system_instruction)
+            result = model.generate_content(prompt, generation_config=generation_config)
+        except TypeError:
+            model = genai.GenerativeModel('gemini-2.5-flash-lite')
+            result = model.generate_content([system_instruction, prompt], generation_config=generation_config)
         markdown = (result.text or '').strip() or 'Nao consegui gerar uma resposta com o contexto atual.'
 
         return {
             'markdown': markdown,
             'attachments': attachments,
-            'context': {
-                'selectedChatId': selected_chat_id,
-                'selectedChatName': selected_chat_name,
-            }
+            'context': response_context,
         }
     except https_fn.HttpsError:
         raise

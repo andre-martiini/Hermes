@@ -11,9 +11,23 @@ export interface WhatsAppAttachmentRef {
   timestamp: string;
 }
 
+export interface WhatsAppChatCandidate {
+  chatId: string;
+  chatName: string;
+  isGroup: boolean;
+  score: number;
+}
+
 export interface WhatsAppAssistantContext {
   selectedChatId?: string;
   selectedChatName?: string;
+  candidateChats?: WhatsAppChatCandidate[];
+  memorySummary?: string;
+  lastSearchKeywords?: string[];
+  lastMessageIds?: string[];
+  searchScopeLabel?: string;
+  resultCount?: number;
+  pendingDisambiguation?: boolean;
 }
 
 export interface AssistantConversationMessage {

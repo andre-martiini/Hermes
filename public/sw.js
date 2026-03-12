@@ -11,41 +11,57 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => cache.addAll(ASSETS_TO_CACHE))
+      .catch(() => undefined)
   );
 });
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  if (event.request.cache === 'only-if-cached' && event.request.mode !== 'same-origin') return;
+
+  const url = new URL(event.request.url);
+  const isSameOrigin = url.origin === self.location.origin;
+  const isDriveAsset = url.hostname.includes('googleusercontent.com') || url.hostname.includes('drive.google.com');
+
+  // Deixa recursos externos como Google Fonts e extensões do navegador fora do SW de desenvolvimento.
+  if (!isSameOrigin && !isDriveAsset) {
+    return;
+  }
 
   // For knowledge base drive files / thumbnails, cache them as they are requested
-  if (event.request.url.includes('googleusercontent.com') || event.request.url.includes('drive.google.com')) {
+  if (isDriveAsset) {
     event.respondWith(
       caches.match(event.request).then((cachedResponse) => {
         if (cachedResponse) {
           return cachedResponse;
         }
 
-        return fetch(event.request).then((response) => {
-          // Check if we received a valid response
-          if (!response || response.status !== 200 || response.type !== 'basic' && response.type !== 'cors') {
+        return fetch(event.request)
+          .then((response) => {
+            // Check if we received a valid response
+            if (!response || response.status !== 200 || (response.type !== 'basic' && response.type !== 'cors')) {
+              return response;
+            }
+
+            // Clone the response because it's a stream and can only be consumed once
+            const responseToCache = response.clone();
+
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, responseToCache);
+            }).catch(() => undefined);
+
             return response;
-          }
-
-          // Clone the response because it's a stream and can only be consumed once
-          const responseToCache = response.clone();
-
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
-
-          return response;
-        });
+          })
+          .catch(() => Response.error());
       })
     );
   } else {
-    // Network first for other requests
+    // Network first for same-origin requests with cache fallback.
     event.respondWith(
-      fetch(event.request).catch(() => caches.match(event.request))
+      fetch(event.request).catch(async () => {
+        const cachedResponse = await caches.match(event.request);
+        return cachedResponse || Response.error();
+      })
     );
   }
 });
