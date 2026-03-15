@@ -2873,7 +2873,27 @@ const App: React.FC = () => {
         base_id: baseId,
       };
       await setDoc(doc(db, 'conhecimento', item.id), knowledgeItem);
-      showToast("Arquivo enviado para a base RAG.", "success");
+      showToast("Arquivo enviado — extraindo texto e vetorizando…", "info");
+
+      // Auto-vectorize: extract text and embed in background
+      try {
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string).split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        const fn = httpsCallable(functions, 'extractAndVectorizeRAGItem');
+        const result = await fn({ fileBase64: base64, mimeType: file.type, knowledgeId: item.id });
+        const data = result.data as any;
+        if (data.vectorized) {
+          showToast("Arquivo indexado e vetorizado com sucesso!", "success");
+        } else {
+          showToast(data.message || "Texto extraído, mas vetorização falhou.", "error");
+        }
+      } catch (err: any) {
+        showToast(err?.message || "Arquivo salvo no Drive. Vetorização automática falhou — tente manualmente.", "error");
+      }
     }
   };
 
@@ -5445,10 +5465,15 @@ const App: React.FC = () => {
                       onVectorizeItem={async (id) => {
                         try {
                           const fn = httpsCallable(functions, 'vectorizeKnowledgeItemCallable');
-                          await fn({ knowledgeId: id });
-                          showToast("Item vetorizado com sucesso!", "success");
-                        } catch (e) {
-                          showToast("Erro ao vetorizar item.", "error");
+                          const result = await fn({ knowledgeId: id });
+                          const data = result.data as any;
+                          if (data?.success) {
+                            showToast("Item vetorizado com sucesso!", "success");
+                          } else {
+                            showToast(data?.message || "Este item não tem texto extraído para vetorizar.", "error");
+                          }
+                        } catch (e: any) {
+                          showToast(e?.message || "Erro ao vetorizar item.", "error");
                         }
                       }}
                       showConfirm={showAlert}

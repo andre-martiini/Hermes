@@ -49,6 +49,28 @@ def get_genai_module():
     return genai
 
 
+def get_embedding(text: str, api_key: str = None) -> list:
+    """Get text embedding via Gemini REST API v1beta using gemini-embedding-001.
+    If api_key is not provided, fetches it from Firestore system/api_keys."""
+    import requests as req_lib
+    if not api_key:
+        db = get_db()
+        keys_doc = db.collection('system').document('api_keys').get()
+        api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+    if not api_key:
+        raise ValueError("Chave Gemini não configurada.")
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent"
+    headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+    payload = {
+        "model": "models/gemini-embedding-001",
+        "content": {"parts": [{"text": text[:8000]}]},
+        "taskType": "RETRIEVAL_DOCUMENT"
+    }
+    response = req_lib.post(url, json=payload, headers=headers, timeout=30)
+    response.raise_for_status()
+    return response.json()["embedding"]["values"]
+
+
 
 def get_db():
 
@@ -2176,17 +2198,7 @@ def process_vectorization(task_id):
 
 
 
-                    embedding = genai.embed_content(
-
-                        model="models/text-embedding-004",
-
-                        content=text_content,
-
-                        task_type="retrieval_document"
-
-                    )
-
-
+                    embedding_vec = get_embedding(text_content, api_key=GEMINI_API_KEY)
 
                     db.collection('processos_conhecimento').add({
 
@@ -2198,7 +2210,7 @@ def process_vectorization(task_id):
 
                         'texto': text_content,
 
-                        'embedding': embedding['embedding'],
+                        'embedding': embedding_vec,
 
                         'data_vetorizacao': firestore.SERVER_TIMESTAMP
 
@@ -2244,21 +2256,83 @@ def vectorizeKnowledgeItemCallable(req: https_fn.CallableRequest):
         if not GEMINI_API_KEY:
             raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION, message="Chave Gemini não configurada.")
 
-        genai.configure(api_key=GEMINI_API_KEY)
-        
-        embedding_result = genai.embed_content(
-            model="models/text-embedding-004",
-            content=text_content,
-            task_type="retrieval_document"
-        )
-        
-        doc_ref.update({'embedding': embedding_result['embedding']})
+        embedding_vec = get_embedding(text_content, api_key=GEMINI_API_KEY)
+        doc_ref.update({'embedding': embedding_vec})
         
         return {'success': True, 'message': f'Item {knowledge_id} vetorizado.'}
     except Exception as e:
         print(f"Erro ao vetorizar {knowledge_id}: {e}")
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=str(e))
 
+
+@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=120)
+def extractAndVectorizeRAGItem(req: https_fn.CallableRequest):
+    """
+    Extrai texto de um arquivo (PDF/TXT/MD) e vetoriza o item já existente na coleção 'conhecimento'.
+    Chamado automaticamente após o upload de um arquivo para uma base RAG.
+    """
+    import google.generativeai as genai
+    data = req.data
+    file_base64 = data.get('fileBase64')
+    mime_type = data.get('mimeType', 'application/octet-stream')
+    knowledge_id = data.get('knowledgeId')
+
+    if not file_base64 or not knowledge_id:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="fileBase64 e knowledgeId são obrigatórios."
+        )
+
+    db = get_db()
+    doc_ref = db.collection('conhecimento').document(knowledge_id)
+    if not doc_ref.get().exists:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.NOT_FOUND,
+            message="Item de conhecimento não encontrado."
+        )
+
+    # Decodifica o arquivo
+    try:
+        file_bytes = base64.b64decode(file_base64)
+    except Exception as e:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message=f"Erro ao decodificar arquivo: {e}")
+
+    # Extrai texto
+    texto_bruto = ""
+    try:
+        if mime_type == 'application/pdf' or mime_type.endswith('/pdf'):
+            import pdfplumber
+            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                texto_bruto = "\n\n".join(
+                    page.extract_text() or "" for page in pdf.pages
+                ).strip()
+        else:
+            texto_bruto = file_bytes.decode('utf-8', errors='replace').strip()
+    except Exception as e:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=f"Erro ao extrair texto: {e}")
+
+    if not texto_bruto:
+        return {'success': False, 'vectorized': False, 'message': 'Nenhum texto extraído do arquivo.'}
+
+    # Trunca para 500.000 chars antes de salvar no Firestore (limite de 1MB por documento)
+    texto_bruto = texto_bruto[:500000]
+
+    # Salva texto no documento existente
+    doc_ref.update({'texto_bruto': texto_bruto})
+
+    # Vetoriza
+    try:
+        keys_doc = db.collection('system').document('api_keys').get()
+        api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+        if not api_key:
+            return {'success': True, 'vectorized': False, 'message': 'Texto salvo, mas chave Gemini não configurada.'}
+
+        embedding_vec = get_embedding(texto_bruto, api_key=api_key)
+        doc_ref.update({'embedding': embedding_vec})
+        return {'success': True, 'vectorized': True}
+    except Exception as e:
+        print(f"Erro ao vetorizar RAG item {knowledge_id}: {e}")
+        return {'success': True, 'vectorized': False, 'message': str(e)}
 
 
 @https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=120)
@@ -2378,17 +2452,7 @@ def retrieve_personalized_rag_context(db, genai, query_text, base_id):
 
             # Re-using the logic from findSimilarKnowledge
 
-            query_embedding_result = genai.embed_content(
-
-                model="models/text-embedding-004",
-
-                content=query_text,
-
-                task_type="retrieval_query"
-
-            )
-
-            query_embedding = query_embedding_result['embedding']
+            query_embedding = get_embedding(query_text)
 
 
 
@@ -2512,15 +2576,11 @@ def retrieve_personalized_rag_context(db, genai, query_text, base_id):
 
             for cat in cats:
 
-                tasks = db.collection('tarefas')\
-
-                    .where('categoria', '==', cat)\
-
-                    .where('status', '==', 'concluído')\
-
-                    .order_by('data_conclusao', direction=firestore.Query.DESCENDING)\
-
-                    .limit(3).stream()
+                tasks = (db.collection('tarefas')
+                    .where('categoria', '==', cat)
+                    .where('status', '==', 'concluído')
+                    .order_by('data_conclusao', direction=firestore.Query.DESCENDING)
+                    .limit(3).stream())
 
                 for d in tasks:
 
@@ -2544,12 +2604,7 @@ def retrieve_extra_context_rag(db, genai, query_text, extra_context_id):
         return ""
 
     try:
-        query_embedding_result = genai.embed_content(
-            model="models/text-embedding-004",
-            content=query_text,
-            task_type="retrieval_query"
-        )
-        query_embedding = query_embedding_result['embedding']
+        query_embedding = get_embedding(query_text)
 
         docs = list(
             db.collection('conhecimento')
@@ -2662,16 +2717,9 @@ def processExtraContextFile(req: https_fn.CallableRequest):
             api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
 
             if api_key:
-                genai = get_genai_module()
-                genai.configure(api_key=api_key)
-                # Limita a 10.000 chars para o embedding (modelo text-embedding-004)
-                embedding_result = genai.embed_content(
-                    model="models/text-embedding-004",
-                    content=texto_bruto[:10000],
-                    task_type="retrieval_document"
-                )
+                embedding_vec = get_embedding(texto_bruto, api_key=api_key)
                 db.collection('conhecimento').document(doc_id).update({
-                    'embedding': embedding_result['embedding']
+                    'embedding': embedding_vec
                 })
                 vectorized = True
         except Exception as e:
@@ -3074,7 +3122,6 @@ def start_file_indexing(item_id, item_data):
 
 
 
-import numpy as np
 
 
 
@@ -3091,22 +3138,13 @@ import numpy as np
 
 
 def cosine_similarity(v1, v2):
-
-
-
-
-
-
-
-    """Calculates the cosine similarity between two vectors."""
-
-
-
-
-
-
-
-    return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+    """Calculates the cosine similarity between two vectors (pure Python)."""
+    dot = sum(a * b for a, b in zip(v1, v2))
+    norm1 = sum(a * a for a in v1) ** 0.5
+    norm2 = sum(b * b for b in v2) ** 0.5
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    return dot / (norm1 * norm2)
 
 
 
@@ -3298,47 +3336,7 @@ def findSimilarKnowledge(req: https_fn.CallableRequest):
 
 
 
-        query_embedding_result = genai.embed_content(
-
-
-
-
-
-
-
-            model="models/text-embedding-004",
-
-
-
-
-
-
-
-            content=query_text,
-
-
-
-
-
-
-
-            task_type="retrieval_query"
-
-
-
-
-
-
-
-        )
-
-
-
-
-
-
-
-        query_embedding = query_embedding_result['embedding']
+        query_embedding = get_embedding(query_text)
 
 
 
@@ -3742,31 +3740,9 @@ def on_knowledge_item_updated(event: firestore_fn.Event[firestore_fn.Change[fire
 
 
 
-            embedding_result = genai.embed_content(
+            embedding_vec = get_embedding(text_after, api_key=GEMINI_API_KEY)
 
-
-
-                model="models/text-embedding-004",
-
-
-
-                content=text_after,
-
-
-
-                task_type="retrieval_document"
-
-
-
-            )
-
-
-
-            
-
-
-
-            doc_ref.update({'embedding': embedding_result['embedding']})
+            doc_ref.update({'embedding': embedding_vec})
 
 
 

@@ -93,6 +93,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
     const [isAddLinkOpen, setIsAddLinkOpen] = useState(false);
     const [linkUrl, setLinkUrl] = useState('');
     const [linkTitle, setLinkTitle] = useState('');
+    const [vectorizingId, setVectorizingId] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const selectedBase = bases.find(b => b.id === selectedBaseId) ?? null;
@@ -372,13 +373,25 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                                                 )}
                                                 {onVectorizeItem && !(item as any).embedding && (
                                                     <button
-                                                        onClick={() => onVectorizeItem(item.id)}
-                                                        className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-all"
-                                                        title="Vetorizar agora"
+                                                        onClick={async () => {
+                                                            setVectorizingId(item.id);
+                                                            await onVectorizeItem(item.id);
+                                                            setVectorizingId(null);
+                                                        }}
+                                                        disabled={vectorizingId === item.id}
+                                                        className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                                                        title={vectorizingId === item.id ? 'Vetorizando...' : 'Vetorizar agora'}
                                                     >
-                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                                                        </svg>
+                                                        {vectorizingId === item.id ? (
+                                                            <svg className="w-4 h-4 animate-spin text-violet-500" fill="none" viewBox="0 0 24 24">
+                                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                                            </svg>
+                                                        ) : (
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                                            </svg>
+                                                        )}
                                                     </button>
                                                 )}
                                                 <button
