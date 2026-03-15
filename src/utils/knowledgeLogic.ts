@@ -214,8 +214,30 @@ export function filterCurrentItems(
     folderStructure: ConhecimentoItem[],
     currentFolderId: string | null,
     searchTerm: string,
-    searchMode: KnowledgeSearchMode = 'all'
+    searchMode: KnowledgeSearchMode = 'all',
+    activeBaseId: string | null = null
 ) {
+    if (activeBaseId) {
+        const baseItems = items.filter(item => item.base_id === activeBaseId);
+        if (searchTerm) {
+            const folderResults =
+                searchMode === 'files'
+                    ? []
+                    : baseItems.filter(item => item.is_folder && matchesSearch(item, searchTerm));
+
+            const fileResults =
+                searchMode === 'folders'
+                    ? []
+                    : baseItems.filter(item => !item.is_folder && matchesSearch(item, searchTerm));
+            
+            const merged = new Map<string, ConhecimentoItem>();
+            [...folderResults, ...fileResults].forEach(item => merged.set(item.id, item));
+            return sortItems(Array.from(merged.values()));
+        }
+
+        return sortItems(baseItems.filter(item => item.parent_id === currentFolderId));
+    }
+
     const actionDocTaskIds = new Set(
         items
             .filter(item => classifyKnowledgeDomain(item) === 'acoes' && item.origem?.id_origem)

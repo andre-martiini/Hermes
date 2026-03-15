@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { ConhecimentoItem, formatDate, Tarefa, WorkItem } from './types';
+import { ConhecimentoItem, formatDate, Tarefa, WorkItem, BaseConhecimento } from './types';
 import {
     type KnowledgeSearchMode,
     ROOT_ACTIONS_FOLDER_ID,
@@ -18,21 +18,42 @@ import { AutoExpandingTextarea } from './src/components/ui/UIComponents';
 
 interface KnowledgeViewProps {
     items: ConhecimentoItem[];
-    onUploadFile: (file: File, destinationFolderId?: string | null) => Promise<ConhecimentoItem | null> | Promise<void> | void;
-    onAddLink?: (url: string, title: string, destinationFolderId?: string | null) => Promise<void>;
+    knowledgeBases: BaseConhecimento[];
+    onUploadFile: (file: File, destinationFolderId?: string | null, baseId?: string | null) => Promise<ConhecimentoItem | null> | Promise<void> | void;
+    onAddLink?: (url: string, title: string, destinationFolderId?: string | null, baseId?: string | null) => Promise<void>;
     onSaveItem?: (item: Partial<ConhecimentoItem>) => Promise<void>;
     onRenameAction?: (taskId: string, title: string) => Promise<void>;
     onDeleteItem: (id: string) => void;
     onProcessWithAI?: (id: string) => Promise<any>;
     onGenerateSlides?: (text: string) => Promise<any>;
     onNavigateToOrigin?: (modulo: string, id: string) => void;
+    onCreateBase: (nome: string) => Promise<void>;
+    onUpdateBase: (id: string, updates: Partial<BaseConhecimento>) => Promise<void>;
+    onDeleteBase: (id: string) => Promise<void>;
     allTasks?: Tarefa[];
     allWorkItems?: WorkItem[];
     masterKnowledge?: any[];
     showConfirm?: (title: string, message: string, onConfirm: () => void) => void;
 }
 
-const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAddLink, onSaveItem, onRenameAction, onDeleteItem, onProcessWithAI, onNavigateToOrigin, allTasks = [], allWorkItems = [], masterKnowledge = [], showConfirm }) => {
+const KnowledgeView: React.FC<KnowledgeViewProps> = ({ 
+    items, 
+    knowledgeBases = [], 
+    onUploadFile, 
+    onAddLink, 
+    onSaveItem, 
+    onRenameAction, 
+    onDeleteItem, 
+    onProcessWithAI, 
+    onNavigateToOrigin, 
+    onCreateBase,
+    onUpdateBase,
+    onDeleteBase,
+    allTasks = [], 
+    allWorkItems = [], 
+    masterKnowledge = [], 
+    showConfirm 
+}) => {
     const [activeTab, setActiveTab] = useState<'library' | 'master'>('library');
     const [searchTerm, setSearchTerm] = useState('');
     const [searchMode, setSearchMode] = useState<KnowledgeSearchMode>('all');
@@ -69,6 +90,9 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
     );
 
     // Virtual Scrolling Variables
+    const [activeBaseId, setActiveBaseId] = useState<string | null>(null);
+
+    // Virtual Scrolling Variables
     const [containerWidth, setContainerWidth] = useState(1000);
     const gridCols = containerWidth < 768 ? 2 : containerWidth < 1024 ? 4 : containerWidth < 1280 ? 5 : 6;
     const itemHeightGrid = 160;
@@ -94,7 +118,8 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
     }, [items, allTasks]);
 
     const breadcrumbs = useMemo(() => {
-        const root: { id: string | null, name: string } = { id: null, name: 'Biblioteca' };
+        const rootName = activeBaseId ? knowledgeBases.find(b => b.id === activeBaseId)?.nome || 'Base' : 'Biblioteca';
+        const root: { id: string | null, name: string } = { id: null, name: rootName };
         if (!currentFolderId) return [root];
 
         const folderMap = new Map(folderStructure.map(folder => [folder.id, folder]));
@@ -111,11 +136,11 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
         }
 
         return [root, ...chain];
-    }, [currentFolderId, folderStructure]);
+    }, [currentFolderId, folderStructure, activeBaseId, knowledgeBases]);
 
     const currentItems = useMemo(() => {
-        return filterCurrentItems(items, allTasks, folderStructure, currentFolderId, searchTerm, searchMode);
-    }, [items, currentFolderId, searchTerm, searchMode, allTasks, folderStructure]);
+        return filterCurrentItems(items, allTasks, folderStructure, currentFolderId, searchTerm, searchMode, activeBaseId);
+    }, [items, currentFolderId, searchTerm, searchMode, allTasks, folderStructure, activeBaseId]);
 
     const isVirtualItem = (item: ConhecimentoItem) =>
         isRootKnowledgeFolderId(item.id) || isActionVirtualFolderId(item.id) || isActionDiaryItemId(item.id);
@@ -728,7 +753,47 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                         )}
                     </button>
 
-                    {activeTab === 'library' && (sidebarChildrenByParent.get(null) || [])
+                    <div className="px-4 py-2">
+                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bases RAG</h4>
+                    </div>
+
+                    {knowledgeBases.map(base => (
+                        <button
+                            key={base.id}
+                            onClick={() => {
+                                setActiveBaseId(base.id);
+                                setActiveTab('library');
+                                setCurrentFolderId(null);
+                            }}
+                            className={`w-full flex items-center gap-3 px-4 py-2 rounded-xl transition-all mb-1 ${activeBaseId === base.id ? 'bg-blue-100 text-blue-800 font-bold' : 'text-slate-500 hover:bg-slate-50'}`}
+                        >
+                            <span style={{ color: base.cor || '#64748b' }}>{base.emoji || '🗂️'}</span>
+                            <span className="text-[11px] truncate">{base.nome}</span>
+                            {base.contagem_elementos && base.contagem_elementos > 0 ? (
+                                <span className="ml-auto bg-slate-200 text-slate-600 text-[8px] font-black px-1.5 py-0.5 rounded-full">{base.contagem_elementos}</span>
+                            ) : null}
+                        </button>
+                    ))}
+                    
+                    <button
+                        onClick={() => {
+                            const newName = prompt('Nome da nova Base de Conhecimento:');
+                            if (newName) onCreateBase(newName);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2 rounded-xl transition-all text-slate-400 hover:text-blue-600 hover:bg-blue-50"
+                    >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+                        <span className="text-[11px] font-bold">Nova Base RAG</span>
+                    </button>
+
+                    <div className="h-px bg-slate-100 my-4"></div>
+
+                    {activeTab === 'library' && !activeBaseId && (sidebarChildrenByParent.get(null) || [])
+                        .filter(folder => !visibleSidebarFolderIds || visibleSidebarFolderIds.has(folder.id))
+                        .map(folder => renderSidebarFolder(folder, 0))}
+                    
+                    {activeTab === 'library' && activeBaseId && (sidebarChildrenByParent.get(null) || [])
+                        .filter(folder => folder.base_id === activeBaseId)
                         .filter(folder => !visibleSidebarFolderIds || visibleSidebarFolderIds.has(folder.id))
                         .map(folder => renderSidebarFolder(folder, 0))}
                 </nav>
@@ -758,7 +823,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ items, onUploadFile, onAd
                                 if (file) {
                                     setIsUploading(true);
                                     try {
-                                        await onUploadFile(file, currentFolderId);
+                                        await onUploadFile(file, currentFolderId, activeBaseId);
                                     } finally {
                                         setIsUploading(false);
                                         if (fileInputRef.current) fileInputRef.current.value = '';

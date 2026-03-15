@@ -673,17 +673,12 @@ def sync_google_tasks_pull(service, sync_ref, logs):
                 cat, sys, meta = classify_task(title, g_notes)
 
                 db.collection('tarefas').add({
-
                     'titulo': title, 'projeto': 'GOOGLE', 'google_id': g_id, 'status': status,
-
                     'data_criacao': datetime.now().isoformat(), 'data_atualizacao': datetime.now().isoformat() if title_was_normalized else g_updated,
-
                     'categoria': cat, 'contabilizar_meta': meta, 'notas': g_notes,
-
                     'data_limite': g_due if g_due else '-',
-
-                    'horario_inicio': h_inicio, 'horario_fim': h_fim
-
+                    'horario_inicio': h_inicio, 'horario_fim': h_fim,
+                    'tipo_acao': 'fast', 'origem': 'google'
                 })
 
                 log_to_firestore(sync_ref, logs, f"[+] IMPORTADA: {title}")
@@ -2221,11 +2216,481 @@ def process_vectorization(task_id):
 
 
 
+@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=120)
+def vectorizeKnowledgeItemCallable(req: https_fn.CallableRequest):
+    """Vetoriza um único item da base de conhecimento."""
+    import google.generativeai as genai
+    db = get_db()
+    
+    knowledge_id = req.data.get('knowledgeId')
+    if not knowledge_id:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="knowledgeId é obrigatório.")
+
+    doc_ref = db.collection('conhecimento').document(knowledge_id)
+    doc = doc_ref.get()
+
+    if not doc.exists:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.NOT_FOUND, message="Item de conhecimento não encontrado.")
+
+    item_data = doc.to_dict()
+    text_content = item_data.get('texto_bruto')
+
+    if not text_content:
+        return {'success': False, 'message': 'Nenhum texto bruto para vetorizar.'}
+
+    try:
+        keys_doc = db.collection('system').document('api_keys').get()
+        GEMINI_API_KEY = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+        if not GEMINI_API_KEY:
+            raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION, message="Chave Gemini não configurada.")
+
+        genai.configure(api_key=GEMINI_API_KEY)
+        
+        embedding_result = genai.embed_content(
+            model="models/text-embedding-004",
+            content=text_content,
+            task_type="retrieval_document"
+        )
+        
+        doc_ref.update({'embedding': embedding_result['embedding']})
+        
+        return {'success': True, 'message': f'Item {knowledge_id} vetorizado.'}
+    except Exception as e:
+        print(f"Erro ao vetorizar {knowledge_id}: {e}")
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=str(e))
+
+
+
+@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=120)
+def generate_task_with_ia(req: https_fn.CallableRequest):
+    """
+    Gera os campos de uma tarefa baseada em input de texto/áudio usando Gemini.
+    Considera o contexto RAG personalizado se fornecido.
+    """
+    data = req.data
+    content = data.get('content')
+    origin = data.get('origin', 'manual')
+    rag_context_id = data.get('ragContext') or data.get('base_conhecimento')
+    extra_context = data.get('extraContext', '')
+    extra_context_id = data.get('extraContextId')
+
+    if not content:
+        return {"error": "Conteúdo não fornecido"}
+
+    db = firestore.client()
+    keys_doc = db.collection('system').document('api_keys').get()
+    api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+
+    if not api_key:
+        return {"error": "Gemini API Key não encontrada no sistema."}
+
+    genai = get_genai_module()
+    genai.configure(api_key=api_key)
+
+    # Busca contexto do RAG da base principal
+    rag_retrieved_context = ""
+    if rag_context_id and rag_context_id != "Nenhum":
+        rag_retrieved_context = retrieve_personalized_rag_context(db, genai, content, rag_context_id)
+
+    # Busca contexto dos arquivos extras desta ação (RAG isolado)
+    extra_rag_context = ""
+    if extra_context_id:
+        extra_rag_context = retrieve_extra_context_rag(db, genai, content, extra_context_id)
+
+    model = genai.GenerativeModel("gemini-2.0-flash")
+
+    # Prompt enriquecido com todos os contextos disponíveis
+    prompt = f"""
+    Você é o HERMES IA, consultor de produtividade avançada do André.
+    Seu objetivo é transformar um fragmento de informação (WhatsApp, Áudio ou Texto) em uma estrutura de Deep Work (Tarefa Planejada) de altíssima qualidade.
+
+    --- BASE DE CONHECIMENTO PRINCIPAL (RAG) ---
+    Contexto recuperado da base de conhecimento selecionada pelo usuário:
+    {rag_retrieved_context if rag_retrieved_context else "Nenhuma base RAG selecionada."}
+
+    --- DOCUMENTOS EXTRAS DESTA AÇÃO ---
+    Documentos carregados especificamente para subsidiar esta demanda:
+    {extra_rag_context if extra_rag_context else "Nenhum documento extra carregado."}
+
+    --- CONTEXTO TEXTUAL ADICIONAL ---
+    {extra_context if extra_context else "Nenhum."}
+
+    --- CONTEÚDO BRUTO PARA PROCESSAR ---
+    Origem: {origin}
+    Conteúdo: {content}
+
+    SUA MISSÃO:
+    1. Analise TODOS os contextos acima. Priorize os documentos extras e o RAG para definir a forma correta de execução.
+    2. Crie um TÍTULO impactante, profissional e específico (reflita exatamente a demanda).
+    3. Escreva uma DESCRIÇÃO detalhada: contextualize o André sobre o que é a demanda, por que ela existe e o que precisa ser entregue.
+    4. Defina uma CATEGORIA lógica (TI, GESTÃO, FINANCEIRO, JURÍDICO, etc.).
+    5. Crie um PLANO DE AÇÃO (checklist) completo, com o passo a passo concreto e sequencial para resolver a demanda do início ao fim.
+    6. Se houver prazos implícitos no conteúdo, defina a DATA LIMITE.
+
+    SAÍDA ESPERADA (JSON puro, sem markdown):
+    {{
+      "titulo": "Título claro e profissional da demanda",
+      "descricao": "Descrição detalhada contextualizando a demanda e o que deve ser feito",
+      "categoria": "CATEGORIA",
+      "status": "em andamento",
+      "data_limite": "YYYY-MM-DD",
+      "plano_acao": ["Passo 1 detalhado", "Passo 2 detalhado", "..."]
+    }}
+    """
+
+    try:
+        response = model.generate_content(prompt)
+        text = response.text
+        # Limpeza para garantir JSON puro
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0].strip()
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0].strip()
+        elif "{" in text:
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            text = text[start:end]
+            
+        return json.loads(text)
+    except Exception as e:
+        print(f"Erro no processamento Gemini RAG: {e}")
+        return {"error": str(e), "raw_response": text if 'text' in locals() else None}
+
+def retrieve_personalized_rag_context(db, genai, query_text, base_id):
+
+    """
+
+    Recupera informações de múltiplas fontes para formar o contexto RAG de uma base.
+
+    Inclui busca vetorial e busca estruturada.
+
+    """
+
+    context_parts = []
+
+    
+
+    # --- 1. Vector Search (Semantic) ---
+
+    if query_text:
+
+        try:
+
+            # Re-using the logic from findSimilarKnowledge
+
+            query_embedding_result = genai.embed_content(
+
+                model="models/text-embedding-004",
+
+                content=query_text,
+
+                task_type="retrieval_query"
+
+            )
+
+            query_embedding = query_embedding_result['embedding']
+
+
+
+            docs_query = db.collection('conhecimento').where('embedding', '!=', None)
+
+            if base_id and base_id != "Nenhum":
+
+                docs_query = docs_query.where('base_id', '==', base_id)
+
+            
+
+            docs = list(docs_query.limit(50).stream()) # Limit to 50 docs for performance
+
+
+
+            similar_items = []
+
+            if docs:
+
+                for doc in docs:
+
+                    item = doc.to_dict()
+
+                    if 'embedding' in item and len(item['embedding']) > 0:
+
+                        similarity = cosine_similarity(query_embedding, item['embedding'])
+
+                        if similarity > 0.7: # Threshold to ensure relevance
+
+                            similar_items.append({
+
+                                'titulo': item.get('titulo'),
+
+                                'texto': item.get('texto_bruto', '')[:1000],
+
+                                'similarity': similarity
+
+                            })
+
+                
+
+                similar_items.sort(key=lambda x: x['similarity'], reverse=True)
+
+
+
+                if similar_items:
+
+                    context_parts.append("### [DOCUMENTOS SIMILARES ENCONTRADOS (BUSCA VETORIAL)]")
+
+                    for item in similar_items[:3]: # Add top 3
+
+                        context_parts.append(f"#### {item['titulo']}\n{item['texto']}")
+
+        except Exception as e:
+
+            print(f"Error during vector search in RAG context retrieval: {e}")
+
+
+
+
+
+    # --- 2. Structured Search (Existing Logic) ---
+
+    base_doc = db.collection('knowledge_bases').document(base_id).get()
+
+    config = {}
+
+    if base_doc.exists:
+
+        base_data = base_doc.to_dict()
+
+        config = base_data.get('configuracao_rag', {})
+
+        context_parts.append(f"### [BASE ATUAL] {base_data.get('nome')} - {base_data.get('descricao', '')}")
+
+    else:
+
+        # Se não existe como base_id, tenta tratar como categoria (legado)
+
+        context_parts.append(f"### [PESQUISA LEGADA POR CATEGORIA] {base_id}")
+
+        config = {
+
+            'incluir_manual': True,
+
+            'incluir_diarios': True,
+
+            'categorias_vinculadas': [base_id]
+
+        }
+
+
+
+    # Busca itens do MANUAL (Conhecimento Mestre)
+
+    if config.get('incluir_manual'):
+
+        cats = config.get('categorias_vinculadas', [])
+
+        if cats:
+
+            for cat in cats:
+
+                master = db.collection('conhecimento_mestre').where('categoria', '==', cat).limit(2).stream()
+
+                for d in master:
+
+                    m = d.to_dict()
+
+                    context_parts.append(f"### [SOP/MANUAL - {cat}] {m.get('titulo')}\n{m.get('conteudo')}")
+
+
+
+    # Busca HISTÓRICO DE DIÁRIOS (Acompanhamento)
+
+    if config.get('incluir_diarios'):
+
+        cats = config.get('categorias_vinculadas', [])
+
+        if cats:
+
+            for cat in cats:
+
+                tasks = db.collection('tarefas')\
+
+                    .where('categoria', '==', cat)\
+
+                    .where('status', '==', 'concluído')\
+
+                    .order_by('data_conclusao', direction=firestore.Query.DESCENDING)\
+
+                    .limit(3).stream()
+
+                for d in tasks:
+
+                    t = d.to_dict()
+
+                    context_parts.append(f"### [HISTÓRICO - {cat}] {t.get('titulo')}\nNOTAS: {t.get('notas', '')}")
+
+
+
+    return "\n\n".join(context_parts)
+
+
+def retrieve_extra_context_rag(db, genai, query_text, extra_context_id):
+    """
+    Recupera contexto dos arquivos extras enviados pelo usuário para uma ação específica.
+    Usa apenas busca vetorial, filtrada pelo extra_context_id.
+    """
+    context_parts = []
+
+    if not query_text or not extra_context_id:
+        return ""
+
+    try:
+        query_embedding_result = genai.embed_content(
+            model="models/text-embedding-004",
+            content=query_text,
+            task_type="retrieval_query"
+        )
+        query_embedding = query_embedding_result['embedding']
+
+        docs = list(
+            db.collection('conhecimento')
+            .where('embedding', '!=', None)
+            .where('extra_context_id', '==', extra_context_id)
+            .limit(20)
+            .stream()
+        )
+
+        similar_items = []
+        for doc in docs:
+            item = doc.to_dict()
+            if 'embedding' in item and item['embedding']:
+                similarity = cosine_similarity(query_embedding, item['embedding'])
+                if similarity > 0.4:  # Limiar menor para garantir que o conteúdo extra sempre seja incluído
+                    similar_items.append({
+                        'titulo': item.get('titulo'),
+                        'texto': item.get('texto_bruto', '')[:2000],
+                        'similarity': similarity
+                    })
+
+        similar_items.sort(key=lambda x: x['similarity'], reverse=True)
+
+        if similar_items:
+            context_parts.append("### [DOCUMENTOS EXTRAS CARREGADOS PARA ESTA AÇÃO]")
+            for item in similar_items[:5]:
+                context_parts.append(f"#### {item['titulo']}\n{item['texto']}")
+        elif docs:
+            # Se há docs mas nenhum passou no threshold, inclui os top 3 mesmo assim
+            all_items = []
+            for doc in docs:
+                item = doc.to_dict()
+                if item.get('texto_bruto'):
+                    all_items.append({'titulo': item.get('titulo'), 'texto': item.get('texto_bruto', '')[:2000]})
+            if all_items:
+                context_parts.append("### [DOCUMENTOS EXTRAS CARREGADOS PARA ESTA AÇÃO]")
+                for item in all_items[:3]:
+                    context_parts.append(f"#### {item['titulo']}\n{item['texto']}")
+
+    except Exception as e:
+        print(f"Erro no RAG de contexto extra: {e}")
+
+    return "\n\n".join(context_parts)
+
+
+@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=120)
+def processExtraContextFile(req: https_fn.CallableRequest):
+    """
+    Processa um arquivo de contexto extra (PDF ou texto) para uma ação específica.
+    Extrai o texto, salva em 'conhecimento' com extra_context_id e vetoriza automaticamente.
+    """
+    data = req.data
+    file_base64 = data.get('fileBase64')
+    filename = data.get('filename', 'arquivo')
+    extra_context_id = data.get('extraContextId')
+    mime_type = data.get('mimeType', 'application/octet-stream')
+
+    if not file_base64 or not extra_context_id:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="fileBase64 e extraContextId são obrigatórios."
+        )
+
+    db = get_db()
+    file_bytes = base64.b64decode(file_base64)
+
+    # Extração de texto baseada no tipo do arquivo
+    texto_bruto = ""
+    is_pdf = 'pdf' in mime_type.lower() or filename.lower().endswith('.pdf')
+
+    if is_pdf:
+        try:
+            import pdfplumber
+            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                texto_bruto = "\n\n".join(
+                    page.extract_text() or "" for page in pdf.pages
+                ).strip()
+        except Exception as e:
+            print(f"Erro ao extrair PDF '{filename}': {e}")
+            texto_bruto = ""
+    else:
+        # Arquivos de texto: TXT, MD, CSV, etc.
+        try:
+            texto_bruto = file_bytes.decode('utf-8').strip()
+        except UnicodeDecodeError:
+            texto_bruto = file_bytes.decode('latin-1', errors='replace').strip()
+
+    # Salva no Firestore
+    doc_id = str(uuid.uuid4())
+    tipo = 'pdf' if is_pdf else 'texto'
+    doc_data = {
+        'id': doc_id,
+        'titulo': filename,
+        'tipo_arquivo': tipo,
+        'texto_bruto': texto_bruto,
+        'extra_context_id': extra_context_id,
+        'base_id': None,
+        'tamanho': len(file_bytes),
+        'data_criacao': datetime.now(timezone.utc).isoformat(),
+        'origem': None,
+        'parent_id': None,
+    }
+    db.collection('conhecimento').document(doc_id).set(doc_data)
+
+    # Vetorização automática
+    vectorized = False
+    if texto_bruto:
+        try:
+            keys_doc = db.collection('system').document('api_keys').get()
+            api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+
+            if api_key:
+                genai = get_genai_module()
+                genai.configure(api_key=api_key)
+                # Limita a 10.000 chars para o embedding (modelo text-embedding-004)
+                embedding_result = genai.embed_content(
+                    model="models/text-embedding-004",
+                    content=texto_bruto[:10000],
+                    task_type="retrieval_document"
+                )
+                db.collection('conhecimento').document(doc_id).update({
+                    'embedding': embedding_result['embedding']
+                })
+                vectorized = True
+        except Exception as e:
+            print(f"Erro ao vetorizar contexto extra '{filename}': {e}")
+
+    return {'success': True, 'docId': doc_id, 'vectorized': vectorized}
+
+
 @https_fn.on_call()
+
+
 
 def transcreverAudio(req: https_fn.CallableRequest):
 
+
+
     """
+
+
 
     Recebe áudio em Base64, transcreve com Groq (Whisper) e refina com Gemini.
 
@@ -2605,13 +3070,745 @@ def start_file_indexing(item_id, item_data):
 
 
 
+
+
+
+
+import numpy as np
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def cosine_similarity(v1, v2):
+
+
+
+
+
+
+
+    """Calculates the cosine similarity between two vectors."""
+
+
+
+
+
+
+
+    return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=120)
+
+
+
+
+
+
+
+def findSimilarKnowledge(req: https_fn.CallableRequest):
+
+
+
+
+
+
+
+    """Finds similar knowledge items using vector search."""
+
+
+
+
+
+
+
+    import google.generativeai as genai
+
+
+
+
+
+
+
+    db = get_db()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    query_text = req.data.get('query_text')
+
+
+
+
+
+
+
+    base_id = req.data.get('base_id')
+
+
+
+
+
+
+
+    top_n = req.data.get('top_n', 5)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    if not query_text:
+
+
+
+
+
+
+
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="query_text é obrigatório.")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    try:
+
+
+
+
+
+
+
+        keys_doc = db.collection('system').document('api_keys').get()
+
+
+
+
+
+
+
+        GEMINI_API_KEY = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+
+
+
+
+
+
+
+        if not GEMINI_API_KEY:
+
+
+
+
+
+
+
+            raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION, message="Chave Gemini não configurada.")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        genai.configure(api_key=GEMINI_API_KEY)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        # 1. Generate embedding for the query
+
+
+
+
+
+
+
+        query_embedding_result = genai.embed_content(
+
+
+
+
+
+
+
+            model="models/text-embedding-004",
+
+
+
+
+
+
+
+            content=query_text,
+
+
+
+
+
+
+
+            task_type="retrieval_query"
+
+
+
+
+
+
+
+        )
+
+
+
+
+
+
+
+        query_embedding = query_embedding_result['embedding']
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        # 2. Fetch documents
+
+
+
+
+
+
+
+        docs_query = db.collection('conhecimento').where('embedding', '!=', None)
+
+
+
+
+
+
+
+        if base_id:
+
+
+
+
+
+
+
+            docs_query = docs_query.where('base_id', '==', base_id)
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+        docs = list(docs_query.stream())
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        if not docs:
+
+
+
+
+
+
+
+            return {'results': []}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        # 3. Compute cosine similarity in memory
+
+
+
+
+
+
+
+        results = []
+
+
+
+
+
+
+
+        for doc in docs:
+
+
+
+
+
+
+
+            item = doc.to_dict()
+
+
+
+
+
+
+
+            if 'embedding' in item and len(item['embedding']) > 0:
+
+
+
+
+
+
+
+                similarity = cosine_similarity(query_embedding, item['embedding'])
+
+
+
+
+
+
+
+                results.append({
+
+
+
+
+
+
+
+                    'id': doc.id,
+
+
+
+
+
+
+
+                    'titulo': item.get('titulo'),
+
+
+
+
+
+
+
+                    'resumo_tldr': item.get('resumo_tldr'),
+
+
+
+
+
+
+
+                    'texto_bruto': item.get('texto_bruto', '')[:500], # Truncate for response
+
+
+
+
+
+
+
+                    'similarity': similarity
+
+
+
+
+
+
+
+                })
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        # 4. Sort and get top N
+
+
+
+
+
+
+
+        results.sort(key=lambda x: x['similarity'], reverse=True)
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+        return {'results': results[:top_n]}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    except Exception as e:
+
+
+
+
+
+
+
+        print(f"Erro em findSimilarKnowledge: {e}")
+
+
+
+
+
+
+
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=str(e))
+
+
+
+
+
+
+
+@firestore_fn.on_document_updated(document="conhecimento/{itemId}")
+
+
+
+
+
+
+
+def on_knowledge_item_updated(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot]]):
+
+
+
+
+
+
+
+    """
+
+
+
+
+
+
+
+    Trigger to automatically vectorize a knowledge item when its text content is added or changed.
+
+
+
+    """
+
+
+
+    if not event.data.after or not event.data.after.exists:
+
+
+
+        return  # Document was deleted
+
+
+
+
+
+
+
+    after_data = event.data.after.to_dict() or {}
+
+
+
+    before_data = (event.data.before.to_dict() or {}) if event.data.before and event.data.before.exists else {}
+
+
+
+
+
+
+
+    text_after = after_data.get('texto_bruto')
+
+
+
+    text_before = before_data.get('texto_bruto')
+
+
+
+
+
+
+
+    # Vectorize if text content was added or changed.
+
+
+
+    if text_after and text_after != text_before:
+
+
+
+        import google.generativeai as genai
+
+
+
+        db = get_db()
+
+
+
+        
+
+
+
+        doc_ref = event.data.after.reference
+
+
+
+
+
+
+
+        try:
+
+
+
+            keys_doc = db.collection('system').document('api_keys').get()
+
+
+
+            GEMINI_API_KEY = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+
+
+
+            if not GEMINI_API_KEY:
+
+
+
+                print("Gemini API Key not found, skipping vectorization.")
+
+
+
+                return
+
+
+
+
+
+
+
+            genai.configure(api_key=GEMINI_API_KEY)
+
+
+
+            
+
+
+
+            embedding_result = genai.embed_content(
+
+
+
+                model="models/text-embedding-004",
+
+
+
+                content=text_after,
+
+
+
+                task_type="retrieval_document"
+
+
+
+            )
+
+
+
+            
+
+
+
+            doc_ref.update({'embedding': embedding_result['embedding']})
+
+
+
+            print(f"Successfully vectorized item {doc_ref.id}")
+
+
+
+            
+
+
+
+        except Exception as e:
+
+
+
+            print(f"Error during vectorization for {doc_ref.id}: {e}")
+
+
+
+
+
+
+
+
+
+
+
 @firestore_fn.on_document_created(document="conhecimento/{itemId}")
+
+
 
 def on_arquivo_adicionado(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]):
 
+
+
     """Trigger disparado quando um novo arquivo é adicionado"""
 
+
+
     if not event.data: return
+
+
 
     item_data = event.data.to_dict()
 
@@ -3099,7 +4296,10 @@ def askTaskAssistant(req: https_fn.CallableRequest):
 
     data = req.data or {}
     prompt = data.get('prompt')
-    history_context = data.get('historyContext') # Texto consolidado do diário de bordo
+    history_context = data.get('historyContext')
+    categoria = data.get('categoria')
+    rag_context_id = data.get('ragContext')
+    extra_context_id = data.get('extraContextId')
 
     if not isinstance(prompt, str) or not prompt.strip():
         raise https_fn.HttpsError(
@@ -3109,9 +4309,10 @@ def askTaskAssistant(req: https_fn.CallableRequest):
 
     try:
         db = get_db()
+
         keys_doc = db.collection('system').document('api_keys').get()
         gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
-        
+
         if not gemini_key:
             raise https_fn.HttpsError(
                 code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
@@ -3119,32 +4320,71 @@ def askTaskAssistant(req: https_fn.CallableRequest):
             )
 
         genai.configure(api_key=gemini_key)
-        # Usando modelo solicitado: gemini-2.5-flash-lite
         model = genai.GenerativeModel("gemini-2.5-flash-lite")
 
+        # --- CONHECIMENTO MESTRE (Manual do André) ---
+        manual_context = ""
+        if categoria:
+            master_docs = db.collection('conhecimento_mestre')\
+                .where('categoria', '==', categoria)\
+                .order_by('data_criacao', direction=firestore.Query.DESCENDING)\
+                .limit(3).stream()
+            manual_items = []
+            for m_doc in master_docs:
+                m = m_doc.to_dict()
+                manual_items.append(f"GUIA: {m.get('titulo')}\nCONTEÚDO:\n{m.get('conteudo')}")
+            if manual_items:
+                manual_context = "\n\n".join(manual_items)
+
+        # --- BASE RAG PRINCIPAL da ação ---
+        rag_context = ""
+        if rag_context_id and rag_context_id != "Nenhum":
+            try:
+                rag_context = retrieve_personalized_rag_context(db, genai, prompt, rag_context_id)
+            except Exception as e:
+                print(f"Erro ao recuperar RAG principal: {e}")
+
+        # --- DOCUMENTOS EXTRAS da ação ---
+        extra_rag_context = ""
+        if extra_context_id:
+            try:
+                extra_rag_context = retrieve_extra_context_rag(db, genai, prompt, extra_context_id)
+            except Exception as e:
+                print(f"Erro ao recuperar contexto extra: {e}")
+
         system_instruction = (
-            "Você é o assistente virtual da plataforma Hermes, focado em ajudar na execução de tarefas. "
-            "Sua base de conhecimento é estritamente o DIÁRIO DE BORDO da tarefa atual fornecido no contexto. "
-            "Responda perguntas de forma executiva, objetiva e profissional (pt-BR). "
-            "Se a informação não estiver no diário de bordo, informe que não possui registros sobre isso."
+            "Você é o HERMES, copiloto de execução de tarefas do André. "
+            "Você tem acesso a: (1) o contexto completo da ação (título, descrição, plano e diário), "
+            "(2) bases de conhecimento RAG personalizadas, "
+            "(3) documentos extras carregados para esta ação, "
+            "(4) manuais de procedimento padrão. "
+            "Seja executivo, preciso e profissional (pt-BR). "
+            "Quando gerar documentos longos (atas, ofícios, pareceres), produza o conteúdo completo e formatado."
         )
 
         full_prompt = f"""
-        CONTEXTO (DIÁRIO DE BORDO):
-        ---
-        {history_context if history_context else 'Nenhum registro encontrado no diário de bordo.'}
-        ---
+        === CONTEXTO DA AÇÃO ===
+        {history_context if history_context else 'Nenhum registro encontrado.'}
 
-        COMANDO DO USUÁRIO:
+        === BASE RAG PRINCIPAL ===
+        {rag_context if rag_context else 'Nenhuma base RAG selecionada.'}
+
+        === DOCUMENTOS EXTRAS DESTA AÇÃO ===
+        {extra_rag_context if extra_rag_context else 'Nenhum documento extra.'}
+
+        === MANUAL DE PROCEDIMENTOS ===
+        {manual_context if manual_context else 'Nenhum guia mestre para esta categoria.'}
+
+        === COMANDO DO USUÁRIO ===
         {prompt}
         """
 
         response = model.generate_content([system_instruction, full_prompt])
-        
+
         result = (response.text or "").strip()
         if not result:
-            result = "Não consegui analisar os logs para responder sua pergunta."
-            
+            result = "Não consegui gerar uma resposta. Tente reformular o comando."
+
         return {"result": result}
 
     except Exception as e:

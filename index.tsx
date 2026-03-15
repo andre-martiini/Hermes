@@ -10,7 +10,7 @@ import {
   formatDate, formatDateLocalISO, Sistema, SistemaStatus, WorkItem, WorkItemPhase,
   WorkItemPriority, QualityLog, WorkItemAudit, GoogleCalendarEvent,
   PoolItem, CustomNotification, HealthExam, ConhecimentoItem, UndoAction, HermesModalProps,
-  ShoppingItem, Projeto, SlideHistoryEntry
+  ShoppingItem, Projeto, SlideHistoryEntry, BaseConhecimento, TipoAcao
 } from './types';
 import HealthView from './HealthView';
 import { MeetingTranscriptionTool } from './src/components/tools/MeetingTranscriptionTool';
@@ -24,6 +24,7 @@ import FinanceView from './FinanceView';
 import DashboardView from './DashboardView';
 import KnowledgeView from './KnowledgeView';
 import ProjectsView from './ProjectsView';
+import RAGBasesView from './src/views/RAGBasesView';
 
 // Importações dos módulos extraídos pelo split.js
 import {
@@ -947,6 +948,7 @@ const App: React.FC = () => {
 
   // Knowledge State
   const [knowledgeItems, setKnowledgeItems] = useState<ConhecimentoItem[]>([]);
+  const [knowledgeBases, setKnowledgeBases] = useState<BaseConhecimento[]>([]);
   const [masterKnowledge, setMasterKnowledge] = useState<any[]>([]);
   // Shopping State
   const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>([]);
@@ -1211,6 +1213,10 @@ const App: React.FC = () => {
       setMasterKnowledge(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
+    const unsubKnowledgeBases = onSnapshot(collection(db, 'knowledge_bases'), (snapshot) => {
+      setKnowledgeBases(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as BaseConhecimento)));
+    });
+
     const unsubscribeSistemasAtivos = onSnapshot(doc(db, 'configuracoes', 'sistemas'), (docSnap) => {
       if (docSnap.exists()) {
         setSistemasAtivos(docSnap.data().lista || []);
@@ -1235,6 +1241,7 @@ const App: React.FC = () => {
       unsubHealthSettings();
       unsubKnowledge();
       unsubMasterKnowledge();
+      unsubKnowledgeBases();
       unsubscribeSistemasAtivos();
     };
   }, []);
@@ -1538,7 +1545,7 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude' | 'projetos'>('dashboard');
-  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'finance' | 'saude' | 'ferramentas' | 'sistemas-dev' | 'knowledge' | 'projects'>('dashboard');
+  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'finance' | 'saude' | 'ferramentas' | 'sistemas-dev' | 'knowledge' | 'projects' | 'rag-bases'>('dashboard');
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
   const [isSidebarRetracted, setIsSidebarRetracted] = useState(false);
   const [financeActiveTab, setFinanceActiveTab] = useState<'dashboard' | 'fixed'>('dashboard');
@@ -2851,6 +2858,44 @@ const App: React.FC = () => {
     }
   };
 
+  const handleUploadToRAGBase = async (file: File, baseId: string): Promise<void> => {
+    const item = await handleFileUploadToDrive(file);
+    if (item) {
+      const knowledgeItem: ConhecimentoItem = {
+        id: item.id,
+        titulo: item.nome || 'Sem título',
+        tipo_arquivo: (file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() : 'unknown') || 'unknown',
+        url_drive: item.valor,
+        tamanho: 0,
+        data_criacao: item.data_criacao,
+        origem: null,
+        parent_id: null,
+        base_id: baseId,
+      };
+      await setDoc(doc(db, 'conhecimento', item.id), knowledgeItem);
+      showToast("Arquivo enviado para a base RAG.", "success");
+    }
+  };
+
+  const handleAddRAGBaseLink = async (url: string, title: string, baseId: string): Promise<void> => {
+    try {
+      await addDoc(collection(db, 'conhecimento'), {
+        titulo: title,
+        tipo_arquivo: 'link',
+        url_drive: url,
+        tamanho: 0,
+        data_criacao: new Date().toISOString(),
+        origem: null,
+        parent_id: null,
+        base_id: baseId,
+      });
+      showToast("Link salvo na base RAG.", "success");
+    } catch (e) {
+      console.error(e);
+      showToast("Erro ao salvar link.", "error");
+    }
+  };
+
   const handleAddKnowledgeLink = async (url: string, title: string, destinationFolderId?: string | null) => {
     try {
       const destinationMetadata = resolveKnowledgeDestinationMetadata(destinationFolderId);
@@ -2886,6 +2931,53 @@ const App: React.FC = () => {
     } catch (e) {
       console.error(e);
       showToast("Erro ao salvar item.", "error");
+    }
+  };
+
+  const handleCreateBase = async (nome: string) => {
+    try {
+      await addDoc(collection(db, 'knowledge_bases'), {
+        nome,
+        descricao: '',
+        cor: '',
+        emoji: '',
+        data_criacao: new Date().toISOString(),
+        data_atualizacao: new Date().toISOString(),
+        configuracao_rag: {
+            incluir_diarios: true,
+            incluir_manual: true,
+            categorias_vinculadas: [],
+            tags_vinculadas: [],
+        },
+      });
+      showToast("Base de conhecimento criada!", "success");
+    } catch (e) {
+      console.error(e);
+      showToast("Erro ao criar base de conhecimento.", "error");
+    }
+  };
+
+  const handleUpdateBase = async (id: string, updates: Partial<BaseConhecimento>) => {
+    try {
+      await updateDoc(doc(db, 'knowledge_bases', id), {
+        ...updates,
+        data_atualizacao: new Date().toISOString(),
+      });
+      showToast("Base de conhecimento atualizada!", "success");
+    } catch (e) {
+      console.error(e);
+      showToast("Erro ao atualizar base de conhecimento.", "error");
+    }
+  };
+
+  const handleDeleteBase = async (id: string) => {
+    try {
+      // TODO: Add confirmation dialog
+      await deleteDoc(doc(db, 'knowledge_bases', id));
+      showToast("Base de conhecimento removida.", "info");
+    } catch (e) {
+      console.error(e);
+      showToast("Erro ao remover base de conhecimento.", "error");
     }
   };
 
@@ -4195,6 +4287,7 @@ const App: React.FC = () => {
                 { id: 'saude', label: 'Saúde', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>, active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
                 { id: 'sistemas', label: 'Sistemas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>, active: viewMode === 'sistemas-dev', onClick: () => { setActiveModule('acoes'); setViewMode('sistemas-dev'); } },
                 { id: 'conhecimento', label: 'Conhecimento', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>, active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
+                { id: 'rag-bases', label: 'Bases RAG', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>, active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
                 { id: 'ferramentas', label: 'Ferramentas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>, active: viewMode === 'ferramentas', onClick: () => { setActiveModule('acoes'); setViewMode('ferramentas'); setActiveFerramenta(null); } },
               ].map(item => (
                 <button
@@ -4334,7 +4427,7 @@ const App: React.FC = () => {
                       </div>
                     )}
 
-                    {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'projects' && (
+                    {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'projects' && (
                       <button
                         onClick={() => setIsCreateModalOpen(true)}
                         className="bg-slate-900 text-white p-1.5 rounded-lg md:rounded-xl shadow-lg hover:bg-slate-800 transition-all active:scale-95"
@@ -4436,6 +4529,7 @@ const App: React.FC = () => {
                       >
                         <h1 className="text-xl font-black tracking-tighter text-slate-900 uppercase">
                           {viewMode === 'projects' ? 'Projetos' :
+                            viewMode === 'rag-bases' ? 'Bases RAG' :
                             viewMode === 'knowledge' ? 'Conhecimento' :
                               viewMode === 'sistemas-dev' ? 'Sistemas' :
                                 viewMode === 'ferramentas' ? 'Ferramentas' :
@@ -4477,7 +4571,7 @@ const App: React.FC = () => {
                       </div>
                     )}
 
-                    {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'projects' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
+                    {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'projects' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
                       <nav className="flex bg-slate-100 p-1 rounded-lg md:rounded-xl border border-slate-200">
                         <button
                           onClick={() => {
@@ -4675,6 +4769,7 @@ const App: React.FC = () => {
                       { label: 'Saúde', active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
                       { label: 'Sistemas', active: viewMode === 'sistemas-dev', onClick: () => { setActiveModule('acoes'); setViewMode('sistemas-dev'); } },
                       { label: 'Conhecimento', active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
+                      { label: 'Bases RAG', active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
                       { label: 'Ferramentas', active: viewMode === 'ferramentas', onClick: () => { setActiveModule('acoes'); setViewMode('ferramentas'); setActiveFerramenta(null); } },
                     ].map((item, idx) => (
                       <button
@@ -5311,6 +5406,7 @@ const App: React.FC = () => {
                   <div className="fixed inset-0 z-[50] bg-slate-50 md:relative md:inset-auto md:z-0 md:bg-transparent">
                     <KnowledgeView
                       items={knowledgeItems}
+                      knowledgeBases={knowledgeBases}
                       onDeleteItem={async (id) => { await deleteDoc(doc(db, 'conhecimento', id)); }}
                       onUploadFile={handleUploadKnowledgeFile}
                       onAddLink={handleAddKnowledgeLink}
@@ -5323,14 +5419,42 @@ const App: React.FC = () => {
                       allWorkItems={workItems}
                       masterKnowledge={masterKnowledge}
                       onNavigateToOrigin={handleNavigateToOrigin}
+                      onCreateBase={handleCreateBase}
+                      onUpdateBase={handleUpdateBase}
+                      onDeleteBase={handleDeleteBase}
                     />
-                    <button 
+                    <button
                       onClick={() => setViewMode('dashboard')}
                       className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-2xl md:hidden z-[60]"
                     >
                       Voltar ao Painel
                     </button>
                   </div>
+
+                ) : viewMode === 'rag-bases' ? (
+                  <div className="fixed inset-0 z-[50] md:relative md:inset-auto md:z-0 h-full">
+                    <RAGBasesView
+                      bases={knowledgeBases}
+                      items={knowledgeItems}
+                      onCreateBase={handleCreateBase}
+                      onUpdateBase={handleUpdateBase}
+                      onDeleteBase={handleDeleteBase}
+                      onUploadFile={handleUploadToRAGBase}
+                      onAddLink={handleAddRAGBaseLink}
+                      onDeleteItem={async (id) => { await deleteDoc(doc(db, 'conhecimento', id)); }}
+                      onVectorizeItem={async (id) => {
+                        try {
+                          const fn = httpsCallable(functions, 'vectorizeKnowledgeItemCallable');
+                          await fn({ knowledgeId: id });
+                          showToast("Item vetorizado com sucesso!", "success");
+                        } catch (e) {
+                          showToast("Erro ao vetorizar item.", "error");
+                        }
+                      }}
+                      showConfirm={showAlert}
+                    />
+                  </div>
+
                 ) : viewMode === 'sistemas-dev' ? (
                   <div className="space-y-8 animate-in fade-in duration-500 pb-20">
                     {!selectedSystemId ? (
@@ -6670,6 +6794,7 @@ const App: React.FC = () => {
           isCreateModalOpen && (
             <TaskCreateModal
               unidades={unidades}
+              knowledgeBases={knowledgeBases}
               onSave={handleCreateTarefa}
               onClose={() => {
                 setIsCreateModalOpen(false);
@@ -6690,6 +6815,7 @@ const App: React.FC = () => {
                 task={selectedTask}
                 tarefas={tarefas}
                 appSettings={appSettings}
+                knowledgeBases={knowledgeBases}
                 onSave={handleUpdateTarefa}
                 onClose={() => setSelectedTask(null)}
                 showToast={showToast}

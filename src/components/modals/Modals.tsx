@@ -1,7 +1,9 @@
-﻿import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '@/firebase';
 import {
   Tarefa, Status, Categoria, EntregaInstitucional, DailyHabits,
-  AppSettings, HermesModalProps, CustomNotification
+  AppSettings, HermesModalProps, CustomNotification, TipoAcao, ActionPlanItem
 } from '@/types';
 import { formatDate, formatDateLocalISO } from '@/types';
 import { detectAreaFromTitle, callScrapeSipac } from '../../utils/helpers';
@@ -924,71 +926,616 @@ export const DailyHabitsModal = ({
     </div>
   );
 };
-export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialData }: { unidades: { id: string, nome: string }[], onSave: (data: Partial<Tarefa>) => void, onClose: () => void, showAlert: (title: string, message: string) => void, initialData?: Partial<Tarefa> }) => {
+
+const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+export const TaskCreateModal = ({ unidades, knowledgeBases = [], onSave, onClose, showAlert, initialData }: { unidades: { id: string, nome: string }[], knowledgeBases?: { id: string, nome: string }[], onSave: (data: Partial<Tarefa>) => void, onClose: () => void, showAlert: (title: string, message: string) => void, initialData?: Partial<Tarefa> }) => {
+  const [tipoAcao, setTipoAcao] = useState<TipoAcao>('fast');
+  const [origemIngestao, setOrigemIngestao] = useState<'manual' | 'whatsapp' | 'audio'>('manual');
+  const [ragContext, setRagContext] = useState('Nenhum');
+  const [isExtraContextOpen, setIsExtraContextOpen] = useState(false);
+  const [extraContext, setExtraContext] = useState('');
+  const [extraContextId] = useState<string>(() => crypto.randomUUID());
+  const [extraContextFiles, setExtraContextFiles] = useState<{ id: string; name: string; status: 'uploading' | 'ready' | 'error' }[]>([]);
+  const [inputText, setInputText] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+
   const [formData, setFormData] = useState({
     titulo: initialData?.titulo || '',
     data_limite: initialData?.data_limite || initialData?.data_inicio || formatDateLocalISO(new Date()),
-    data_criacao: new Date().toISOString(), // Actual creation timestamp
+    data_criacao: new Date().toISOString(),
     status: initialData?.status || 'em andamento' as Status,
-    categoria: initialData?.categoria || 'NÃO CLASSIFICADA' as Categoria,
+    categoria: initialData?.categoria || 'GERAL' as Categoria,
     notas: initialData?.notas || '',
+    descricao: initialData?.descricao || '',
     horario_inicio: initialData?.horario_inicio || '',
-    horario_fim: initialData?.horario_fim || ''
+    horario_fim: initialData?.horario_fim || '',
+    origem: 'manual' as any
   });
 
+  const [planoAcao, setPlanoAcao] = useState<ActionPlanItem[]>([]);
+  const [newChecklistItem, setNewChecklistItem] = useState('');
   const [autoClassified, setAutoClassified] = useState(false);
+
+  const recognitionRef = useRef<any>(null);
+
+  const handleUploadExtraFile = async (file: File) => {
+    const tempId = Math.random().toString(36).substring(2, 9);
+    setExtraContextFiles(prev => [...prev, { id: tempId, name: file.name, status: 'uploading' }]);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const fn = httpsCallable(functions, 'processExtraContextFile');
+      const result = await fn({ fileBase64: base64, filename: file.name, mimeType: file.type, extraContextId });
+      const docId = (result.data as any).docId;
+      setExtraContextFiles(prev => prev.map(f => f.id === tempId ? { ...f, id: docId, status: 'ready' } : f));
+    } catch {
+      setExtraContextFiles(prev => prev.map(f => f.id === tempId ? { ...f, status: 'error' } : f));
+    }
+  };
+
+  const startTranscription = (targetField: 'titulo' | 'inputText') => {
+    if (!SpeechRecognition) {
+      showAlert("Não suportado", "Seu navegador não suporta reconhecimento de voz.");
+      return;
+    }
+
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'pt-BR';
+    recognition.continuous = targetField === 'inputText';
+    recognition.interimResults = true;
+
+    recognition.onstart = () => setIsRecording(true);
+    recognition.onend = () => setIsRecording(false);
+    recognition.onerror = (event: any) => {
+      console.error("Erro STT:", event.error);
+      setIsRecording(false);
+    };
+
+    recognition.onresult = (event: any) => {
+      let transcript = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        transcript += event.results[i][0].transcript;
+      }
+      
+      if (targetField === 'titulo') {
+        setFormData(prev => ({ ...prev, titulo: transcript }));
+      } else {
+        setInputText(transcript);
+      }
+    };
+
+    recognition.start();
+    recognitionRef.current = recognition;
+  };
+
+  const handleGenerateWithIA = async () => {
+    if (!inputText.trim()) {
+      showAlert("Atenção", "Forneça algum conteúdo para processar.");
+      return;
+    }
+
+    setIsGenerating(true);
+    try {
+      const generateFunc = httpsCallable(functions, 'generate_task_with_ia');
+      const response = await generateFunc({
+        content: inputText,
+        origin: origemIngestao,
+        ragContext: ragContext,
+        extraContext: extraContext,
+        ...(extraContextFiles.some(f => f.status === 'ready') ? { extraContextId: extraContextId } : {})
+      });
+
+      const data = response.data as any;
+      if (data) {
+        setFormData(prev => ({
+          ...prev,
+          titulo: data.titulo || prev.titulo,
+          descricao: data.descricao || prev.descricao,
+          categoria: (data.categoria as Categoria) || prev.categoria,
+          status: (data.status as Status) || prev.status,
+          data_limite: data.data_limite || prev.data_limite
+        }));
+        if (data.plano_acao) {
+          setPlanoAcao(data.plano_acao.map((item: any) => ({
+            id: Math.random().toString(36).substring(2, 9),
+            text: item,
+            completed: false
+          })));
+        }
+        showAlert("Sucesso", "Demanda gerada com sucesso pela IA!");
+      }
+    } catch (error) {
+      console.error("Erro ao gerar com IA:", error);
+      showAlert("Erro", "Falha ao processar conteúdo com IA.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const addChecklistItem = () => {
+    if (!newChecklistItem.trim()) return;
+    const newItem: ActionPlanItem = {
+      id: Math.random().toString(36).substring(2, 9),
+      text: newChecklistItem.trim(),
+      completed: false
+    };
+    setPlanoAcao([...planoAcao, newItem]);
+    setNewChecklistItem('');
+  };
+
+  const removeChecklistItem = (id: string) => {
+    setPlanoAcao(planoAcao.filter(item => item.id !== id));
+  };
+
+  const toggleChecklistItem = (id: string) => {
+    setPlanoAcao(planoAcao.map(item => item.id === id ? { ...item, completed: !item.completed } : item));
+  };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
       <div className="bg-white w-full h-auto max-h-[95vh] md:max-w-md rounded-2xl md:rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col">
-        <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between flex-shrink-0">
-          <h3 className="text-lg font-black text-slate-900 tracking-tight">Nova Ação</h3>
-          <button onClick={onClose} className="p-1.5 hover:bg-slate-200 rounded-full transition-colors">
-            <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
+        {/* Header with Type Selector */}
+        <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col gap-4 flex-shrink-0">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-black text-slate-900 tracking-tight">Nova Ação</h3>
+            <button onClick={onClose} className="p-1.5 hover:bg-slate-200 rounded-full transition-colors">
+              <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+
+          <div className="flex bg-slate-200/50 p-1 rounded-xl">
+            <button
+              onClick={() => setTipoAcao('fast')}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${tipoAcao === 'fast' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              Fast Track
+            </button>
+            <button
+              onClick={() => setTipoAcao('deep')}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${tipoAcao === 'deep' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              Deep Work
+            </button>
+          </div>
         </div>
 
-        <div className="p-4 space-y-3 overflow-y-auto custom-scrollbar flex-1">
+        <div className="p-4 space-y-4 overflow-y-auto custom-scrollbar flex-1">
+          {/* Seção de Ingestão para Deep Work */}
+          {tipoAcao === 'deep' && (
+            <div className="space-y-4 animate-in slide-in-from-top-4 duration-300 border-b border-slate-100 pb-4">
+              <div className="flex bg-slate-100 p-1 rounded-xl gap-1">
+                {(['manual', 'whatsapp', 'audio'] as const).map((o) => (
+                  <button
+                    key={o}
+                    onClick={() => setOrigemIngestao(o)}
+                    className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${origemIngestao === o ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                  >
+                    {o === 'manual' ? 'Manual' : o === 'whatsapp' ? 'WhatsApp' : 'Áudio'}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Base RAG</label>
+                  <select
+                    value={ragContext}
+                    onChange={e => setRagContext(e.target.value)}
+                    className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                  >
+                    <option value="Nenhum">Nenhum</option>
+                    {knowledgeBases.map(base => (
+                      <option key={base.id} value={base.id}>{base.nome}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-end">
+                  <button
+                    onClick={() => setIsExtraContextOpen(!isExtraContextOpen)}
+                    className={`h-9 w-full rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${isExtraContextOpen ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                  >
+                    Contexto Extra
+                  </button>
+                </div>
+              </div>
+
+              {isExtraContextOpen && (
+                <div className="space-y-2 animate-in slide-in-from-top-2">
+                  {/* Área de drop/upload */}
+                  <div
+                    className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center cursor-pointer hover:border-slate-400 transition-colors"
+                    onClick={() => (document.getElementById('extra-ctx-file-input') as HTMLInputElement)?.click()}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => { e.preventDefault(); Array.from(e.dataTransfer.files).forEach(handleUploadExtraFile); }}
+                  >
+                    <input
+                      id="extra-ctx-file-input"
+                      type="file"
+                      className="hidden"
+                      accept=".pdf,.txt,.md,.csv,text/plain,application/pdf"
+                      multiple
+                      onChange={(e) => Array.from(e.target.files || []).forEach(handleUploadExtraFile)}
+                    />
+                    <svg className="w-5 h-5 mx-auto text-slate-300 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">PDF, TXT ou MD — arraste ou clique</p>
+                  </div>
+
+                  {/* Lista de arquivos */}
+                  {extraContextFiles.length > 0 && (
+                    <div className="space-y-1">
+                      {extraContextFiles.map(f => (
+                        <div key={f.id} className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2">
+                          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${f.status === 'ready' ? 'bg-emerald-400' : f.status === 'uploading' ? 'bg-amber-400 animate-pulse' : 'bg-rose-400'}`} />
+                          <span className="text-[10px] font-bold text-slate-700 flex-1 truncate">{f.name}</span>
+                          <span className="text-[9px] text-slate-400 flex-shrink-0">{f.status === 'uploading' ? 'Processando…' : f.status === 'ready' ? 'Pronto' : 'Erro'}</span>
+                          {f.status !== 'uploading' && (
+                            <button
+                              onClick={() => setExtraContextFiles(prev => prev.filter(x => x.id !== f.id))}
+                              className="text-slate-300 hover:text-rose-400 transition-colors"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Textarea para texto livre */}
+                  <textarea
+                    value={extraContext}
+                    onChange={e => setExtraContext(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs font-medium text-slate-700 min-h-[50px] resize-none"
+                    placeholder="Ou cole aqui texto adicional de contexto..."
+                  />
+                </div>
+              )}
+
+              {/* Área de Processamento Dinâmico */}
+              {origemIngestao !== 'manual' && (
+                <div className="space-y-3 p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                  {origemIngestao === 'whatsapp' ? (
+                    <textarea
+                      value={inputText}
+                      onChange={e => setInputText(e.target.value)}
+                      className="w-full bg-white border-none rounded-xl px-4 py-3 text-xs font-medium text-slate-700 min-h-[100px] resize-none focus:ring-1 focus:ring-slate-300"
+                      placeholder="Cole aqui as mensagens copiadas do WhatsApp..."
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center gap-4 py-4">
+                      <button
+                        onClick={() => startTranscription('inputText')}
+                        className={`w-16 h-16 rounded-full flex items-center justify-center transition-all ${isRecording ? 'bg-rose-500 scale-110 shadow-lg shadow-rose-200 animate-pulse' : 'bg-white text-slate-400 border border-slate-200 hover:border-slate-400'}`}
+                      >
+                        <svg className={`w-8 h-8 ${isRecording ? 'text-white' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                      </button>
+                      <div className="text-center">
+                        <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest">{isRecording ? 'Ouvindo...' : 'Clique para narrar'}</p>
+                        <p className="text-[9px] font-medium text-slate-400">{inputText || 'Sua fala aparecerá aqui...'}</p>
+                      </div>
+                    </div>
+                  )}
+                  <button
+                    onClick={handleGenerateWithIA}
+                    disabled={isGenerating || !inputText.trim()}
+                    className={`w-full py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isGenerating ? 'bg-slate-100 text-slate-400' : 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md hover:opacity-90'}`}
+                  >
+                    {isGenerating ? '✨ Processando Inteligência...' : '✨ Gerar Demanda com IA'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Área de Revisão - Título (Com Transcrição no Fast) */}
           <div className="space-y-1">
             <label htmlFor="task-title-input" className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Título da Tarefa</label>
-            <input
-              id="task-title-input"
-              type="text"
-              autoFocus
-              value={formData.titulo}
-              onChange={e => {
-                const newTitulo = e.target.value;
-                const detectedArea = detectAreaFromTitle(newTitulo);
-
-                setFormData({
-                  ...formData,
-                  titulo: newTitulo,
-                  // SÃ³ atualiza a categoria automaticamente se ainda não foi manualmente alterada
-                  categoria: autoClassified ? formData.categoria : detectedArea
-                });
-              }}
-              className="w-full bg-slate-100 border-none rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
-              placeholder="O que precisa ser feito?"
-            />
-            {formData.categoria !== 'NÃO CLASSIFICADA' && formData.categoria !== 'GERAL' && !autoClassified && (
-              <p className="text-[8px] font-bold text-blue-600 pl-1 flex items-center gap-1">
-                <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                Ãrea detectada automaticamente.
-              </p>
-            )}
+            <div className="relative group">
+              <input
+                id="task-title-input"
+                type="text"
+                autoFocus
+                value={formData.titulo}
+                onChange={e => {
+                  const newTitulo = e.target.value;
+                  const detectedArea = detectAreaFromTitle(newTitulo);
+                  setFormData({ ...formData, titulo: newTitulo, categoria: autoClassified ? formData.categoria : detectedArea });
+                }}
+                className="w-full bg-slate-100 border-none rounded-xl px-4 py-3 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans pr-12"
+                placeholder={tipoAcao === 'fast' ? "O que precisa ser feito agora?" : "Título da demanda profunda..."}
+              />
+              {tipoAcao === 'fast' && (
+                <button
+                  onClick={() => startTranscription('titulo')}
+                  className={`absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-lg transition-all ${isRecording ? 'bg-rose-100 text-rose-600' : 'text-slate-400 hover:bg-slate-200'}`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                </button>
+              )}
+            </div>
           </div>
+
+          {/* Demais campos de Revisão (Deep Work) */}
+          {(tipoAcao === 'deep' || (tipoAcao === 'fast' && formData.titulo)) && (
+            <div className={`space-y-4 ${tipoAcao === 'fast' ? 'opacity-40 hover:opacity-100 transition-opacity' : ''}`}>
+              {tipoAcao === 'deep' && (
+                <>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Descritivo / Contexto</label>
+                    <textarea
+                      value={formData.descricao}
+                      onChange={e => setFormData({ ...formData, descricao: e.target.value })}
+                      className="w-full bg-slate-100 border-none rounded-xl px-4 py-3 text-xs font-medium text-slate-700 focus:ring-2 focus:ring-slate-900 transition-all font-sans min-h-[80px] resize-none"
+                      placeholder="Detone o contexto desta ação..."
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Status</label>
+                      <select
+                        value={formData.status}
+                        onChange={e => setFormData({ ...formData, status: e.target.value as Status })}
+                        className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                      >
+                        <option value="em andamento">Em Andamento</option>
+                        <option value="stand-by">Stand-by</option>
+                        <option value="concluído">Concluído</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Tag (Classificação)</label>
+                      <select
+                        value={formData.categoria}
+                        onChange={e => {
+                          setFormData({ ...formData, categoria: e.target.value as Categoria });
+                          setAutoClassified(true);
+                        }}
+                        className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
+                      >
+                        <option value="GERAL">Geral</option>
+                        <option value="NÃO CLASSIFICADA">Não Classificada</option>
+                        {unidades.map(u => (
+                          <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Plano de Ação */}
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Plano de Ação (Checklist)</label>
+                    <div className="space-y-2">
+                      {planoAcao.map((item) => (
+                        <div key={item.id} className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100 group animate-in slide-in-from-left-2 transition-all">
+                          <button
+                            onClick={() => toggleChecklistItem(item.id)}
+                            className={`w-4 h-4 rounded border transition-all flex items-center justify-center ${item.completed ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-slate-300'}`}
+                          >
+                            {item.completed && <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>}
+                          </button>
+                          <span className={`text-[11px] font-bold flex-1 ${item.completed ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{item.text}</span>
+                          <button onClick={() => removeChecklistItem(item.id)} className="opacity-0 group-hover:opacity-100 p-1 text-slate-300 hover:text-rose-500 transition-all">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                          </button>
+                        </div>
+                      ))}
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={newChecklistItem}
+                          onChange={e => setNewChecklistItem(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && addChecklistItem()}
+                          className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-[11px] font-medium text-slate-700 focus:ring-1 focus:ring-purple-500 outline-none"
+                          placeholder="Novo passo no plano..."
+                        />
+                        <button onClick={addChecklistItem} className="bg-purple-100 text-purple-600 p-1.5 rounded-lg hover:bg-purple-200 transition-all">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Prazo (Comum) */}
+              <div className="space-y-1 border-t border-slate-100 pt-3">
+                <div className="flex items-center justify-between gap-3 pl-1">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Prazo Final</label>
+                  {formData.status === 'stand-by' && (
+                    <button type="button" onClick={() => setFormData({ ...formData, data_limite: '' })} className="text-[9px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-900">Sem prazo</button>
+                  )}
+                </div>
+                <input
+                  type="date"
+                  value={formData.data_limite}
+                  onChange={e => setFormData({ ...formData, data_limite: e.target.value })}
+                  className="w-full bg-slate-100 border-none rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer Actions */}
+        <div className="p-4 bg-slate-50 border-t border-slate-100 flex gap-3 flex-shrink-0">
+          <button onClick={onClose} className="flex-1 px-4 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all border border-slate-200">Cancelar</button>
+          <button
+            onClick={() => {
+              if (!formData.titulo || (!formData.data_limite && formData.status !== 'stand-by')) {
+                showAlert("Atenção", "Preencha o título e o prazo final.");
+                return;
+              }
+
+              onSave({
+                ...formData,
+                tipo_acao: tipoAcao,
+                plano_acao: planoAcao,
+                data_inicio: formData.data_limite || '',
+                origem: tipoAcao === 'deep' ? origemIngestao : 'manual',
+                base_conhecimento: ragContext,
+                ...(extraContextFiles.some(f => f.status === 'ready') ? { extra_context_id: extraContextId } : {})
+              });
+              onClose();
+            }}
+            className={`flex-1 ${tipoAcao === 'fast' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-purple-600 hover:bg-purple-700'} text-white px-4 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg transition-all`}
+          >
+            {tipoAcao === 'fast' ? 'Criar Fast Action' : 'Iniciar Deep Work'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showAlert, showConfirm, pgcEntregas = [] }: { unidades: { id: string, nome: string }[], task: Tarefa, onSave: (id: string, updates: Partial<Tarefa>) => void, onDelete: (id: string) => void, onClose: () => void, showAlert: (title: string, message: string) => void, showConfirm: (title: string, message: string, onConfirm: () => void) => void, pgcEntregas?: EntregaInstitucional[] }) => {
+  const [tipoAcao, setTipoAcao] = useState<TipoAcao>(task.tipo_acao || 'fast');
+  const [formData, setFormData] = useState({
+    titulo: task.titulo,
+    data_limite: task.data_limite === '-' ? (task.data_inicio || '') : (task.data_limite || task.data_inicio || ''),
+    data_criacao: task.data_criacao,
+    status: task.status,
+    categoria: task.categoria || 'NÃO CLASSIFICADA',
+    notas: task.notas || '',
+    descricao: task.descricao || '',
+    entregas_relacionadas: task.entregas_relacionadas || [],
+    horario_inicio: task.horario_inicio || '',
+    horario_fim: task.horario_fim || ''
+  });
+
+  const [planoAcao, setPlanoAcao] = useState<ActionPlanItem[]>(task.plano_acao || []);
+  const [newChecklistItem, setNewChecklistItem] = useState('');
+
+  const addChecklistItem = () => {
+    if (!newChecklistItem.trim()) return;
+    const newItem: ActionPlanItem = {
+      id: Math.random().toString(36).substring(2, 9),
+      text: newChecklistItem.trim(),
+      completed: false
+    };
+    setPlanoAcao([...planoAcao, newItem]);
+    setNewChecklistItem('');
+  };
+
+  const removeChecklistItem = (id: string) => {
+    setPlanoAcao(planoAcao.filter(item => item.id !== id));
+  };
+
+  const toggleChecklistItem = (id: string) => {
+    setPlanoAcao(planoAcao.map(item => item.id === id ? { ...item, completed: !item.completed } : item));
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="bg-white w-full h-auto max-h-[95vh] md:max-w-md flex flex-col rounded-2xl md:rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+        <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col gap-4 flex-shrink-0">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-black text-slate-900 tracking-tight">Editar Ação</h3>
+            <button onClick={onClose} className="p-1.5 hover:bg-slate-200 rounded-full transition-colors">
+              <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+
+          <div className="flex bg-slate-200/50 p-1 rounded-xl">
+            <button
+              onClick={() => setTipoAcao('fast')}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${tipoAcao === 'fast' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              Fast Track
+            </button>
+            <button
+              onClick={() => setTipoAcao('deep')}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${tipoAcao === 'deep' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              Deep Work
+            </button>
+          </div>
+        </div>
+
+        <div className="p-4 space-y-4 overflow-y-auto custom-scrollbar flex-1">
+          <div className="space-y-1">
+            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Título da Tarefa</label>
+            <input
+              type="text"
+              value={formData.titulo}
+              onChange={e => setFormData({ ...formData, titulo: e.target.value })}
+              className="w-full bg-slate-100 border-none rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+              placeholder="Título da demanda..."
+            />
+          </div>
+
+          {tipoAcao === 'deep' && (
+            <div className="space-y-4 animate-in slide-in-from-top-4 duration-300">
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Descritivo / Contexto</label>
+                <textarea
+                  value={formData.descricao}
+                  onChange={e => setFormData({ ...formData, descricao: e.target.value })}
+                  className="w-full bg-slate-100 border-none rounded-xl px-4 py-3 text-xs font-medium text-slate-700 focus:ring-2 focus:ring-slate-900 transition-all font-sans min-h-[80px] resize-none"
+                  placeholder="Detone o contexto desta ação..."
+                />
+              </div>
+
+              {/* Plano de Ação (Checklist) */}
+              <div className="space-y-2">
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Plano de Ação (Checklist)</label>
+                <div className="space-y-2">
+                  {planoAcao.map((item) => (
+                    <div key={item.id} className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100 group">
+                      <button
+                        onClick={() => toggleChecklistItem(item.id)}
+                        className={`w-4 h-4 rounded border transition-all flex items-center justify-center ${item.completed ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-slate-300'}`}
+                      >
+                        {item.completed && <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>}
+                      </button>
+                      <span className={`text-[11px] font-bold flex-1 ${item.completed ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{item.text}</span>
+                      <button
+                        onClick={() => removeChecklistItem(item.id)}
+                        className="opacity-0 group-hover:opacity-100 p-1 text-slate-300 hover:text-rose-500 transition-all"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                  ))}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newChecklistItem}
+                      onChange={e => setNewChecklistItem(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && addChecklistItem()}
+                      className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-[11px] font-medium text-slate-700 focus:ring-1 focus:ring-purple-500 outline-none"
+                      placeholder="Novo passo no plano..."
+                    />
+                    <button
+                      onClick={addChecklistItem}
+                      className="bg-purple-100 text-purple-600 p-1.5 rounded-lg hover:bg-purple-200 transition-all"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="space-y-1">
             <div className="flex items-center justify-between gap-3 pl-1">
               <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Prazo</label>
               {formData.status === 'stand-by' && (
-                <button
-                  type="button"
-                  onClick={() => setFormData({ ...formData, data_limite: '' })}
-                  className="text-[9px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-900"
-                >
-                  Sem prazo
-                </button>
+                <button type="button" onClick={() => setFormData({ ...formData, data_limite: '' })} className="text-[9px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-900">Sem prazo</button>
               )}
             </div>
             <input
@@ -997,30 +1544,6 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
               onChange={e => setFormData({ ...formData, data_limite: e.target.value })}
               className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
             />
-            {formData.status === 'stand-by' && (
-              <p className="text-[10px] font-bold text-slate-400 pl-1">Ações em stand-by podem ficar sem data definida.</p>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Hora Início</label>
-              <input
-                type="time"
-                value={formData.horario_inicio}
-                onChange={e => setFormData({ ...formData, horario_inicio: e.target.value })}
-                className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Hora Fim</label>
-              <input
-                type="time"
-                value={formData.horario_fim}
-                onChange={e => setFormData({ ...formData, horario_fim: e.target.value })}
-                className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
-              />
-            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -1037,152 +1560,7 @@ export const TaskCreateModal = ({ unidades, onSave, onClose, showAlert, initialD
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Tag (Classificação)</label>
-              <select
-                value={formData.categoria}
-                onChange={e => {
-                  setFormData({ ...formData, categoria: e.target.value as Categoria });
-                  setAutoClassified(true); // Marca que o usuário alterou manualmente
-                }}
-                className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
-              >
-                <option value="GERAL">Geral</option>
-                <option value="NÃO CLASSIFICADA">Não Classificada</option>
-                <option value="CLC">CLC</option>
-                <option value="ASSISTÊNCIA">Assistência Estudantil</option>
-                {unidades.filter(u => u.nome !== 'CLC' && u.nome !== 'Assistência Estudantil').map(u => (
-                  <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <div className="p-4 bg-slate-50 border-t border-slate-100 flex gap-3 flex-shrink-0">
-          <button onClick={onClose} className="flex-1 px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all border border-slate-200">Cancelar</button>
-          <button
-            onClick={() => {
-              if (!formData.titulo || (!formData.data_limite && formData.status !== 'stand-by')) {
-                showAlert("Atenção", "Preencha o título e o prazo final, ou use stand-by para ações sem prazo.");
-                return;
-              }
-
-              let finalNotes = formData.notas;
-              if (formData.categoria !== 'NÃO CLASSIFICADA') {
-                const tagStr = `Tag: ${formData.categoria}`;
-                finalNotes = finalNotes ? `${finalNotes}\n\n${tagStr}` : tagStr;
-              }
-
-              onSave({
-                ...formData,
-                data_inicio: formData.data_limite || '',
-                notas: finalNotes,
-                data_criacao: new Date().toISOString()
-              });
-              onClose();
-            }}
-            className="flex-1 bg-blue-600 text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
-          >
-            Criar Ação
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showAlert, showConfirm, pgcEntregas = [] }: { unidades: { id: string, nome: string }[], task: Tarefa, onSave: (id: string, updates: Partial<Tarefa>) => void, onDelete: (id: string) => void, onClose: () => void, showAlert: (title: string, message: string) => void, showConfirm: (title: string, message: string, onConfirm: () => void) => void, pgcEntregas?: EntregaInstitucional[] }) => {
-  const [formData, setFormData] = useState({
-    titulo: task.titulo,
-    data_limite: task.data_limite === '-' ? (task.data_inicio || '') : (task.data_limite || task.data_inicio || ''),
-    data_criacao: task.data_criacao,
-    status: task.status,
-    categoria: task.categoria || 'NÃO CLASSIFICADA',
-    notas: task.notas || '',
-    entregas_relacionadas: task.entregas_relacionadas || [],
-    horario_inicio: task.horario_inicio || '',
-    horario_fim: task.horario_fim || ''
-  });
-
-  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className="bg-white w-full h-auto max-h-[95vh] md:max-w-md flex flex-col rounded-2xl md:rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-        <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between flex-shrink-0">
-          <h3 className="text-lg font-black text-slate-900 tracking-tight">Editar Demanda</h3>
-          <button onClick={onClose} className="p-1.5 hover:bg-slate-200 rounded-full transition-colors">
-            <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-
-        <div className="p-4 space-y-3 overflow-y-auto custom-scrollbar flex-1">
-          <div className="space-y-1">
-            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Título da Tarefa</label>
-            <input
-              type="text"
-              value={formData.titulo}
-              onChange={e => setFormData({ ...formData, titulo: e.target.value })}
-              className="w-full bg-slate-100 border-none rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
-              placeholder="Título da demanda..."
-            />
-          </div>
-
-          <div className="space-y-1">
-            <div className="flex items-center justify-between gap-3 pl-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Prazo</label>
-              {formData.status === 'stand-by' && (
-                <button type="button" onClick={() => setFormData({ ...formData, data_limite: '' })} className="text-[9px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-900">Sem prazo</button>
-              )}
-            </div>
-            <input
-              type="date"
-              value={formData.data_limite}
-              onChange={e => setFormData({ ...formData, data_limite: e.target.value })}
-              className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
-            />
-            {formData.status === 'stand-by' && (
-              <p className="text-[10px] font-bold text-slate-400 pl-1">Ações em stand-by podem ficar sem data definida.</p>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Hora Início</label>
-              <input
-                type="time"
-                value={formData.horario_inicio}
-                onChange={e => setFormData({ ...formData, horario_inicio: e.target.value })}
-                className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Hora Fim</label>
-              <input
-                type="time"
-                value={formData.horario_fim}
-                onChange={e => setFormData({ ...formData, horario_fim: e.target.value })}
-                className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Status</label>
-            <select
-              value={formData.status}
-              onChange={e => setFormData({ ...formData, status: e.target.value as Status })}
-              className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all"
-            >
-              <option value="em andamento">Em Andamento</option>
-              <option value="stand-by">Stand-by</option>
-              <option value="concluído">Concluído</option>
-            </select>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3">
-            <div className="space-y-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Tag (Classificação)</label>
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Tag</label>
               <select
                 value={formData.categoria}
                 onChange={e => setFormData({ ...formData, categoria: e.target.value as Categoria })}
@@ -1197,22 +1575,6 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
                 ))}
               </select>
             </div>
-
-            {(formData.categoria === 'CLC' || formData.categoria === 'ASSISTÊNCIA' || formData.categoria === 'ASSISTÊNCIA ESTUDANTIL') && (
-              <div className="space-y-1 animate-in fade-in slide-in-from-top-2">
-                <label className="text-[9px] font-black text-blue-600 uppercase tracking-widest pl-1">Vincular ao PGD</label>
-                <select
-                  value={formData.entregas_relacionadas[0] || ''}
-                  onChange={e => setFormData({ ...formData, entregas_relacionadas: e.target.value ? [e.target.value] : [] })}
-                  className="w-full bg-blue-50 border-blue-100 rounded-xl px-4 py-2 text-[10px] font-bold text-blue-900 focus:ring-2 focus:ring-blue-500 transition-all"
-                >
-                  <option value="">Não vinculado ao PGD</option>
-                  {pgcEntregas.map(e => (
-                    <option key={e.id} value={e.id}>{e.entrega}</option>
-                  ))}
-                </select>
-              </div>
-            )}
           </div>
         </div>
 
@@ -1220,13 +1582,18 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
           <button
             onClick={() => {
               if (!formData.titulo || (!formData.data_limite && formData.status !== 'stand-by')) {
-                showAlert("Atenção", "Preencha o título e o prazo final, ou use stand-by para ações sem prazo.");
+                showAlert("Atenção", "Preencha o título e o prazo final.");
                 return;
               }
-              onSave(task.id, { ...formData, data_inicio: formData.data_limite || '' });
+              onSave(task.id, {
+                ...formData,
+                tipo_acao: tipoAcao,
+                plano_acao: planoAcao,
+                data_inicio: formData.data_limite || ''
+              });
               onClose();
             }}
-            className="w-full md:flex-1 bg-slate-900 text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all order-1 md:order-2"
+            className={`w-full md:flex-1 ${tipoAcao === 'fast' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-purple-600 hover:bg-purple-700'} text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg transition-all order-1 md:order-2`}
           >
             Salvar Alterações
           </button>

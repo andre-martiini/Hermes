@@ -1,4 +1,4 @@
-﻿
+
 export type Status = 'em andamento' | 'stand-by' | 'concluído';
 export type Prioridade = 'alta' | 'média' | 'baixa';
 
@@ -16,6 +16,14 @@ export interface PoolItem {
     nome?: string; // Nome do arquivo ou rótulo do link
     data_criacao: string;
     drive_file_id?: string;
+}
+
+export type TipoAcao = 'fast' | 'deep';
+
+export interface ActionPlanItem {
+    id: string;
+    text: string;
+    completed: boolean;
 }
 
 export interface Tarefa {
@@ -47,6 +55,11 @@ export interface Tarefa {
     ordem?: number;
     reminder_at?: string; // ISO date string for reminder
     reminder_sent?: boolean;
+    tipo_acao?: TipoAcao;
+    plano_acao?: ActionPlanItem[];
+    origem?: 'manual' | 'audio' | 'whatsapp' | 'google';
+    base_conhecimento?: string;
+    extra_context_id?: string;
 }
 
 export interface AtividadeRealizada {
@@ -289,13 +302,32 @@ export interface AppSettings {
     }
 }
 
-export const formatDate = (dateStr: string) => {
-    if (!dateStr || dateStr === "-" || dateStr === "0000-00-00" || dateStr.trim() === "") return 'Sem Data';
-    const parts = dateStr.split('-');
-    if (parts.length !== 3) return dateStr;
+export const formatDate = (dateStr: any) => {
+    if (!dateStr || dateStr === "-" || dateStr === "0000-00-00") return 'Sem Data';
+    
+    let actualDateStr = "";
+    if (typeof dateStr === 'string') {
+        actualDateStr = dateStr;
+    } else if (dateStr && typeof dateStr === 'object') {
+        // Handle Firestore Timestamp
+        if (dateStr.seconds) {
+            actualDateStr = formatDateLocalISO(new Date(dateStr.seconds * 1000));
+        } else if (dateStr instanceof Date) {
+            actualDateStr = formatDateLocalISO(dateStr);
+        } else {
+            return 'Data Inválida';
+        }
+    } else {
+        return 'Sem Data';
+    }
+
+    if (actualDateStr.trim() === "") return 'Sem Data';
+
+    const parts = actualDateStr.split('-');
+    if (parts.length !== 3) return actualDateStr;
     const [year, month, day] = parts.map(Number);
     const date = new Date(year, month - 1, day);
-    if (isNaN(date.getTime())) return dateStr;
+    if (isNaN(date.getTime())) return actualDateStr;
     const dayOfWeek = new Intl.DateTimeFormat('pt-BR', { weekday: 'long' }).format(date);
     const capitalizedDay = dayOfWeek.charAt(0).toUpperCase() + dayOfWeek.slice(1);
     return `${parts[2]}/${parts[1]}/${parts[0]} (${capitalizedDay})`;
@@ -380,14 +412,16 @@ export interface GoogleCalendarEvent {
 export interface ConhecimentoItem {
     id: string;
     titulo: string;
-    tipo_arquivo: string; // pdf, imagem, doc, link, apresentacao
+    tipo_arquivo: string; // pdf, imagem, doc, link, apresentacao, nota, mensagem
     url_drive: string;
     tamanho: number;
     data_criacao: string;
+    data_atualizacao?: string;
     texto_bruto?: string;
     resumo_tldr?: string;
     tags?: string[];
     categoria?: string;
+    base_id?: string; // Link to a specific personalized RAG base
     origem?: {
         modulo: string;
         id_origem: string;
@@ -397,6 +431,23 @@ export interface ConhecimentoItem {
     is_folder?: boolean;
     orphan_action_title?: string;
     fileHandle?: any;
+}
+
+export interface BaseConhecimento {
+    id: string;
+    nome: string;
+    descricao?: string;
+    cor?: string;
+    emoji?: string;
+    data_criacao: string;
+    data_atualizacao: string;
+    configuracao_rag: {
+        incluir_diarios: boolean;
+        incluir_manual: boolean;
+        categorias_vinculadas: string[];
+        tags_vinculadas: string[];
+    };
+    contagem_elementos?: number;
 }
 
 export interface UndoAction {

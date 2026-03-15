@@ -8,3 +8,4 @@ google-generativeai>=0.8.0
 requests
 google-cloud-pubsub
 google-auth
+pdfplumber>=0.11.0

@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { AppSettings, Categoria } from '../../types';
 import { functions } from '../../firebase';
 import { httpsCallable } from 'firebase/functions';
