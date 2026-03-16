@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Tarefa, AppSettings, PoolItem, ConhecimentoItem, Acompanhamento, ActionPlanItem,
-  BaseConhecimento, formatDate, formatDateLocalISO
+  ChatMessage, BaseConhecimento, formatDate, formatDateLocalISO
 } from '../../types';
 import { normalizeStatus } from '../utils/helpers';
 import { buildDiaryRichNote, ensureHttpUrl, getRenamedFileName, parseDiaryRichNote } from '../utils/diaryEntries';
@@ -85,6 +87,12 @@ export const TaskExecutionView = ({
   onSkipGlobalPhase: handleSkipPhase
 }: TaskExecutionViewProps) => {
 
+  // ─── Derived Data ─────────────────────────────────────────────
+  const currentTaskData = useMemo(() =>
+    tarefas.find(t => t.id === task.id) || task,
+    [tarefas, task.id, task]
+  );
+
   // ─── States ───────────────────────────────────────────────────
   const [mobileTab, setMobileTab] = useState<MobileTab>('diario');
   const [newFollowUp, setNewFollowUp] = useState('');
@@ -94,13 +102,22 @@ export const TaskExecutionView = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Chat & Artifacts
-  const [chatMessages, setChatMessages] = useState<{ role: 'user' | 'assistant'; content: string; isArtifact?: boolean }[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(currentTaskData.chat_history || []);
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [showArtifacts, setShowArtifacts] = useState(false);
   const [copiedArtifactId, setCopiedArtifactId] = useState<string | null>(null);
+  const [isChatFocused, setIsChatFocused] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setChatMessages(currentTaskData.chat_history || []);
+  }, [currentTaskData.id]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
 
   // Inline editing
   const [editingStatus, setEditingStatus] = useState(false);
@@ -139,11 +156,8 @@ export const TaskExecutionView = ({
   const audioChunksRef = useRef<Blob[]>([]);
   const diaryEndRef = useRef<HTMLDivElement>(null);
 
-  // ─── Derived Data ─────────────────────────────────────────────
-  const currentTaskData = useMemo(() =>
-    tarefas.find(t => t.id === task.id) || task,
-    [tarefas, task.id, task]
-  );
+  const isBreakActive = appSettings.pomodoro?.enabled && pomodoroMode === 'break' && isTimerRunning;
+  const isDark = isTimerRunning;
 
   const progressPercent = useMemo(() => {
     const items = currentTaskData.plano_acao || [];
@@ -151,13 +165,6 @@ export const TaskExecutionView = ({
     const done = items.filter(i => i.completed).length;
     return Math.round((done / items.length) * 100);
   }, [currentTaskData.plano_acao]);
-
-  const isBreakActive = appSettings.pomodoro?.enabled && pomodoroMode === 'break' && isTimerRunning;
-  const isDark = isTimerRunning;
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
 
   // ─── Timer Formatter ──────────────────────────────────────────
   const formatTimer = (s: number) => {
@@ -175,13 +182,26 @@ export const TaskExecutionView = ({
     if (!item) return;
     const newCompleted = !item.completed;
     const updated = items.map(i => i.id === itemId ? { ...i, completed: newCompleted } : i);
-    const systemEntry: Acompanhamento = {
-      data: new Date().toISOString(),
-      nota: `✅ Sistema: Subtarefa "${item.text}" ${newCompleted ? 'concluída' : 'reaberta'}.`
-    };
+    
+    let updatedAcompanhamento = [...(currentTaskData.acompanhamento || [])];
+    
+    if (newCompleted) {
+      const systemEntry: Acompanhamento = {
+        data: new Date().toISOString(),
+        nota: `✅ Sistema: Subtarefa "${item.text}" concluída.`
+      };
+      updatedAcompanhamento.push(systemEntry);
+    } else {
+      const targetNote = `✅ Sistema: Subtarefa "${item.text}" concluída.`;
+      const lastIndex = updatedAcompanhamento.map(e => e.nota).lastIndexOf(targetNote);
+      if (lastIndex !== -1) {
+        updatedAcompanhamento.splice(lastIndex, 1);
+      }
+    }
+    
     onSave(task.id, {
       plano_acao: updated,
-      acompanhamento: [...(currentTaskData.acompanhamento || []), systemEntry]
+      acompanhamento: updatedAcompanhamento
     });
   };
 
@@ -293,8 +313,9 @@ export const TaskExecutionView = ({
     if (mediaRecorderRef.current && isRecording) { mediaRecorderRef.current.stop(); setIsRecording(false); }
   };
 
-  const handleProcessAudio = async (audioBlob: Blob) => {
+  const handleProcessAudio = async (audioBlob: Blob, target: 'diary' | 'chat' = 'diary') => {
     setIsProcessingTranscription(true);
+    const setter = target === 'chat' ? setChatInput : setNewFollowUp;
     try {
       const reader = new FileReader();
       reader.readAsDataURL(audioBlob);
@@ -304,7 +325,7 @@ export const TaskExecutionView = ({
           const fn = httpsCallable(functions, 'transcreverAudio');
           const res = await fn({ audioBase64: b64 });
           const data = res.data as { raw: string; refined: string };
-          if (data.refined) setNewFollowUp(prev => prev + (prev ? '\n' : '') + data.refined);
+          if (data.refined) setter(prev => prev + (prev ? '\n' : '') + data.refined);
         } catch { showToast('Erro ao processar áudio.', 'error'); }
         finally { setIsProcessingTranscription(false); }
       };
@@ -381,20 +402,69 @@ export const TaskExecutionView = ({
     (currentTaskData.acompanhamento || []).slice(-20).map(a => `[${new Date(a.data).toLocaleString('pt-BR')}] ${a.nota}`).join('\n')
   ].join('\n');
 
+  const handleApplyProposedPlan = (proposedItems: ActionPlanItem[]) => {
+    const successMsg: ChatMessage = { role: 'assistant', content: '✅ Plano de ação atualizado com sucesso!' };
+    const newHistory = [...chatMessages, successMsg];
+    onSave(task.id, { 
+      plano_acao: proposedItems,
+      chat_history: newHistory
+    });
+    setChatMessages(newHistory);
+    showToast('Plano de ação atualizado!', 'success');
+  };
+
   const sendChatMessage = async (messageText: string, asArtifact = false) => {
     if (!messageText.trim() || isChatLoading) return;
-    setChatMessages(prev => [...prev, { role: 'user', content: messageText }]);
+    
+    const userMsg: ChatMessage = { role: 'user', content: messageText };
+    const historyWithUser = [...chatMessages, userMsg];
+    setChatMessages(historyWithUser);
     setIsChatLoading(true);
+    
     try {
       const fn = httpsCallable(functions, 'askTaskAssistant');
+      
+      const customPrompt = `
+        Comando: ${messageText}
+        ---
+        IMPORTANTE: Se o usuário pedir para criar, alterar ou sugerir um plano de ação, retorne sua sugestão normal no texto E TAMBÉM inclua no final da sua resposta um bloco JSON exatamente assim:
+        [PROPOSAL]
+        [
+          {"id": "uuid1", "text": "Passo 1", "completed": false},
+          {"id": "uuid2", "text": "Passo 2", "completed": false}
+        ]
+        [/PROPOSAL]
+        Use IDs únicos (pode ser timestamps ou strings aleatórias). Preserve os itens que já estão concluídos se fizer sentido.
+      `;
+
       const res = await fn({
-        prompt: messageText,
+        prompt: customPrompt,
         historyContext: buildHistoryContext(),
         categoria: task.categoria,
         ragContext: currentTaskData.base_conhecimento,
         extraContextId: currentTaskData.extra_context_id,
       });
-      const result = (res.data as any).result || '';
+      
+      let result = (res.data as any).result || '';
+      let proposedPlan: ActionPlanItem[] | undefined = undefined;
+
+      // Detect proposal
+      const proposalMatch = result.match(/\[PROPOSAL\]([\s\S]*?)\[\/PROPOSAL\]/);
+      if (proposalMatch) {
+        try {
+          proposedPlan = JSON.parse(proposalMatch[1].trim());
+          result = result.replace(/\[PROPOSAL\][\s\S]*?\[\/PROPOSAL\]/, '').trim();
+        } catch (e) {
+          console.error("Erro ao processar proposta de plano:", e);
+        }
+      }
+
+      const assistantMsg: ChatMessage = { 
+        role: 'assistant', 
+        content: asArtifact ? '📄 Artefato gerado e salvo no painel de Artefatos.' + (proposedPlan ? '\n\nO copiloto também sugeriu uma atualização no plano de ação.' : '') : result,
+        proposedPlan 
+      };
+
       if (asArtifact) {
         const artifact: Artifact = {
           id: Date.now().toString(),
@@ -404,16 +474,22 @@ export const TaskExecutionView = ({
         };
         setArtifacts(prev => [...prev, artifact]);
         setShowArtifacts(true);
-        setChatMessages(prev => [...prev, { role: 'assistant', content: '📄 Artefato gerado e salvo no painel de Artefatos.', isArtifact: true }]);
-        // Auto diary entry for AI
+        
         const aiEntry: Acompanhamento = {
           data: new Date().toISOString(),
           nota: `🤖 IA: ${artifact.title} — documento gerado pelo copiloto.`
         };
-        onSave(task.id, { acompanhamento: [...(currentTaskData.acompanhamento || []), aiEntry] });
+        
+        onSave(task.id, { 
+          acompanhamento: [...(currentTaskData.acompanhamento || []), aiEntry],
+          chat_history: [...historyWithUser, assistantMsg]
+        });
       } else {
-        setChatMessages(prev => [...prev, { role: 'assistant', content: result }]);
+        onSave(task.id, { 
+          chat_history: [...historyWithUser, assistantMsg]
+        });
       }
+      setChatMessages([...historyWithUser, assistantMsg]);
     } catch {
       showToast('Erro ao consultar o Copiloto.', 'error');
     } finally {
@@ -980,14 +1056,61 @@ export const TaskExecutionView = ({
                 </div>
               )}
               {chatMessages.map((msg, i) => (
-                <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[90%] px-3 py-2.5 rounded-2xl text-xs font-medium leading-relaxed shadow-sm ${msg.role === 'user'
+                <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                  <div className={`max-w-[100%] px-3 py-2.5 rounded-2xl text-xs font-medium leading-relaxed shadow-sm ${msg.role === 'user'
                     ? isDark ? 'bg-blue-600 text-white rounded-br-none' : 'bg-slate-900 text-white rounded-br-none'
                     : msg.isArtifact
                       ? isDark ? 'bg-indigo-500/20 text-indigo-200 border border-indigo-500/30 rounded-bl-none' : 'bg-indigo-50 text-indigo-800 border border-indigo-200 rounded-bl-none'
                       : isDark ? 'bg-white/10 text-white/80 rounded-bl-none' : 'bg-blue-50 text-slate-700 rounded-bl-none'
                   }`}>
-                    {msg.content}
+                    <ReactMarkdown 
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        p: ({node, ...props}) => <p className="mb-2 last:mb-0" {...props} />,
+                        ul: ({node, ...props}) => <ul className="list-disc ml-4 mb-2" {...props} />,
+                        ol: ({node, ...props}) => <ol className="list-decimal ml-4 mb-2" {...props} />,
+                        li: ({node, ...props}) => <li className="mb-0.5" {...props} />,
+                        a: ({node, ...props}) => <a className="text-blue-400 underline hover:text-blue-300" target="_blank" rel="noopener noreferrer" {...props} />,
+                        strong: ({node, ...props}) => <strong className="font-bold text-emerald-400" {...props} />,
+                      }}
+                    >
+                      {msg.content}
+                    </ReactMarkdown>
+
+                    {msg.proposedPlan && (
+                      <div className={`mt-3 p-3 rounded-xl border ${isDark ? 'bg-black/20 border-white/10' : 'bg-white/50 border-blue-200'}`}>
+                        <p className="text-[10px] font-black uppercase tracking-widest mb-2 flex items-center gap-2">
+                          <svg className="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                          Proposta de Plano de Ação
+                        </p>
+                        <div className="space-y-1.5 mb-3">
+                          {msg.proposedPlan.map((item, idx) => (
+                            <div key={idx} className="flex items-start gap-2 text-[10px]">
+                              <span className="shrink-0 w-4 h-4 rounded bg-blue-500/20 text-blue-300 flex items-center justify-center text-[8px] font-bold">{idx + 1}</span>
+                              <span className={isDark ? 'text-white/70' : 'text-slate-600'}>{item.text}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => handleApplyProposedPlan(msg.proposedPlan!)}
+                            className="flex-1 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-black uppercase tracking-widest transition-all"
+                          >
+                            Aplicar Alterações
+                          </button>
+                          <button 
+                            onClick={() => {
+                              const updatedMessages = [...chatMessages];
+                              updatedMessages[i] = { ...updatedMessages[i], proposedPlan: undefined };
+                              setChatMessages(updatedMessages);
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-white/5 text-white/40 hover:bg-white/10' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                          >
+                            Recusar
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -1006,15 +1129,36 @@ export const TaskExecutionView = ({
             {/* Chat input */}
             <div className={`shrink-0 p-3 border-t ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
               <div className="flex gap-2">
-                <input
-                  type="text"
+                <textarea
                   value={chatInput}
                   onChange={e => setChatInput(e.target.value)}
+                  onFocus={() => setIsChatFocused(true)}
+                  onBlur={() => setIsChatFocused(false)}
                   onKeyDown={e => {
                     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); }
                   }}
+                  onPaste={(e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+                    const pastedText = e.clipboardData.getData('text');
+                    if (pastedText && /\[\d{2}:\d{2}, \d{2}\/\d{2}\/\d{4}\]/.test(pastedText)) {
+                      e.preventDefault();
+                      const cleaned = pastedText.replace(/\[\d{2}:\d{2}, \d{2}\/\d{2}\/\d{4}\][^:]+:\s*/g, '').trim();
+                      setChatInput(prev => prev ? prev + '\n' + cleaned : cleaned);
+                      return;
+                    }
+                    
+                    if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+                      const filesArray = Array.from(e.clipboardData.files);
+                      const audioFile = filesArray.find(f => f.type.startsWith('audio/') || f.name.endsWith('.ogg') || f.name.endsWith('.opus') || f.name.endsWith('.m4a'));
+                      if (audioFile) {
+                        e.preventDefault();
+                        handleProcessAudio(audioFile, 'chat');
+                      }
+                    }
+                  }}
                   placeholder="Pergunte ao copiloto…"
-                  className={`flex-1 px-4 py-2.5 rounded-xl text-xs font-medium outline-none border focus:ring-2 focus:ring-blue-500 transition-all ${isDark ? 'bg-white/10 border-white/10 text-white placeholder:text-white/30' : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400'}`}
+                  className={`flex-1 px-4 py-2 rounded-xl text-xs font-medium outline-none border focus:ring-2 focus:ring-blue-500 transition-all resize-none ${
+                    isChatFocused ? 'h-32' : 'h-10'
+                  } ${isDark ? 'bg-white/10 border-white/10 text-white placeholder:text-white/30' : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400'}`}
                 />
                 <button
                   onClick={handleSendMessage}

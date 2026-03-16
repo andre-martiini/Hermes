@@ -26,6 +26,14 @@ export interface ActionPlanItem {
     completed: boolean;
 }
 
+export interface ChatMessage {
+    role: 'user' | 'assistant';
+    content: string;
+    isArtifact?: boolean;
+    proposedPlan?: ActionPlanItem[];
+    timestamp?: string;
+}
+
 export interface Tarefa {
     id: string;
     titulo: string;
@@ -39,12 +47,14 @@ export interface Tarefa {
     data_criacao: string;
     data_atualizacao?: string;
     data_conclusao?: string | null;
+    status_atualizacao?: string;
     notas?: string;
     sistema?: string;
     acompanhamento?: Acompanhamento[];
     entregas_relacionadas?: string[];
     descricao?: string;
     chat_gemini_url?: string;
+    chat_history?: ChatMessage[];
     processo_sei?: string;
     tempo_total_segundos?: number;
     sync_status?: 'new' | 'updated' | 'synced' | 'pendente' | 'processando' | 'concluido' | 'erro' | null;
