@@ -18,7 +18,7 @@ import { STATUS_COLORS, PROJECT_COLORS, SLIDES_HISTORY_KEY } from './constants';
 import { db, functions, messaging, auth, googleProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, onSnapshot, query, orderBy, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, writeBatch, getDoc, getDocs, where } from 'firebase/firestore';
-import { getToken, onMessage } from 'firebase/messaging';
+import { getToken, onMessage, isSupported } from 'firebase/messaging';
 import { httpsCallable } from 'firebase/functions';
 import FinanceView from './FinanceView';
 import DashboardView from './DashboardView';
@@ -1748,7 +1748,7 @@ const App: React.FC = () => {
         console.log('Push desativado em desenvolvimento local.');
         return;
       }
-      if (!messaging) return;
+      if (!messaging || !(await isSupported())) return;
       try {
         console.log('Iniciando configuração de Push...');
         const permission = await Notification.requestPermission();
@@ -1788,7 +1788,8 @@ const App: React.FC = () => {
 
     const seenPushIds = new Set<string>();
 
-    const unsubscribe = onMessage(messaging!, (payload) => {
+    if (!messaging) return;
+    const unsubscribe = onMessage(messaging, (payload) => {
       console.log('Mensagem PUSH recebida em primeiro plano:', payload);
       const payloadData = (payload.data || {}) as Record<string, string>;
       const pushId = payloadData.id || payload.messageId || `${payloadData.link || ''}_${payloadData.title || ''}_${payloadData.message || ''}`;
@@ -6823,6 +6824,7 @@ const App: React.FC = () => {
             <TaskCreateModal
               unidades={unidades}
               knowledgeBases={knowledgeBases}
+              knowledgeItems={knowledgeItems}
               onSave={handleCreateTarefa}
               onClose={() => {
                 setIsCreateModalOpen(false);

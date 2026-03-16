@@ -26,5 +26,11 @@ export const db = initializeFirestore(app, {
 });
 
 export const functions = getFunctions(app);
-export const messaging = typeof window !== 'undefined' ? getMessaging(app) : null;
+let _messaging: ReturnType<typeof getMessaging> | null = null;
+try {
+  if (typeof window !== 'undefined') _messaging = getMessaging(app);
+} catch {
+  _messaging = null;
+}
+export const messaging = _messaging;
 export const storage = getStorage(app);

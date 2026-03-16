@@ -45,7 +45,7 @@ MAX_SYNC_PASSES = 3
 
 
 def get_genai_module():
-    import google.generativeai as genai
+    from google import genai
     return genai
 
 
@@ -1336,9 +1336,8 @@ def sync_boletos_gmail(service, sync_ref, logs):
             return
         
         genai = get_genai_module()
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
-        
+        client = genai.Client(api_key=api_key)
+
         processed_count = 0
         
         # Cache de boletos existentes para permitir duplicatas ou vinculação
@@ -1403,13 +1402,13 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 content_parts.append({"mime_type": "application/pdf", "data": pdf_data})
             
             try:
-                response = model.generate_content(content_parts)
+                response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=content_parts)
                 res_text = response.text.strip()
                 if "```json" in res_text:
                     res_text = res_text.split("```json")[-1].split("```")[0].strip()
                 elif "```" in res_text:
                     res_text = res_text.split("```")[-1].split("```")[0].strip()
-                
+
                 data = json.loads(res_text)
                 if data.get('error'): 
                     new_processed_ids.append(msg_id)
@@ -2120,7 +2119,7 @@ def process_vectorization(task_id):
 
     """Lógica central de extração e vetorização"""
 
-    import google.generativeai as genai
+    from google import genai
 
     db = get_db()
 
@@ -2146,9 +2145,7 @@ def process_vectorization(task_id):
 
 
 
-    genai.configure(api_key=GEMINI_API_KEY)
-
-    model = genai.GenerativeModel("gemini-2.5-flash-lite")
+    client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 
@@ -2186,7 +2183,7 @@ def process_vectorization(task_id):
 
                     # Extração de texto via Gemini 1.5 Flash
 
-                    response = model.generate_content([
+                    response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=[
 
                         "Extraia todo o texto relevante deste documento para indexação. Se for HTML, ignore tags. Se for PDF, faça OCR se necessário.",
 
@@ -2231,7 +2228,6 @@ def process_vectorization(task_id):
 @https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=120)
 def vectorizeKnowledgeItemCallable(req: https_fn.CallableRequest):
     """Vetoriza um único item da base de conhecimento."""
-    import google.generativeai as genai
     db = get_db()
     
     knowledge_id = req.data.get('knowledgeId')
@@ -2271,7 +2267,6 @@ def extractAndVectorizeRAGItem(req: https_fn.CallableRequest):
     Extrai texto de um arquivo (PDF/TXT/MD) e vetoriza o item já existente na coleção 'conhecimento'.
     Chamado automaticamente após o upload de um arquivo para uma base RAG.
     """
-    import google.generativeai as genai
     data = req.data
     file_base64 = data.get('fileBase64')
     mime_type = data.get('mimeType', 'application/octet-stream')
@@ -2347,6 +2342,7 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
     rag_context_id = data.get('ragContext') or data.get('base_conhecimento')
     extra_context = data.get('extraContext', '')
     extra_context_id = data.get('extraContextId')
+    knowledge_item_ids = data.get('knowledgeItemIds', [])
 
     if not content:
         return {"error": "Conteúdo não fornecido"}
@@ -2359,7 +2355,7 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
         return {"error": "Gemini API Key não encontrada no sistema."}
 
     genai = get_genai_module()
-    genai.configure(api_key=api_key)
+    client = genai.Client(api_key=api_key)
 
     # Busca contexto do RAG da base principal
     rag_retrieved_context = ""
@@ -2368,10 +2364,8 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
 
     # Busca contexto dos arquivos extras desta ação (RAG isolado)
     extra_rag_context = ""
-    if extra_context_id:
-        extra_rag_context = retrieve_extra_context_rag(db, genai, content, extra_context_id)
-
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    if extra_context_id or knowledge_item_ids:
+        extra_rag_context = retrieve_extra_context_rag(db, genai, content, extra_context_id, knowledge_item_ids)
 
     # Prompt enriquecido com todos os contextos disponíveis
     prompt = f"""
@@ -2413,7 +2407,7 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
     """
 
     try:
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         text = response.text
         # Limpeza para garantir JSON puro
         if "```json" in text:
@@ -2593,7 +2587,7 @@ def retrieve_personalized_rag_context(db, genai, query_text, base_id):
     return "\n\n".join(context_parts)
 
 
-def retrieve_extra_context_rag(db, genai, query_text, extra_context_id):
+def retrieve_extra_context_rag(db, genai, query_text, extra_context_id=None, item_ids=None):
     """
     Recupera contexto dos arquivos extras enviados pelo usuário para uma ação específica.
     Usa apenas busca vetorial, filtrada pelo extra_context_id.
@@ -2606,13 +2600,21 @@ def retrieve_extra_context_rag(db, genai, query_text, extra_context_id):
     try:
         query_embedding = get_embedding(query_text)
 
-        docs = list(
-            db.collection('conhecimento')
-            .where('embedding', '!=', None)
-            .where('extra_context_id', '==', extra_context_id)
-            .limit(20)
-            .stream()
-        )
+        docs = []
+        if extra_context_id:
+            docs.extend(list(
+                db.collection('conhecimento')
+                .where('embedding', '!=', None)
+                .where('extra_context_id', '==', extra_context_id)
+                .limit(20)
+                .stream()
+            ))
+
+        if item_ids:
+            for iid in item_ids:
+                doc = db.collection('conhecimento').document(iid).get()
+                if doc.exists:
+                    docs.append(doc)
 
         similar_items = []
         for doc in docs:
@@ -2752,7 +2754,7 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
     from groq import Groq
 
-    import google.generativeai as genai
+    from google import genai
 
 
 
@@ -2858,9 +2860,7 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
         # Refinamento via Gemini Flash
 
-        genai.configure(api_key=GEMINI_API_KEY)
-
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
         prompt = f"""
 
@@ -2882,7 +2882,7 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
         """
 
-        result = model.generate_content(prompt)
+        result = gemini_client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=prompt)
 
         texto_refinado = result.text
 
@@ -2960,15 +2960,13 @@ def start_file_indexing(item_id, item_data):
 
 
 
-        import google.generativeai as genai
+        from google import genai
 
         import json
 
 
 
-        genai.configure(api_key=GEMINI_API_KEY)
-
-        model = genai.GenerativeModel("gemini-2.5-flash-lite") # Usando modelo preferencial do André
+        client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 
@@ -3068,7 +3066,7 @@ def start_file_indexing(item_id, item_data):
 
 
 
-        response = model.generate_content(parts)
+        response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=parts)
 
         res_text = response.text
 
@@ -3183,8 +3181,6 @@ def findSimilarKnowledge(req: https_fn.CallableRequest):
 
 
 
-
-    import google.generativeai as genai
 
 
 
@@ -3312,7 +3308,7 @@ def findSimilarKnowledge(req: https_fn.CallableRequest):
 
 
 
-        genai.configure(api_key=GEMINI_API_KEY)
+
 
 
 
@@ -3684,10 +3680,6 @@ def on_knowledge_item_updated(event: firestore_fn.Event[firestore_fn.Change[fire
 
 
 
-        import google.generativeai as genai
-
-
-
         db = get_db()
 
 
@@ -3732,11 +3724,7 @@ def on_knowledge_item_updated(event: firestore_fn.Event[firestore_fn.Change[fire
 
 
 
-            genai.configure(api_key=GEMINI_API_KEY)
 
-
-
-            
 
 
 
@@ -3866,7 +3854,7 @@ def gerarSlidesIA(req: https_fn.CallableRequest):
 
     """
 
-    import google.generativeai as genai
+    from google import genai
 
     import json
 
@@ -3906,9 +3894,7 @@ def gerarSlidesIA(req: https_fn.CallableRequest):
 
 
 
-        genai.configure(api_key=GEMINI_API_KEY)
-
-        model = genai.GenerativeModel("gemini-2.5-flash-lite") # Usando o modelo solicitado no slides-ia e preferido do André
+        client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 
@@ -3964,13 +3950,13 @@ def gerarSlidesIA(req: https_fn.CallableRequest):
 
 
 
-        response = model.generate_content([
+        response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=[
 
             system_instruction,
 
             f"Texto Bruto para Processar:\n{rascunho}"
 
-        ], generation_config={"response_mime_type": "application/json"})
+        ])
 
 
 
@@ -4000,7 +3986,7 @@ def processInvoiceOCR(req: https_fn.CallableRequest):
 
     """
 
-    import google.generativeai as genai
+    from google import genai
 
     import json
 
@@ -4032,9 +4018,7 @@ def processInvoiceOCR(req: https_fn.CallableRequest):
 
 
 
-        genai.configure(api_key=GEMINI_API_KEY)
-
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 
@@ -4100,7 +4084,7 @@ def processInvoiceOCR(req: https_fn.CallableRequest):
 
 
 
-        response = model.generate_content(parts)
+        response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=parts)
 
         res_text = response.text
 
@@ -4141,9 +4125,9 @@ def transcrever_audio(req: https_fn.CallableRequest):
     import base64
     import tempfile
     import os
-    # Instale: pip install groq google-generativeai
+    # Instale: pip install groq google-genai
     from groq import Groq
-    import google.generativeai as genai
+    from google import genai
 
     data = req.data
     audio_base64 = data.get('audioBase64')
@@ -4221,9 +4205,7 @@ def transcrever_audio(req: https_fn.CallableRequest):
         texto_bruto = transcription.text
 
         # 3. Refinamento via Gemini Flash
-        genai.configure(api_key=GEMINI_API_KEY)
-        # Usando o modelo solicitado (2.5-flash-lite)
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
         prompt = f"""
         Atue como um redator especialista. O texto a seguir é uma transcrição de voz bruta.
@@ -4232,11 +4214,11 @@ def transcrever_audio(req: https_fn.CallableRequest):
         2. Remover vícios de linguagem (né, tipo, ahn).
         3. Manter o tom original e termos técnicos.
         4. Retorne APENAS o texto corrigido, sem introduções.
-        
+
         Texto: "{texto_bruto}"
         """
-        
-        response = model.generate_content(prompt)
+
+        response = gemini_client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=prompt)
         texto_refinado = response.text
 
         return {
@@ -4268,7 +4250,7 @@ def askTaskAssistant(req: https_fn.CallableRequest):
     """
     Responde perguntas sobre o contexto de uma tarefa específica baseando-se no diário de bordo.
     """
-    import google.generativeai as genai
+    from google import genai
 
     data = req.data or {}
     prompt = data.get('prompt')
@@ -4276,6 +4258,7 @@ def askTaskAssistant(req: https_fn.CallableRequest):
     categoria = data.get('categoria')
     rag_context_id = data.get('ragContext')
     extra_context_id = data.get('extraContextId')
+    knowledge_item_ids = data.get('knowledgeItemIds', [])
 
     if not isinstance(prompt, str) or not prompt.strip():
         raise https_fn.HttpsError(
@@ -4295,22 +4278,24 @@ def askTaskAssistant(req: https_fn.CallableRequest):
                 message="Chave Gemini não configurada."
             )
 
-        genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        client = genai.Client(api_key=gemini_key)
 
         # --- CONHECIMENTO MESTRE (Manual do André) ---
         manual_context = ""
         if categoria:
-            master_docs = db.collection('conhecimento_mestre')\
-                .where('categoria', '==', categoria)\
-                .order_by('data_criacao', direction=firestore.Query.DESCENDING)\
-                .limit(3).stream()
-            manual_items = []
-            for m_doc in master_docs:
-                m = m_doc.to_dict()
-                manual_items.append(f"GUIA: {m.get('titulo')}\nCONTEÚDO:\n{m.get('conteudo')}")
-            if manual_items:
-                manual_context = "\n\n".join(manual_items)
+            try:
+                master_docs = db.collection('conhecimento_mestre')\
+                    .where('categoria', '==', categoria)\
+                    .order_by('data_criacao', direction=firestore.Query.DESCENDING)\
+                    .limit(3).stream()
+                manual_items = []
+                for m_doc in master_docs:
+                    m = m_doc.to_dict()
+                    manual_items.append(f"GUIA: {m.get('titulo')}\nCONTEÚDO:\n{m.get('conteudo')}")
+                if manual_items:
+                    manual_context = "\n\n".join(manual_items)
+            except Exception as e:
+                print(f"Erro ao recuperar conhecimento mestre: {e}")
 
         # --- BASE RAG PRINCIPAL da ação ---
         rag_context = ""
@@ -4322,9 +4307,9 @@ def askTaskAssistant(req: https_fn.CallableRequest):
 
         # --- DOCUMENTOS EXTRAS da ação ---
         extra_rag_context = ""
-        if extra_context_id:
+        if extra_context_id or knowledge_item_ids:
             try:
-                extra_rag_context = retrieve_extra_context_rag(db, genai, prompt, extra_context_id)
+                extra_rag_context = retrieve_extra_context_rag(db, genai, prompt, extra_context_id, knowledge_item_ids)
             except Exception as e:
                 print(f"Erro ao recuperar contexto extra: {e}")
 
@@ -4355,7 +4340,7 @@ def askTaskAssistant(req: https_fn.CallableRequest):
         {prompt}
         """
 
-        response = model.generate_content([system_instruction, full_prompt])
+        response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=[system_instruction, full_prompt])
 
         result = (response.text or "").strip()
         if not result:
@@ -4380,7 +4365,7 @@ def askChatbot(req: https_fn.CallableRequest):
     """
     Responde perguntas sobre o contexto da reunião usando Gemini.
     """
-    import google.generativeai as genai
+    from google import genai
 
     prompt = (req.data or {}).get('prompt')
     if not isinstance(prompt, str) or not prompt.strip():
@@ -4399,10 +4384,10 @@ def askChatbot(req: https_fn.CallableRequest):
                 message="Chave Gemini não configurada."
             )
 
-        genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
-        response = model.generate_content(
-            [
+        client = genai.Client(api_key=gemini_key)
+        response = client.models.generate_content(
+            model="gemini-3.1-flash-lite-preview",
+            contents=[
                 "Você é um assistente de reunião em pt-BR. Responda com objetividade, "
                 "baseando-se no contexto recebido. Se o contexto estiver incompleto, "
                 "deixe claro que a resposta é parcial.",
@@ -4567,11 +4552,11 @@ def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
     """
     Analisa tarefas de uma categoria específica para identificar padrões e propor artefatos de conhecimento.
     """
-    import google.generativeai as genai
+    from google import genai
     import json
     import re
     import traceback
-    
+
     data = req.data or {}
     categoria = data.get('categoria')
     
@@ -4604,8 +4589,7 @@ def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
         if not gemini_key:
             return {"success": False, "error": "Chave Gemini não configurada no sistema (system/api_keys)."}
 
-        genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        client = genai.Client(api_key=gemini_key)
 
         prompt = f"""
         Você é o HERMES Master IA. Analise a sequência de tarefas abaixo da categoria '{categoria}'.
@@ -4622,13 +4606,13 @@ def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
         3. insight: Um breve comentário seu sobre por que isso é importante ou o que você notou de especial.
         """
 
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=prompt)
         res_text = response.text
-        
+
         json_match = re.search(r'\{.*\}', res_text, re.DOTALL)
         if json_match:
             result_data = json.loads(json_match.group(0))
-            
+
             # Salva no manual automaticamente
             db.collection("conhecimento_mestre").add({
                 "titulo": result_data.get('titulo'),

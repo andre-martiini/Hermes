@@ -5,7 +5,7 @@ import { collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import type { MeetingHistoryEntry } from '../tools/MeetingTranscriptionTool';
 import {
   Tarefa, Status, Categoria, EntregaInstitucional, DailyHabits,
-  AppSettings, HermesModalProps, CustomNotification, TipoAcao, ActionPlanItem
+  AppSettings, HermesModalProps, CustomNotification, TipoAcao, ActionPlanItem, ConhecimentoItem
 } from '@/types';
 import { formatDate, formatDateLocalISO } from '@/types';
 import { detectAreaFromTitle, callScrapeSipac } from '../../utils/helpers';
@@ -931,7 +931,7 @@ export const DailyHabitsModal = ({
 
 const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-export const TaskCreateModal = ({ unidades, knowledgeBases = [], onSave, onClose, showAlert, initialData }: { unidades: { id: string, nome: string }[], knowledgeBases?: { id: string, nome: string }[], onSave: (data: Partial<Tarefa>) => void, onClose: () => void, showAlert: (title: string, message: string) => void, initialData?: Partial<Tarefa> }) => {
+export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems = [], onSave, onClose, showAlert, initialData }: { unidades: { id: string, nome: string }[], knowledgeBases?: { id: string, nome: string }[], knowledgeItems?: ConhecimentoItem[], onSave: (data: Partial<Tarefa>) => void, onClose: () => void, showAlert: (title: string, message: string) => void, initialData?: Partial<Tarefa> }) => {
   const [tipoAcao, setTipoAcao] = useState<TipoAcao>('fast');
   const [origemIngestao, setOrigemIngestao] = useState<'manual' | 'whatsapp' | 'audio'>('manual');
   const [ragContext, setRagContext] = useState('Nenhum');
@@ -947,6 +947,8 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], onSave, onClose
   const [selectedReuniao, setSelectedReuniao] = useState<MeetingHistoryEntry | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const [isTranscriptionSelectorOpen, setIsTranscriptionSelectorOpen] = useState(false);
+  const [transcriptionSearch, setTranscriptionSearch] = useState('');
 
   const [formData, setFormData] = useState({
     titulo: initialData?.titulo || '',
@@ -1093,7 +1095,10 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], onSave, onClose
         origin: origemIngestao,
         ragContext: ragContext,
         extraContext: extraContext + meetingContext,
-        ...(extraContextFiles.some(f => f.status === 'ready') ? { extraContextId: extraContextId } : {})
+        ...(extraContextFiles.some(f => f.status === 'ready') ? { 
+          extraContextId: extraContextId,
+          knowledgeItemIds: extraContextFiles.filter(f => f.status === 'ready').map(f => f.id)
+        } : {})
       });
 
       const data = response.data as any;
@@ -1144,7 +1149,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], onSave, onClose
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className="bg-white w-full h-auto max-h-[95vh] md:max-w-md rounded-2xl md:rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col">
+      <div className={`bg-white w-full h-auto max-h-[95vh] rounded-2xl md:rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col transition-all duration-500 ${tipoAcao === 'deep' ? 'md:max-w-4xl' : 'md:max-w-md'}`}>
         {/* Header with Type Selector */}
         <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col gap-4 flex-shrink-0">
           <div className="flex items-center justify-between">
@@ -1200,15 +1205,65 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], onSave, onClose
                     ))}
                   </select>
                 </div>
-                <div className="flex items-end">
+                <div className="flex items-end gap-2">
                   <button
                     onClick={() => setIsExtraContextOpen(!isExtraContextOpen)}
-                    className={`h-9 w-full rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${isExtraContextOpen ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                    className={`h-9 flex-1 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${isExtraContextOpen ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                   >
                     Contexto Extra
                   </button>
+                  <button
+                    onClick={() => setIsTranscriptionSelectorOpen(!isTranscriptionSelectorOpen)}
+                    className={`h-9 flex-1 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${isTranscriptionSelectorOpen ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'}`}
+                  >
+                    Anexar Reunião
+                  </button>
                 </div>
               </div>
+
+              {isTranscriptionSelectorOpen && (
+                <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 space-y-3 animate-in slide-in-from-top-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">Selecionar Transcrição</p>
+                    <button onClick={() => setIsTranscriptionSelectorOpen(false)} className="text-indigo-400 hover:text-indigo-600">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Buscar por título da reunião..."
+                    value={transcriptionSearch}
+                    onChange={e => setTranscriptionSearch(e.target.value)}
+                    className="w-full bg-white border border-indigo-100 rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                  <div className="max-h-[150px] overflow-y-auto space-y-2 custom-scrollbar pr-1">
+                    {knowledgeItems
+                      ?.filter(item => 
+                        (item.categoria === 'REUNIÕES' || item.tipo_arquivo === 'transcription') &&
+                        item.titulo.toLowerCase().includes(transcriptionSearch.toLowerCase()) &&
+                        !extraContextFiles.some(f => f.id === item.id)
+                      )
+                      .map(item => (
+                        <button
+                          key={item.id}
+                          onClick={() => {
+                            setExtraContextFiles(prev => [...prev, { id: item.id, name: `[Transcrição] ${item.titulo}`, status: 'ready' }]);
+                            setIsTranscriptionSelectorOpen(false);
+                            setTranscriptionSearch('');
+                            if (!isExtraContextOpen) setIsExtraContextOpen(true);
+                          }}
+                          className="w-full text-left p-3 bg-white border border-indigo-50 rounded-xl hover:border-indigo-300 hover:shadow-sm transition-all group"
+                        >
+                          <p className="text-[10px] font-bold text-slate-700 group-hover:text-indigo-600 transition-colors">{item.titulo}</p>
+                          <p className="text-[8px] text-slate-400 font-medium uppercase mt-1">{formatDate(item.data_criacao)}</p>
+                        </button>
+                      ))}
+                    {knowledgeItems?.filter(item => (item.categoria === 'REUNIÕES' || item.tipo_arquivo === 'transcription')).length === 0 && (
+                      <p className="text-[10px] text-slate-400 italic text-center py-4">Nenhuma transcrição encontrada.</p>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {isExtraContextOpen && (
                 <div className="space-y-2 animate-in slide-in-from-top-2">
@@ -1483,7 +1538,10 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], onSave, onClose
                 data_inicio: formData.data_limite || '',
                 origem: tipoAcao === 'deep' ? origemIngestao : 'manual',
                 base_conhecimento: ragContext,
-                ...(extraContextFiles.some(f => f.status === 'ready') ? { extra_context_id: extraContextId } : {}),
+                ...(extraContextFiles.some(f => f.status === 'ready') ? { 
+                  extra_context_id: extraContextId,
+                  knowledge_item_ids: extraContextFiles.filter(f => f.status === 'ready').map(f => f.id)
+                } : {}),
                 ...(selectedReuniao?.firestoreId ? { reuniao_vinculada_id: selectedReuniao.firestoreId } : {})
               });
               onClose();
