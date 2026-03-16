@@ -402,11 +402,18 @@ export const TaskExecutionView = ({
     (currentTaskData.acompanhamento || []).slice(-20).map(a => `[${new Date(a.data).toLocaleString('pt-BR')}] ${a.nota}`).join('\n')
   ].join('\n');
 
-  const handleApplyProposedPlan = (proposedItems: ActionPlanItem[]) => {
+  const handleApplyProposedPlan = (index: number) => {
+    const msg = chatMessages[index];
+    if (!msg || !msg.proposedPlan) return;
+
+    const updatedMessages = [...chatMessages];
+    updatedMessages[index] = { ...updatedMessages[index], proposedPlan: undefined };
+
     const successMsg: ChatMessage = { role: 'assistant', content: '✅ Plano de ação atualizado com sucesso!' };
-    const newHistory = [...chatMessages, successMsg];
+    const newHistory = [...updatedMessages, successMsg];
+
     onSave(task.id, { 
-      plano_acao: proposedItems,
+      plano_acao: msg.proposedPlan,
       chat_history: newHistory
     });
     setChatMessages(newHistory);
@@ -1093,7 +1100,7 @@ export const TaskExecutionView = ({
                         </div>
                         <div className="flex gap-2">
                           <button 
-                            onClick={() => handleApplyProposedPlan(msg.proposedPlan!)}
+                            onClick={() => handleApplyProposedPlan(i)}
                             className="flex-1 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-black uppercase tracking-widest transition-all"
                           >
                             Aplicar Alterações
