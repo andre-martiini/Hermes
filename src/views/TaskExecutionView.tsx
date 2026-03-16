@@ -407,13 +407,14 @@ export const TaskExecutionView = ({
     if (!msg || !msg.proposedPlan) return;
 
     const updatedMessages = [...chatMessages];
-    updatedMessages[index] = { ...updatedMessages[index], proposedPlan: undefined };
+    const { proposedPlan: appliedPlan, ...rest } = updatedMessages[index];
+    updatedMessages[index] = rest;
 
     const successMsg: ChatMessage = { role: 'assistant', content: '✅ Plano de ação atualizado com sucesso!' };
     const newHistory = [...updatedMessages, successMsg];
 
     onSave(task.id, { 
-      plano_acao: msg.proposedPlan,
+      plano_acao: appliedPlan,
       chat_history: newHistory
     });
     setChatMessages(newHistory);
@@ -469,7 +470,7 @@ export const TaskExecutionView = ({
       const assistantMsg: ChatMessage = { 
         role: 'assistant', 
         content: asArtifact ? '📄 Artefato gerado e salvo no painel de Artefatos.' + (proposedPlan ? '\n\nO copiloto também sugeriu uma atualização no plano de ação.' : '') : result,
-        proposedPlan 
+        ...(proposedPlan ? { proposedPlan } : {})
       };
 
       if (asArtifact) {

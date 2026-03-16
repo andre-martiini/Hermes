@@ -2309,9 +2309,10 @@ const App: React.FC = () => {
         }
       }
 
-      await updateDoc(docRef, {
-        ...payload
-      });
+      // Cleanup payload for Firestore (remove undefined values)
+      const cleanPayload = JSON.parse(JSON.stringify(payload));
+
+      await updateDoc(docRef, cleanPayload);
 
       if (updates.pool_dados && updates.pool_dados.length > 0) {
         for (const item of updates.pool_dados) {
@@ -2715,8 +2716,9 @@ const App: React.FC = () => {
 
   const handleUpdateWorkItem = async (id: string, updates: Partial<WorkItem>) => {
     try {
+      const cleanUpdates = JSON.parse(JSON.stringify(updates));
       await updateDoc(doc(db, 'sistemas_work_items', id), {
-        ...updates
+        ...cleanUpdates
       } as any);
 
       // Mirror to Knowledge base
@@ -2938,12 +2940,13 @@ const App: React.FC = () => {
 
   const handleSaveKnowledgeItem = async (item: Partial<ConhecimentoItem>) => {
     try {
+      const cleanItem = JSON.parse(JSON.stringify(item));
       if (item.id) {
-        await setDoc(doc(db, 'conhecimento', item.id), item, { merge: true });
+        await setDoc(doc(db, 'conhecimento', item.id), cleanItem, { merge: true });
         showToast("Item salvo.", "success");
       } else {
         await addDoc(collection(db, 'conhecimento'), {
-          ...item,
+          ...cleanItem,
           data_criacao: new Date().toISOString()
         });
         showToast("Item salvo.", "success");
