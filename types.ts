@@ -60,6 +60,7 @@ export interface Tarefa {
     origem?: 'manual' | 'audio' | 'whatsapp' | 'google';
     base_conhecimento?: string;
     extra_context_id?: string;
+    reuniao_vinculada_id?: string;
 }
 
 export interface AtividadeRealizada {

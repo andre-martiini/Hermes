@@ -1,6 +1,7 @@
 ﻿import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '@/firebase';
+import { functions, db } from '@/firebase';
+import { collection, addDoc, getDocs, query, orderBy, limit } from 'firebase/firestore';
 
 export interface TranscriptionEntry {
   id: string;
@@ -21,14 +22,16 @@ interface MeetingTranscriptionToolProps {
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
 
-interface MeetingHistoryEntry {
+export interface MeetingHistoryEntry {
   id: string;
+  titulo: string;
   startedAt: string;
   endedAt: string;
   transcriptCount: number;
   chatCount: number;
   transcripts: Array<{ speaker: 'Você' | 'Reunião'; text: string; timestamp: string }>;
   chats: Array<{ role: 'user' | 'assistant'; content: string; timestamp: string }>;
+  firestoreId?: string;
 }
 
 const GROUP_WINDOW_MS = 7000;
@@ -99,6 +102,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
   const [meetingStartedAt, setMeetingStartedAt] = useState<Date | null>(null);
   const [meetingEndedAt, setMeetingEndedAt] = useState<Date | null>(null);
   const [meetingHistory, setMeetingHistory] = useState<MeetingHistoryEntry[]>([]);
+  const [isTitleGenerating, setIsTitleGenerating] = useState(false);
 
   const micRecorderRef = useRef<MediaRecorder | null>(null);
   const systemRecorderRef = useRef<MediaRecorder | null>(null);
@@ -142,16 +146,42 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
   }, [meetingStartedAt]);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as MeetingHistoryEntry[];
-      if (Array.isArray(parsed)) {
-        setMeetingHistory(parsed.filter(item => item?.id && item?.startedAt && item?.endedAt).slice(0, HISTORY_MAX_ITEMS));
+    // Load from Firestore first, fallback to localStorage
+    const loadHistory = async () => {
+      try {
+        const q = query(collection(db, 'reunioes'), orderBy('startedAt', 'desc'), limit(HISTORY_MAX_ITEMS));
+        const snapshot = await getDocs(q);
+        if (!snapshot.empty) {
+          const firestoreMeetings: MeetingHistoryEntry[] = snapshot.docs.map(doc => ({
+            id: doc.data().startedAt as string,
+            titulo: (doc.data().titulo as string) || 'Reunião sem título',
+            startedAt: doc.data().startedAt as string,
+            endedAt: doc.data().endedAt as string,
+            transcriptCount: (doc.data().transcriptCount as number) || 0,
+            chatCount: (doc.data().chatCount as number) || 0,
+            transcripts: (doc.data().transcripts as MeetingHistoryEntry['transcripts']) || [],
+            chats: (doc.data().chats as MeetingHistoryEntry['chats']) || [],
+            firestoreId: doc.id,
+          }));
+          setMeetingHistory(firestoreMeetings);
+          return;
+        }
+      } catch (e) {
+        console.error('Erro ao carregar reuniões do Firestore:', e);
       }
-    } catch (e) {
-      console.error('Erro ao carregar histórico de reuniões:', e);
-    }
+      // Fallback: localStorage
+      try {
+        const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as MeetingHistoryEntry[];
+        if (Array.isArray(parsed)) {
+          setMeetingHistory(parsed.filter(item => item?.id && item?.startedAt && item?.endedAt).slice(0, HISTORY_MAX_ITEMS));
+        }
+      } catch (e) {
+        console.error('Erro ao carregar histórico local de reuniões:', e);
+      }
+    };
+    loadHistory();
   }, []);
 
   useEffect(() => {
@@ -174,6 +204,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
 
     const newEntry: MeetingHistoryEntry = {
       id: meetingId,
+      titulo: `Reunião ${new Date(meetingId).toLocaleDateString('pt-BR')} ${new Date(meetingId).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
       startedAt: startedAt.toISOString(),
       endedAt: endedAt.toISOString(),
       transcriptCount: transcriptSnapshot.length,
@@ -264,6 +295,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
 
       if (persistHistory) {
         persistCurrentMeetingToHistory(ended);
+        finalizeAndPersistMeetingRef.current?.(ended);
       }
     },
     [persistCurrentMeetingToHistory]
@@ -416,6 +448,69 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
     const minute = String(startedAt.getMinutes()).padStart(2, '0');
     return `Reuniao_${year}-${month}-${day}_${hour}-${minute}.txt`;
   }, []);
+
+  const generateMeetingTitle = useCallback(async (transcriptSnapshot: TranscriptionEntry[]): Promise<string> => {
+    if (transcriptSnapshot.length === 0) return 'Reunião sem transcrição';
+    const sample = transcriptSnapshot.slice(0, 15).map(t => `${t.speaker}: ${t.text}`).join('\n');
+    const prompt = `Com base nesta transcrição de reunião, gere um título curto e descritivo (máximo 8 palavras, sem aspas). Responda APENAS com o título:\n\n${sample}`;
+    try {
+      const askChatbotFunc = httpsCallable(functions, 'askChatbot');
+      const response = await askChatbotFunc({ prompt });
+      const data = response.data as { result?: string };
+      return data?.result?.trim().slice(0, 80) || 'Reunião sem título';
+    } catch {
+      return 'Reunião sem título';
+    }
+  }, []);
+
+  const finalizeAndPersistMeetingRef = useRef<((ended: Date) => void) | null>(null);
+
+  const finalizeAndPersistMeeting = useCallback(async (ended: Date) => {
+    const startedAt = meetingStartedAtRef.current;
+    if (!startedAt) return;
+    const meetingId = startedAt.toISOString();
+    const transcriptSnapshot = [...transcriptsRef.current];
+    const chatSnapshot = [...chatMessagesRef.current];
+
+    setIsTitleGenerating(true);
+    const titulo = await generateMeetingTitle(transcriptSnapshot);
+
+    setMeetingHistory(prev => prev.map(entry =>
+      entry.id === meetingId ? { ...entry, titulo } : entry
+    ));
+
+    try {
+      const docRef = await addDoc(collection(db, 'reunioes'), {
+        titulo,
+        startedAt: startedAt.toISOString(),
+        endedAt: ended.toISOString(),
+        transcriptCount: transcriptSnapshot.length,
+        chatCount: chatSnapshot.length,
+        transcripts: transcriptSnapshot.map(t => ({
+          speaker: t.speaker,
+          text: t.text,
+          timestamp: t.timestamp.toISOString(),
+        })),
+        chats: chatSnapshot.map(c => ({
+          role: c.role,
+          content: c.content,
+          timestamp: c.timestamp.toISOString(),
+        })),
+        data_criacao: new Date().toISOString(),
+      });
+      setMeetingHistory(prev => prev.map(entry =>
+        entry.id === meetingId ? { ...entry, titulo, firestoreId: docRef.id } : entry
+      ));
+    } catch (err) {
+      console.error('Erro ao salvar reunião no Firestore:', err);
+    } finally {
+      setIsTitleGenerating(false);
+    }
+  }, [generateMeetingTitle]);
+
+  useEffect(() => {
+    finalizeAndPersistMeetingRef.current = finalizeAndPersistMeeting;
+  }, [finalizeAndPersistMeeting]);
 
   const handleCopyMeetingContent = async () => {
     if (transcripts.length === 0 && chatMessages.length === 0) {
@@ -657,11 +752,14 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
                     return (
                       <div key={entry.id} className="border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="text-xs font-black text-slate-800 truncate">
-                            {started.toLocaleDateString('pt-BR')} • {started.toLocaleTimeString('pt-BR')} - {ended.toLocaleTimeString('pt-BR')}
+                          <p className="text-xs font-black text-slate-800 truncate flex items-center gap-1">
+                            {entry.titulo || `${started.toLocaleDateString('pt-BR')} ${started.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`}
+                            {isTitleGenerating && entry.id === meetingStartedAt?.toISOString() && (
+                              <span className="w-3 h-3 border border-slate-300 border-t-blue-500 rounded-full animate-spin inline-block ml-1" />
+                            )}
                           </p>
                           <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                            {entry.transcriptCount} blocos de fala • {entry.chatCount} mensagens no chat
+                            {started.toLocaleDateString('pt-BR')} • {started.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} - {ended.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} • {entry.transcriptCount} falas
                           </p>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
