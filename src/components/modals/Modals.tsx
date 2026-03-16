@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '@/firebase';
+import { functions, db } from '@/firebase';
+import { collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
+import type { MeetingHistoryEntry } from '../tools/MeetingTranscriptionTool';
 import {
   Tarefa, Status, Categoria, EntregaInstitucional, DailyHabits,
   AppSettings, HermesModalProps, CustomNotification, TipoAcao, ActionPlanItem
@@ -939,7 +941,12 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], onSave, onClose
   const [extraContextFiles, setExtraContextFiles] = useState<{ id: string; name: string; status: 'uploading' | 'ready' | 'error' }[]>([]);
   const [inputText, setInputText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [reunioes, setReunioes] = useState<MeetingHistoryEntry[]>([]);
+  const [selectedReuniao, setSelectedReuniao] = useState<MeetingHistoryEntry | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   const [formData, setFormData] = useState({
     titulo: initialData?.titulo || '',
@@ -979,45 +986,93 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], onSave, onClose
     }
   };
 
-  const startTranscription = (targetField: 'titulo' | 'inputText') => {
+  // Load recent meetings from Firestore for linking
+  useEffect(() => {
+    const loadReunioes = async () => {
+      try {
+        const q = query(collection(db, 'reunioes'), orderBy('startedAt', 'desc'), limit(10));
+        const snapshot = await getDocs(q);
+        const entries: MeetingHistoryEntry[] = snapshot.docs.map(doc => ({
+          id: doc.data().startedAt as string,
+          titulo: (doc.data().titulo as string) || 'Reunião sem título',
+          startedAt: doc.data().startedAt as string,
+          endedAt: doc.data().endedAt as string,
+          transcriptCount: (doc.data().transcriptCount as number) || 0,
+          chatCount: (doc.data().chatCount as number) || 0,
+          transcripts: (doc.data().transcripts as MeetingHistoryEntry['transcripts']) || [],
+          chats: (doc.data().chats as MeetingHistoryEntry['chats']) || [],
+          firestoreId: doc.id,
+        }));
+        setReunioes(entries);
+      } catch (e) {
+        console.error('Erro ao carregar reuniões:', e);
+      }
+    };
+    loadReunioes();
+  }, []);
+
+  // STT for titulo field only (browser native, short dictation)
+  const startTranscription = (targetField: 'titulo') => {
     if (!SpeechRecognition) {
       showAlert("Não suportado", "Seu navegador não suporta reconhecimento de voz.");
       return;
     }
-
     if (isRecording) {
       recognitionRef.current?.stop();
       setIsRecording(false);
       return;
     }
-
     const recognition = new SpeechRecognition();
     recognition.lang = 'pt-BR';
-    recognition.continuous = targetField === 'inputText';
+    recognition.continuous = false;
     recognition.interimResults = true;
-
     recognition.onstart = () => setIsRecording(true);
     recognition.onend = () => setIsRecording(false);
-    recognition.onerror = (event: any) => {
-      console.error("Erro STT:", event.error);
-      setIsRecording(false);
-    };
-
+    recognition.onerror = (event: any) => { console.error("Erro STT:", event.error); setIsRecording(false); };
     recognition.onresult = (event: any) => {
       let transcript = '';
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        transcript += event.results[i][0].transcript;
-      }
-      
-      if (targetField === 'titulo') {
-        setFormData(prev => ({ ...prev, titulo: transcript }));
-      } else {
-        setInputText(transcript);
-      }
+      for (let i = event.resultIndex; i < event.results.length; ++i) transcript += event.results[i][0].transcript;
+      setFormData(prev => ({ ...prev, titulo: transcript }));
     };
-
     recognition.start();
     recognitionRef.current = recognition;
+  };
+
+  // MediaRecorder-based toggle for audio ingestion mode
+  const handleAudioToggle = async () => {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      mediaRecorderRef.current = mr;
+      audioChunksRef.current = [];
+      mr.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      mr.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        setIsTranscribing(true);
+        try {
+          const reader = new FileReader();
+          reader.readAsDataURL(blob);
+          reader.onloadend = async () => {
+            try {
+              const b64 = (reader.result as string).split(',')[1];
+              const fn = httpsCallable(functions, 'transcreverAudio');
+              const res = await fn({ audioBase64: b64 });
+              const data = res.data as { raw: string; refined: string };
+              if (data.refined) setInputText(prev => (prev ? prev + ' ' : '') + data.refined);
+            } catch { showAlert('Erro', 'Erro ao transcrever o áudio.'); }
+            finally { setIsTranscribing(false); }
+          };
+        } catch { setIsTranscribing(false); }
+      };
+      mr.start();
+      setIsRecording(true);
+    } catch { showAlert('Erro', 'Não foi possível acessar o microfone.'); }
   };
 
   const handleGenerateWithIA = async () => {
@@ -1029,11 +1084,15 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], onSave, onClose
     setIsGenerating(true);
     try {
       const generateFunc = httpsCallable(functions, 'generate_task_with_ia');
+      const meetingContext = selectedReuniao
+        ? `\n\n=== CONTEXTO DE REUNIÃO: ${selectedReuniao.titulo} ===\n` +
+          selectedReuniao.transcripts.map(t => `${t.speaker}: ${t.text}`).join('\n')
+        : '';
       const response = await generateFunc({
         content: inputText,
         origin: origemIngestao,
         ragContext: ragContext,
-        extraContext: extraContext,
+        extraContext: extraContext + meetingContext,
         ...(extraContextFiles.some(f => f.status === 'ready') ? { extraContextId: extraContextId } : {})
       });
 
@@ -1045,7 +1104,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], onSave, onClose
           descricao: data.descricao || prev.descricao,
           categoria: (data.categoria as Categoria) || prev.categoria,
           status: (data.status as Status) || prev.status,
-          data_limite: data.data_limite || prev.data_limite
+          data_limite: prev.data_limite
         }));
         if (data.plano_acao) {
           setPlanoAcao(data.plano_acao.map((item: any) => ({
@@ -1195,6 +1254,33 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], onSave, onClose
                     </div>
                   )}
 
+                  {/* Vincular Reunião */}
+                  {reunioes.length > 0 && (
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Vincular Reunião</label>
+                      <select
+                        value={selectedReuniao?.firestoreId || ''}
+                        onChange={e => {
+                          const found = reunioes.find(r => r.firestoreId === e.target.value) || null;
+                          setSelectedReuniao(found);
+                        }}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[10px] font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 transition-all"
+                      >
+                        <option value="">Nenhuma reunião</option>
+                        {reunioes.map(r => (
+                          <option key={r.firestoreId} value={r.firestoreId || ''}>
+                            {r.titulo} — {new Date(r.startedAt).toLocaleDateString('pt-BR')}
+                          </option>
+                        ))}
+                      </select>
+                      {selectedReuniao && (
+                        <p className="text-[9px] text-emerald-600 font-bold pl-1">
+                          ✓ {selectedReuniao.transcriptCount} falas da reunião serão usadas como contexto
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   {/* Textarea para texto livre */}
                   <textarea
                     value={extraContext}
@@ -1218,14 +1304,23 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], onSave, onClose
                   ) : (
                     <div className="flex flex-col items-center justify-center gap-4 py-4">
                       <button
-                        onClick={() => startTranscription('inputText')}
-                        className={`w-16 h-16 rounded-full flex items-center justify-center transition-all ${isRecording ? 'bg-rose-500 scale-110 shadow-lg shadow-rose-200 animate-pulse' : 'bg-white text-slate-400 border border-slate-200 hover:border-slate-400'}`}
+                        onClick={handleAudioToggle}
+                        disabled={isTranscribing}
+                        className={`w-16 h-16 rounded-full flex items-center justify-center transition-all disabled:opacity-60 ${isRecording ? 'bg-rose-500 scale-110 shadow-lg shadow-rose-200 animate-pulse' : isTranscribing ? 'bg-blue-100 text-blue-500' : 'bg-white text-slate-400 border border-slate-200 hover:border-slate-400'}`}
                       >
-                        <svg className={`w-8 h-8 ${isRecording ? 'text-white' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                        {isTranscribing ? (
+                          <svg className="w-7 h-7 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                        ) : isRecording ? (
+                          <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+                        ) : (
+                          <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                        )}
                       </button>
                       <div className="text-center">
-                        <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest">{isRecording ? 'Ouvindo...' : 'Clique para narrar'}</p>
-                        <p className="text-[9px] font-medium text-slate-400">{inputText || 'Sua fala aparecerá aqui...'}</p>
+                        <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest">
+                          {isTranscribing ? 'Transcrevendo...' : isRecording ? 'Gravando — clique para parar' : 'Clique para gravar'}
+                        </p>
+                        {inputText && <p className="text-[9px] font-medium text-slate-500 mt-1 max-w-[200px] truncate">{inputText}</p>}
                       </div>
                     </div>
                   )}
@@ -1388,7 +1483,8 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], onSave, onClose
                 data_inicio: formData.data_limite || '',
                 origem: tipoAcao === 'deep' ? origemIngestao : 'manual',
                 base_conhecimento: ragContext,
-                ...(extraContextFiles.some(f => f.status === 'ready') ? { extra_context_id: extraContextId } : {})
+                ...(extraContextFiles.some(f => f.status === 'ready') ? { extra_context_id: extraContextId } : {}),
+                ...(selectedReuniao?.firestoreId ? { reuniao_vinculada_id: selectedReuniao.firestoreId } : {})
               });
               onClose();
             }}
