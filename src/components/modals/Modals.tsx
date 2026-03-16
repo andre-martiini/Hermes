@@ -1,13 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { functions, db } from '@/firebase';
+import { functions, db } from '../../../firebase';
 import { collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import type { MeetingHistoryEntry } from '../tools/MeetingTranscriptionTool';
 import {
   Tarefa, Status, Categoria, EntregaInstitucional, DailyHabits,
   AppSettings, HermesModalProps, CustomNotification, TipoAcao, ActionPlanItem, ConhecimentoItem
-} from '@/types';
-import { formatDate, formatDateLocalISO } from '@/types';
+} from '../../../types';
+import { formatDate, formatDateLocalISO } from '../../../types';
 import { detectAreaFromTitle, callScrapeSipac } from '../../utils/helpers';
 import { WysiwygEditor } from '../ui/UIComponents';
 export const HermesModal = ({ isOpen, title, message, type, onConfirm, onCancel, confirmLabel, cancelLabel }: HermesModalProps) => {
