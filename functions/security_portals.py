@@ -30,7 +30,7 @@ def get_db():
 
 
 def get_genai_module():
-    import google.generativeai as genai
+    from google import genai
     return genai
 
 
