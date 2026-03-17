@@ -5698,6 +5698,7 @@ const App: React.FC = () => {
                           testes: { panel: 'bg-orange-50', pill: 'bg-orange-100 text-orange-700', accent: 'bg-orange-500', helper: 'Validação, correções finais e fechamento de pendências.' },
                           producao: { panel: 'bg-emerald-50', pill: 'bg-emerald-100 text-emerald-700', accent: 'bg-emerald-500', helper: 'Operação estável, documentação e manutenção evolutiva.' }
                         };
+                        const currentStatusTheme = statusTheme[sysDetails.status] ?? statusTheme['ideia'];
                         const summaryItems = [
                           { label: 'Ativos', value: String(activeWorkItems.length) },
                           { label: 'Concluídos', value: String(completedWorkItems.length) },
@@ -5711,14 +5712,14 @@ const App: React.FC = () => {
                             <div className="flex-1 bg-white rounded-none overflow-hidden">
 
                               {/* Status Stepper */}
-                              <div className={`${statusTheme[sysDetails.status].panel} border-b border-slate-100 p-4 md:p-8 flex flex-col items-center gap-4 md:gap-6`}>
+                              <div className={`${currentStatusTheme.panel} border-b border-slate-100 p-4 md:p-8 flex flex-col items-center gap-4 md:gap-6`}>
                                 <div className="w-full flex items-center justify-between">
                                   <div>
                                     <div className="flex items-center gap-2 flex-wrap">
                                       <h2 className="text-lg md:text-2xl font-black text-slate-900 tracking-tight uppercase">{systemName}</h2>
-                                      <span className={`px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${statusTheme[sysDetails.status].pill}`}>{stepLabels[sysDetails.status]}</span>
+                                      <span className={`px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${currentStatusTheme.pill}`}>{stepLabels[sysDetails.status]}</span>
                                     </div>
-                                    <p className="text-[10px] font-bold text-slate-500 mt-1">{statusTheme[sysDetails.status].helper}</p>
+                                    <p className="text-[10px] font-bold text-slate-500 mt-1">{currentStatusTheme.helper}</p>
                                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1.5">{ajustesPendentesCount} demanda{ajustesPendentesCount !== 1 ? 's' : ''} aberta{ajustesPendentesCount !== 1 ? 's' : ''}</p>
                                   </div>
                                 </div>
@@ -5747,7 +5748,7 @@ const App: React.FC = () => {
                                         <button
                                           onClick={() => handleUpdateSistema(unit.id, { status: step })}
                                           className={`flex-1 md:flex-none px-2 md:px-4 py-2 rounded-lg md:rounded-xl text-[8px] md:text-[9px] font-black uppercase tracking-widest transition-all ${isActive
-                                            ? `${statusTheme[sysDetails.status].accent} text-white shadow-lg`
+                                            ? `${currentStatusTheme.accent} text-white shadow-lg`
                                             : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'
                                             }`}
                                         >

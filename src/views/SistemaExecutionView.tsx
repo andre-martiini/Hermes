@@ -248,7 +248,7 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
   };
 
   // ─── Derived ───────────────────────────────────────────────────
-  const theme = STATUS_THEME[sysDetails.status];
+  const theme = STATUS_THEME[sysDetails.status] ?? STATUS_THEME['ideia'];
   const resourceCount = [
     sysDetails.repositorio_principal,
     sysDetails.link_documentacao,
