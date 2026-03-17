@@ -1113,7 +1113,7 @@ const App: React.FC = () => {
           const data = response.data as { raw: string, refined: string };
           if (data.refined) {
             if (viewMode === 'sistemas-dev' && selectedSystemId) {
-              await handleCreateWorkItem(selectedSystemId, newLogTipo, data.refined, newLogAttachments);
+              await handleCreateWorkItem(selectedSystemId, 'geral', data.refined, newLogAttachments);
               setNewLogText('');
               setNewLogAttachments([]);
               showToast("Log registrado via IA!", "success");
@@ -5504,72 +5504,80 @@ const App: React.FC = () => {
                   </div>
 
                 ) : viewMode === 'sistemas-dev' ? (
-                  <div className="space-y-8 animate-in fade-in duration-500 pb-20">
-                    {!selectedSystemId ? (
-                      /* VISÃO GERAL - LISTA DE SISTEMAS */
-                      <>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-8 p-3 md:p-0 pt-8">
+                  <div className="animate-in fade-in duration-500 pb-20">
+                    <div className="md:flex md:border md:border-slate-200 md:rounded-[2rem] md:overflow-hidden md:shadow-xl md:bg-white" style={{minHeight: '580px'}}>
+                      {/* LEFT: Lista de sistemas */}
+                      <div className={`${selectedSystemId ? 'hidden md:flex' : 'flex'} flex-col w-full md:w-64 lg:w-72 md:shrink-0 md:border-r md:border-slate-100 md:bg-slate-50/30 md:overflow-y-auto`}>
+                        <div className="hidden md:flex px-5 py-4 border-b border-slate-100 items-center justify-between">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sistemas</span>
+                          <span className="bg-violet-100 text-violet-600 text-[9px] font-black px-2 py-0.5 rounded-full">{unidades.filter(u => u.nome.startsWith('SISTEMA:')).length}</span>
+                        </div>
+                        {/* Mobile: cards compactos */}
+                        <div className="md:hidden grid grid-cols-1 gap-3 p-3 pt-6">
                           {unidades.filter(u => u.nome.startsWith('SISTEMA:')).map(unit => {
-                            const sysDetails = sistemasDetalhes.find(s => s.id === unit.id) || {
-                              id: unit.id,
-                              nome: unit.nome.replace('SISTEMA:', '').trim(),
-                              status: 'ideia' as SistemaStatus,
-                              data_criacao: new Date().toISOString(),
-                              data_atualizacao: new Date().toISOString()
-                            };
+                            const sysDetails = sistemasDetalhes.find(s => s.id === unit.id) || { id: unit.id, nome: unit.nome.replace('SISTEMA:', '').trim(), status: 'ideia' as SistemaStatus, data_criacao: new Date().toISOString(), data_atualizacao: new Date().toISOString() };
                             const systemName = unit.nome.replace('SISTEMA:', '').trim();
                             const ajustesPendentes = workItems.filter(w => w.sistema_id === unit.id && !w.concluido).length;
-
                             return (
-                              <button
-                                key={unit.id}
-                                onClick={() => setSelectedSystemId(unit.id)}
-                                className="bg-white border border-slate-200 rounded-2xl md:rounded-[2.5rem] p-6 md:p-8 text-left shadow-sm md:shadow-xl hover:shadow-md md:hover:shadow-2xl hover:border-violet-300 transition-all group relative overflow-hidden"
-                              >
-                                <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500"></div>
-                                <div className="relative z-10 space-y-6">
-                                  <div className="flex justify-between items-start">
-                                    <div className="w-14 h-14 bg-violet-100 text-violet-600 rounded-none md:rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
-                                      <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
-                                    </div>
-                                    <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest ${sysDetails.status === 'producao' ? 'bg-emerald-100 text-emerald-700' :
-                                      sysDetails.status === 'desenvolvimento' ? 'bg-blue-100 text-blue-700' :
-                                        sysDetails.status === 'testes' ? 'bg-amber-100 text-amber-700' :
-                                          'bg-slate-100 text-slate-500'
-                                      }`}>
-                                      {sysDetails.status === 'prototipacao' ? 'Prototipação' :
-                                        sysDetails.status === 'producao' ? 'Produção' :
-                                          sysDetails.status}
-                                    </span>
-                                  </div>
-                                  <div>
-                                    <h3 className="text-xl font-black text-slate-900 mb-1 group-hover:text-violet-700 transition-colors">{systemName}</h3>
-                                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                                      Atualizado em {formatDate(sysDetails.data_atualizacao?.split('T')[0] || formatDateLocalISO(new Date()))}
-                                    </p>
-                                  </div>
-                                  <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
-                                    <span className="text-xs font-bold text-slate-500">{ajustesPendentes} ajustes pendentes</span>
-                                    <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-violet-500 group-hover:text-white transition-colors">
-                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
-                                    </div>
-                                  </div>
+                              <button key={unit.id} onClick={() => setSelectedSystemId(unit.id)}
+                                className="bg-white border border-slate-200 rounded-2xl p-4 text-left hover:border-violet-300 transition-all">
+                                <div className="flex items-center justify-between gap-2">
+                                  <h3 className="font-black text-slate-900 text-sm truncate">{systemName}</h3>
+                                  <span className={`shrink-0 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${sysDetails.status === 'producao' ? 'bg-emerald-100 text-emerald-700' : sysDetails.status === 'desenvolvimento' ? 'bg-blue-100 text-blue-700' : sysDetails.status === 'testes' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
+                                    {sysDetails.status === 'prototipacao' ? 'Protótipo' : sysDetails.status === 'producao' ? 'Produção' : sysDetails.status}
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-400 font-bold mt-1">{ajustesPendentes} ajuste{ajustesPendentes !== 1 ? 's' : ''} pendente{ajustesPendentes !== 1 ? 's' : ''}</p>
+                              </button>
+                            );
+                          })}
+                          {unidades.filter(u => u.nome.startsWith('SISTEMA:')).length === 0 && (
+                            <div className="text-center py-16 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+                              <p className="text-slate-400 font-bold text-sm mb-3">Nenhum sistema cadastrado</p>
+                              <button onClick={() => setIsSettingsModalOpen(true)} className="bg-slate-900 text-white px-4 py-2 rounded-xl font-bold text-xs uppercase tracking-widest">Configurações</button>
+                            </div>
+                          )}
+                        </div>
+                        {/* Desktop: linhas compactas na sidebar */}
+                        <div className="hidden md:flex flex-col flex-1">
+                          {unidades.filter(u => u.nome.startsWith('SISTEMA:')).map(unit => {
+                            const sysDetails = sistemasDetalhes.find(s => s.id === unit.id) || { id: unit.id, nome: unit.nome.replace('SISTEMA:', '').trim(), status: 'ideia' as SistemaStatus, data_criacao: new Date().toISOString(), data_atualizacao: new Date().toISOString() };
+                            const systemName = unit.nome.replace('SISTEMA:', '').trim();
+                            const ajustesPendentes = workItems.filter(w => w.sistema_id === unit.id && !w.concluido).length;
+                            const isSelected = selectedSystemId === unit.id;
+                            const statusDot: Record<string, string> = { ideia: 'bg-slate-400', prototipacao: 'bg-amber-400', desenvolvimento: 'bg-blue-500', testes: 'bg-orange-400', producao: 'bg-emerald-500' };
+                            const statusLabel: Record<string, string> = { ideia: 'Ideia', prototipacao: 'Protótipo', desenvolvimento: 'Dev', testes: 'Testes', producao: 'Produção' };
+                            return (
+                              <button key={unit.id} onClick={() => setSelectedSystemId(isSelected ? null : unit.id)}
+                                className={`relative w-full text-left px-5 py-4 border-b border-slate-100 transition-all ${isSelected ? 'bg-white' : 'hover:bg-white/60'}`}>
+                                {isSelected && <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-violet-500 rounded-r"></div>}
+                                <div className="flex items-start justify-between gap-2 pl-1">
+                                  <span className={`font-black text-[13px] leading-snug truncate ${isSelected ? 'text-violet-700' : 'text-slate-800'}`}>{systemName}</span>
+                                  {ajustesPendentes > 0 && <span className="shrink-0 bg-violet-100 text-violet-700 text-[9px] font-black px-1.5 py-0.5 rounded-full leading-none mt-0.5">{ajustesPendentes}</span>}
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-1.5 pl-1">
+                                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDot[sysDetails.status] || 'bg-slate-400'}`}></span>
+                                  <span className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">{statusLabel[sysDetails.status] || sysDetails.status}</span>
                                 </div>
                               </button>
                             );
                           })}
-
                           {unidades.filter(u => u.nome.startsWith('SISTEMA:')).length === 0 && (
-                            <div className="col-span-full text-center py-20 bg-slate-50 rounded-none md:rounded-[2.5rem] border-2 border-dashed border-slate-200">
-                              <p className="text-slate-400 font-bold text-lg mb-2">Nenhum sistema cadastrado</p>
-                              <button onClick={() => { setIsSettingsModalOpen(true); }} className="bg-slate-900 text-white px-6 py-3 rounded-lg md:rounded-xl font-bold uppercase tracking-widest text-xs hover:bg-slate-800 transition-all mt-4">
-                                Ir para Configurações
-                              </button>
+                            <div className="p-6 text-center">
+                              <p className="text-[10px] text-slate-300 font-black uppercase tracking-widest">Nenhum sistema</p>
+                              <button onClick={() => setIsSettingsModalOpen(true)} className="mt-3 text-[10px] text-violet-600 font-black uppercase tracking-widest hover:underline">Configurações</button>
                             </div>
                           )}
                         </div>
-                      </>
-                    ) : (
+                      </div>
+                      {/* RIGHT: Painel de detalhes */}
+                      <div className={`${!selectedSystemId ? 'hidden md:flex' : 'flex'} flex-col flex-1 md:overflow-y-auto`}>
+                        {!selectedSystemId ? (
+                          <div className="hidden md:flex flex-1 flex-col items-center justify-center gap-3 text-slate-200">
+                            <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+                            <p className="text-xs font-black uppercase tracking-widest">Selecione um sistema</p>
+                          </div>
+                        ) : (
                       /* VISÃO DETALHADA - SISTEMA SELECIONADO */
                       (() => {
                         const unit = unidades.find(u => u.id === selectedSystemId);
@@ -5585,50 +5593,79 @@ const App: React.FC = () => {
 
                         const systemName = unit.nome.replace('SISTEMA:', '').trim();
                         const systemWorkItems = workItems.filter(w => w.sistema_id === unit.id);
-                        const ajustesPendentesCount = systemWorkItems.filter(w => !w.concluido).length;
+                        const activeWorkItems = systemWorkItems.filter(w => !w.concluido);
+                        const completedWorkItems = systemWorkItems.filter(w => w.concluido);
+                        const ajustesPendentesCount = activeWorkItems.length;
+                        const latestWorkItem = [...systemWorkItems].sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime())[0];
+                        const systemBaseIds = knowledgeBases.filter(base => base.sistema_id === unit.id).map(base => base.id);
+                        const systemKnowledgeIds = new Set(knowledgeItems.filter(item => item.base_id && systemBaseIds.includes(item.base_id)).map(item => item.id));
+                        const linkedTasks = tarefas.filter(task =>
+                          task.base_conhecimento && systemBaseIds.includes(task.base_conhecimento)
+                          || (task.knowledge_item_ids || []).some(id => systemKnowledgeIds.has(id))
+                          || task.sistema === systemName
+                        );
 
                         const steps: SistemaStatus[] = ['ideia', 'prototipacao', 'desenvolvimento', 'testes', 'producao'];
-                        const currentStepIndex = steps.indexOf(sysDetails.status);
+                        const stepLabels: Record<string, string> = { ideia: 'Ideia', prototipacao: 'Protótipo', desenvolvimento: 'Dev', testes: 'Testes', producao: 'Produção' };
+                        const resourceItems = [
+                          { field: 'repositorio_principal', label: 'Repositório', shortLabel: 'Repo', value: sysDetails.repositorio_principal || '', tone: 'slate', empty: 'Não configurado' },
+                          { field: 'link_documentacao', label: 'Documentação', shortLabel: 'Docs', value: sysDetails.link_documentacao || '', tone: 'violet', empty: 'Sem documentação' },
+                          { field: 'link_google_ai_studio', label: 'AI Studio', shortLabel: 'AI', value: sysDetails.link_google_ai_studio || '', tone: 'blue', empty: 'Sem workspace' },
+                          { field: 'link_hospedado', label: 'Hospedagem', shortLabel: 'App', value: sysDetails.link_hospedado || '', tone: 'emerald', empty: 'Sem link público' }
+                        ];
+                        const resourceToneClasses: Record<string, string> = {
+                          slate: 'border-slate-200 bg-white text-slate-600',
+                          violet: 'border-violet-200 bg-violet-50/60 text-violet-700',
+                          blue: 'border-blue-200 bg-blue-50/60 text-blue-700',
+                          emerald: 'border-emerald-200 bg-emerald-50/70 text-emerald-700'
+                        };
+                        const statusTheme: Record<SistemaStatus, { panel: string; pill: string; accent: string; helper: string }> = {
+                          ideia: { panel: 'bg-slate-50', pill: 'bg-slate-100 text-slate-700', accent: 'bg-slate-500', helper: 'Hipóteses, escopo inicial e definição do que vale perseguir.' },
+                          prototipacao: { panel: 'bg-amber-50', pill: 'bg-amber-100 text-amber-700', accent: 'bg-amber-500', helper: 'Experimentos rápidos, prova de conceito e validação inicial.' },
+                          desenvolvimento: { panel: 'bg-blue-50', pill: 'bg-blue-100 text-blue-700', accent: 'bg-blue-500', helper: 'Construção principal, ajustes técnicos e integração com base RAG.' },
+                          testes: { panel: 'bg-orange-50', pill: 'bg-orange-100 text-orange-700', accent: 'bg-orange-500', helper: 'Validação, correções finais e fechamento de pendências.' },
+                          producao: { panel: 'bg-emerald-50', pill: 'bg-emerald-100 text-emerald-700', accent: 'bg-emerald-500', helper: 'Operação estável, documentação e manutenção evolutiva.' }
+                        };
+                        const summaryItems = [
+                          { label: 'Ativos', value: String(activeWorkItems.length) },
+                          { label: 'Concluídos', value: String(completedWorkItems.length) },
+                          { label: 'Recursos', value: `${resourceItems.filter(item => item.value).length}/4` },
+                          { label: 'Ações', value: String(linkedTasks.length) }
+                        ];
 
                         return (
-                          <div className="animate-in fade-in slide-in-from-bottom-8 duration-500">
-                            {/* Navigation */}
+                          <div className="animate-in fade-in duration-300 flex flex-col h-full">
+                            {/* Botão voltar: apenas mobile */}
                             <button
                               onClick={() => setSelectedSystemId(null)}
-                              className="mb-8 px-6 md:px-0 flex items-center gap-2 text-slate-500 hover:text-slate-800 font-bold text-xs uppercase tracking-widest transition-colors"
+                              className="md:hidden px-6 pt-4 pb-2 flex items-center gap-2 text-slate-500 hover:text-slate-800 font-bold text-xs uppercase tracking-widest transition-colors"
                             >
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
                               Voltar para Lista
                             </button>
 
-                            <div className="bg-white border border-slate-200 rounded-none md:rounded-[2.5rem] overflow-hidden shadow-xl">
-                              {/* Header Detalhado */}
-                              <div className="hidden md:block bg-slate-900 p-8 md:p-12 text-white relative overflow-hidden">
-                                <div className="absolute top-0 right-0 w-64 h-64 bg-violet-500/20 rounded-full -mr-20 -mt-20 blur-3xl"></div>
-                                <div className="relative z-10 flex flex-col md:flex-row md:items-end justify-between gap-8">
-                                  <div className="space-y-4">
-                                    <div className="inline-flex items-center gap-2 bg-white/10 px-3 py-1 rounded-lg backdrop-blur-sm border border-white/10">
-                                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                                      <span className="text-[10px] font-black uppercase tracking-widest">
-                                        {sysDetails.status === 'prototipacao' ? 'Prototipação' :
-                                          sysDetails.status === 'producao' ? 'Produção' :
-                                            sysDetails.status}
-                                      </span>
-                                    </div>
-                                    <h2 className="text-4xl md:text-5xl font-black tracking-tight">{systemName}</h2>
-                                  </div>
-                                  <div className="text-right">
-                                    <div className="text-3xl font-black text-violet-400">{ajustesPendentesCount}</div>
-                                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Ajustes Pendentes</div>
-                                  </div>
-                                </div>
-                              </div>
+                            <div className="flex-1 bg-white border border-slate-200 md:border-0 rounded-none overflow-hidden">
 
                               {/* Status Stepper */}
-                              <div className="bg-slate-50 border-b border-slate-100 p-4 md:p-10 flex flex-col items-center gap-4 md:gap-8">
-                                <div className="text-center">
-                                  <h2 className="text-lg md:text-3xl font-black text-slate-900 tracking-tight uppercase">{systemName}</h2>
-                                  <div className="w-8 h-1 bg-violet-500 mx-auto mt-2 rounded-full"></div>
+                              <div className={`${statusTheme[sysDetails.status].panel} border-b border-slate-100 p-4 md:p-8 flex flex-col items-center gap-4 md:gap-6`}>
+                                <div className="w-full flex items-center justify-between">
+                                  <div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <h2 className="text-lg md:text-2xl font-black text-slate-900 tracking-tight uppercase">{systemName}</h2>
+                                      <span className={`px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${statusTheme[sysDetails.status].pill}`}>{stepLabels[sysDetails.status]}</span>
+                                    </div>
+                                    <p className="text-[10px] font-bold text-slate-500 mt-1">{statusTheme[sysDetails.status].helper}</p>
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1.5">{ajustesPendentesCount} demanda{ajustesPendentesCount !== 1 ? 's' : ''} aberta{ajustesPendentesCount !== 1 ? 's' : ''}</p>
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 w-full">
+                                  {summaryItems.map(item => (
+                                    <div key={item.label} className="bg-white border border-slate-200 rounded-xl px-3 py-2.5">
+                                      <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">{item.label}</div>
+                                      <div className="text-sm font-black text-slate-800 mt-1 truncate">{item.value}</div>
+                                    </div>
+                                  ))}
                                 </div>
 
                                 <div className="flex flex-wrap items-center justify-center bg-slate-200/50 p-1 rounded-xl md:rounded-2xl gap-1 w-full md:w-auto">
@@ -5646,8 +5683,8 @@ const App: React.FC = () => {
                                         <button
                                           onClick={() => handleUpdateSistema(unit.id, { status: step })}
                                           className={`flex-1 md:flex-none px-2 md:px-4 py-2 rounded-lg md:rounded-xl text-[8px] md:text-[9px] font-black uppercase tracking-widest transition-all ${isActive
-                                            ? 'bg-violet-600 text-white shadow-lg'
-                                            : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'
+                                            ? `${statusTheme[sysDetails.status].accent} text-white shadow-lg`
+                                            : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'
                                             }`}
                                         >
                                           {stepLabels[step]}
@@ -5663,9 +5700,9 @@ const App: React.FC = () => {
                                 </div>
                               </div>
 
-                              <div className="p-0 md:p-8 grid grid-cols-1 lg:grid-cols-3 gap-0 md:gap-12">
+                              <div className="p-0 md:p-6 grid grid-cols-1 lg:grid-cols-[320px,minmax(0,1fr)] gap-0 md:gap-6">
                                 {/* Coluna 2: Links e Recursos (Topo no mobile) */}
-                                <div className="lg:col-span-1 order-1 md:order-1 space-y-0 md:space-y-8">
+                                <div className="order-1 md:order-1 space-y-0 md:space-y-4">
                                   <div className="p-4 md:p-0">
                                     <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
                                       <span className="w-1 h-3 bg-violet-500 rounded-full"></span>
@@ -5673,20 +5710,23 @@ const App: React.FC = () => {
                                     </h4>
                                   </div>
 
-                                  <div className="grid grid-cols-4 md:grid-cols-1 gap-2 md:gap-6 px-4 md:px-0 mb-8 md:mb-0">
+                                  <div className="grid grid-cols-1 gap-2 px-4 md:px-0 mb-6 md:mb-0">
                                     {/* Repositório */}
                                     <button
                                       onClick={() => setEditingResource({ field: 'repositorio_principal', label: 'Repositório', value: sysDetails.repositorio_principal || '' })}
-                                      className="group bg-slate-900 p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-800 hover:border-slate-600 hover:shadow-xl transition-all text-center md:text-left flex flex-col items-center md:items-stretch justify-center md:justify-between aspect-square md:aspect-auto md:min-h-[120px] relative overflow-hidden"
+                                      className="group bg-slate-900 p-3 rounded-xl border border-slate-800 hover:border-slate-600 hover:shadow-md transition-all text-left flex items-center justify-between gap-3 relative overflow-hidden min-h-[72px]"
                                     >
                                       <div className="absolute top-0 right-0 w-24 h-24 bg-violet-500/10 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
-                                      <div className="relative z-10 space-y-2 md:space-y-3">
-                                        <div className="w-8 h-8 md:w-10 md:h-10 bg-white/10 text-white rounded-lg flex items-center justify-center mx-auto md:mx-0">
-                                          <svg className="w-4 h-4 md:w-5 md:h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" /></svg>
+                                      <div className="relative z-10 flex items-center gap-3 min-w-0">
+                                        <div className="w-9 h-9 bg-white/10 text-white rounded-lg flex items-center justify-center shrink-0">
+                                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" /></svg>
                                         </div>
-                                        <h5 className="text-[8px] md:text-xs font-black text-white uppercase tracking-widest leading-none">Repo</h5>
+                                        <div className="min-w-0">
+                                          <h5 className="text-[10px] font-black text-white uppercase tracking-widest leading-none">Repo</h5>
+                                          <p className="text-[10px] text-slate-400 mt-1 truncate">{sysDetails.repositorio_principal || 'Nao configurado'}</p>
+                                        </div>
                                       </div>
-                                      <div className="hidden md:block relative z-10">
+                                      <div className="relative z-10 shrink-0">
                                         <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{sysDetails.repositorio_principal ? 'Editar' : 'Configurar'}</span>
                                       </div>
                                     </button>
@@ -5694,16 +5734,19 @@ const App: React.FC = () => {
                                     {/* Documentação */}
                                     <button
                                       onClick={() => setEditingResource({ field: 'link_documentacao', label: 'Documentação', value: sysDetails.link_documentacao || '' })}
-                                      className="group bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-200 hover:border-violet-300 hover:shadow-xl transition-all text-center md:text-left flex flex-col items-center md:items-stretch justify-center md:justify-between aspect-square md:aspect-auto md:min-h-[120px] relative overflow-hidden"
+                                      className="group bg-white p-3 rounded-xl border border-slate-200 hover:border-violet-300 hover:shadow-md transition-all text-left flex items-center justify-between gap-3 relative overflow-hidden min-h-[72px]"
                                     >
                                       <div className="absolute top-0 right-0 w-24 h-24 bg-violet-500/5 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
-                                      <div className="relative z-10 space-y-2 md:space-y-3">
-                                        <div className="w-8 h-8 md:w-10 md:h-10 bg-violet-100 text-violet-600 rounded-lg flex items-center justify-center mx-auto md:mx-0">
-                                          <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                      <div className="relative z-10 flex items-center gap-3 min-w-0">
+                                        <div className="w-9 h-9 bg-violet-100 text-violet-600 rounded-lg flex items-center justify-center shrink-0">
+                                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                         </div>
-                                        <h5 className="text-[8px] md:text-xs font-black text-slate-900 uppercase tracking-widest leading-none">Docs</h5>
+                                        <div className="min-w-0">
+                                          <h5 className="text-[10px] font-black text-slate-900 uppercase tracking-widest leading-none">Docs</h5>
+                                          <p className="text-[10px] text-slate-500 mt-1 truncate">{sysDetails.link_documentacao || 'Sem documentacao'}</p>
+                                        </div>
                                       </div>
-                                      <div className="hidden md:block relative z-10">
+                                      <div className="relative z-10 shrink-0">
                                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{sysDetails.link_documentacao ? 'Editar' : 'Configurar'}</span>
                                       </div>
                                     </button>
@@ -5711,16 +5754,19 @@ const App: React.FC = () => {
                                     {/* AI Studio */}
                                     <button
                                       onClick={() => setEditingResource({ field: 'link_google_ai_studio', label: 'AI Studio', value: sysDetails.link_google_ai_studio || '' })}
-                                      className="group bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-200 hover:border-blue-300 hover:shadow-xl transition-all text-center md:text-left flex flex-col items-center md:items-stretch justify-center md:justify-between aspect-square md:aspect-auto md:min-h-[120px] relative overflow-hidden"
+                                      className="group bg-white p-3 rounded-xl border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all text-left flex items-center justify-between gap-3 relative overflow-hidden min-h-[72px]"
                                     >
                                       <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
-                                      <div className="relative z-10 space-y-2 md:space-y-3">
-                                        <div className="w-8 h-8 md:w-10 md:h-10 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center mx-auto md:mx-0">
-                                          <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                      <div className="relative z-10 flex items-center gap-3 min-w-0">
+                                        <div className="w-9 h-9 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center shrink-0">
+                                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                                         </div>
-                                        <h5 className="text-[8px] md:text-xs font-black text-slate-900 uppercase tracking-widest leading-none">AI</h5>
+                                        <div className="min-w-0">
+                                          <h5 className="text-[10px] font-black text-slate-900 uppercase tracking-widest leading-none">AI</h5>
+                                          <p className="text-[10px] text-slate-500 mt-1 truncate">{sysDetails.link_google_ai_studio || 'Sem workspace'}</p>
+                                        </div>
                                       </div>
-                                      <div className="hidden md:block relative z-10">
+                                      <div className="relative z-10 shrink-0">
                                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{sysDetails.link_google_ai_studio ? 'Editar' : 'Configurar'}</span>
                                       </div>
                                     </button>
@@ -5728,16 +5774,19 @@ const App: React.FC = () => {
                                     {/* Link Hospedado */}
                                     <button
                                       onClick={() => setEditingResource({ field: 'link_hospedado', label: 'Hospedagem', value: sysDetails.link_hospedado || '' })}
-                                      className="group bg-emerald-50 p-4 md:p-6 rounded-2xl md:rounded-3xl border border-emerald-100 hover:border-emerald-300 hover:shadow-xl transition-all text-center md:text-left flex flex-col items-center md:items-stretch justify-center md:justify-between aspect-square md:aspect-auto md:min-h-[120px] relative overflow-hidden"
+                                      className="group bg-emerald-50 p-3 rounded-xl border border-emerald-100 hover:border-emerald-300 hover:shadow-md transition-all text-left flex items-center justify-between gap-3 relative overflow-hidden min-h-[72px]"
                                     >
                                       <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
-                                      <div className="relative z-10 space-y-2 md:space-y-3">
-                                        <div className="w-8 h-8 md:w-10 md:h-10 bg-emerald-100 text-emerald-600 rounded-lg flex items-center justify-center mx-auto md:mx-0">
-                                          <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
+                                      <div className="relative z-10 flex items-center gap-3 min-w-0">
+                                        <div className="w-9 h-9 bg-emerald-100 text-emerald-600 rounded-lg flex items-center justify-center shrink-0">
+                                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
                                         </div>
-                                        <h5 className="text-[8px] md:text-xs font-black text-emerald-900 uppercase tracking-widest leading-none">App</h5>
+                                        <div className="min-w-0">
+                                          <h5 className="text-[10px] font-black text-emerald-900 uppercase tracking-widest leading-none">App</h5>
+                                          <p className="text-[10px] text-emerald-700/70 mt-1 truncate">{sysDetails.link_hospedado || 'Sem link publico'}</p>
+                                        </div>
                                       </div>
-                                      <div className="hidden md:block relative z-10">
+                                      <div className="relative z-10 shrink-0">
                                         <span className="text-[10px] font-bold text-emerald-600/60 uppercase tracking-widest">{sysDetails.link_hospedado ? 'Editar' : 'Configurar'}</span>
                                       </div>
                                     </button>
@@ -5777,17 +5826,17 @@ const App: React.FC = () => {
                                 </div>
 
                                 {/* Coluna 1: Logs de Trabalho (Abaixo no mobile) */}
-                                <div className="lg:col-span-2 order-2 md:order-2 space-y-0 md:space-y-6">
-                                  <div className="bg-white border-0 md:border border-slate-200 rounded-none md:rounded-[2.5rem] overflow-hidden flex flex-col min-h-[400px] md:min-h-[600px] shadow-none md:shadow-sm">
+                                <div className="order-2 md:order-2 space-y-0 md:space-y-4">
+                                  <div className="bg-white border-0 md:border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden flex flex-col min-h-[400px] md:min-h-[600px] shadow-none md:shadow-sm">
                                     {/* Novo Log Input */}
-                                    <div className="p-6 md:p-8 border-b border-slate-100 bg-slate-50">
-                                      <div className="flex flex-col gap-6">
+                                    <div className="p-4 md:p-5 border-b border-slate-100 bg-slate-50">
+                                      <div className="flex flex-col gap-4">
                                         <div className="flex items-center justify-between gap-4">
                                           <div className="flex items-center gap-2">
                                             <div className="p-1.5 bg-violet-600 text-white rounded-lg">
                                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                                             </div>
-                                            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Dev Log</h4>
+                                            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nova Demanda</h4>
                                           </div>
                                         </div>
 
@@ -5797,7 +5846,7 @@ const App: React.FC = () => {
                                               value={newLogText}
                                               onChange={setNewLogText}
                                               placeholder="O que foi feito no sistema?"
-                                              className="bg-white min-h-[120px] pb-10"
+                                              className="bg-white min-h-[110px] pb-10"
                                             />
                                             <div className="absolute right-4 top-4 flex flex-col gap-2">
                                               <button
@@ -5856,12 +5905,12 @@ const App: React.FC = () => {
                                           </div>
                                           <button
                                             onClick={() => {
-                                              handleCreateWorkItem(unit.id, newLogTipo, newLogText, newLogAttachments);
+                                              handleCreateWorkItem(unit.id, 'geral', newLogText, newLogAttachments);
                                               setNewLogText('');
                                               setNewLogAttachments([]);
                                             }}
                                             disabled={!newLogText.trim()}
-                                            className="w-full bg-slate-900 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 disabled:grayscale"
+                                            className="w-full bg-slate-900 text-white py-3 rounded-none md:rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 disabled:grayscale"
                                           >
                                             Registrar
                                           </button>
@@ -5869,33 +5918,108 @@ const App: React.FC = () => {
                                       </div>
                                     </div>
 
-                                    {/* Listagem de Logs */}
-                                    <div className="block flex-1 overflow-y-auto p-4 md:p-8 bg-white space-y-8 pb-32">
+                                    <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-white space-y-6 pb-24">
+                                      <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/70">
+                                        <div className="flex items-start justify-between gap-4">
+                                          <div>
+                                            <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Demandas registradas</h5>
+                                            <p className="text-sm font-semibold text-slate-700 mt-2">
+                                              {systemWorkItems.length === 0
+                                                ? 'Nenhuma demanda registrada para este sistema.'
+                                                : `${systemWorkItems.length} demanda(s) registrada(s). ${activeWorkItems.length} ainda aberta(s).`}
+                                            </p>
+                                            <p className="text-[10px] text-slate-500 mt-2">
+                                              {latestWorkItem
+                                                ? `Ultimo registro em ${new Date(latestWorkItem.data_criacao).toLocaleDateString('pt-BR')}.`
+                                                : 'Use o campo acima para guardar ideias, melhorias e ajustes para fazer depois.'}
+                                            </p>
+                                          </div>
+                                          {latestWorkItem && (
+                                            <button
+                                              onClick={() => {
+                                                setEditingWorkItem(latestWorkItem);
+                                                setEditingWorkItemText(latestWorkItem.descricao);
+                                                setEditingWorkItemAttachments(latestWorkItem.pool_dados || []);
+                                              }}
+                                              className="shrink-0 text-[9px] font-black uppercase tracking-widest text-violet-600 hover:text-violet-800"
+                                            >
+                                              Ver ultimo
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      <div className="space-y-3">
+                                        <div className="flex items-center justify-between gap-4">
+                                          <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-violet-500 pl-3">Acoes vinculadas</h5>
+                                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">{linkedTasks.length} acao{linkedTasks.length !== 1 ? 'es' : ''}</span>
+                                        </div>
+
+                                        {linkedTasks.length > 0 ? (
+                                          <div className="space-y-2">
+                                            {linkedTasks
+                                              .sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime())
+                                              .slice(0, 8)
+                                              .map(task => (
+                                                <button
+                                                  key={task.id}
+                                                  onClick={() => setSelectedTask(task)}
+                                                  className="w-full text-left border border-slate-200 rounded-xl px-4 py-3 bg-white hover:border-violet-300 hover:bg-violet-50/30 transition-all"
+                                                >
+                                                  <div className="flex items-start justify-between gap-3">
+                                                    <div className="min-w-0">
+                                                      <div className="flex items-center gap-2 flex-wrap">
+                                                        <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-wider ${STATUS_COLORS[normalizeStatus(task.status)] || 'bg-slate-100 text-slate-600'}`}>
+                                                          {task.status}
+                                                        </span>
+                                                        {task.base_conhecimento && <span className="text-[8px] font-black uppercase tracking-widest text-violet-600">RAG</span>}
+                                                      </div>
+                                                      <p className="text-sm font-semibold text-slate-800 mt-2 truncate">{task.titulo}</p>
+                                                      <p className="text-[10px] text-slate-500 mt-1 truncate">
+                                                        {task.data_limite ? `Prazo: ${new Date(task.data_limite).toLocaleDateString('pt-BR')}` : 'Sem prazo definido'}
+                                                      </p>
+                                                    </div>
+                                                    <svg className="w-4 h-4 text-slate-300 shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
+                                                  </div>
+                                                </button>
+                                              ))}
+                                          </div>
+                                        ) : (
+                                          <div className="text-center py-12 bg-slate-50/50 rounded-xl border-2 border-dashed border-slate-100">
+                                            <p className="text-slate-300 font-black text-[10px] uppercase tracking-widest italic">Nenhuma acao vinculada</p>
+                                            <p className="text-[10px] text-slate-400 mt-2">Acoes com base RAG deste sistema aparecerao aqui.</p>
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      {/* Listagem de Logs */}
+                                      <div className="hidden">
                                       {/* Ativos (Não concluídos) */}
-                                      <div className="space-y-4">
+                                      <div className="space-y-3">
                                         <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-violet-500 pl-3">Logs Ativos</h5>
-                                        {systemWorkItems.filter(w => !w.concluido).sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime()).map(log => (
-                                          <div key={log.id} className="group bg-slate-50 border border-slate-100 rounded-none md:rounded-3xl p-6 hover:border-violet-200 hover:bg-white transition-all">
-                                            <div className="flex flex-col md:flex-row items-start justify-between gap-4 md:gap-6">
+                                        {activeWorkItems.sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime()).map(log => (
+                                          <div key={log.id} className="group bg-slate-50 border border-slate-100 rounded-none md:rounded-xl p-4 hover:border-violet-200 hover:bg-white transition-all">
+                                            <div className="flex flex-col md:flex-row items-start justify-between gap-3 md:gap-4">
                                               <div className="flex-1 space-y-2 w-full">
-                                                <div className="flex items-center gap-3">
+                                                <div className="flex items-center gap-3 flex-wrap">
                                                   <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-wider ${log.tipo === 'desenvolvimento' ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-600'}`}>
                                                     {log.tipo === 'ajuste' ? 'log' : log.tipo}
                                                   </span>
                                                   <span className="text-[8px] font-black text-slate-300 uppercase">{new Date(log.data_criacao).toLocaleDateString('pt-BR')}</span>
+                                                  {log.pool_dados && log.pool_dados.length > 0 && <span className="text-[8px] font-black text-emerald-600 uppercase">{log.pool_dados.length} anexo{log.pool_dados.length !== 1 ? 's' : ''}</span>}
                                                 </div>
                                                 <p className="text-sm font-medium text-slate-700 leading-relaxed break-words">{log.descricao}</p>
                                                 {log.pool_dados && log.pool_dados.length > 0 && (
-                                                  <div className="flex flex-wrap gap-2 mt-3">
+                                                  <div className="flex flex-wrap gap-2 mt-2">
                                                     {log.pool_dados.map((at, i) => (
                                                       <a key={i} href={at.valor} target="_blank" rel="noopener noreferrer" className="block">
-                                                        <img src={at.valor} alt="preview" className="w-20 h-20 object-cover rounded-lg border border-slate-100 hover:scale-105 transition-transform shadow-sm" />
+                                                        <img src={at.valor} alt="preview" className="w-12 h-12 object-cover rounded-lg border border-slate-100 hover:scale-105 transition-transform shadow-sm" />
                                                       </a>
                                                     ))}
                                                   </div>
                                                 )}
                                               </div>
-                                              <div className="flex gap-1 items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                              <div className="flex gap-1 items-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                                                 <button
                                                   onClick={() => {
                                                     setEditingWorkItem(log);
@@ -6015,6 +6139,7 @@ const App: React.FC = () => {
                                           )}
                                         </div>
                                       )}
+                                      </div>
                                     </div>
                                   </div>
                                 </div>
@@ -6340,7 +6465,9 @@ const App: React.FC = () => {
                           </div>
                         );
                       })()
-                    )}
+                        )}
+                      </div>
+                    </div>
                   </div>
 
 
