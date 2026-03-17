@@ -1,5 +1,5 @@
 ﻿
-import { Status, Prioridade } from './types';
+import { Status } from './types';
 
 export const STATUS_COLORS: Record<string, string> = {
   'em andamento': 'bg-amber-300 text-amber-950 border-amber-600',
@@ -8,11 +8,6 @@ export const STATUS_COLORS: Record<string, string> = {
   'default': 'bg-slate-100 text-slate-600 border-slate-300'
 };
 
-export const PRIORITY_COLORS: Record<Prioridade, string> = {
-  'alta': 'bg-rose-600 text-white shadow-sm',
-  'média': 'bg-amber-600 text-white shadow-sm',
-  'baixa': 'bg-emerald-600 text-white shadow-sm',
-};
 
 export const PROJECT_COLORS: Record<string, string> = {
   'MAGO': 'text-purple-700 font-black',

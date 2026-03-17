@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import {
-  Tarefa, Status, EntregaInstitucional, Prioridade, AtividadeRealizada,
+  Tarefa, Status, EntregaInstitucional, AtividadeRealizada,
   Afastamento, PlanoTrabalho, PlanoTrabalhoItem, Categoria, Acompanhamento,
   BrainstormIdea, FinanceTransaction, FinanceGoal, FinanceSettings,
   FixedBill, BillRubric, IncomeEntry, IncomeRubric, HealthWeight,
@@ -929,6 +929,7 @@ const App: React.FC = () => {
   const [editingWorkItemAttachments, setEditingWorkItemAttachments] = useState<PoolItem[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isRecordingLog, setIsRecordingLog] = useState(false);
+  const [isSyncingGithub, setIsSyncingGithub] = useState(false);
   const [isProcessingLog, setIsProcessingLog] = useState(false);
   const logMediaRecorderRef = useRef<MediaRecorder | null>(null);
   const logAudioChunksRef = useRef<Blob[]>([]);
@@ -2644,6 +2645,29 @@ const App: React.FC = () => {
     }
   };
 
+  const handleSyncGithubRepo = async (sistemaId: string, repoUrl: string) => {
+    if (!repoUrl) {
+      showToast("Configure o repositório antes de sincronizar.", "error");
+      return;
+    }
+    setIsSyncingGithub(true);
+    try {
+      const fn = httpsCallable(functions, 'sync_github_repo');
+      const result = await fn({ sistema_id: sistemaId, repo_url: repoUrl });
+      const data = result.data as any;
+      showToast(`RAG sincronizado! ${data.chunks_created} chunks criados para "${data.repo_name}".`, "success");
+    } catch (err: any) {
+      const msg = err?.message || "Erro ao sincronizar repositório.";
+      if (msg.includes('Token GitHub')) {
+        showToast("Repositório privado — configure um GitHub Token em sistema/api_keys no Firestore.", "error");
+      } else {
+        showToast(msg, "error");
+      }
+    } finally {
+      setIsSyncingGithub(false);
+    }
+  };
+
   const handleCreateWorkItem = async (sistemaId: string, tipo: 'desenvolvimento' | 'ajuste' | 'log' | 'geral', descricao: string, attachments: PoolItem[] = [], suppressToast = false) => {
     const finalTipo = tipo === 'geral' ? 'log' : tipo;
     try {
@@ -3114,7 +3138,6 @@ const App: React.FC = () => {
         google_id: "", // Sinaliza que precisa de PUSH
         data_atualizacao: new Date().toISOString(),
         projeto: 'Google Tasks',
-        prioridade: 'média',
         contabilizar_meta: inputData.categoria === 'CLC' || inputData.categoria === 'ASSISTÊNCIA',
         acompanhamento: [],
         entregas_relacionadas: []
@@ -3832,11 +3855,7 @@ const App: React.FC = () => {
       // Se ambas não têm horário, usamos a ordem manual se existir
       if (a.ordem !== undefined && b.ordem !== undefined) return a.ordem - b.ordem;
       
-      // Finalmente prioridade
-      const priorityOrder = { 'alta': 3, 'média': 2, 'baixa': 1 };
-      const pA = priorityOrder[a.prioridade] || 0;
-      const pB = priorityOrder[b.prioridade] || 0;
-      return pB - pA;
+      return 0;
     });
     return result;
   }, [tarefas, searchTerm, statusFilter, sortOption, areaFilter]);
@@ -5722,6 +5741,38 @@ const App: React.FC = () => {
                                       </div>
                                     </button>
                                   </div>
+
+                                  {/* Sincronizar RAG do GitHub */}
+                                  {sysDetails.repositorio_principal && (
+                                    <div className="px-4 md:px-0 mt-4 md:mt-6">
+                                      <button
+                                        onClick={() => handleSyncGithubRepo(unit.id, sysDetails.repositorio_principal!)}
+                                        disabled={isSyncingGithub}
+                                        className="w-full flex items-center justify-between gap-3 p-3 md:p-4 rounded-2xl border border-dashed border-violet-300 hover:border-violet-500 hover:bg-violet-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed group"
+                                      >
+                                        <div className="flex items-center gap-3">
+                                          <div className="w-7 h-7 bg-violet-100 text-violet-600 rounded-lg flex items-center justify-center shrink-0">
+                                            {isSyncingGithub ? (
+                                              <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                                            ) : (
+                                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                                            )}
+                                          </div>
+                                          <div className="text-left">
+                                            <p className="text-[10px] font-black text-violet-700 uppercase tracking-widest leading-none">
+                                              {isSyncingGithub ? 'Sincronizando...' : 'Sincronizar RAG'}
+                                            </p>
+                                            <p className="text-[9px] text-slate-400 mt-0.5">
+                                              {sysDetails.github_rag_synced_at
+                                                ? `Última sync: ${new Date(sysDetails.github_rag_synced_at).toLocaleDateString('pt-BR')}`
+                                                : 'Nunca sincronizado'}
+                                            </p>
+                                          </div>
+                                        </div>
+                                        <svg className="w-3.5 h-3.5 text-violet-400 group-hover:text-violet-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
 
                                 {/* Coluna 1: Logs de Trabalho (Abaixo no mobile) */}

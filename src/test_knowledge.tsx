@@ -11,7 +11,6 @@ const mockTasks: Tarefa[] = [
         data_inicio: new Date().toISOString(),
         data_limite: new Date().toISOString(),
         status: 'A Fazer' as any,
-        prioridade: 'alta',
         categoria: 'geral',
         contabilizar_meta: false,
         data_criacao: new Date().toISOString()
@@ -23,7 +22,6 @@ const mockTasks: Tarefa[] = [
         data_inicio: new Date().toISOString(),
         data_limite: new Date().toISOString(),
         status: 'pendente',
-        prioridade: 'alta',
         categoria: 'geral',
         contabilizar_meta: false,
         data_criacao: new Date().toISOString()

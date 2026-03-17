@@ -931,7 +931,7 @@ export const DailyHabitsModal = ({
 
 const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-export const TaskCreateModal = ({ unidades, knowledgeBases = [], onSave, onClose, showAlert, initialData }: { unidades: { id: string, nome: string }[], knowledgeBases?: { id: string, nome: string }[], onSave: (data: Partial<Tarefa>) => void, onClose: () => void, showAlert: (title: string, message: string) => void, initialData?: Partial<Tarefa> }) => {
+export const TaskCreateModal = ({ unidades, knowledgeBases = [], onSave, onClose, showAlert, initialData }: { unidades: { id: string, nome: string }[], knowledgeBases?: { id: string, nome: string, tipo?: string }[], onSave: (data: Partial<Tarefa>) => void, onClose: () => void, showAlert: (title: string, message: string) => void, initialData?: Partial<Tarefa> }) => {
   const [tipoAcao, setTipoAcao] = useState<TipoAcao>('fast');
   const [origemIngestao, setOrigemIngestao] = useState<'manual' | 'whatsapp' | 'audio'>('manual');
   const [ragContext, setRagContext] = useState('Nenhum');
@@ -1104,7 +1104,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], onSave, onClose
           descricao: data.descricao || prev.descricao,
           categoria: (data.categoria as Categoria) || prev.categoria,
           status: (data.status as Status) || prev.status,
-          data_limite: prev.data_limite
+          data_limite: data.data_limite || prev.data_limite
         }));
         if (data.plano_acao) {
           setPlanoAcao(data.plano_acao.map((item: any) => ({
@@ -1195,9 +1195,20 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], onSave, onClose
                     className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
                   >
                     <option value="Nenhum">Nenhum</option>
-                    {knowledgeBases.map(base => (
-                      <option key={base.id} value={base.id}>{base.nome}</option>
-                    ))}
+                    {knowledgeBases.filter(b => b.tipo !== 'github').length > 0 && (
+                      <optgroup label="Bases de Conhecimento">
+                        {knowledgeBases.filter(b => b.tipo !== 'github').map(base => (
+                          <option key={base.id} value={base.id}>{base.nome}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {knowledgeBases.filter(b => b.tipo === 'github').length > 0 && (
+                      <optgroup label="Repositórios GitHub">
+                        {knowledgeBases.filter(b => b.tipo === 'github').map(base => (
+                          <option key={base.id} value={base.id}>{base.nome}</option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
                 </div>
                 <div className="flex items-end">

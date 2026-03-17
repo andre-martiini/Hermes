@@ -143,6 +143,15 @@ export const TaskExecutionView = ({
   const [newPlanItemText, setNewPlanItemText] = useState('');
   const newPlanItemRef = useRef<HTMLInputElement>(null);
 
+  // Proposal editing (Feature 1 & 2)
+  const [editingProposal, setEditingProposal] = useState<{ msgIndex: number; items: ActionPlanItem[] } | null>(null);
+
+  // Progressive plan adjustment (Feature 3)
+  const [showPlanSuggestion, setShowPlanSuggestion] = useState(false);
+
+  // Plan history viewer (Feature 5)
+  const [showPlanHistory, setShowPlanHistory] = useState(false);
+
   // Knowledge panel
   const [showKnowledgePanel, setShowKnowledgePanel] = useState(false);
   const [sessionExtraFiles, setSessionExtraFiles] = useState<{ id: string; name: string; status: 'uploading' | 'ready' | 'error' }[]>([]);
@@ -203,6 +212,21 @@ export const TaskExecutionView = ({
       plano_acao: updated,
       acompanhamento: updatedAcompanhamento
     });
+
+    // Feature 3: sugere revisão do plano restante quando uma etapa é concluída
+    if (newCompleted) {
+      const remaining = updated.filter(i => !i.completed);
+      if (remaining.length > 0) setShowPlanSuggestion(true);
+    }
+  };
+
+  // Feature 3: envia mensagem ao copiloto para revisar etapas restantes
+  const handleSuggestPlanAdjustment = () => {
+    const completed = (currentTaskData.plano_acao || []).filter(i => i.completed);
+    const remaining = (currentTaskData.plano_acao || []).filter(i => !i.completed);
+    const msg = `Revisar plano: concluí ${completed.map(i => `"${i.text}"`).join(', ')}. Etapas restantes: ${remaining.map((i, idx) => `${idx + 1}. ${i.text}`).join('; ')}. O plano restante ainda faz sentido ou deve ser ajustado com base no que foi feito?`;
+    setShowPlanSuggestion(false);
+    sendChatMessage(msg);
   };
 
   // ─── Diary Handlers ───────────────────────────────────────────
@@ -402,22 +426,33 @@ export const TaskExecutionView = ({
     (currentTaskData.acompanhamento || []).slice(-20).map(a => `[${new Date(a.data).toLocaleString('pt-BR')}] ${a.nota}`).join('\n')
   ].join('\n');
 
-  const handleApplyProposedPlan = (index: number) => {
+  const handleApplyProposedPlan = (index: number, customPlan?: ActionPlanItem[]) => {
     const msg = chatMessages[index];
-    if (!msg || !msg.proposedPlan) return;
+    if (!msg || (!msg.proposedPlan && !customPlan)) return;
+    const appliedPlan = customPlan || msg.proposedPlan!;
+
+    // Feature 5: salva versão atual no histórico antes de sobrescrever
+    const currentPlan = currentTaskData.plano_acao || [];
+    const existingHistory = currentTaskData.plano_acao_historico || [];
+    const updatedHistory = currentPlan.length > 0
+      ? [...existingHistory.slice(-4), currentPlan]
+      : existingHistory;
 
     const updatedMessages = [...chatMessages];
-    const { proposedPlan: appliedPlan, ...rest } = updatedMessages[index];
+    const { proposedPlan: _removed, ...rest } = updatedMessages[index];
     updatedMessages[index] = rest;
 
     const successMsg: ChatMessage = { role: 'assistant', content: '✅ Plano de ação atualizado com sucesso!' };
     const newHistory = [...updatedMessages, successMsg];
 
-    onSave(task.id, { 
+    onSave(task.id, {
       plano_acao: appliedPlan,
+      plano_acao_historico: updatedHistory,
       chat_history: newHistory
     });
     setChatMessages(newHistory);
+    setEditingProposal(null);
+    setShowPlanHistory(false);
     showToast('Plano de ação atualizado!', 'success');
   };
 
@@ -442,7 +477,7 @@ export const TaskExecutionView = ({
           {"id": "uuid2", "text": "Passo 2", "completed": false}
         ]
         [/PROPOSAL]
-        Use IDs únicos (pode ser timestamps ou strings aleatórias). Preserve os itens que já estão concluídos se fizer sentido.
+        Use IDs únicos (pode ser timestamps ou strings aleatórias). Preserve os itens que já estão concluídos se fizer sentido. O plano deve ter no máximo 5 etapas — priorize as mais relevantes e agrupe ações similares quando necessário.
       `;
 
       const res = await fn({
@@ -789,6 +824,55 @@ export const TaskExecutionView = ({
                 ))
               )}
             </div>
+
+            {/* Feature 3: sugestão de revisão após concluir etapa */}
+            {showPlanSuggestion && (
+              <div className={`mx-3 mb-3 flex items-center gap-2 p-2 rounded-xl border ${isDark ? 'bg-blue-500/10 border-blue-500/20' : 'bg-blue-50 border-blue-200'}`}>
+                <svg className="w-3 h-3 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                <span className={`flex-1 text-[9px] ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>Revisar plano com base no progresso?</span>
+                <button onClick={handleSuggestPlanAdjustment} className="text-[9px] font-black text-blue-400 hover:text-blue-300 uppercase tracking-widest px-2">Sim</button>
+                <button onClick={() => setShowPlanSuggestion(false)} className={`text-[9px] ${isDark ? 'text-white/30 hover:text-white/50' : 'text-slate-400 hover:text-slate-600'}`}>Ignorar</button>
+              </div>
+            )}
+
+            {/* Feature 5: histórico de versões do plano */}
+            {(currentTaskData.plano_acao_historico || []).length > 0 && (
+              <div className="px-3 mb-3">
+                <button
+                  onClick={() => setShowPlanHistory(!showPlanHistory)}
+                  className={`text-[9px] font-bold flex items-center gap-1 ${isDark ? 'text-white/30 hover:text-white/50' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  <svg className={`w-3 h-3 transition-transform ${showPlanHistory ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
+                  Histórico de versões ({(currentTaskData.plano_acao_historico || []).length})
+                </button>
+                {showPlanHistory && (
+                  <div className="mt-2 space-y-2">
+                    {[...(currentTaskData.plano_acao_historico || [])].reverse().map((version, vIdx) => (
+                      <div key={vIdx} className={`p-2 rounded-xl border ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                        <p className={`text-[8px] font-black uppercase tracking-widest mb-1.5 ${mutedText}`}>Versão anterior {(currentTaskData.plano_acao_historico || []).length - vIdx}</p>
+                        <div className="space-y-1">
+                          {version.map((item, iIdx) => (
+                            <p key={iIdx} className={`text-[9px] flex gap-1.5 ${isDark ? 'text-white/40' : 'text-slate-500'}`}>
+                              <span className="shrink-0">{iIdx + 1}.</span>{item.text}
+                            </p>
+                          ))}
+                        </div>
+                        <button
+                          onClick={() => {
+                            onSave(task.id, { plano_acao: version });
+                            setShowPlanHistory(false);
+                            showToast('Plano restaurado!', 'success');
+                          }}
+                          className={`mt-1.5 text-[8px] font-bold ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-800'}`}
+                        >
+                          Restaurar esta versão
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Pool de Dados */}
@@ -1087,30 +1171,105 @@ export const TaskExecutionView = ({
 
                     {msg.proposedPlan && (
                       <div className={`mt-3 p-3 rounded-xl border ${isDark ? 'bg-black/20 border-white/10' : 'bg-white/50 border-blue-200'}`}>
-                        <p className="text-[10px] font-black uppercase tracking-widest mb-2 flex items-center gap-2">
-                          <svg className="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                          Proposta de Plano de Ação
-                        </p>
+                        {/* Header com toggle de edição */}
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
+                            <svg className="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            Proposta de Plano de Ação
+                          </p>
+                          {/* Feature 1: botão editar */}
+                          <button
+                            onClick={() => setEditingProposal(
+                              editingProposal?.msgIndex === i
+                                ? null
+                                : { msgIndex: i, items: msg.proposedPlan!.map(it => ({ ...it })) }
+                            )}
+                            className={`text-[9px] font-bold px-2 py-0.5 rounded transition-all ${editingProposal?.msgIndex === i ? 'bg-blue-500/20 text-blue-300' : isDark ? 'text-white/40 hover:text-white/70' : 'text-slate-400 hover:text-slate-600'}`}
+                          >
+                            {editingProposal?.msgIndex === i ? 'Concluir edição' : 'Editar'}
+                          </button>
+                        </div>
+
+                        {/* Lista de itens */}
                         <div className="space-y-1.5 mb-3">
-                          {msg.proposedPlan.map((item, idx) => (
-                            <div key={idx} className="flex items-start gap-2 text-[10px]">
+                          {(editingProposal?.msgIndex === i ? editingProposal.items : msg.proposedPlan).map((item, idx) => (
+                            <div key={item.id} className="flex items-center gap-2 text-[10px]">
                               <span className="shrink-0 w-4 h-4 rounded bg-blue-500/20 text-blue-300 flex items-center justify-center text-[8px] font-bold">{idx + 1}</span>
-                              <span className={isDark ? 'text-white/70' : 'text-slate-600'}>{item.text}</span>
+                              {editingProposal?.msgIndex === i ? (
+                                <>
+                                  {/* Feature 1: edição inline */}
+                                  <input
+                                    value={item.text}
+                                    onChange={(e) => {
+                                      const newItems = [...editingProposal.items];
+                                      newItems[idx] = { ...newItems[idx], text: e.target.value };
+                                      setEditingProposal({ ...editingProposal, items: newItems });
+                                    }}
+                                    className={`flex-1 bg-transparent border-b text-[10px] outline-none ${isDark ? 'border-white/20 text-white/80' : 'border-slate-300 text-slate-700'}`}
+                                  />
+                                  {/* Feature 2: remover item */}
+                                  <button
+                                    onClick={() => setEditingProposal({
+                                      ...editingProposal,
+                                      items: editingProposal.items.filter((_, j) => j !== idx)
+                                    })}
+                                    className="shrink-0 text-rose-400 hover:text-rose-300 font-bold text-[10px] px-1"
+                                  >✕</button>
+                                </>
+                              ) : (
+                                <span className={isDark ? 'text-white/70' : 'text-slate-600'}>{item.text}</span>
+                              )}
                             </div>
                           ))}
                         </div>
-                        <div className="flex gap-2">
-                          <button 
-                            onClick={() => handleApplyProposedPlan(i)}
+
+                        {/* Feature 1: adicionar etapa (max 5) */}
+                        {editingProposal?.msgIndex === i && editingProposal.items.length < 5 && (
+                          <button
+                            onClick={() => setEditingProposal({
+                              ...editingProposal,
+                              items: [...editingProposal.items, { id: Date.now().toString(), text: '', completed: false }]
+                            })}
+                            className={`w-full mb-2 py-1 rounded-lg text-[9px] border border-dashed transition-all ${isDark ? 'border-white/20 text-white/40 hover:text-white/60' : 'border-slate-300 text-slate-400 hover:text-slate-600'}`}
+                          >
+                            + Adicionar etapa
+                          </button>
+                        )}
+
+                        {/* Botões de ação */}
+                        <div className="flex gap-2 flex-wrap">
+                          <button
+                            onClick={() => handleApplyProposedPlan(
+                              i,
+                              editingProposal?.msgIndex === i ? editingProposal.items : undefined
+                            )}
                             className="flex-1 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-black uppercase tracking-widest transition-all"
                           >
                             Aplicar Alterações
                           </button>
-                          <button 
+
+                          {/* Feature 2: Refinar — aparece quando itens foram removidos */}
+                          {editingProposal?.msgIndex === i && editingProposal.items.length < msg.proposedPlan!.length && (
+                            <button
+                              onClick={() => {
+                                const kept = editingProposal.items;
+                                const missing = msg.proposedPlan!.length - kept.length;
+                                const refineMsg = `Refinamento do plano: mantenha as etapas existentes [${kept.map(it => `"${it.text}"`).join(', ')}] e sugira ${missing} etapa(s) complementar(es) para completar um plano de ${msg.proposedPlan!.length} etapas.`;
+                                setEditingProposal(null);
+                                sendChatMessage(refineMsg);
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 text-[9px] font-black uppercase tracking-widest transition-all border border-blue-500/30"
+                            >
+                              Refinar
+                            </button>
+                          )}
+
+                          <button
                             onClick={() => {
                               const updatedMessages = [...chatMessages];
                               updatedMessages[i] = { ...updatedMessages[i], proposedPlan: undefined };
                               setChatMessages(updatedMessages);
+                              setEditingProposal(null);
                             }}
                             className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-white/5 text-white/40 hover:bg-white/10' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
                           >

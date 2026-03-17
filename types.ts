@@ -1,6 +1,5 @@
 
 export type Status = 'em andamento' | 'stand-by' | 'concluído';
-export type Prioridade = 'alta' | 'média' | 'baixa';
 
 export interface Acompanhamento {
     data: string;
@@ -41,7 +40,6 @@ export interface Tarefa {
     data_inicio: string;
     data_limite: string;
     status: Status;
-    prioridade: Prioridade;
     categoria: Categoria;
     contabilizar_meta: boolean;
     data_criacao: string;
@@ -67,6 +65,7 @@ export interface Tarefa {
     reminder_sent?: boolean;
     tipo_acao?: TipoAcao;
     plano_acao?: ActionPlanItem[];
+    plano_acao_historico?: ActionPlanItem[][];
     origem?: 'manual' | 'audio' | 'whatsapp' | 'google';
     base_conhecimento?: string;
     extra_context_id?: string;
@@ -364,6 +363,7 @@ export interface Sistema {
     link_hospedado?: string;
     data_criacao: string;
     data_atualizacao: string;
+    github_rag_synced_at?: string;
 }
 
 export type WorkItemPhase = 'planejamento' | 'prototipagem' | 'desenvolvimento' | 'testes' | 'producao';
@@ -450,6 +450,8 @@ export interface BaseConhecimento {
     descricao?: string;
     cor?: string;
     emoji?: string;
+    tipo?: string;
+    sistema_id?: string;
     data_criacao: string;
     data_atualizacao: string;
     configuracao_rag: {

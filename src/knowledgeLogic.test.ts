@@ -18,7 +18,6 @@ describe('Knowledge Logic - Top Folders and Action Subfolders', () => {
             data_inicio: '2023-01-01',
             data_limite: '2023-01-02',
             status: 'A Fazer' as any,
-            prioridade: 'alta',
             categoria: 'geral',
             contabilizar_meta: false,
             data_criacao: '2023-01-01',
@@ -31,7 +30,6 @@ describe('Knowledge Logic - Top Folders and Action Subfolders', () => {
             data_inicio: '2023-01-01',
             data_limite: '2023-01-02',
             status: 'A Fazer' as any,
-            prioridade: 'alta',
             categoria: 'geral',
             contabilizar_meta: false,
             data_criacao: '2023-01-01'

@@ -87,7 +87,6 @@ new_task = '''      if (convertingIdea) {
             google_id: "",
             data_atualizacao: new Date().toISOString(),
             projeto: 'Google Tasks',
-            prioridade: 'média',
             contabilizar_meta: data.categoria === 'CLC' || data.categoria === 'ASSISTÊNCIA',
             acompanhamento: [],
             entregas_relacionadas: []

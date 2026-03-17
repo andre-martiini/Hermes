@@ -55,7 +55,6 @@ export const DayView = ({
         ...task,
         titulo: 'Nova Tarefa',
         status: 'em andamento',
-        prioridade: 'média',
         categoria: 'GERAL',
         projeto: 'GERAL',
         contabilizar_meta: true,

@@ -40,7 +40,6 @@ const fixData = async () => {
         acompanhamento: novoAcompanhamento,
         descricao: deleteField(),
         observacoes: deleteField(),
-        prioridade: deleteField() // Aproveitando para limpar prioridade também
       });
 
       console.log(`✔ Tarefa "${data.titulo}" (ID: ${docRef.id}) atualizada.`);

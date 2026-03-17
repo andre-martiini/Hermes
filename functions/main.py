@@ -2351,6 +2351,8 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
     if not content:
         return {"error": "Conteúdo não fornecido"}
 
+    today = datetime.now().date().isoformat()
+
     db = firestore.client()
     keys_doc = db.collection('system').document('api_keys').get()
     api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
@@ -2398,8 +2400,12 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
     2. Crie um TÍTULO impactante, profissional e específico (reflita exatamente a demanda).
     3. Escreva uma DESCRIÇÃO detalhada: contextualize o André sobre o que é a demanda, por que ela existe e o que precisa ser entregue.
     4. Defina uma CATEGORIA lógica (TI, GESTÃO, FINANCEIRO, JURÍDICO, etc.).
-    5. Crie um PLANO DE AÇÃO (checklist) completo, com o passo a passo concreto e sequencial para resolver a demanda do início ao fim.
-    6. Se houver prazos implícitos no conteúdo, defina a DATA LIMITE.
+    5. Crie um PLANO DE AÇÃO (checklist) com no máximo 5 etapas concretas e sequenciais para resolver a demanda.
+       REGRAS DO PLANO: cada etapa deve ser específica e acionável para ESTA demanda. Mencione elementos concretos presentes no conteúdo (nomes, sistemas, processos, documentos). Proibido etapas genéricas como "analisar o processo" sem especificar qual. Se a demanda for simples e não justificar 5 etapas, use menos.
+    6. Defina a DATA LIMITE seguindo estas regras obrigatórias:
+       - Se houver uma data ou prazo mencionado no conteúdo, use-o — MAS a data gerada DEVE ser igual ou posterior a {today}.
+       - Se nenhum prazo for mencionado, use a data de hoje ({today}).
+       - NUNCA gere uma data anterior a {today}. Isso é proibido.
 
     SAÍDA ESPERADA (JSON puro, sem markdown):
     {{
@@ -2425,7 +2431,12 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
             end = text.rfind("}") + 1
             text = text[start:end]
             
-        return json.loads(text)
+        result = json.loads(text)
+        # Garante que data_limite nunca seja anterior a hoje
+        generated_date = result.get('data_limite', '')
+        if not generated_date or generated_date < today:
+            result['data_limite'] = today
+        return result
     except Exception as e:
         print(f"Erro no processamento Gemini RAG: {e}")
         return {"error": str(e), "raw_response": text if 'text' in locals() else None}
@@ -2726,6 +2737,204 @@ def processExtraContextFile(req: https_fn.CallableRequest):
             print(f"Erro ao vetorizar contexto extra '{filename}': {e}")
 
     return {'success': True, 'docId': doc_id, 'vectorized': vectorized}
+
+
+@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=180)
+def sync_github_repo(req: https_fn.CallableRequest):
+    """
+    Extrai informações principais de um repositório GitHub e cria/atualiza
+    uma base RAG vinculada ao sistema no Hermes.
+    Extrai: README, árvore de arquivos, dependências e configs.
+    """
+    import requests as http_req
+    import re
+    import base64 as b64
+
+    data = req.data
+    sistema_id = data.get('sistema_id')
+    repo_url = data.get('repo_url', '').strip()
+
+    if not sistema_id or not repo_url:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="sistema_id e repo_url são obrigatórios."
+        )
+
+    db = get_db()
+
+    # Busca chaves da API
+    keys_doc = db.collection('system').document('api_keys').get()
+    keys = keys_doc.to_dict() if keys_doc.exists else {}
+    gemini_key = keys.get('gemini_api_key')
+    github_token = keys.get('github_token')  # opcional, para repos privados
+
+    # Extrai owner/repo da URL (suporta https e ssh)
+    match = re.search(r'github\.com[/:]([^/]+)/([^/.\s]+)', repo_url)
+    if not match:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="URL do repositório inválida. Use o formato https://github.com/owner/repo"
+        )
+    owner = match.group(1)
+    repo = match.group(2).replace('.git', '')
+
+    headers = {
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'Hermes-App'
+    }
+    if github_token:
+        headers['Authorization'] = f'token {github_token}'
+
+    base_url = f'https://api.github.com/repos/{owner}/{repo}'
+
+    # 1. Info básica do repositório
+    repo_resp = http_req.get(base_url, headers=headers, timeout=30)
+    if repo_resp.status_code == 404:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.NOT_FOUND,
+            message="Repositório não encontrado. Verifique a URL ou se o repo é público."
+        )
+    if repo_resp.status_code == 401:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
+            message="Acesso negado. Configure um GitHub Token para repositórios privados."
+        )
+    repo_data = repo_resp.json()
+    default_branch = repo_data.get('default_branch', 'main')
+    sistema_nome = repo_data.get('name', repo)
+
+    # 2. README
+    readme_content = ""
+    readme_resp = http_req.get(f'{base_url}/readme', headers=headers, timeout=30)
+    if readme_resp.status_code == 200:
+        try:
+            readme_content = b64.b64decode(readme_resp.json().get('content', '')).decode('utf-8', errors='replace')
+        except Exception:
+            pass
+
+    # 3. Árvore de arquivos (até 2 níveis de profundidade, máx 120 arquivos)
+    file_tree = ""
+    tree_resp = http_req.get(f'{base_url}/git/trees/{default_branch}?recursive=1', headers=headers, timeout=30)
+    if tree_resp.status_code == 200:
+        paths = [
+            item['path'] for item in tree_resp.json().get('tree', [])
+            if item['type'] == 'blob' and item['path'].count('/') <= 2
+        ][:120]
+        file_tree = '\n'.join(paths)
+
+    # 4. Dependências (primeira correspondência encontrada)
+    deps_content = ""
+    for deps_file in ['package.json', 'requirements.txt', 'pyproject.toml', 'Cargo.toml', 'pom.xml', 'go.mod']:
+        dep_resp = http_req.get(f'{base_url}/contents/{deps_file}', headers=headers, timeout=30)
+        if dep_resp.status_code == 200:
+            try:
+                deps_content = f"=== {deps_file} ===\n" + b64.b64decode(dep_resp.json().get('content', '')).decode('utf-8', errors='replace')[:3000]
+            except Exception:
+                pass
+            break
+
+    # 5. Arquivos de configuração
+    config_content = ""
+    for config_file in ['.env.example', '.env.sample', 'docker-compose.yml', 'docker-compose.yaml']:
+        cfg_resp = http_req.get(f'{base_url}/contents/{config_file}', headers=headers, timeout=30)
+        if cfg_resp.status_code == 200:
+            try:
+                content_decoded = b64.b64decode(cfg_resp.json().get('content', '')).decode('utf-8', errors='replace')[:2000]
+                config_content += f"=== {config_file} ===\n{content_decoded}\n\n"
+            except Exception:
+                pass
+
+    # ─── Monta chunks para RAG ────────────────────────────────────
+    base_id = f"github_{sistema_id}"
+    chunks = []
+
+    # Chunk 1: Overview do repositório + início do README
+    overview = (
+        f"SISTEMA: {sistema_nome}\n"
+        f"REPOSITÓRIO: {repo_url}\n"
+        f"LINGUAGEM PRINCIPAL: {repo_data.get('language', 'N/A')}\n"
+        f"DESCRIÇÃO: {repo_data.get('description', 'N/A')}\n"
+        f"TÓPICOS: {', '.join(repo_data.get('topics', []))}\n"
+        f"ÚLTIMA ATUALIZAÇÃO: {repo_data.get('updated_at', 'N/A')}\n\n"
+        f"=== README ===\n{readme_content[:6000]}"
+    )
+    chunks.append(('overview_readme', overview))
+
+    # Chunk 2: Continuação do README (se longo)
+    if len(readme_content) > 6000:
+        chunks.append(('readme_cont', readme_content[6000:12000]))
+
+    # Chunk 3: Estrutura + dependências + configs
+    structure_chunk = ""
+    if file_tree:
+        structure_chunk += f"=== ESTRUTURA DO PROJETO ===\n{file_tree}\n\n"
+    if deps_content:
+        structure_chunk += deps_content + "\n\n"
+    if config_content:
+        structure_chunk += config_content
+    if structure_chunk.strip():
+        chunks.append(('structure_deps', structure_chunk))
+
+    # ─── Remove docs antigos desta base RAG ──────────────────────
+    existing = db.collection('conhecimento').where('base_id', '==', base_id).stream()
+    for doc in existing:
+        doc.reference.delete()
+
+    # ─── Cria novos documentos com embeddings ────────────────────
+    created_count = 0
+    for chunk_type, chunk_text in chunks:
+        if not chunk_text.strip():
+            continue
+        doc_id = str(uuid.uuid4())
+        doc_data = {
+            'id': doc_id,
+            'titulo': f'GitHub: {sistema_nome} [{chunk_type}]',
+            'tipo_arquivo': 'texto',
+            'texto_bruto': chunk_text,
+            'base_id': base_id,
+            'extra_context_id': None,
+            'tamanho': len(chunk_text.encode()),
+            'data_criacao': datetime.now(timezone.utc).isoformat(),
+            'origem': repo_url,
+            'parent_id': None,
+        }
+        db.collection('conhecimento').document(doc_id).set(doc_data)
+
+        if gemini_key:
+            try:
+                emb = get_embedding(chunk_text[:8000], api_key=gemini_key)
+                db.collection('conhecimento').document(doc_id).update({'embedding': emb})
+            except Exception as e:
+                print(f"Erro embedding chunk {chunk_type}: {e}")
+
+        created_count += 1
+
+    # ─── Cria/atualiza entrada na knowledge_bases ────────────────
+    kb_data = {
+        'id': base_id,
+        'nome': f'GitHub: {sistema_nome}',
+        'descricao': f'Contexto extraído automaticamente do repositório {repo_url}',
+        'tipo': 'github',
+        'sistema_id': sistema_id,
+        'data_atualizacao': datetime.now(timezone.utc).isoformat(),
+    }
+    kb_ref = db.collection('knowledge_bases').document(base_id)
+    if not kb_ref.get().exists:
+        kb_data['data_criacao'] = datetime.now(timezone.utc).isoformat()
+    kb_ref.set(kb_data, merge=True)
+
+    # ─── Atualiza sistema com data de sincronização ───────────────
+    db.collection('sistemas_detalhes').document(sistema_id).set({
+        'github_rag_synced_at': datetime.now(timezone.utc).isoformat(),
+        'data_atualizacao': datetime.now(timezone.utc).isoformat(),
+    }, merge=True)
+
+    return {
+        'success': True,
+        'base_id': base_id,
+        'chunks_created': created_count,
+        'repo_name': sistema_nome,
+    }
 
 
 @https_fn.on_call()
@@ -4296,7 +4505,7 @@ def askTaskAssistant(req: https_fn.CallableRequest):
             )
 
         genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        model = genai.GenerativeModel("gemini-3.1-flash-lite-preview")
 
         # --- CONHECIMENTO MESTRE (Manual do André) ---
         manual_context = ""

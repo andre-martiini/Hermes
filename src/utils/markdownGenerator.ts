@@ -108,7 +108,6 @@ export const generateActionsMarkdown = (tasks: Tarefa[]): string => {
     md += `- Prazo: ${formatTaskDate(task.data_limite || task.data_inicio)}\n`;
     md += `- Projeto: ${task.projeto || 'Nao informado'}\n`;
     md += `- Categoria: ${task.categoria || 'Nao classificada'}\n`;
-    md += `- Prioridade: ${task.prioridade || 'Nao informada'}\n`;
     md += `- Criada em: ${task.data_criacao ? new Date(task.data_criacao).toLocaleString('pt-BR') : 'Nao informado'}\n`;
     md += `- Atualizada em: ${task.data_atualizacao ? new Date(task.data_atualizacao).toLocaleString('pt-BR') : 'Nao informado'}\n`;
     md += `- Concluida em: ${task.data_conclusao ? new Date(task.data_conclusao).toLocaleString('pt-BR') : 'Nao concluida'}\n`;

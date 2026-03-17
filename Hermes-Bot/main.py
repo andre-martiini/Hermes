@@ -129,7 +129,7 @@ def consultar_hermes(colecao: str, campo: str = None, valor: str = None, limite:
     except Exception as e:
         return f"Erro na consulta: {str(e)}"
 
-def registrar_tarefa_hermes(titulo: str, projeto: str = "Geral", notas: str = "", prioridade: str = "Média", data_limite: str = None):
+def registrar_tarefa_hermes(titulo: str, projeto: str = "Geral", notas: str = "", data_limite: str = None):
     """
     Registra uma nova tarefa no sistema.
     """
@@ -140,7 +140,6 @@ def registrar_tarefa_hermes(titulo: str, projeto: str = "Geral", notas: str = ""
             "projeto": projeto,
             "data_limite": data_limite or agora.strftime("%Y-%m-%d"),
             "status": "em andamento",
-            "prioridade": prioridade,
             "notas": notas,
             "horario_inicio": agora.strftime("%H:%M"),
             "pool_dados": [],
