@@ -608,10 +608,10 @@ def askWhatsAppAssistantSecure(req: https_fn.CallableRequest):
             'max_output_tokens': 900,
         }
         try:
-            model = genai.GenerativeModel('gemini-2.5-flash-lite', system_instruction=system_instruction)
+            model = genai.GenerativeModel('gemini-3.1-flash-lite', system_instruction=system_instruction)
             result = model.generate_content(prompt, generation_config=generation_config)
         except TypeError:
-            model = genai.GenerativeModel('gemini-2.5-flash-lite')
+            model = genai.GenerativeModel('gemini-3.1-flash-lite')
             result = model.generate_content([system_instruction, prompt], generation_config=generation_config)
         markdown = (result.text or '').strip() or 'Nao consegui gerar uma resposta com o contexto atual.'
 

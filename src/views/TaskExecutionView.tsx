@@ -486,6 +486,7 @@ export const TaskExecutionView = ({
         categoria: task.categoria,
         ragContext: currentTaskData.base_conhecimento,
         extraContextId: currentTaskData.extra_context_id,
+        knowledgeItemIds: currentTaskData.knowledge_item_ids || [],
       });
       
       let result = (res.data as any).result || '';
@@ -559,6 +560,7 @@ export const TaskExecutionView = ({
         categoria: task.categoria,
         ragContext: currentTaskData.base_conhecimento,
         extraContextId: currentTaskData.extra_context_id,
+        knowledgeItemIds: currentTaskData.knowledge_item_ids || [],
       });
       const result = (res.data as any).result || '';
       const artifact: Artifact = {

@@ -68,8 +68,8 @@ export interface Tarefa {
     plano_acao_historico?: ActionPlanItem[][];
     origem?: 'manual' | 'audio' | 'whatsapp' | 'google';
     base_conhecimento?: string;
-    extra_context_id?: string;
     reuniao_vinculada_id?: string;
+    knowledge_item_ids?: string[];
 }
 
 export interface AtividadeRealizada {
