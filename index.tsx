@@ -45,6 +45,7 @@ import { DayView } from './src/views/DayView';
 import { CalendarView } from './src/views/CalendarView';
 import { CategoryView } from './src/views/CategoryView';
 import { TaskExecutionView } from './src/views/TaskExecutionView';
+import { SistemaExecutionView } from './src/views/SistemaExecutionView';
 import { PublicScholarshipRegistration } from './src/components/public/PublicScholarshipRegistration';
 import PublicFinancePortal from './src/components/public/PublicFinancePortal';
 import PublicShoppingPortal from './src/components/public/PublicShoppingPortal';
@@ -931,6 +932,8 @@ const App: React.FC = () => {
   const [isRecordingLog, setIsRecordingLog] = useState(false);
   const [isSyncingGithub, setIsSyncingGithub] = useState(false);
   const [isProcessingLog, setIsProcessingLog] = useState(false);
+  const [sistemaFilterStatus, setSistemaFilterStatus] = useState<string>('todos');
+  const [sistemaSearch, setSistemaSearch] = useState('');
   const logMediaRecorderRef = useRef<MediaRecorder | null>(null);
   const logAudioChunksRef = useRef<Blob[]>([]);
 
@@ -5505,79 +5508,148 @@ const App: React.FC = () => {
 
                 ) : viewMode === 'sistemas-dev' ? (
                   <div className="animate-in fade-in duration-500 pb-20">
-                    <div className="md:flex md:border md:border-slate-200 md:rounded-[2rem] md:overflow-hidden md:shadow-xl md:bg-white" style={{minHeight: '580px'}}>
-                      {/* LEFT: Lista de sistemas */}
-                      <div className={`${selectedSystemId ? 'hidden md:flex' : 'flex'} flex-col w-full md:w-64 lg:w-72 md:shrink-0 md:border-r md:border-slate-100 md:bg-slate-50/30 md:overflow-y-auto`}>
-                        <div className="hidden md:flex px-5 py-4 border-b border-slate-100 items-center justify-between">
-                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sistemas</span>
-                          <span className="bg-violet-100 text-violet-600 text-[9px] font-black px-2 py-0.5 rounded-full">{unidades.filter(u => u.nome.startsWith('SISTEMA:')).length}</span>
-                        </div>
-                        {/* Mobile: cards compactos */}
-                        <div className="md:hidden grid grid-cols-1 gap-3 p-3 pt-6">
-                          {unidades.filter(u => u.nome.startsWith('SISTEMA:')).map(unit => {
-                            const sysDetails = sistemasDetalhes.find(s => s.id === unit.id) || { id: unit.id, nome: unit.nome.replace('SISTEMA:', '').trim(), status: 'ideia' as SistemaStatus, data_criacao: new Date().toISOString(), data_atualizacao: new Date().toISOString() };
-                            const systemName = unit.nome.replace('SISTEMA:', '').trim();
-                            const ajustesPendentes = workItems.filter(w => w.sistema_id === unit.id && !w.concluido).length;
-                            return (
-                              <button key={unit.id} onClick={() => setSelectedSystemId(unit.id)}
-                                className="bg-white border border-slate-200 rounded-2xl p-4 text-left hover:border-violet-300 transition-all">
-                                <div className="flex items-center justify-between gap-2">
-                                  <h3 className="font-black text-slate-900 text-sm truncate">{systemName}</h3>
-                                  <span className={`shrink-0 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${sysDetails.status === 'producao' ? 'bg-emerald-100 text-emerald-700' : sysDetails.status === 'desenvolvimento' ? 'bg-blue-100 text-blue-700' : sysDetails.status === 'testes' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
-                                    {sysDetails.status === 'prototipacao' ? 'Protótipo' : sysDetails.status === 'producao' ? 'Produção' : sysDetails.status}
-                                  </span>
-                                </div>
-                                <p className="text-[10px] text-slate-400 font-bold mt-1">{ajustesPendentes} ajuste{ajustesPendentes !== 1 ? 's' : ''} pendente{ajustesPendentes !== 1 ? 's' : ''}</p>
-                              </button>
-                            );
-                          })}
-                          {unidades.filter(u => u.nome.startsWith('SISTEMA:')).length === 0 && (
-                            <div className="text-center py-16 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
-                              <p className="text-slate-400 font-bold text-sm mb-3">Nenhum sistema cadastrado</p>
-                              <button onClick={() => setIsSettingsModalOpen(true)} className="bg-slate-900 text-white px-4 py-2 rounded-xl font-bold text-xs uppercase tracking-widest">Configurações</button>
+                    {!selectedSystemId ? (
+                      /* TABLE VIEW */
+                      (() => {
+                        const sistemasUnits = unidades.filter(u => u.nome.startsWith('SISTEMA:'));
+                        const statusDotMap: Record<string, string> = { ideia: 'bg-slate-400', prototipacao: 'bg-amber-400', desenvolvimento: 'bg-blue-500', testes: 'bg-orange-400', producao: 'bg-emerald-500' };
+                        const statusLabelMap: Record<string, string> = { ideia: 'Ideia', prototipacao: 'Protótipo', desenvolvimento: 'Dev', testes: 'Testes', producao: 'Produção' };
+                        const statusPillMap: Record<string, string> = { ideia: 'bg-slate-100 text-slate-600', prototipacao: 'bg-amber-100 text-amber-700', desenvolvimento: 'bg-blue-100 text-blue-700', testes: 'bg-orange-100 text-orange-700', producao: 'bg-emerald-100 text-emerald-700' };
+                        const filtered = sistemasUnits.filter(unit => {
+                          const sysD = sistemasDetalhes.find(s => s.id === unit.id);
+                          const name = unit.nome.replace('SISTEMA:', '').trim().toLowerCase();
+                          const matchesSearch = name.includes(sistemaSearch.toLowerCase());
+                          const matchesFilter = sistemaFilterStatus === 'todos' || (sysD?.status || 'ideia') === sistemaFilterStatus;
+                          return matchesSearch && matchesFilter;
+                        });
+                        return (
+                          <div className="space-y-4">
+                            {/* Toolbar */}
+                            <div className="flex flex-col md:flex-row gap-3 items-start md:items-center justify-between">
+                              <div className="flex flex-wrap gap-2">
+                                {(['todos', 'ideia', 'prototipacao', 'desenvolvimento', 'testes', 'producao'] as const).map(s => (
+                                  <button
+                                    key={s}
+                                    onClick={() => setSistemaFilterStatus(s)}
+                                    className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                                      sistemaFilterStatus === s
+                                        ? 'bg-slate-900 text-white'
+                                        : 'bg-white border border-slate-200 text-slate-500 hover:border-slate-400'
+                                    }`}
+                                  >
+                                    {s === 'todos' ? 'Todos' : statusLabelMap[s]}
+                                  </button>
+                                ))}
+                              </div>
+                              <input
+                                type="text"
+                                placeholder="Buscar sistema..."
+                                value={sistemaSearch}
+                                onChange={e => setSistemaSearch(e.target.value)}
+                                className="w-full md:w-64 bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-violet-400 transition-all"
+                              />
                             </div>
-                          )}
-                        </div>
-                        {/* Desktop: linhas compactas na sidebar */}
-                        <div className="hidden md:flex flex-col flex-1">
-                          {unidades.filter(u => u.nome.startsWith('SISTEMA:')).map(unit => {
-                            const sysDetails = sistemasDetalhes.find(s => s.id === unit.id) || { id: unit.id, nome: unit.nome.replace('SISTEMA:', '').trim(), status: 'ideia' as SistemaStatus, data_criacao: new Date().toISOString(), data_atualizacao: new Date().toISOString() };
-                            const systemName = unit.nome.replace('SISTEMA:', '').trim();
-                            const ajustesPendentes = workItems.filter(w => w.sistema_id === unit.id && !w.concluido).length;
-                            const isSelected = selectedSystemId === unit.id;
-                            const statusDot: Record<string, string> = { ideia: 'bg-slate-400', prototipacao: 'bg-amber-400', desenvolvimento: 'bg-blue-500', testes: 'bg-orange-400', producao: 'bg-emerald-500' };
-                            const statusLabel: Record<string, string> = { ideia: 'Ideia', prototipacao: 'Protótipo', desenvolvimento: 'Dev', testes: 'Testes', producao: 'Produção' };
-                            return (
-                              <button key={unit.id} onClick={() => setSelectedSystemId(isSelected ? null : unit.id)}
-                                className={`relative w-full text-left px-5 py-4 border-b border-slate-100 transition-all ${isSelected ? 'bg-white' : 'hover:bg-white/60'}`}>
-                                {isSelected && <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-violet-500 rounded-r"></div>}
-                                <div className="flex items-start justify-between gap-2 pl-1">
-                                  <span className={`font-black text-[13px] leading-snug truncate ${isSelected ? 'text-violet-700' : 'text-slate-800'}`}>{systemName}</span>
-                                  {ajustesPendentes > 0 && <span className="shrink-0 bg-violet-100 text-violet-700 text-[9px] font-black px-1.5 py-0.5 rounded-full leading-none mt-0.5">{ajustesPendentes}</span>}
-                                </div>
-                                <div className="flex items-center gap-1.5 mt-1.5 pl-1">
-                                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDot[sysDetails.status] || 'bg-slate-400'}`}></span>
-                                  <span className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">{statusLabel[sysDetails.status] || sysDetails.status}</span>
-                                </div>
-                              </button>
-                            );
-                          })}
-                          {unidades.filter(u => u.nome.startsWith('SISTEMA:')).length === 0 && (
-                            <div className="p-6 text-center">
-                              <p className="text-[10px] text-slate-300 font-black uppercase tracking-widest">Nenhum sistema</p>
-                              <button onClick={() => setIsSettingsModalOpen(true)} className="mt-3 text-[10px] text-violet-600 font-black uppercase tracking-widest hover:underline">Configurações</button>
+                            {/* Table */}
+                            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="border-b border-slate-100 bg-slate-50/80">
+                                    <th className="text-left px-5 py-3.5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Nome</th>
+                                    <th className="text-left px-4 py-3.5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
+                                    <th className="text-center px-4 py-3.5 text-[10px] font-black text-slate-400 uppercase tracking-widest hidden md:table-cell">Abertas</th>
+                                    <th className="text-center px-4 py-3.5 text-[10px] font-black text-slate-400 uppercase tracking-widest hidden md:table-cell">Concluídas</th>
+                                    <th className="text-center px-4 py-3.5 text-[10px] font-black text-slate-400 uppercase tracking-widest hidden lg:table-cell">Recursos</th>
+                                    <th className="text-center px-4 py-3.5 text-[10px] font-black text-slate-400 uppercase tracking-widest hidden lg:table-cell">Ações</th>
+                                    <th className="text-right px-5 py-3.5 text-[10px] font-black text-slate-400 uppercase tracking-widest hidden md:table-cell">Atualizado</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {filtered.map((unit, idx) => {
+                                    const sysDetails = sistemasDetalhes.find(s => s.id === unit.id) || { id: unit.id, nome: unit.nome.replace('SISTEMA:', '').trim(), status: 'ideia' as SistemaStatus, data_criacao: new Date().toISOString(), data_atualizacao: new Date().toISOString() };
+                                    const systemName = unit.nome.replace('SISTEMA:', '').trim();
+                                    const sysWorkItems = workItems.filter(w => w.sistema_id === unit.id);
+                                    const openCount = sysWorkItems.filter(w => !w.concluido).length;
+                                    const doneCount = sysWorkItems.filter(w => w.concluido).length;
+                                    const resourceCount = [sysDetails.repositorio_principal, sysDetails.link_documentacao, sysDetails.link_google_ai_studio, sysDetails.link_hospedado].filter(Boolean).length;
+                                    const sysBaseIds = knowledgeBases.filter(base => base.sistema_id === unit.id).map(base => base.id);
+                                    const sysKnowledgeIds = new Set(knowledgeItems.filter(item => item.base_id && sysBaseIds.includes(item.base_id)).map(item => item.id));
+                                    const linkedCount = tarefas.filter(task =>
+                                      (task.base_conhecimento && sysBaseIds.includes(task.base_conhecimento)) ||
+                                      (task.knowledge_item_ids || []).some(id => sysKnowledgeIds.has(id)) ||
+                                      task.sistema === systemName
+                                    ).length;
+                                    const updatedAt = new Date(sysDetails.data_atualizacao).toLocaleDateString('pt-BR');
+                                    return (
+                                      <tr
+                                        key={unit.id}
+                                        onClick={() => setSelectedSystemId(unit.id)}
+                                        className={`cursor-pointer transition-colors hover:bg-violet-50/60 border-b border-slate-50 last:border-0 ${idx % 2 !== 0 ? 'bg-slate-50/30' : ''}`}
+                                      >
+                                        <td className="px-5 py-4">
+                                          <div className="flex items-center gap-3">
+                                            <span className={`w-2 h-2 rounded-full shrink-0 ${statusDotMap[sysDetails.status] || 'bg-slate-400'}`}></span>
+                                            <span className="font-bold text-slate-900 truncate max-w-[180px] md:max-w-[260px]">{systemName}</span>
+                                            {openCount > 0 && (
+                                              <span className="bg-violet-100 text-violet-700 text-[9px] font-black px-1.5 py-0.5 rounded-full leading-none shrink-0">{openCount}</span>
+                                            )}
+                                          </div>
+                                        </td>
+                                        <td className="px-4 py-4">
+                                          <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${statusPillMap[sysDetails.status] || 'bg-slate-100 text-slate-600'}`}>
+                                            {statusLabelMap[sysDetails.status] || sysDetails.status}
+                                          </span>
+                                        </td>
+                                        <td className="px-4 py-4 text-center hidden md:table-cell">
+                                          {openCount > 0 ? (
+                                            <span className="bg-orange-100 text-orange-700 text-[10px] font-black px-2 py-1 rounded-lg">{openCount}</span>
+                                          ) : (
+                                            <span className="text-slate-300 text-[10px] font-bold">—</span>
+                                          )}
+                                        </td>
+                                        <td className="px-4 py-4 text-center hidden md:table-cell">
+                                          <span className="text-slate-500 text-[11px] font-bold">{doneCount}</span>
+                                        </td>
+                                        <td className="px-4 py-4 text-center hidden lg:table-cell">
+                                          <span className={`text-[11px] font-black ${resourceCount === 4 ? 'text-emerald-600' : resourceCount === 0 ? 'text-slate-300' : 'text-slate-500'}`}>{resourceCount}/4</span>
+                                        </td>
+                                        <td className="px-4 py-4 text-center hidden lg:table-cell">
+                                          <span className="text-slate-500 text-[11px] font-bold">{linkedCount}</span>
+                                        </td>
+                                        <td className="px-5 py-4 text-right hidden md:table-cell">
+                                          <span className="text-[10px] text-slate-400 font-bold">{updatedAt}</span>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                  {filtered.length === 0 && (
+                                    <tr>
+                                      <td colSpan={7} className="px-5 py-16 text-center">
+                                        <p className="text-slate-300 font-black text-[10px] uppercase tracking-widest">Nenhum sistema encontrado</p>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
                             </div>
-                          )}
-                        </div>
-                      </div>
-                      {/* RIGHT: Painel de detalhes */}
-                      <div className={`${!selectedSystemId ? 'hidden md:flex' : 'flex'} flex-col flex-1 md:overflow-y-auto`}>
-                        {!selectedSystemId ? (
-                          <div className="hidden md:flex flex-1 flex-col items-center justify-center gap-3 text-slate-200">
-                            <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
-                            <p className="text-xs font-black uppercase tracking-widest">Selecione um sistema</p>
                           </div>
-                        ) : (
+                        );
+                      })()
+                    ) : (
+                      /* DETAIL VIEW — renderizado pelo SistemaExecutionView overlay */
+                      (() => {
+                        const unit = unidades.find(u => u.id === selectedSystemId);
+                        if (!unit || selectedSystemId) return null;
+                        return (
+                          <div className="animate-in fade-in duration-300 flex flex-col gap-4">
+                            <button
+                              onClick={() => setSelectedSystemId(null)}
+                              className="flex items-center gap-2 text-slate-500 hover:text-slate-800 font-bold text-xs uppercase tracking-widest transition-colors w-fit"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+                              Voltar para Lista
+                            </button>
+                            <div className="border border-slate-200 rounded-[2rem] overflow-hidden shadow-xl bg-white">
+                            {(
                       /* VISÃO DETALHADA - SISTEMA SELECIONADO */
                       (() => {
                         const unit = unidades.find(u => u.id === selectedSystemId);
@@ -5635,16 +5707,8 @@ const App: React.FC = () => {
 
                         return (
                           <div className="animate-in fade-in duration-300 flex flex-col h-full">
-                            {/* Botão voltar: apenas mobile */}
-                            <button
-                              onClick={() => setSelectedSystemId(null)}
-                              className="md:hidden px-6 pt-4 pb-2 flex items-center gap-2 text-slate-500 hover:text-slate-800 font-bold text-xs uppercase tracking-widest transition-colors"
-                            >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
-                              Voltar para Lista
-                            </button>
 
-                            <div className="flex-1 bg-white border border-slate-200 md:border-0 rounded-none overflow-hidden">
+                            <div className="flex-1 bg-white rounded-none overflow-hidden">
 
                               {/* Status Stepper */}
                               <div className={`${statusTheme[sysDetails.status].panel} border-b border-slate-100 p-4 md:p-8 flex flex-col items-center gap-4 md:gap-6`}>
@@ -6465,9 +6529,12 @@ const App: React.FC = () => {
                           </div>
                         );
                       })()
-                        )}
-                      </div>
-                    </div>
+                            )}
+                            </div>
+                          </div>
+                        );
+                      })()
+                    )}
                   </div>
 
 
@@ -7068,6 +7135,40 @@ const App: React.FC = () => {
             )
           )
         }
+
+        {/* ── Sistema Execution View (full-screen overlay) ─────────────── */}
+        {selectedSystemId && viewMode === 'sistemas-dev' && (() => {
+          const unit = unidades.find(u => u.id === selectedSystemId);
+          if (!unit) return null;
+          const sysDetails = sistemasDetalhes.find(s => s.id === selectedSystemId) || {
+            id: selectedSystemId,
+            nome: unit.nome.replace('SISTEMA:', '').trim(),
+            status: 'ideia' as SistemaStatus,
+            data_criacao: new Date().toISOString(),
+            data_atualizacao: new Date().toISOString(),
+          };
+          return (
+            <SistemaExecutionView
+              unit={unit}
+              sysDetails={sysDetails}
+              workItems={workItems}
+              tarefas={tarefas}
+              knowledgeBases={knowledgeBases}
+              knowledgeItems={knowledgeItems}
+              onClose={() => setSelectedSystemId(null)}
+              onUpdateSistema={handleUpdateSistema}
+              onCreateWorkItem={handleCreateWorkItem}
+              onUpdateWorkItem={handleUpdateWorkItem}
+              onDeleteWorkItem={handleDeleteWorkItem}
+              onSyncGithubRepo={handleSyncGithubRepo}
+              isSyncingGithub={isSyncingGithub}
+              onSelectTask={setSelectedTask}
+              showToast={showToast}
+              handleFileUploadToDrive={handleFileUploadToDrive}
+              isUploading={isUploading}
+            />
+          );
+        })()}
 
         {
           isTerminalOpen && (
