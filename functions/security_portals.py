@@ -280,9 +280,8 @@ Responda SOMENTE com JSON valido no formato abaixo, sem markdown, sem explicacoe
 
     try:
         genai = get_genai_module()
-        genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        result = model.generate_content(prompt)
+        client = genai.Client(api_key=gemini_key)
+        result = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
         parsed = parse_json_response(result.text or '')
         return parsed
     except Exception as e:
@@ -342,9 +341,8 @@ def generatePgdFromDiariesAI(req: https_fn.CallableRequest):
 
     try:
         genai = get_genai_module()
-        genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        result = model.generate_content(prompt)
+        client = genai.Client(api_key=gemini_key)
+        result = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
         parsed = parse_json_response(result.text or '')
         return {'registros': parsed.get('registros') or []}
     except Exception as e:
@@ -399,9 +397,8 @@ def generatePgdFromRawTextAI(req: https_fn.CallableRequest):
 
     try:
         genai = get_genai_module()
-        genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        result = model.generate_content(prompt)
+        client = genai.Client(api_key=gemini_key)
+        result = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
         parsed = parse_json_response(result.text or '')
         return {'registros': parsed.get('registros') or []}
     except Exception as e:
@@ -601,18 +598,11 @@ def askWhatsAppAssistantSecure(req: https_fn.CallableRequest):
         )
 
         genai = get_genai_module()
-        genai.configure(api_key=gemini_key)
-        generation_config = {
-            'temperature': 0.25,
-            'top_p': 0.9,
-            'max_output_tokens': 900,
-        }
-        try:
-            model = genai.GenerativeModel('gemini-3.1-flash-lite', system_instruction=system_instruction)
-            result = model.generate_content(prompt, generation_config=generation_config)
-        except TypeError:
-            model = genai.GenerativeModel('gemini-3.1-flash-lite')
-            result = model.generate_content([system_instruction, prompt], generation_config=generation_config)
+        client = genai.Client(api_key=gemini_key)
+        result = client.models.generate_content(
+            model='gemini-3.1-flash-lite',
+            contents=[system_instruction, prompt],
+        )
         markdown = (result.text or '').strip() or 'Nao consegui gerar uma resposta com o contexto atual.'
 
         return {
