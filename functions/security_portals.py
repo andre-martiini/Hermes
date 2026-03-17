@@ -231,6 +231,15 @@ def parse_json_response(raw_text):
     return json.loads(cleaned)
 
 
+def _normalize_name(name: str) -> str:
+    """Lowercase + remove acentos para comparação tolerante."""
+    import unicodedata
+    name = name.lower().strip()
+    name = unicodedata.normalize('NFD', name)
+    name = ''.join(c for c in name if unicodedata.category(c) != 'Mn')
+    return name
+
+
 @https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=120)
 def matchShoppingItemsAI(req: https_fn.CallableRequest):
     require_authenticated(req)
@@ -266,15 +275,18 @@ CATALOGO DISPONIVEL (id|nome|categoria):
 PEDIDO DO USUARIO:
 "{text}"
 
-Sua tarefa:
-1. Para cada item mencionado pelo usuario, encontre o item mais proximo no catalogo (matching fuzzy/semantico tolerante a abreviacoes, sinonimos e erros).
-2. Identifique a quantidade mencionada (numero + unidade se houver). Se nao mencionado, use "1 un".
-3. Se nao houver correspondencia razoavel no catalogo, marque isNew=true com o nome como o usuario falou.
+Regras OBRIGATORIAS de matching:
+1. Ignore maiusculas/minusculas e acentos. "arroz" casa com "Arroz", "feijao" casa com "Feijão".
+2. Use matching semantico e fuzzy: abreviacoes, sinonimos, plurais, erros de digitacao devem ser aceitos.
+   Exemplos: "leite integral" → "Leite", "frango" → "Peito de Frango", "detergente" → "Detergente Liquido".
+3. PREFIRA sempre um item do catalogo. So marque isNew=true se realmente nao houver nenhum item remotamente parecido.
+4. Para cada item do pedido, retorne o catalogId do item mais proximo do catalogo.
+5. Se a quantidade nao for mencionada, use "1" e unit "un".
 
-Responda SOMENTE com JSON valido no formato abaixo, sem markdown, sem explicacoes:
+Responda SOMENTE com JSON valido, sem markdown, sem explicacoes:
 {{
   "itens": [
-    {{ "catalogId": "ID_DO_ITEM_OU_null_SE_NOVO", "nomeExibido": "Nome para exibir", "quantidade": "2", "unit": "kg", "isNew": false }}
+    {{ "catalogId": "ID_DO_CATALOGO", "nomeExibido": "Nome exato do catalogo", "quantidade": "1", "unit": "un", "isNew": false }}
   ]
 }}"""
 
@@ -283,7 +295,32 @@ Responda SOMENTE com JSON valido no formato abaixo, sem markdown, sem explicacoe
         client = genai.Client(api_key=gemini_key)
         result = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
         parsed = parse_json_response(result.text or '')
-        return parsed
+        itens = parsed.get('itens') or []
+
+        # Fallback: para itens marcados como novos, tenta match normalizado no catalogo
+        catalog_by_norm = {
+            _normalize_name(item.get('nome', '')): item
+            for item in catalog_items if isinstance(item, dict)
+        }
+        for item in itens:
+            if item.get('isNew') or not item.get('catalogId') or item.get('catalogId') == 'null':
+                norm = _normalize_name(item.get('nomeExibido') or '')
+                # Tenta match exato normalizado
+                if norm in catalog_by_norm:
+                    matched = catalog_by_norm[norm]
+                    item['catalogId'] = matched.get('id')
+                    item['nomeExibido'] = matched.get('nome')
+                    item['isNew'] = False
+                else:
+                    # Tenta match parcial: verifica se o nome normalizado está contido em algum item
+                    for cat_norm, cat_item in catalog_by_norm.items():
+                        if norm and (norm in cat_norm or cat_norm in norm) and len(norm) >= 3:
+                            item['catalogId'] = cat_item.get('id')
+                            item['nomeExibido'] = cat_item.get('nome')
+                            item['isNew'] = False
+                            break
+
+        return {'itens': itens}
     except Exception as e:
         print(f"Erro em matchShoppingItemsAI: {e}")
         raise https_fn.HttpsError(
