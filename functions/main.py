@@ -2741,7 +2741,7 @@ def processExtraContextFile(req: https_fn.CallableRequest):
     return {'success': True, 'docId': doc_id, 'vectorized': vectorized}
 
 
-@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=180)
+@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=180, cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]))
 def sync_github_repo(req: https_fn.CallableRequest):
     """
     Extrai informações principais de um repositório GitHub e cria/atualiza
