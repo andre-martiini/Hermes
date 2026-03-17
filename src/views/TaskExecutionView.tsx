@@ -435,7 +435,7 @@ export const TaskExecutionView = ({
     const currentPlan = currentTaskData.plano_acao || [];
     const existingHistory = currentTaskData.plano_acao_historico || [];
     const updatedHistory = currentPlan.length > 0
-      ? [...existingHistory.slice(-4), currentPlan]
+      ? [...existingHistory.slice(-4), { data: new Date().toISOString(), items: currentPlan }]
       : existingHistory;
 
     const updatedMessages = [...chatMessages];
@@ -851,9 +851,14 @@ export const TaskExecutionView = ({
                   <div className="mt-2 space-y-2">
                     {[...(currentTaskData.plano_acao_historico || [])].reverse().map((version, vIdx) => (
                       <div key={vIdx} className={`p-2 rounded-xl border ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
-                        <p className={`text-[8px] font-black uppercase tracking-widest mb-1.5 ${mutedText}`}>Versão anterior {(currentTaskData.plano_acao_historico || []).length - vIdx}</p>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <p className={`text-[8px] font-black uppercase tracking-widest ${mutedText}`}>
+                            Versão {(currentTaskData.plano_acao_historico || []).length - vIdx} 
+                            {version.data && ` — ${formatDate(version.data)}`}
+                          </p>
+                        </div>
                         <div className="space-y-1">
-                          {version.map((item, iIdx) => (
+                          {version.items.map((item, iIdx) => (
                             <p key={iIdx} className={`text-[9px] flex gap-1.5 ${isDark ? 'text-white/40' : 'text-slate-500'}`}>
                               <span className="shrink-0">{iIdx + 1}.</span>{item.text}
                             </p>
@@ -861,7 +866,7 @@ export const TaskExecutionView = ({
                         </div>
                         <button
                           onClick={() => {
-                            onSave(task.id, { plano_acao: version });
+                            onSave(task.id, { plano_acao: version.items });
                             setShowPlanHistory(false);
                             showToast('Plano restaurado!', 'success');
                           }}

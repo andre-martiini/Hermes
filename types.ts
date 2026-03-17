@@ -33,6 +33,11 @@ export interface ChatMessage {
     timestamp?: string;
 }
 
+export interface ActionPlanHistory {
+    data: string;
+    items: ActionPlanItem[];
+}
+
 export interface Tarefa {
     id: string;
     titulo: string;
@@ -65,11 +70,12 @@ export interface Tarefa {
     reminder_sent?: boolean;
     tipo_acao?: TipoAcao;
     plano_acao?: ActionPlanItem[];
-    plano_acao_historico?: ActionPlanItem[][];
+    plano_acao_historico?: ActionPlanHistory[];
     origem?: 'manual' | 'audio' | 'whatsapp' | 'google';
     base_conhecimento?: string;
     reuniao_vinculada_id?: string;
     knowledge_item_ids?: string[];
+    extra_context_id?: string;
 }
 
 export interface AtividadeRealizada {
