@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { db } from '../../firebase';
+import { doc, setDoc, onSnapshot } from 'firebase/firestore';
 
 interface NFSeData {
   cnpj: string;
@@ -9,14 +11,38 @@ interface NFSeData {
 
 export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
   const [valorLiquido, setValorLiquido] = useState<string>('');
-  const [mesReferencia, setMesReferencia] = useState<string>('');
+  
+  const monthNames = [
+    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+  ];
+
+  const today = new Date();
+  const [selecaoMes, setSelecaoMes] = useState<number>(today.getMonth() + 1);
+  const [selecaoAno, setSelecaoAno] = useState<number>(today.getFullYear());
+  
+  const [dataCompetencia, setDataCompetencia] = useState<string>(() => {
+    const day = '10';
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const year = today.getFullYear();
+    return `${day}${month}${year}`;
+  });
   const [cnpj, setCnpj] = useState<string>('');
   
+  // States for calculated/editable values
+  const [valorBrutoManual, setValorBrutoManual] = useState<string | null>(null);
+  const [valorCPManual, setValorCPManual] = useState<string | null>(null);
+  const [valorIRRFManual, setValorIRRFManual] = useState<string | null>(null);
+  const [descricaoManual, setDescricaoManual] = useState<string | null>(null);
+  const [portalLogin, setPortalLogin] = useState<string>('');
+  const [portalSenha, setPortalSenha] = useState<string>('');
+
   const [loading, setLoading] = useState(false);
   const [clientData, setClientData] = useState<NFSeData | null>(null);
   
   const [showResults, setShowResults] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [isRobotRunning, setIsRobotRunning] = useState(false);
 
   const cleanCnpj = (value: string) => value.replace(/\D/g, '');
 
@@ -26,6 +52,18 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
       return cleaned.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2}).*/, '$1.$2.$3/$4-$5');
     }
     return value;
+  };
+
+  const formatDataCompetenciaDisplay = (val: string) => {
+    const clean = val.replace(/\D/g, '');
+    if (clean.length <= 2) return clean;
+    if (clean.length <= 4) return `${clean.slice(0, 2)}/${clean.slice(2)}`;
+    return `${clean.slice(0, 2)}/${clean.slice(2, 4)}/${clean.slice(4, 8)}`;
+  };
+
+  const handleDataCompetenciaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const clean = e.target.value.replace(/\D/g, '').slice(0, 8);
+    setDataCompetencia(clean);
   };
 
   const buscarCnpj = async () => {
@@ -61,16 +99,66 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
     setTimeout(() => setCopiedField(null), 2000);
   };
 
-  // Cálculos
-  const liquido = parseFloat(valorLiquido.replace(/\./g, '').replace(',', '.')) || 0;
-  const valorBruto = liquido / 0.89;
-  const inss = valorBruto * 0.11;
-  const zeroStr = 'R$ 0,00';
-
   const formatCurrency = (val: number) => 
     val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  const descricao = `Desenvolvimento de soluções tecnológicas e consultoria em gestão empresarial na empresa ${clientData?.razaoSocial || '[RAZÃO SOCIAL]'}. Referente ao mês de ${mesReferencia || '[MÊS DE REFERÊNCIA]'}. Valor líquido acordado: ${formatCurrency(liquido)}.`;
+  // Cálculos Automáticos
+  const liquidoNum = parseFloat(valorLiquido.replace(/\./g, '').replace(',', '.')) || 0;
+  const brutoAutoNum = liquidoNum / 0.89;
+  const cpAutoNum = brutoAutoNum * 0.11;
+  const irrfAutoNum = 0;
+
+  // Valores Finais (Manual ou Auto)
+  const finalBruto = valorBrutoManual !== null ? parseFloat(valorBrutoManual.replace(',', '.')) || 0 : brutoAutoNum;
+  const finalCP = valorCPManual !== null ? parseFloat(valorCPManual.replace(',', '.')) || 0 : cpAutoNum;
+  const finalIRRF = valorIRRFManual !== null ? parseFloat(valorIRRFManual.replace(',', '.')) || 0 : irrfAutoNum;
+  
+  const mesReferenciaString = `${monthNames[selecaoMes - 1]}/${selecaoAno}`;
+  const autoDescricao = `Desenvolvimento de soluções tecnológicas e consultoria em gestão empresarial na empresa ${clientData?.razaoSocial || '[RAZÃO SOCIAL]'}. Referente ao mês de ${mesReferenciaString}. Valor líquido acordado: ${formatCurrency(liquidoNum)}.`;
+  const finalDescricao = descricaoManual !== null ? descricaoManual : autoDescricao;
+
+  const runRobot = async () => {
+    setIsRobotRunning(true);
+    try {
+        // Prepare data for the robot
+        const robotData = {
+            data_competencia: dataCompetencia,
+            cnpj_tomador: cleanCnpj(clientData?.cnpj || cnpj),
+            descricao: finalDescricao,
+            valor_bruto: finalBruto.toFixed(2).replace('.', ','),
+            valor_irrf: finalIRRF.toFixed(2).replace('.', ','),
+            valor_cp: finalCP.toFixed(2).replace('.', ','),
+            portal_login: portalLogin,
+            portal_senha: portalSenha
+        };
+
+        // Call Local Bridge via Firestore
+        await setDoc(doc(db, 'automations', 'hermes_robot'), {
+            params: robotData,
+            status: 'requested',
+            timestamp: new Date().toISOString()
+        });
+
+        alert("Comando de Emissão enviado para o Hermes Robot! 🤖\n\nAbra o terminal do sistema e verifique se o 'robot_bridge.py' está rodando.");
+    } catch (error) {
+        console.error("Erro ao executar robô:", error);
+        setIsRobotRunning(false);
+    }
+  };
+
+  const [robotStatus, setRobotStatus] = useState<string>('idle');
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'automations', 'hermes_robot'), (docSnap) => {
+        const data = docSnap.data();
+        if (data) {
+            setRobotStatus(data.status);
+            if (data.status === 'requested') setIsRobotRunning(true);
+            if (data.status === 'error') setIsRobotRunning(false);
+        }
+    });
+    return () => unsub();
+  }, []);
 
   return (
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -108,19 +196,42 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Mês/Ano de Referência</label>
-              <input 
-                type="text" 
-                value={mesReferencia}
-                onChange={(e) => setMesReferencia(e.target.value)}
-                placeholder="Ex: Janeiro/2026"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-emerald-500"
-              />
+            <div className="grid grid-cols-6 gap-3">
+              <div className="col-span-2">
+                <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Competência</label>
+                <input 
+                  type="text" 
+                  value={formatDataCompetenciaDisplay(dataCompetencia)}
+                  onChange={handleDataCompetenciaChange}
+                  placeholder="DD/MM/AAAA"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-black text-slate-800 outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Mês Ref.</label>
+                <select 
+                  value={selecaoMes}
+                  onChange={(e) => setSelecaoMes(Number(e.target.value))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-emerald-500 appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%2394a3b8%22%20stroke-width%3D%223%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M6%209l6%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_12px_center] bg-no-repeat"
+                >
+                  {monthNames.map((m, i) => (
+                    <option key={m} value={i + 1}>{m}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-span-2">
+                <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Ano Ref.</label>
+                <input 
+                  type="number" 
+                  value={selecaoAno}
+                  onChange={(e) => setSelecaoAno(Number(e.target.value))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
             </div>
 
             <div className="space-y-3">
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">CNPJ do Tomador</label>
+              <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest">CNPJ do Tomador</label>
               <div className="flex gap-2">
                 <input 
                   type="text" 
@@ -142,6 +253,87 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
                   )}
                 </button>
               </div>
+            </div>
+
+            {/* Configurações Avançadas de Tributos */}
+            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 space-y-4">
+                <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Ajuste de Impostos (Opcional)</h4>
+                
+                <div className="grid grid-cols-3 gap-3">
+                    <div>
+                        <label className="block text-[8px] font-bold text-slate-400 uppercase mb-1">Bruto (Override)</label>
+                        <input 
+                            type="text" 
+                            placeholder={brutoAutoNum.toFixed(2).replace('.', ',')}
+                            value={valorBrutoManual || ''}
+                            onChange={(e) => setValorBrutoManual(e.target.value)}
+                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-[8px] font-bold text-slate-400 uppercase mb-1">CP/INSS (Override)</label>
+                        <input 
+                            type="text" 
+                            placeholder={cpAutoNum.toFixed(2).replace('.', ',')}
+                            value={valorCPManual || ''}
+                            onChange={(e) => setValorCPManual(e.target.value)}
+                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-[8px] font-bold text-slate-400 uppercase mb-1">IRRF (Override)</label>
+                        <input 
+                            type="text" 
+                            placeholder="0,00"
+                            value={valorIRRFManual || ''}
+                            onChange={(e) => setValorIRRFManual(e.target.value)}
+                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                    </div>
+                </div>
+
+                <div>
+                    <label className="block text-[8px] font-bold text-slate-400 uppercase mb-1">Descrição Manual</label>
+                    <textarea 
+                        value={finalDescricao}
+                        onChange={(e) => setDescricaoManual(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-[10px] font-semibold text-slate-600 outline-none focus:ring-2 focus:ring-emerald-500 min-h-[60px]"
+                    />
+                </div>
+            </div>
+
+            {/* Acesso ao Portal (Login Automático) */}
+            <div className="bg-slate-900 rounded-2xl p-5 border border-slate-800 space-y-4 shadow-xl">
+                <div className="flex items-center gap-2 mb-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                    <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Acesso ao Portal (Auto-Login)</h4>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-3">
+                    <div>
+                        <label className="block text-[8px] font-bold text-slate-400 uppercase mb-1">CPF/CNPJ</label>
+                        <input 
+                            type="text" 
+                            value={portalLogin}
+                            onChange={(e) => setPortalLogin(e.target.value)}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs font-bold text-white outline-none focus:ring-2 focus:ring-emerald-500 placeholder:text-slate-600"
+                            placeholder="Usuario"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-[8px] font-bold text-slate-400 uppercase mb-1">Senha</label>
+                        <input 
+                            type="password" 
+                            value={portalSenha}
+                            onChange={(e) => setPortalSenha(e.target.value)}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs font-bold text-white outline-none focus:ring-2 focus:ring-emerald-500 placeholder:text-slate-600"
+                            placeholder="••••••••"
+                        />
+                    </div>
+                </div>
+                <p className="text-[8px] text-slate-500 leading-tight italic">
+                    Dados são processados localmente pelo robô e não ficam armazenados permanentemente.
+                </p>
             </div>
 
             {clientData && (
@@ -169,10 +361,10 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
 
             <button
               onClick={() => setShowResults(true)}
-              disabled={!valorLiquido || !mesReferencia}
-              className="w-full bg-slate-900 text-white py-4 rounded-xl font-black text-xs uppercase tracking-widest mt-4 hover:bg-slate-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+              disabled={!valorLiquido}
+              className="w-full bg-emerald-950 text-white py-4 rounded-xl font-black text-xs uppercase tracking-widest mt-4 hover:bg-emerald-900 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
             >
-              Gerar Dados para NFS-e
+              Visualizar Dados NFS-e
             </button>
           </div>
 
@@ -227,7 +419,7 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
                         <div className="flex justify-between items-start mb-2">
                             <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-widest">Descrição do Serviço</span>
                             <button 
-                                onClick={() => handleCopy(descricao, 'descricao')}
+                                onClick={() => handleCopy(finalDescricao, 'descricao')}
                                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-colors ${copiedField === 'descricao' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
                             >
                                 {copiedField === 'descricao' ? (
@@ -238,7 +430,7 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
                             </button>
                         </div>
                         <p className="text-sm font-semibold text-slate-800 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-100">
-                            {descricao}
+                            {finalDescricao}
                         </p>
                     </div>
 
@@ -246,9 +438,9 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
                     <div className="grid grid-cols-2 gap-4">
                         <div className="bg-emerald-50 p-5 rounded-xl border border-emerald-200 relative overflow-hidden group">
                             <span className="block text-[9px] font-black text-emerald-700 uppercase tracking-widest mb-1">Valor Bruto (Serviço)</span>
-                            <div className="text-2xl font-black text-emerald-900">{formatCurrency(valorBruto)}</div>
+                            <div className="text-2xl font-black text-emerald-900">{formatCurrency(finalBruto)}</div>
                             <button 
-                                onClick={() => handleCopy(valorBruto.toFixed(2).replace('.', ','), 'bruto')}
+                                onClick={() => handleCopy(finalBruto.toFixed(2).replace('.', ','), 'bruto')}
                                 className="absolute top-4 right-4 p-2 bg-white/80 rounded-lg text-emerald-600 opacity-0 group-hover:opacity-100 hover:bg-white transition-all shadow-sm"
                             >
                                 {copiedField === 'bruto' ? <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>}
@@ -256,15 +448,52 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
                         </div>
 
                         <div className="bg-rose-50 p-5 rounded-xl border border-rose-200 relative overflow-hidden group">
-                            <span className="block text-[9px] font-black text-rose-700 uppercase tracking-widest mb-1">Valor INSS Retido (11%)</span>
-                            <div className="text-2xl font-black text-rose-900">{formatCurrency(inss)}</div>
+                            <span className="block text-[9px] font-black text-rose-700 uppercase tracking-widest mb-1">INSS / CP Retida (11%)</span>
+                            <div className="text-2xl font-black text-rose-900">{formatCurrency(finalCP)}</div>
                             <button 
-                                onClick={() => handleCopy(inss.toFixed(2).replace('.', ','), 'inss')}
+                                onClick={() => handleCopy(finalCP.toFixed(2).replace('.', ','), 'cp')}
                                 className="absolute top-4 right-4 p-2 bg-white/80 rounded-lg text-rose-600 opacity-0 group-hover:opacity-100 hover:bg-white transition-all shadow-sm"
                             >
-                                {copiedField === 'inss' ? <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>}
+                                {copiedField === 'cp' ? <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>}
                             </button>
                         </div>
+                    </div>
+
+                    {/* Botão de Ação do Robô */}
+                    <div className="pt-2 flex flex-col gap-3">
+                        {robotStatus === 'processing' && isRobotRunning && (
+                          <button
+                            onClick={async () => {
+                              await setDoc(doc(db, 'automations', 'hermes_robot'), { status: 'login_confirmed' }, { merge: true });
+                            }}
+                            className="w-full py-4 bg-emerald-100 text-emerald-700 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-emerald-200 transition-all flex items-center justify-center gap-2 border border-emerald-200 animate-pulse shadow-sm"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                            Já estou Logado! Prosseguir Preenchimento
+                          </button>
+                        )}
+                        
+                        <button
+                            onClick={runRobot}
+                            disabled={isRobotRunning && (robotStatus === 'requested' || robotStatus === 'processing')}
+                            className={`w-full py-5 rounded-[1.5rem] font-black uppercase tracking-widest text-sm flex items-center justify-center gap-3 transition-all transform hover:scale-[1.02] active:scale-95 shadow-xl ${
+                                (isRobotRunning && (robotStatus === 'requested' || robotStatus === 'processing'))
+                                ? 'bg-slate-200 text-slate-500 cursor-not-allowed' 
+                                : 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white hover:from-emerald-500 hover:to-teal-600 active:from-emerald-700 active:to-teal-800'
+                            }`}
+                        >
+                            {(isRobotRunning && (robotStatus === 'requested' || robotStatus === 'processing')) ? (
+                                <>
+                                    <span className="w-5 h-5 border-3 border-emerald-500 border-t-emerald-100 rounded-full animate-spin"></span>
+                                    {robotStatus === 'requested' ? 'Chamando Robô...' : 'Robô em Ação...'}
+                                </>
+                            ) : (
+                                <>
+                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                                    Emitir NFS-e com Robô
+                                </>
+                            )}
+                        </button>
                     </div>
 
                     {/* Outros Impostos Zerados */}
