@@ -142,6 +142,29 @@ const SystemsBarChart = ({ data }: { data: [string, number][] }) => {
     );
 };
 
+const OrphanItemsDebugger = ({ workItems, unidades, sistemasDetalhes }: { workItems: WorkItem[], unidades: { id: string, nome: string }[], sistemasDetalhes: Sistema[] }) => {
+    const orphans = workItems.filter(w => !w.concluido && !unidades.some(u => u.id === w.sistema_id) && !sistemasDetalhes.some(s => s.id === w.sistema_id));
+    
+    if (orphans.length === 0) return null;
+
+    return (
+        <div className="mt-4 p-3 bg-rose-50 rounded-2xl border border-rose-100 animate-in zoom-in-95">
+            <div className="flex items-center gap-2 mb-2">
+                <span className="w-2 h-2 bg-rose-500 rounded-full animate-pulse"></span>
+                <p className="text-[10px] font-black text-rose-700 uppercase tracking-widest">Ajustes Órfãos ({orphans.length})</p>
+            </div>
+            <div className="space-y-2 max-h-32 overflow-y-auto pr-1">
+                {orphans.map(w => (
+                    <div key={w.id} className="p-2 bg-white/80 backdrop-blur-sm rounded-lg border border-rose-200">
+                        <p className="text-[11px] font-bold text-slate-800 leading-tight">{w.descricao}</p>
+                        <p className="text-[8px] text-slate-400 mt-1 uppercase font-black">Origem ID: {w.sistema_id || 'BRANCO'}</p>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
 // --- COMPONENTE PRINCIPAL ---
 
 const DashboardView: React.FC<DashboardViewProps> = ({
@@ -325,11 +348,18 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         const counts: Record<string, number> = {};
         workItems.filter(w => !w.concluido).forEach(w => {
             const unit = unidades.find(u => u.id === w.sistema_id);
-            const name = unit ? unit.nome.replace('SISTEMA:', '').trim() : 'Sistema Desconhecido';
+            let name = unit ? unit.nome.replace('SISTEMA:', '').trim() : '';
+            
+            // If not found in units, try in system details for consistency
+            if (!name) {
+                const sys = sistemasDetalhes.find(s => s.id === w.sistema_id);
+                name = sys ? sys.nome : (w.sistema_id ? 'Sistema Desconhecido' : 'Sem Sistema Vinculado');
+            }
+            
             counts[name] = (counts[name] || 0) + 1;
         });
         return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
-    }, [workItems, unidades]);
+    }, [workItems, unidades, sistemasDetalhes]);
 
     return (
         <div className="animate-in fade-in duration-700 flex flex-col h-full lg:h-[calc(100vh-5rem)] p-1 md:p-2 lg:p-1 w-full max-w-[1600px] mx-auto overflow-hidden">
@@ -458,9 +488,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                 </div>
                             ))}
                         </div>
-                        <div className="flex-1">
+                        <div className="flex-1 overflow-y-auto pr-1">
                             <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 md:mb-3">Pendências por Sistema</p>
                             <SystemsBarChart data={systemsByAdjustments} />
+                            <OrphanItemsDebugger workItems={workItems} unidades={unidades} sistemasDetalhes={sistemasDetalhes} />
                         </div>
                     </div>
                 </DashboardCard>

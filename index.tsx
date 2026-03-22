@@ -5709,7 +5709,7 @@ const App: React.FC = () => {
                       /* DETAIL VIEW — renderizado pelo SistemaExecutionView overlay */
                       (() => {
                         const unit = unidades.find(u => u.id === selectedSystemId);
-                        if (!unit || selectedSystemId) return null;
+                        if (!unit) return null;
                         return (
                           <div className="animate-in fade-in duration-300 flex flex-col gap-4">
                             <button
