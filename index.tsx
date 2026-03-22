@@ -144,11 +144,25 @@ const QuickLogModal = ({ isOpen, onClose, onAddLog, unidades }: { isOpen: boolea
 
   const systems = useMemo(() => unidades.filter(u => u.nome.startsWith('SISTEMA:')), [unidades]);
 
+  const streamRef = useRef<MediaStream | null>(null);
+
   useEffect(() => {
     if (systems.length > 0 && !selectedSystem) {
       setSelectedSystem(systems[0].id);
     }
   }, [systems, selectedSystem]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, []);
 
   if (!isOpen) return null;
 
@@ -166,6 +180,7 @@ const QuickLogModal = ({ isOpen, onClose, onAddLog, unidades }: { isOpen: boolea
         await handleProcessAudio(audioBlob);
         stream.getTracks().forEach(track => track.stop());
       };
+      streamRef.current = stream;
       mediaRecorder.start();
       setIsRecording(true);
     } catch (err) {
@@ -496,7 +511,21 @@ const ShoppingAIModal = ({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
+  const streamRef = useRef<MediaStream | null>(null);
+
   const resetToInput = () => { setStep('input'); setMatchedItems([]); setErrorMsg(''); };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, []);
 
   if (!isOpen) return null;
 
@@ -539,6 +568,7 @@ const ShoppingAIModal = ({
           setStep('input');
         }
       };
+      streamRef.current = stream;
       mr.start();
       setIsRecording(true);
     } catch {
@@ -1085,8 +1115,9 @@ const App: React.FC = () => {
       };
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(logAudioChunksRef.current, { type: 'audio/m4a' });
+        // Stop audio tracks immediately to release hardware
+        if (stream) stream.getTracks().forEach(track => track.stop());
         await handleProcessLogAudio(audioBlob);
-        stream.getTracks().forEach(track => track.stop());
       };
       mediaRecorder.start();
       setIsRecordingLog(true);
@@ -1102,6 +1133,15 @@ const App: React.FC = () => {
       setIsRecordingLog(false);
     }
   };
+
+  // Cleanup on unmount for log recording
+  useEffect(() => {
+    return () => {
+      if (logMediaRecorderRef.current && logMediaRecorderRef.current.state !== 'inactive') {
+        logMediaRecorderRef.current.stop();
+      }
+    };
+  }, []);
 
   const handleProcessLogAudio = async (audioBlob: Blob) => {
     setIsProcessingLog(true);
@@ -3210,6 +3250,37 @@ const App: React.FC = () => {
           });
         });
         batch.commit().catch((migrationErr) => console.error('Erro ao normalizar tarefas legadas:', migrationErr));
+      }
+
+      // Automação: Atualizar tarefas atrasadas para o dia de hoje
+      const today = formatDateLocalISO(new Date());
+      const nowISO = new Date().toISOString();
+      const overdueTasks = snapshot.docs
+        .map(taskDoc => ({ id: taskDoc.id, ...taskDoc.data() } as Tarefa))
+        .filter(task => {
+          const status = normalizeStatus(task.status);
+          const isPending = status !== 'concluido' && task.status !== 'excluído' as any;
+          const hasPastDeadline = task.data_limite && 
+                                 task.data_limite !== '-' && 
+                                 task.data_limite !== '0000-00-00' && 
+                                 task.data_limite < today;
+          return isPending && hasPastDeadline;
+        });
+
+      if (overdueTasks.length > 0) {
+        const batch = writeBatch(db);
+        overdueTasks.forEach(task => {
+          batch.update(doc(db, 'tarefas', task.id), {
+            data_inicio: today,
+            data_limite: today,
+            data_atualizacao: nowISO
+          });
+        });
+        batch.commit()
+          .then(() => {
+            showToast(`${overdueTasks.length} ação(ões) atrasada(s) atualizada(s) para hoje!`, 'info');
+          })
+          .catch((err) => console.error('Erro ao atualizar tarefas atrasadas:', err));
       }
 
       setLoading(false);

@@ -946,6 +946,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
   const [reunioes, setReunioes] = useState<MeetingHistoryEntry[]>([]);
   const [selectedReuniao, setSelectedReuniao] = useState<MeetingHistoryEntry | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const [isTranscriptionSelectorOpen, setIsTranscriptionSelectorOpen] = useState(false);
   const [transcriptionSearch, setTranscriptionSearch] = useState('');
@@ -1013,6 +1014,19 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
     loadReunioes();
   }, []);
 
+  // Cleanup for audio recording on unmount
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+    };
+  }, []);
+
   // STT for titulo field only (browser native, short dictation)
   const startTranscription = (targetField: 'titulo') => {
     if (!SpeechRecognition) {
@@ -1049,12 +1063,14 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
       const mr = new MediaRecorder(stream);
       mediaRecorderRef.current = mr;
       audioChunksRef.current = [];
       mr.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       mr.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
+        if (stream) stream.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         setIsTranscribing(true);
         try {

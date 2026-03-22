@@ -137,6 +137,8 @@ export const TaskExecutionView = ({
   const [pendingFileNames, setPendingFileNames] = useState<Record<string, string>>({});
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
 
+  const streamRef = useRef<MediaStream | null>(null);
+
   // Plan modal
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [planDraft, setPlanDraft] = useState<ActionPlanItem[]>([]);
@@ -319,14 +321,17 @@ export const TaskExecutionView = ({
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
       const mr = new MediaRecorder(stream);
       mediaRecorderRef.current = mr;
       audioChunksRef.current = [];
       mr.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       mr.onstop = async () => {
         const blob = new Blob(audioChunksRef.current, { type: 'audio/m4a' });
+        // Stop hardware immediately instead of waiting for transcription processing
+        if (stream) stream.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
         await handleProcessAudio(blob);
-        stream.getTracks().forEach(t => t.stop());
       };
       mr.start();
       setIsRecording(true);
@@ -334,8 +339,25 @@ export const TaskExecutionView = ({
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) { mediaRecorderRef.current.stop(); setIsRecording(false); }
+    if (mediaRecorderRef.current && isRecording) { 
+      mediaRecorderRef.current.stop(); 
+      setIsRecording(false); 
+      // Tracks will be stopped in onstop callback
+    }
   };
+
+  // Cleanup on unmount - Ensure microphone is released
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+    };
+  }, []);
 
   const handleProcessAudio = async (audioBlob: Blob, target: 'diary' | 'chat' = 'diary') => {
     setIsProcessingTranscription(true);
@@ -674,17 +696,17 @@ export const TaskExecutionView = ({
       ══════════════════════════════════════════════════════════ */}
       <header className={`shrink-0 px-4 md:px-6 py-3 border-b flex flex-col gap-2 ${isDark ? 'border-white/10 bg-black/30' : 'border-slate-200 bg-white/80 backdrop-blur-sm'}`}>
         {/* Row 1: nav + title + controls */}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {/* Back */}
-          <button onClick={onClose} className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'text-white/40 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}>
+          <button onClick={onClose} className={`order-1 shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'text-white/40 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}>
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
             <span className="hidden sm:inline">Voltar</span>
           </button>
 
           {/* Label + Title */}
-          <div className="flex-1 min-w-0">
+          <div className="order-3 sm:order-2 flex-1 min-w-0 w-full sm:w-auto">
             <p className={`text-[8px] font-black uppercase tracking-[0.3em] ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>Sala de Operações</p>
-            <h1 className={`text-base md:text-xl font-black tracking-tight leading-tight truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>
+            <h1 className={`text-base md:text-xl font-black tracking-tight leading-tight break-words whitespace-normal ${isDark ? 'text-white' : 'text-slate-900'}`}>
               {currentTaskData.titulo}
             </h1>
           </div>
@@ -693,7 +715,7 @@ export const TaskExecutionView = ({
           <select
             value={currentTaskData.status}
             onChange={e => handleStatusChange(e.target.value)}
-            className={`shrink-0 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl border appearance-none cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 transition-all ${statusColor(currentTaskData.status)} ${isDark ? 'bg-transparent' : 'bg-white'}`}
+            className={`order-2 sm:order-3 shrink-0 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl border appearance-none cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 transition-all ${statusColor(currentTaskData.status)} ${isDark ? 'bg-transparent' : 'bg-white'}`}
           >
             <option value="em andamento">Em Andamento</option>
             <option value="stand-by">Stand-by</option>
@@ -702,7 +724,7 @@ export const TaskExecutionView = ({
 
           {/* Timer (if active) */}
           {(isTimerRunning || seconds > 0) && (
-            <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border shrink-0 ${isTimerRunning ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' : isDark ? 'bg-white/5 border-white/10 text-white/40' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+            <div className={`order-4 hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border shrink-0 ${isTimerRunning ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' : isDark ? 'bg-white/5 border-white/10 text-white/40' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
               <span className="text-[9px] font-black uppercase tracking-widest opacity-60">{pomodoroMode === 'focus' ? 'Foco' : 'Pausa'}</span>
               <span className="text-sm font-black tabular-nums">{formatTimer(seconds)}</span>
               <button onClick={handleToggleTimer} className={`p-1 rounded-lg ${isTimerRunning ? 'bg-rose-500 text-white' : 'bg-emerald-500 text-white'}`}>
