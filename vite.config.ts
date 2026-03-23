@@ -38,10 +38,30 @@ export default defineConfig(({ mode }) => {
               purpose: "any maskable",
             },
           ],
+          share_target: {
+            action: "/_share-target",
+            method: "POST",
+            enctype: "multipart/form-data",
+            params: {
+              title: "title",
+              text: "text",
+              url: "url",
+              files: [
+                {
+                  name: "audioFile",
+                  accept: ["audio/*", "application/ogg", ".ogg"]
+                },
+                {
+                  name: "videoFile",
+                  accept: ["video/*", ".mp4", ".mov", ".mkv"]
+                }
+              ]
+            }
+          }
         },
         workbox: {
           maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
-          importScripts: ["firebase-messaging-sw.js"],
+          importScripts: ["firebase-messaging-sw.js", "share-target-sw.js"],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,

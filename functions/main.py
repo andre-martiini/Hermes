@@ -2343,6 +2343,7 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
     extra_context = data.get('extraContext', '')
     extra_context_id = data.get('extraContextId')
     knowledge_item_ids = data.get('knowledgeItemIds', [])
+    available_tags = data.get('availableTags', [])
 
     if not content:
         return {"error": "Conteúdo não fornecido"}
@@ -2369,6 +2370,8 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
     if extra_context_id or knowledge_item_ids:
         extra_rag_context = retrieve_extra_context_rag(db, genai, content, extra_context_id, knowledge_item_ids)
 
+    tags_string = ", ".join(f'"{tag}"' for tag in available_tags) if available_tags else '"GERAL", "NÃO CLASSIFICADA"'
+
     # Prompt enriquecido com todos os contextos disponíveis
     prompt = f"""
     Você é o HERMES IA, consultor de produtividade avançada do André.
@@ -2393,7 +2396,9 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
     1. Analise TODOS os contextos acima. Priorize os documentos extras e o RAG para definir a forma correta de execução.
     2. Crie um TÍTULO impactante, profissional e específico (reflita exatamente a demanda).
     3. Escreva uma DESCRIÇÃO detalhada: contextualize o André sobre o que é a demanda, por que ela existe e o que precisa ser entregue.
-    4. Defina uma CATEGORIA lógica (TI, GESTÃO, FINANCEIRO, JURÍDICO, etc.).
+    4. Defina a CATEGORIA escolhendo EXATAMENTE UMA das tags válidas fornecidas abaixo. 
+       TAGS DISPONÍVEIS: [{tags_string}]
+       IMPORTANTE: Escolha a tag que mais se adeque ao contexto da ação. Se nenhuma for perfeitamente adequada, escolha "GERAL" ou "NÃO CLASSIFICADA". NUNCA INVENTE OUTRA TAG.
     5. Crie um PLANO DE AÇÃO (checklist) com no máximo 5 etapas concretas e sequenciais para resolver a demanda.
        REGRAS DO PLANO: cada etapa deve ser específica e acionável para ESTA demanda. Mencione elementos concretos presentes no conteúdo (nomes, sistemas, processos, documentos). Proibido etapas genéricas como "analisar o processo" sem especificar qual. Se a demanda for simples e não justificar 5 etapas, use menos.
     6. Defina a DATA LIMITE seguindo estas regras obrigatórias:
@@ -2405,7 +2410,7 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
     {{
       "titulo": "Título claro e profissional da demanda",
       "descricao": "Descrição detalhada contextualizando a demanda e o que deve ser feito",
-      "categoria": "CATEGORIA",
+      "categoria": "NOME_EXATO_DE_UMA_DAS_TAGS_DISPONIVEIS",
       "status": "em andamento",
       "data_limite": "YYYY-MM-DD",
       "plano_acao": ["Passo 1 detalhado", "Passo 2 detalhado", "..."]

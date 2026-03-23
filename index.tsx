@@ -351,6 +351,18 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
     setTranscription(null);
   };
 
+  useEffect(() => {
+    const handleSharedAudio = (e: any) => {
+      if (e.detail && e.detail instanceof File) {
+        handleFileSelection(e.detail);
+        // Pequeno delay para garantir que o estado file seja atualizado e renderizado
+        setTimeout(() => document.getElementById('btn-transcribe-now')?.click(), 300);
+      }
+    };
+    window.addEventListener('hermes-shared-audio', handleSharedAudio);
+    return () => window.removeEventListener('hermes-shared-audio', handleSharedAudio);
+  }, []);
+
   const handleTranscribe = async () => {
     if (!file) return;
     setIsProcessing(true);
@@ -426,7 +438,7 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
                     <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
                   </div>
                   <p className="text-lg font-black text-slate-900 truncate px-4">{file.name}</p>
-                  <button onClick={handleTranscribe} className="bg-indigo-600 text-white px-8 py-3 rounded-none md:rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg hover:bg-indigo-700 transition-all">Transcrever Agora</button>
+                  <button id="btn-transcribe-now" onClick={handleTranscribe} className="bg-indigo-600 text-white px-8 py-3 rounded-none md:rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg hover:bg-indigo-700 transition-all">Transcrever Agora</button>
                 </div>
               ) : (
                 <div className="py-10">
@@ -1629,6 +1641,41 @@ const App: React.FC = () => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [exams, setExams] = useState<HealthExam[]>([]);
   const [lastBackPress, setLastBackPress] = useState(0);
+
+  // Escuta o redirecionamento do Share Target (Android Share Intent PWA)
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('sharedIntent') === 'true') {
+      const openRequest = indexedDB.open('hermes-share-db', 1);
+      openRequest.onsuccess = (e: any) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('shared-files')) return;
+        
+        const transaction = db.transaction('shared-files', 'readwrite');
+        const store = transaction.objectStore('shared-files');
+        const getRequest = store.getAll();
+        
+        getRequest.onsuccess = () => {
+          const items = getRequest.result;
+          if (items && items.length > 0) {
+            for (const item of items) {
+              if (item.fileType === 'audio') {
+                setIsTranscriptionAIModalOpen(true);
+                setTimeout(() => window.dispatchEvent(new CustomEvent('hermes-shared-audio', { detail: item.file })), 800);
+              } else if (item.fileType === 'video') {
+                setActiveModule('acoes');
+                setViewMode('ferramentas');
+                setActiveFerramenta('choir_rehearsals');
+                setTimeout(() => window.dispatchEvent(new CustomEvent('hermes-shared-video', { detail: item.file })), 800);
+              }
+              store.delete(item.id);
+            }
+          }
+          window.history.replaceState({}, document.title, window.location.pathname);
+        };
+      };
+    }
+  }, []);
 
   const handleDashboardNavigate = (view: 'gallery' | 'finance' | 'saude' | 'sistemas-dev') => {
     setViewMode(view);

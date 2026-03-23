@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDoc } from 'firebase/firestore';
 import { db } from '@/firebase';
 import { ConhecimentoItem } from '@/types';
 
@@ -30,14 +30,59 @@ export const ChoirRehearsalsTool: React.FC<{
   const [searchTermKB, setSearchTermKB] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   
+  const [sharedVideoWizard, setSharedVideoWizard] = useState<'options' | 'pick_music' | null>(null);
+  const [incomingSharedFile, setIncomingSharedFile] = useState<File | null>(null);
+
   // Form state
   const [titulo, setTitulo] = useState('');
   const [tagInput, setTagInput] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [observacoes, setObservacoes] = useState('');
 
-  // Knowledge base attach simulated for now (In real app, we'd open a modal to pick from knowledge base)
-  // For the sake of this feature, we implement file uploads and dummy knowledge base references.
+  // Recebe via Share Intent Global Event
+  useEffect(() => {
+    const handleSharedVideo = (e: any) => {
+      if (e.detail && e.detail instanceof File) {
+        setIncomingSharedFile(e.detail);
+        setSharedVideoWizard('options');
+      }
+    };
+    window.addEventListener('hermes-shared-video', handleSharedVideo);
+    return () => window.removeEventListener('hermes-shared-video', handleSharedVideo);
+  }, []);
+
+  const handleProcessSharedVideo = async (musicId: string) => {
+    if (!incomingSharedFile || !onUploadFile) return showToast("Upload indisponível", "error");
+    setIsUploading(true);
+    setSharedVideoWizard(null);
+    try {
+      const newItem = await onUploadFile(incomingSharedFile);
+      if (newItem) {
+        const mappedTipo = 'video';
+        const newArquivo = {
+          id: newItem.id,
+          titulo: newItem.titulo,
+          url_drive: newItem.url_drive,
+          tipo: mappedTipo as 'video'
+        };
+        const docSnap = await getDoc(doc(db, 'musicas', musicId));
+        if(docSnap.exists()) {
+            const currArquivos = docSnap.data().arquivos || [];
+            await updateDoc(doc(db, 'musicas', musicId), {
+                arquivos: [...currArquivos, newArquivo]
+            });
+            showToast("Vídeo recebido anexado com sucesso!", "success");
+            const updatedDoc = await getDoc(doc(db, 'musicas', musicId));
+            if (updatedDoc.exists()) setSelectedMusica({ id: updatedDoc.id, ...updatedDoc.data() } as Musica);
+        }
+      }
+    } catch (e) {
+      showToast("Erro ao anexar vídeo recebido", "error");
+    } finally {
+      setIsUploading(false);
+      setIncomingSharedFile(null);
+    }
+  };
 
   useEffect(() => {
     const q = query(collection(db, 'musicas'), orderBy('data_criacao', 'desc'));
@@ -50,18 +95,24 @@ export const ChoirRehearsalsTool: React.FC<{
   const handleSave = async () => {
     if (!titulo.trim()) return showToast("O título é obrigatório", "error");
     try {
+      let finalId = selectedMusica?.id;
       if (selectedMusica) {
         await updateDoc(doc(db, 'musicas', selectedMusica.id), {
           titulo, tags, observacoes
         });
         showToast("Música atualizada!", "success");
       } else {
-        await addDoc(collection(db, 'musicas'), {
+        const docRef = await addDoc(collection(db, 'musicas'), {
           titulo, tags, observacoes, arquivos: [], data_criacao: new Date().toISOString()
         });
+        finalId = docRef.id;
         showToast("Música criada com sucesso!", "success");
       }
       setIsModalOpen(false);
+
+      if (incomingSharedFile && finalId) {
+        handleProcessSharedVideo(finalId);
+      }
     } catch (e) {
       showToast("Erro ao salvar", "error");
     }
@@ -365,6 +416,53 @@ export const ChoirRehearsalsTool: React.FC<{
           </div>
         </div>
       )}
+      {sharedVideoWizard === 'options' && (
+        <div className="fixed inset-0 z-[400] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in">
+           <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl p-10 text-center animate-in zoom-in-95">
+               <div className="w-24 h-24 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                 <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+               </div>
+               <h3 className="text-3xl font-black text-slate-900 mb-2">Vídeo Recebido</h3>
+               <p className="text-slate-500 font-bold mb-10">"{incomingSharedFile?.name}"</p>
+               
+               <div className="space-y-4">
+                  <button onClick={() => {
+                      setSharedVideoWizard(null);
+                      setSelectedMusica(null); 
+                      setTitulo(''); setTags([]); setObservacoes(''); 
+                      setIsModalOpen(true);
+                  }} className="w-full bg-blue-600 hover:bg-blue-700 text-white px-6 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg transition-colors">
+                      Criar Nova Música
+                  </button>
+                  <button onClick={() => setSharedVideoWizard('pick_music')} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 px-6 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-colors">
+                      Vincular Música Existente
+                  </button>
+                  <button onClick={() => { setSharedVideoWizard(null); setIncomingSharedFile(null); }} className="w-full bg-transparent text-slate-400 hover:text-rose-500 px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-colors mt-4">
+                      Cancelar Submissão
+                  </button>
+               </div>
+           </div>
+        </div>
+      )}
+
+      {sharedVideoWizard === 'pick_music' && (
+        <div className="fixed inset-0 z-[400] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in">
+           <div className="bg-white w-full max-w-xl rounded-[2.5rem] shadow-2xl p-8 animate-in zoom-in-95 flex flex-col max-h-[80vh]">
+               <h3 className="text-2xl font-black text-slate-900 mb-6">Selecione a Música</h3>
+               <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-2">
+                 {musicas.map(m => (
+                    <button key={m.id} onClick={() => handleProcessSharedVideo(m.id)} className="w-full text-left p-4 rounded-2xl border border-slate-100 hover:border-blue-300 hover:bg-blue-50 transition-colors flex items-center justify-between">
+                       <span className="font-bold text-slate-900">{m.titulo}</span>
+                       <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7"/></svg>
+                    </button>
+                 ))}
+                 {musicas.length === 0 && <p className="text-center text-slate-400 font-bold py-10">Nenhuma música cadastrada.</p>}
+               </div>
+               <button onClick={() => setSharedVideoWizard('options')} className="mt-6 w-full py-4 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-colors">Voltar</button>
+           </div>
+        </div>
+      )}
+
     </div>
   );
 };

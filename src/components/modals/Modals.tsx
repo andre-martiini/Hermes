@@ -1106,11 +1106,19 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
         ? `\n\n=== CONTEXTO DE REUNIÃO: ${selectedReuniao.titulo} ===\n` +
           selectedReuniao.transcripts.map(t => `${t.speaker}: ${t.text}`).join('\n')
         : '';
+        
+      const tagsDisponiveis = [
+        'GERAL', 
+        'NÃO CLASSIFICADA', 
+        ...unidades.map(u => u.nome.toUpperCase())
+      ];
+      
       const response = await generateFunc({
         content: inputText,
         origin: origemIngestao,
         ragContext: ragContext,
         extraContext: extraContext + meetingContext,
+        availableTags: tagsDisponiveis,
         ...(extraContextFiles.some(f => f.status === 'ready') ? { 
           extraContextId: extraContextId,
           knowledgeItemIds: extraContextFiles.filter(f => f.status === 'ready').map(f => f.id)
@@ -1119,6 +1127,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
 
       const data = response.data as any;
       if (data) {
+        setAutoClassified(true);
         setFormData(prev => ({
           ...prev,
           titulo: data.titulo || prev.titulo,
