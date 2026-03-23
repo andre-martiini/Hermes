@@ -1749,33 +1749,145 @@ const App: React.FC = () => {
 
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
 
-  // --- Global Timer State (Persistent) ---
-  const [isGlobalTimerRunning, setIsGlobalTimerRunning] = useState(() => localStorage.getItem('hermes_timer_running') === 'true');
-  const [timerSeconds, setTimerSeconds] = useState(() => Number(localStorage.getItem('hermes_timer_seconds')) || 0);
+  // --- Global Timer State (Persistent via Timestamp for true sync) ---
+  const initiallyRunning = localStorage.getItem('hermes_timer_running') === 'true';
+  const initialTimerAcc = Number(localStorage.getItem('hermes_timer_accumulated')) || 0;
+  const initialTotalAcc = Number(localStorage.getItem('hermes_session_total_accumulated')) || 0;
+  const initialTimerLastStart = Number(localStorage.getItem('hermes_timer_last_start')) || Date.now();
+
+  const [isGlobalTimerRunning, setIsGlobalTimerRunning] = useState(initiallyRunning);
+  const [timerSeconds, setTimerSeconds] = useState(() => {
+    if (initiallyRunning) return initialTimerAcc + Math.floor((Date.now() - initialTimerLastStart) / 1000);
+    return initialTimerAcc;
+  });
+  const [sessionTotalSeconds, setSessionTotalSeconds] = useState(() => {
+    if (initiallyRunning) return initialTotalAcc + Math.floor((Date.now() - initialTimerLastStart) / 1000);
+    return initialTotalAcc;
+  });
   const [pomodoroMode, setPomodoroMode] = useState<'focus' | 'break'>(() => (localStorage.getItem('hermes_pomodoro_mode') as 'focus' | 'break') || 'focus');
-  const [sessionTotalSeconds, setSessionTotalSeconds] = useState(() => Number(localStorage.getItem('hermes_session_total')) || 0);
 
-  // Persist state to localStorage
+  // Cross-tab synchronization
   useEffect(() => {
-    localStorage.setItem('hermes_timer_running', String(isGlobalTimerRunning));
-    localStorage.setItem('hermes_timer_seconds', String(timerSeconds));
-    localStorage.setItem('hermes_pomodoro_mode', pomodoroMode);
-    localStorage.setItem('hermes_session_total', String(sessionTotalSeconds));
-  }, [isGlobalTimerRunning, timerSeconds, pomodoroMode, sessionTotalSeconds]);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'hermes_timer_running') setIsGlobalTimerRunning(e.newValue === 'true');
+      if (e.key === 'hermes_pomodoro_mode' && e.newValue) setPomodoroMode(e.newValue as 'focus'|'break');
+      
+      if (e.key === 'hermes_timer_accumulated' && e.newValue) {
+        setTimerSeconds(Number(e.newValue));
+      }
+      if (e.key === 'hermes_session_total_accumulated' && e.newValue) {
+        setSessionTotalSeconds(Number(e.newValue));
+      }
+      
+      if (e.key === 'hermes_play_sound' && e.newValue) {
+        const mode = e.newValue.split('_')[1];
+        if (mode === 'break') {
+          const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/1112/1112-preview.mp3');
+          audio.volume = 0.8;
+          audio.play().catch(()=>{});
+        } else if (mode === 'focus') {
+          const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3');
+          audio.volume = 0.8;
+          audio.play().catch(()=>{});
+        }
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
 
-  // Global Timer Tick
+  // Timer Tick - Based on Date.now() for continuous operation
   useEffect(() => {
     let interval: any;
     if (isGlobalTimerRunning) {
+      let startTimestamp = Number(localStorage.getItem('hermes_timer_last_start'));
+      let startAcc = Number(localStorage.getItem('hermes_timer_accumulated')) || 0;
+      let startTotalAcc = Number(localStorage.getItem('hermes_session_total_accumulated')) || 0;
+      
+      if (!startTimestamp) {
+        startTimestamp = Date.now();
+        localStorage.setItem('hermes_timer_last_start', String(startTimestamp));
+      }
+
       interval = setInterval(() => {
-        setTimerSeconds(prev => prev + 1);
-        setSessionTotalSeconds(prev => prev + 1);
+        const now = Date.now();
+        const elapsed = Math.floor((now - startTimestamp) / 1000);
+        
+        setTimerSeconds(startAcc + elapsed);
+        setSessionTotalSeconds(startTotalAcc + elapsed);
       }, 1000);
     }
     return () => clearInterval(interval);
   }, [isGlobalTimerRunning]);
 
-  // Pomodoro Logic and Transition Sounds
+  // Handle Sounds manually for the active tab (when toggle runs)
+  const playModeSound = (mode: 'focus' | 'break') => {
+    const soundId = `${Date.now()}_${mode}`;
+    localStorage.setItem('hermes_play_sound', soundId);
+    
+    const audio = new Audio(mode === 'break' 
+      ? 'https://assets.mixkit.co/active_storage/sfx/1112/1112-preview.mp3' 
+      : 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3');
+    audio.volume = 0.8;
+    audio.play().catch(()=>{});
+  };
+
+  const syncAccumulatedToStorage = () => {
+    localStorage.setItem('hermes_timer_accumulated', String(timerSeconds));
+    localStorage.setItem('hermes_session_total_accumulated', String(sessionTotalSeconds));
+  };
+
+  const handleToggleGlobalTimer = () => {
+    const willRun = !isGlobalTimerRunning;
+    if (willRun) {
+      localStorage.setItem('hermes_timer_last_start', String(Date.now()));
+      // Toca um som respectivo à atividade ou pausa ao ativá-la
+      playModeSound(pomodoroMode);
+    } else {
+      syncAccumulatedToStorage();
+    }
+    localStorage.setItem('hermes_timer_running', String(willRun));
+    setIsGlobalTimerRunning(willRun);
+  };
+
+  const handleResetGlobalTimer = () => {
+    setTimerSeconds(0);
+    setSessionTotalSeconds(0);
+    localStorage.setItem('hermes_timer_accumulated', '0');
+    localStorage.setItem('hermes_session_total_accumulated', '0');
+    localStorage.setItem('hermes_timer_running', 'false');
+    setIsGlobalTimerRunning(false);
+  };
+
+  const handleSkipGlobalPhase = (fromAutoLimit = false) => {
+    setPomodoroMode(prevMode => {
+      const nextMode = prevMode === 'focus' ? 'break' : 'focus';
+      
+      localStorage.setItem('hermes_pomodoro_mode', nextMode);
+      setTimerSeconds(0);
+      localStorage.setItem('hermes_timer_accumulated', '0');
+      
+      if (isGlobalTimerRunning) {
+        localStorage.setItem('hermes_timer_last_start', String(Date.now()));
+        // Play som apenas se estiver rodando
+        playModeSound(nextMode);
+      }
+
+      const isForBreak = nextMode === 'break';
+      if (fromAutoLimit === true) {
+        emitNotification(
+          isForBreak ? 'Intervalo Iniciado!' : 'Hora de Focar!',
+          isForBreak ? 'Você concluiu um ciclo de foco. Descanse um pouco.' : 'O intervalo acabou. Vamos voltar ao trabalho?',
+          isForBreak ? 'info' : 'success'
+        );
+      } else {
+        showToast("Fase do Pomodoro pulada.", "info");
+      }
+      return nextMode;
+    });
+  };
+
+  // Pomodoro Limits Logic
   useEffect(() => {
     if (!appSettings.pomodoro?.enabled) return;
 
@@ -1783,48 +1895,29 @@ const App: React.FC = () => {
     const breakLimit = (appSettings.pomodoro.breakTime || 5) * 60;
     const limit = pomodoroMode === 'focus' ? focusLimit : breakLimit;
 
-    // Beeps in last 3 seconds of a cycle
     const remaining = limit - timerSeconds;
     if (isGlobalTimerRunning && remaining > 0 && remaining <= 3) {
-      const beep = new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3');
-      beep.volume = 0.3;
-      beep.play().catch(() => { });
+       // Single tab beep
+       const lockKey = `hermes_beep_${pomodoroMode}_${remaining}`;
+       if (!localStorage.getItem(lockKey)) {
+         localStorage.setItem(lockKey, 'true');
+         setTimeout(()=>localStorage.removeItem(lockKey), 1000);
+         const beep = new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3');
+         beep.volume = 0.3;
+         beep.play().catch(() => { });
+       }
     }
 
     if (timerSeconds >= limit && isGlobalTimerRunning) {
-      const nextMode = pomodoroMode === 'focus' ? 'break' : 'focus';
-      setPomodoroMode(nextMode);
-      setTimerSeconds(0);
-
-      // Play Strong Transition Sounds
-      const soundUrl = nextMode === 'break'
-        ? 'https://assets.mixkit.co/active_storage/sfx/1112/1112-preview.mp3' // Stronger break sound
-        : 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3'; // Stronger focus sound
-
-      const audio = new Audio(soundUrl);
-      audio.volume = 0.8;
-      audio.play().catch(e => console.warn('Audio play failed:', e));
-
-      // Global Notification
-      emitNotification(
-        nextMode === 'break' ? 'Intervalo Iniciado!' : 'Hora de Focar!',
-        nextMode === 'break' ? 'Você concluiu um ciclo de foco. Descanse um pouco.' : 'O intervalo acabou. Vamos voltar ao trabalho?',
-        nextMode === 'break' ? 'info' : 'success'
-      );
+       // Single tab triggers transition
+       const transitionLock = `hermes_transition_${pomodoroMode}_${limit}`;
+       if (!localStorage.getItem(transitionLock)) {
+         localStorage.setItem(transitionLock, 'true');
+         setTimeout(()=>localStorage.removeItem(transitionLock), 5000);
+         handleSkipGlobalPhase(true);
+       }
     }
   }, [timerSeconds, pomodoroMode, appSettings.pomodoro, isGlobalTimerRunning]);
-
-  const handleToggleGlobalTimer = () => setIsGlobalTimerRunning(prev => !prev);
-  const handleResetGlobalTimer = () => {
-    setTimerSeconds(0);
-    setSessionTotalSeconds(0);
-    setIsGlobalTimerRunning(false);
-  };
-  const handleSkipGlobalPhase = () => {
-    setTimerSeconds(0);
-    setPomodoroMode(prev => prev === 'focus' ? 'break' : 'focus');
-    showToast("Fase do Pomodoro pulada.", "info");
-  };
 
   const [isHabitsReminderOpen, setIsHabitsReminderOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'notifications' | 'context' | 'sistemas'>('notifications');
