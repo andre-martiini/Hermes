@@ -1800,22 +1800,21 @@ const App: React.FC = () => {
   useEffect(() => {
     let interval: any;
     if (isGlobalTimerRunning) {
-      let startTimestamp = Number(localStorage.getItem('hermes_timer_last_start'));
-      let startAcc = Number(localStorage.getItem('hermes_timer_accumulated')) || 0;
-      let startTotalAcc = Number(localStorage.getItem('hermes_session_total_accumulated')) || 0;
-      
-      if (!startTimestamp) {
-        startTimestamp = Date.now();
-        localStorage.setItem('hermes_timer_last_start', String(startTimestamp));
+      if (!localStorage.getItem('hermes_timer_last_start')) {
+        localStorage.setItem('hermes_timer_last_start', String(Date.now()));
       }
 
       interval = setInterval(() => {
+        const startTimestamp = Number(localStorage.getItem('hermes_timer_last_start')) || Date.now();
+        const startAcc = Number(localStorage.getItem('hermes_timer_accumulated')) || 0;
+        const startTotalAcc = Number(localStorage.getItem('hermes_session_total_accumulated')) || 0;
+        
         const now = Date.now();
         const elapsed = Math.floor((now - startTimestamp) / 1000);
         
         setTimerSeconds(startAcc + elapsed);
         setSessionTotalSeconds(startTotalAcc + elapsed);
-      }, 1000);
+      }, 500); // 500ms para maior precisão visual
     }
     return () => clearInterval(interval);
   }, [isGlobalTimerRunning]);
