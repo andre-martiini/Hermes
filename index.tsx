@@ -1750,19 +1750,29 @@ const App: React.FC = () => {
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
 
   // --- Global Timer State (Persistent via Timestamp for true sync) ---
-  const initiallyRunning = localStorage.getItem('hermes_timer_running') === 'true';
-  const initialTimerAcc = Number(localStorage.getItem('hermes_timer_accumulated')) || 0;
-  const initialTotalAcc = Number(localStorage.getItem('hermes_session_total_accumulated')) || 0;
-  const initialTimerLastStart = Number(localStorage.getItem('hermes_timer_last_start')) || Date.now();
-
-  const [isGlobalTimerRunning, setIsGlobalTimerRunning] = useState(initiallyRunning);
+  // Ao carregar a página, o cronômetro SEMPRE inicia pausado.
+  // Se havia um timer rodando anteriormente, o tempo decorrido é calculado e
+  // adicionado ao acumulado, e o estado é persistido como pausado.
+  const [isGlobalTimerRunning, setIsGlobalTimerRunning] = useState(() => {
+    const wasRunning = localStorage.getItem('hermes_timer_running') === 'true';
+    if (wasRunning) {
+      // Calcular e salvar o tempo acumulado antes de marcar como pausado
+      const acc = Number(localStorage.getItem('hermes_timer_accumulated')) || 0;
+      const totalAcc = Number(localStorage.getItem('hermes_session_total_accumulated')) || 0;
+      const lastStart = Number(localStorage.getItem('hermes_timer_last_start')) || Date.now();
+      const elapsed = Math.floor((Date.now() - lastStart) / 1000);
+      localStorage.setItem('hermes_timer_accumulated', String(acc + elapsed));
+      localStorage.setItem('hermes_session_total_accumulated', String(totalAcc + elapsed));
+      localStorage.setItem('hermes_timer_running', 'false');
+    }
+    // Sempre inicia pausado
+    return false;
+  });
   const [timerSeconds, setTimerSeconds] = useState(() => {
-    if (initiallyRunning) return initialTimerAcc + Math.floor((Date.now() - initialTimerLastStart) / 1000);
-    return initialTimerAcc;
+    return Number(localStorage.getItem('hermes_timer_accumulated')) || 0;
   });
   const [sessionTotalSeconds, setSessionTotalSeconds] = useState(() => {
-    if (initiallyRunning) return initialTotalAcc + Math.floor((Date.now() - initialTimerLastStart) / 1000);
-    return initialTotalAcc;
+    return Number(localStorage.getItem('hermes_session_total_accumulated')) || 0;
   });
   const [pomodoroMode, setPomodoroMode] = useState<'focus' | 'break'>(() => (localStorage.getItem('hermes_pomodoro_mode') as 'focus' | 'break') || 'focus');
 
