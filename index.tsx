@@ -10,7 +10,7 @@ import {
   formatDate, formatDateLocalISO, Sistema, SistemaStatus, WorkItem, WorkItemPhase,
   WorkItemPriority, QualityLog, WorkItemAudit, GoogleCalendarEvent,
   PoolItem, CustomNotification, HealthExam, ConhecimentoItem, UndoAction, HermesModalProps,
-  ShoppingItem, Projeto, SlideHistoryEntry, BaseConhecimento, TipoAcao
+  ShoppingItem, Projeto, SlideHistoryEntry, BaseConhecimento, TipoAcao, Servico
 } from './types';
 import HealthView from './HealthView';
 import { MeetingTranscriptionTool } from './src/components/tools/MeetingTranscriptionTool';
@@ -25,6 +25,7 @@ import DashboardView from './DashboardView';
 import KnowledgeView from './KnowledgeView';
 import ProjectsView from './ProjectsView';
 import RAGBasesView from './src/views/RAGBasesView';
+import { ServicesView } from './src/views/ServicesView';
 
 // Importações dos módulos extraídos pelo split.js
 import {
@@ -1243,11 +1244,11 @@ const App: React.FC = () => {
       setShoppingItems(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ShoppingItem)));
     });
 
-    // Projects Sync
-    const qProjects = query(collection(db, 'projetos'), orderBy('data_criacao', 'desc')); // orderBy imported? Need to check imports
-    const unsubProjects = onSnapshot(qProjects, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Projeto[];
-      setProjects(data);
+    // Services Sync
+    const qServices = query(collection(db, 'servicos'), orderBy('data_criacao', 'desc'));
+    const unsubProjects = onSnapshot(qServices, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Servico[];
+      setServices(data);
     });
 
     // Health Sync
@@ -1555,6 +1556,37 @@ const App: React.FC = () => {
     } catch (error) {
       console.error("Error creating project:", error);
       showToast("Erro ao criar projeto.", "error");
+    }
+  };
+
+  const handleCreateService = async (service: Omit<Servico, 'id' | 'data_criacao' | 'data_atualizacao'>) => {
+    try {
+      const now = new Date().toISOString();
+      await addDoc(collection(db, 'servicos'), { ...service, data_criacao: now, data_atualizacao: now });
+      showToast("Serviço criado com sucesso!", "success");
+    } catch (error) {
+      console.error("Error creating service:", error);
+      showToast("Erro ao criar serviço.", "error");
+    }
+  };
+
+  const handleUpdateService = async (id: string, service: Partial<Servico>) => {
+    try {
+      await updateDoc(doc(db, 'servicos', id), { ...service, data_atualizacao: new Date().toISOString() });
+      showToast("Serviço atualizado!", "success");
+    } catch (error) {
+      console.error("Error updating service:", error);
+      showToast("Erro ao atualizar serviço.", "error");
+    }
+  };
+
+  const handleDeleteService = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'servicos', id));
+      showToast("Serviço removido.", "success");
+    } catch (error) {
+      console.error("Error deleting service:", error);
+      showToast("Erro ao remover serviço.", "error");
     }
   };
 

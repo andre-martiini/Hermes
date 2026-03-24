@@ -1,4 +1,4 @@
-import { Servico, IncomeEntry } from '../types';
+import { Servico, IncomeEntry } from '../../types';
 
 /**
  * Synchronizes the milestones (parcelas) of a given Servico with the financial system.

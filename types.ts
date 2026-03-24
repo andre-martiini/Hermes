@@ -659,3 +659,30 @@ export interface ShoppingLocation {
     nome: string;
     icon?: string;
 }
+
+// Services Module Types
+export interface ParcelaServico {
+    id: string;
+    descricao: string;
+    valor: number;
+    data_prevista: string;
+    status: 'pendente' | 'pago';
+}
+
+export interface Servico {
+    id: string;
+    titulo: string;
+    descricao: string;
+    cliente: string;
+    papel: string;
+    status: 'Prospecção' | 'Ativo' | 'Concluído' | 'Cancelado' | 'Em Pausa';
+    tags: string[];
+    data_inicio: string;
+    data_termino: string;
+    carga_horaria_semanal: number;
+    tipo_contrato: 'Mensalidade' | 'Pacote Fechado';
+    valor_total: number;
+    parcelas: ParcelaServico[];
+    data_criacao: string;
+    data_atualizacao: string;
+}
