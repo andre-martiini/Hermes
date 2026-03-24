@@ -1192,6 +1192,7 @@ const App: React.FC = () => {
 
   // Finance Sync
   useEffect(() => {
+    if (!user) return;
     const unsubSistemas = onSnapshot(collection(db, 'sistemas_detalhes'), (snapshot) => {
       setSistemasDetalhes(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Sistema)));
     });
@@ -1300,7 +1301,7 @@ const App: React.FC = () => {
       unsubKnowledgeBases();
       unsubscribeSistemasAtivos();
     };
-  }, []);
+  }, [user]);
 
 
   // Finance Processing Logic (The Listener)
@@ -1967,13 +1968,22 @@ const App: React.FC = () => {
   // --- Firebase Cloud Messaging (FCM) & Push Notifications ---
   useEffect(() => {
     const setupFCM = async () => {
+      if (!user) return;
       const isLocalhost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
       if (isLocalhost) {
         console.log('Push desativado em desenvolvimento local.');
         return;
       }
-      if (!messaging || !(await isSupported())) return;
+      
       try {
+        // Dynamic import and support check to avoid errors in unsupported browsers
+        const { isSupported } = await import('firebase/messaging');
+        const supported = await isSupported();
+        if (!supported || !messaging) {
+          console.log('Push Notifications não suportadas neste navegador.');
+          return;
+        }
+
         console.log('Iniciando configuração de Push...');
         const permission = await Notification.requestPermission();
         console.log('Permissão de Notificação:', permission);
@@ -2012,7 +2022,7 @@ const App: React.FC = () => {
 
     const seenPushIds = new Set<string>();
 
-    if (!messaging) return;
+    if (!messaging || !user) return;
     const unsubscribe = onMessage(messaging, (payload) => {
       console.log('Mensagem PUSH recebida em primeiro plano:', payload);
       const payloadData = (payload.data || {}) as Record<string, string>;
@@ -2037,7 +2047,7 @@ const App: React.FC = () => {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   const emitNotification = async (title: string, message: string, type: 'info' | 'warning' | 'success' | 'error' = 'info', link?: string, id?: string) => {
     const newNotif: HermesNotification = {
@@ -2059,6 +2069,8 @@ const App: React.FC = () => {
 
     // 2. Persiste no Firestore para disparar Push Notification via Cloud Function
     try {
+      if (!user) return; // Prevent writing before auth
+
       // Usa setDoc com ID específico para evitar duplicados no Firestore
       // Garante que não há campos undefined
       const firestoreData = JSON.parse(JSON.stringify(newNotif));
@@ -2078,13 +2090,14 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
+    if (!user) return;
     const unsub = onSnapshot(doc(db, 'configuracoes', 'geral'), (snap) => {
       if (snap.exists()) {
         setAppSettings(snap.data() as AppSettings);
       }
     });
     return () => unsub();
-  }, []);
+  }, [user]);
 
   const handleUpdateAppSettings = async (newSettings: AppSettings) => {
     try {
@@ -2399,6 +2412,7 @@ const App: React.FC = () => {
 
   // Welcome HermesNotification
   useEffect(() => {
+    if (!user) return;
     const hasSeenWelcome = localStorage.getItem('hasSeenWelcome');
     if (!hasSeenWelcome && notifications.length === 0) {
       emitNotification(
@@ -2410,10 +2424,11 @@ const App: React.FC = () => {
       );
       localStorage.setItem('hasSeenWelcome', 'true');
     }
-  }, []);
+  }, [user]);
 
   // Sync Logic
   useEffect(() => {
+    if (!user) return;
     const unsub = onSnapshot(doc(db, 'system', 'sync'), (snap) => {
       if (snap.exists()) {
         const data = snap.data();
@@ -2423,7 +2438,7 @@ const App: React.FC = () => {
       }
     });
     return () => unsub();
-  }, []);
+  }, [user]);
 
   const handleSync = async () => {
     if (isSyncing) {
@@ -3398,6 +3413,7 @@ const App: React.FC = () => {
 
 
   useEffect(() => {
+    if (!user) return;
     setLoading(true);
     setError(null);
 
@@ -3529,7 +3545,7 @@ const App: React.FC = () => {
       unsubscribeAfastamentos();
       unsubscribeUnidades();
     };
-  }, []);
+  }, [user]);
 
   const handleAddUnidade = async (nome: string) => {
     try {
@@ -3565,15 +3581,17 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
+    if (!user) return;
     const qPlanos = query(collection(db, 'planos_trabalho'));
     const unsubscribePlanos = onSnapshot(qPlanos, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlanoTrabalho));
       setPlanosTrabalho(data);
     });
     return () => unsubscribePlanos();
-  }, []);
+  }, [user]);
 
   useEffect(() => {
+    if (!user) return;
     const qBrainstorm = query(collection(db, 'brainstorm_ideas'));
     const unsubscribeBrainstorm = onSnapshot(qBrainstorm, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BrainstormIdea));
@@ -3589,7 +3607,7 @@ const App: React.FC = () => {
       unsubscribeBrainstorm();
       unsubscribeKnowledge();
     };
-  }, []);
+  }, [user]);
 
 
   const handleLinkTarefa = async (tarefaId: string, entregaId: string) => {

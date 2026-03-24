@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Servico, ParcelaServico } from '../../types';
 
 interface ServicesViewProps {
@@ -16,8 +16,24 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'list'>('dashboard');
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
+  const [localDoc, setLocalDoc] = useState<Servico | null>(null);
+  const [showBatchForm, setShowBatchForm] = useState(false);
+  const [batchForm, setBatchForm] = useState({
+      start: '',
+      end: '',
+      day: 5,
+      value: 0
+  } as { start: string, end: string, day: number, value: number });
 
   const selectedService = useMemo(() => services.find(s => s.id === selectedServiceId), [services, selectedServiceId]);
+
+  useEffect(() => {
+    if (selectedService) {
+        setLocalDoc(selectedService);
+    } else {
+        setLocalDoc(null);
+    }
+  }, [selectedServiceId]);
 
   // --- Dashboard Metrics Logic ---
   const activeServices = useMemo(() => services.filter(s => s.status === 'Ativo'), [services]);
@@ -40,11 +56,12 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
   }, [activeServices]);
 
   const receivables = useMemo(() => {
+    const today = new Date();
     return services
         .filter(s => s.status === 'Ativo' || s.status === 'Concluído')
         .reduce((acc, curr) => {
             const pendingAmount = curr.parcelas
-                .filter(p => p.status === 'pendente')
+                .filter(p => new Date(p.data_prevista) > today)
                 .reduce((sum, p) => sum + p.valor, 0);
             return acc + pendingAmount;
         }, 0);
@@ -53,6 +70,46 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
   const committedCapacity = useMemo(() => {
     return activeServices.reduce((acc, curr) => acc + (curr.carga_horaria_semanal || 0), 0);
   }, [activeServices]);
+
+  const handleGenerateBatch = () => {
+    if (!batchForm.start || !batchForm.end || !selectedService) return;
+    
+    const start = new Date(batchForm.start + 'T00:00:00');
+    const end = new Date(batchForm.end + 'T23:59:59');
+    const day = batchForm.day;
+    const value = batchForm.value;
+    
+    const newParcelas: ParcelaServico[] = [];
+    let current = new Date(start.getFullYear(), start.getMonth(), 1);
+    
+    while (current <= end) {
+        const installmentDate = new Date(current.getFullYear(), current.getMonth(), day);
+        
+        // Se o dia transbordou o mês
+        if (installmentDate.getMonth() !== current.getMonth()) {
+            installmentDate.setDate(0);
+        }
+        
+        if (installmentDate >= start && installmentDate <= end) {
+            newParcelas.push({
+                id: Math.random().toString(36).substr(2, 9),
+                valor: value,
+                data_prevista: installmentDate.toISOString(),
+                status: installmentDate <= new Date() ? 'pago' : 'pendente',
+                descricao: `Parcela ${ (selectedService.parcelas?.length || 0) + newParcelas.length + 1}`
+            });
+        }
+        current.setMonth(current.getMonth() + 1);
+    }
+    
+    if (newParcelas.length > 0) {
+        const updatedParcelas = [...(selectedService.parcelas || []), ...newParcelas];
+        onUpdateService(selectedService.id, { parcelas: updatedParcelas });
+        setLocalDoc(prev => prev ? { ...prev, parcelas: updatedParcelas } : null);
+        setShowBatchForm(false);
+        setBatchForm({ start: '', end: '', day: 5, value: 0 });
+    }
+  };
 
 
   return (
@@ -241,8 +298,9 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                             </div>
                             <input
                                 className="text-3xl font-black text-slate-900 tracking-tighter bg-transparent border-none outline-none focus:ring-2 focus:ring-indigo-500 rounded p-1 w-full"
-                                value={selectedService.titulo}
-                                onChange={(e) => onUpdateService(selectedService.id, { titulo: e.target.value })}
+                                value={localDoc?.titulo || ''}
+                                onChange={(e) => setLocalDoc(prev => prev ? { ...prev, titulo: e.target.value } : null)}
+                                onBlur={(e) => onUpdateService(selectedService.id, { titulo: e.target.value })}
                             />
                         </div>
                         <div className="flex items-center gap-4">
@@ -273,8 +331,9 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Cliente / Instituição</label>
                                     <input
                                         type="text"
-                                        value={selectedService.cliente}
-                                        onChange={(e) => onUpdateService(selectedService.id, { cliente: e.target.value })}
+                                        value={localDoc?.cliente || ''}
+                                        onChange={(e) => setLocalDoc(prev => prev ? { ...prev, cliente: e.target.value } : null)}
+                                        onBlur={(e) => onUpdateService(selectedService.id, { cliente: e.target.value })}
                                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
                                     />
                                 </div>
@@ -282,16 +341,18 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Papel / Função</label>
                                     <input
                                         type="text"
-                                        value={selectedService.papel}
-                                        onChange={(e) => onUpdateService(selectedService.id, { papel: e.target.value })}
+                                        value={localDoc?.papel || ''}
+                                        onChange={(e) => setLocalDoc(prev => prev ? { ...prev, papel: e.target.value } : null)}
+                                        onBlur={(e) => onUpdateService(selectedService.id, { papel: e.target.value })}
                                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
                                     />
                                 </div>
                                 <div>
                                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Descrição do Escopo</label>
                                     <textarea
-                                        value={selectedService.descricao}
-                                        onChange={(e) => onUpdateService(selectedService.id, { descricao: e.target.value })}
+                                        value={localDoc?.descricao || ''}
+                                        onChange={(e) => setLocalDoc(prev => prev ? { ...prev, descricao: e.target.value } : null)}
+                                        onBlur={(e) => onUpdateService(selectedService.id, { descricao: e.target.value })}
                                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 min-h-[100px] resize-none"
                                     />
                                 </div>
@@ -303,8 +364,12 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Início</label>
                                         <input
                                             type="date"
-                                            value={selectedService.data_inicio.split('T')[0]}
-                                            onChange={(e) => onUpdateService(selectedService.id, { data_inicio: new Date(e.target.value).toISOString() })}
+                                            value={localDoc?.data_inicio?.split('T')[0] || ''}
+                                            onChange={(e) => {
+                                                const val = new Date(e.target.value).toISOString();
+                                                setLocalDoc(prev => prev ? { ...prev, data_inicio: val } : null);
+                                                onUpdateService(selectedService.id, { data_inicio: val });
+                                            }}
                                             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
                                         />
                                     </div>
@@ -312,8 +377,12 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Término Previsto</label>
                                         <input
                                             type="date"
-                                            value={selectedService.data_termino.split('T')[0]}
-                                            onChange={(e) => onUpdateService(selectedService.id, { data_termino: new Date(e.target.value).toISOString() })}
+                                            value={localDoc?.data_termino?.split('T')[0] || ''}
+                                            onChange={(e) => {
+                                                const val = new Date(e.target.value).toISOString();
+                                                setLocalDoc(prev => prev ? { ...prev, data_termino: val } : null);
+                                                onUpdateService(selectedService.id, { data_termino: val });
+                                            }}
                                             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
                                         />
                                     </div>
@@ -322,8 +391,12 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                     <div>
                                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Status</label>
                                         <select
-                                            value={selectedService.status}
-                                            onChange={(e) => onUpdateService(selectedService.id, { status: e.target.value as any })}
+                                            value={localDoc?.status || ''}
+                                            onChange={(e) => {
+                                                const val = e.target.value as any;
+                                                setLocalDoc(prev => prev ? { ...prev, status: val } : null);
+                                                onUpdateService(selectedService.id, { status: val });
+                                            }}
                                             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
                                         >
                                             <option value="Prospecção">Prospecção</option>
@@ -336,8 +409,9 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Carga Horária (h/sem)</label>
                                         <input
                                             type="number"
-                                            value={selectedService.carga_horaria_semanal}
-                                            onChange={(e) => onUpdateService(selectedService.id, { carga_horaria_semanal: Number(e.target.value) })}
+                                            value={localDoc?.carga_horaria_semanal || 0}
+                                            onChange={(e) => setLocalDoc(prev => prev ? { ...prev, carga_horaria_semanal: Number(e.target.value) } : null)}
+                                            onBlur={(e) => onUpdateService(selectedService.id, { carga_horaria_semanal: Number(e.target.value) })}
                                             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
                                         />
                                     </div>
@@ -346,8 +420,9 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Valor Total (R$)</label>
                                     <input
                                         type="number"
-                                        value={selectedService.valor_total}
-                                        onChange={(e) => onUpdateService(selectedService.id, { valor_total: Number(e.target.value) })}
+                                        value={localDoc?.valor_total || 0}
+                                        onChange={(e) => setLocalDoc(prev => prev ? { ...prev, valor_total: Number(e.target.value) } : null)}
+                                        onBlur={(e) => onUpdateService(selectedService.id, { valor_total: Number(e.target.value) })}
                                         className="w-full bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 text-xl font-black text-indigo-900 outline-none focus:ring-2 focus:ring-indigo-500"
                                     />
                                 </div>
@@ -361,25 +436,91 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                     <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Cronograma Financeiro</h4>
                                     <p className="text-xs text-slate-500 font-medium mt-1">Marcos e parcelas deste serviço</p>
                                 </div>
-                                <button
-                                    onClick={() => {
-                                        const newParcela: ParcelaServico = {
-                                            id: Math.random().toString(36).substr(2, 9),
-                                            valor: 0,
-                                            data_prevista: new Date().toISOString(),
-                                            status: 'pendente',
-                                            descricao: 'Nova Parcela'
-                                        };
-                                        onUpdateService(selectedService.id, { parcelas: [...(selectedService.parcelas || []), newParcela] });
-                                    }}
-                                    className="bg-slate-900 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center gap-2"
-                                >
-                                    + Adicionar Parcela
-                                </button>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => setShowBatchForm(!showBatchForm)}
+                                        className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-100 transition-all flex items-center gap-2"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                                        {showBatchForm ? 'Fechar Lote' : 'Gerar em Lote'}
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            const newParcela: ParcelaServico = {
+                                                id: Math.random().toString(36).substr(2, 9),
+                                                valor: 0,
+                                                data_prevista: new Date().toISOString(),
+                                                status: 'pendente',
+                                                descricao: 'Nova Parcela'
+                                            };
+                                            const newParcelas = [...(selectedService.parcelas || []), newParcela];
+                                            onUpdateService(selectedService.id, { parcelas: newParcelas });
+                                            setLocalDoc(prev => prev ? { ...prev, parcelas: newParcelas } : null);
+                                        }}
+                                        className="bg-slate-900 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center gap-2"
+                                    >
+                                        + Adicionar Parcela
+                                    </button>
+                                </div>
                             </div>
 
+                            {/* Batch Generation Form */}
+                            {showBatchForm && (
+                                <div className="bg-indigo-50/50 border border-indigo-100 p-6 rounded-2xl mb-8 animate-in slide-in-from-top-4 duration-300">
+                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                                        <div>
+                                            <label className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1.5 block">Data Inicial</label>
+                                            <input 
+                                                type="date" 
+                                                value={batchForm.start}
+                                                onChange={e => setBatchForm(prev => ({ ...prev, start: e.target.value }))}
+                                                className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-400" 
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1.5 block">Data Final</label>
+                                            <input 
+                                                type="date" 
+                                                value={batchForm.end}
+                                                onChange={e => setBatchForm(prev => ({ ...prev, end: e.target.value }))}
+                                                className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-400" 
+                                            />
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1.5 block">Dia Venc.</label>
+                                                <input 
+                                                    type="number" 
+                                                    min="1" max="31"
+                                                    value={batchForm.day}
+                                                    onChange={e => setBatchForm(prev => ({ ...prev, day: Number(e.target.value) }))}
+                                                    className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-400" 
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1.5 block">Valor (R$)</label>
+                                                <input 
+                                                    type="number" 
+                                                    placeholder="0,00"
+                                                    value={batchForm.value}
+                                                    onChange={e => setBatchForm(prev => ({ ...prev, value: Number(e.target.value) }))}
+                                                    className="w-full bg-white border border-indigo-200 rounded-lg px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-400" 
+                                                />
+                                            </div>
+                                        </div>
+                                        <button 
+                                            onClick={handleGenerateBatch}
+                                            className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
+                                        >
+                                            Confirmar e Gerar
+                                        </button>
+                                    </div>
+                                    <p className="text-[9px] text-indigo-400 mt-4 font-bold italic">* As parcelas serão anexadas ao cronograma atual.</p>
+                                </div>
+                            )}
+
                             <div className="space-y-3">
-                                {(selectedService.parcelas || []).map((parcela, index) => (
+                                {(localDoc?.parcelas || []).map((parcela, index) => (
                                     <div key={parcela.id} className="flex items-center gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200 group">
                                         <div className="w-8 h-8 rounded-full bg-white border border-slate-200 flex items-center justify-center text-[10px] font-black text-slate-400 shrink-0">
                                             {index + 1}
@@ -389,7 +530,12 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                                 type="text"
                                                 value={parcela.descricao}
                                                 onChange={(e) => {
-                                                    const updated = [...selectedService.parcelas];
+                                                    const updated = [...localDoc!.parcelas];
+                                                    updated[index].descricao = e.target.value;
+                                                    setLocalDoc({ ...localDoc!, parcelas: updated });
+                                                }}
+                                                onBlur={(e) => {
+                                                    const updated = [...localDoc!.parcelas];
                                                     updated[index].descricao = e.target.value;
                                                     onUpdateService(selectedService.id, { parcelas: updated });
                                                 }}
@@ -402,7 +548,12 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                                     type="number"
                                                     value={parcela.valor}
                                                     onChange={(e) => {
-                                                        const updated = [...selectedService.parcelas];
+                                                        const updated = [...localDoc!.parcelas];
+                                                        updated[index].valor = Number(e.target.value);
+                                                        setLocalDoc({ ...localDoc!, parcelas: updated });
+                                                    }}
+                                                    onBlur={(e) => {
+                                                        const updated = [...localDoc!.parcelas];
                                                         updated[index].valor = Number(e.target.value);
                                                         onUpdateService(selectedService.id, { parcelas: updated });
                                                     }}
@@ -413,29 +564,35 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                                 type="date"
                                                 value={parcela.data_prevista.split('T')[0]}
                                                 onChange={(e) => {
-                                                    const updated = [...selectedService.parcelas];
-                                                    updated[index].data_prevista = new Date(e.target.value).toISOString();
+                                                    const val = new Date(e.target.value).toISOString();
+                                                    const updated = [...localDoc!.parcelas];
+                                                    updated[index].data_prevista = val;
+                                                    setLocalDoc({ ...localDoc!, parcelas: updated });
                                                     onUpdateService(selectedService.id, { parcelas: updated });
                                                 }}
                                                 className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold text-slate-800 w-full"
                                             />
-                                            <select
-                                                value={parcela.status}
-                                                onChange={(e) => {
-                                                    const updated = [...selectedService.parcelas];
-                                                    updated[index].status = e.target.value as any;
-                                                    onUpdateService(selectedService.id, { parcelas: updated });
-                                                }}
-                                                className={`bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold w-full ${parcela.status === 'pago' ? 'text-emerald-600' : 'text-amber-600'}`}
-                                            >
-                                                <option value="pendente">Pendente</option>
-                                                <option value="pago">Pago</option>
-                                            </select>
+                                            <div className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold w-full flex items-center h-full">
+                                                {new Date(parcela.data_prevista) <= new Date() ? (
+                                                    <span className="text-emerald-600 flex items-center gap-1">
+                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                        Recebido
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-amber-600 flex items-center gap-1">
+                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                                        Pendente
+                                                    </span>
+                                                )}
+                                            </div>
                                         </div>
                                         <button
                                             onClick={() => {
-                                                const updated = selectedService.parcelas.filter((_, i) => i !== index);
-                                                onUpdateService(selectedService.id, { parcelas: updated });
+                                                if (confirm("Deseja realmente excluir esta parcela?")) {
+                                                    const updated = localDoc!.parcelas.filter((_, i) => i !== index);
+                                                    setLocalDoc({ ...localDoc!, parcelas: updated });
+                                                    onUpdateService(selectedService.id, { parcelas: updated });
+                                                }
                                             }}
                                             className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors shrink-0"
                                         >
@@ -443,7 +600,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                         </button>
                                     </div>
                                 ))}
-                                {(selectedService.parcelas || []).length === 0 && (
+                                {(localDoc?.parcelas || []).length === 0 && (
                                     <div className="py-8 text-center border-2 border-dashed border-slate-200 rounded-xl">
                                         <p className="text-slate-400 font-black uppercase tracking-widest text-[10px]">Nenhuma parcela cadastrada</p>
                                     </div>

@@ -457,8 +457,18 @@ export const AutoExpandingTextarea = (props: AutoExpandingTextareaProps) => {
 
   useEffect(() => {
     if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+      const scrollPos = window.scrollY;
+      const caretPos = textareaRef.current.selectionStart;
+      
+      textareaRef.current.style.height = 'auto'; // Still needed to get scrollHeight from collapsed state
+      const newHeight = textareaRef.current.scrollHeight;
+      textareaRef.current.style.height = `${newHeight}px`;
+      
+      // Restore scroll and caret just in case
+      window.scrollTo(window.scrollX, scrollPos);
+      if (document.activeElement === textareaRef.current) {
+         textareaRef.current.setSelectionRange(caretPos, caretPos);
+      }
     }
   }, [props.value]);
 
@@ -477,8 +487,18 @@ export const WysiwygEditor = ({ value, onChange, onKeyDown, placeholder, classNa
   // Auto-expand logic
   useEffect(() => {
     if (textareaRef.current) {
+      const scrollPos = window.scrollY;
+      const caretPos = textareaRef.current.selectionStart;
+
       textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+      const newHeight = textareaRef.current.scrollHeight;
+      textareaRef.current.style.height = `${newHeight}px`;
+
+      // Restore scroll and caret
+      window.scrollTo(window.scrollX, scrollPos);
+      if (document.activeElement === textareaRef.current) {
+        textareaRef.current.setSelectionRange(caretPos, caretPos);
+      }
     }
   }, [value]);
 

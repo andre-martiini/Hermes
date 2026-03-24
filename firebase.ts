@@ -27,10 +27,18 @@ export const db = initializeFirestore(app, {
 
 export const functions = getFunctions(app);
 let _messaging: ReturnType<typeof getMessaging> | null = null;
-try {
-  if (typeof window !== 'undefined') _messaging = getMessaging(app);
-} catch {
-  _messaging = null;
+if (typeof window !== "undefined") {
+  // Use a self-executing async function to check for support without blocking the export
+  (async () => {
+    try {
+      const { isSupported } = await import("firebase/messaging");
+      if (await isSupported()) {
+        _messaging = getMessaging(app);
+      }
+    } catch (e) {
+      console.warn("Firebase Messaging is not supported in this environment.", e);
+    }
+  })();
 }
 export const messaging = _messaging;
 export const storage = getStorage(app);
