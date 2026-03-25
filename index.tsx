@@ -1448,6 +1448,89 @@ const App: React.FC = () => {
       }).catch(err => console.error("Erro ao gerar contas fixas:", err));
     }
   }, [billRubrics, fixedBills, currentMonth, currentYear]);
+  
+  // --- Service Installments Synchronization to Finance ---
+  useEffect(() => {
+    if (!services) return;
+    
+    const syncServicesToIncome = async () => {
+      // 1. Parcelas that SHOULD exist (Active/Completed services)
+      const activeOrCompleted = services.filter(s => s.status === 'Ativo' || s.status === 'Concluído');
+      const expectedIncomes: Partial<IncomeEntry>[] = [];
+      
+      activeOrCompleted.forEach(service => {
+        (service.parcelas || []).forEach(p => {
+          const date = new Date(p.data_prevista);
+          expectedIncomes.push({
+            parcela_id: p.id,
+            service_id: service.id,
+            description: `${service.titulo} - ${p.descricao}`,
+            amount: p.valor,
+            day: date.getDate(),
+            month: date.getMonth(), // Use 0-11 as per currentMonth state
+            year: date.getFullYear(),
+            category: service.categoria_financeira || 'Serviço Particular',
+            isReceived: p.status === 'pago',
+            status: 'active'
+          });
+        });
+      });
+
+      // 2. Diff and Update
+      const batch = writeBatch(db);
+      let changes = 0;
+
+      // Create or Update
+      for (const expected of expectedIncomes) {
+          const existing = incomeEntries.find(ie => ie.parcela_id === expected.parcela_id);
+          
+          if (!existing) {
+              const newRef = doc(collection(db, 'income_entries'));
+              batch.set(newRef, { 
+                  ...expected, 
+                  data_criacao: new Date().toISOString()
+              });
+              changes++;
+          } else {
+              const hasChanged = 
+                  existing.amount !== expected.amount ||
+                  existing.description !== expected.description ||
+                  existing.day !== expected.day ||
+                  existing.month !== expected.month ||
+                  existing.year !== expected.year ||
+                  existing.category !== expected.category ||
+                  existing.isReceived !== expected.isReceived ||
+                  existing.status !== 'active';
+                  
+              if (hasChanged) {
+                  batch.update(doc(db, 'income_entries', existing.id), expected);
+                  changes++;
+              }
+          }
+      }
+
+      // Delete (Software delete) if parcela is gone or service no longer eligible
+      const linkedIncomes = incomeEntries.filter(ie => ie.parcela_id && ie.service_id);
+      for (const linked of linkedIncomes) {
+          const stillExists = expectedIncomes.some(e => e.parcela_id === linked.parcela_id);
+          if (!stillExists && linked.status !== 'deleted') {
+              batch.update(doc(db, 'income_entries', linked.id), { status: 'deleted' });
+              changes++;
+          }
+      }
+
+      if (changes > 0) {
+          await batch.commit();
+          console.log(`[Finance Sync] ${changes} changes synchronized from services.`);
+      }
+    };
+
+    const timer = setTimeout(() => {
+        syncServicesToIncome();
+    }, 1000); // Debounce to avoid slamming Firestore
+
+    return () => clearTimeout(timer);
+  }, [services, incomeEntries, db]);
 
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success', action?: { label: string | React.ReactNode, onClick: () => void }, actions?: { label: string | React.ReactNode, onClick: () => void }[]) => {

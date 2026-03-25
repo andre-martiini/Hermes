@@ -1173,6 +1173,16 @@ def sync_pix_emails(service, sync_ref, logs):
         processed_ids = processed_emails_doc.to_dict().get('ids', []) if processed_emails_doc.exists else []
 
         new_processed_ids = []
+        
+        # Cache de rubricas de renda para vinculação automática
+        income_rubrics_cache = []
+        for r in db.collection('income_rubrics').stream():
+            d = r.to_dict()
+            income_rubrics_cache.append({
+                'id': r.id,
+                'desc': d.get('description', '').lower(),
+                'category': d.get('category', 'Renda Extra')
+            })
 
 
 
@@ -1278,11 +1288,22 @@ def sync_pix_emails(service, sync_ref, logs):
 
                 # Salva no banco
                 if is_income:
+                    # Busca em rubricas de renda para vinculação
+                    matched_rubric_id = None
+                    matched_category = 'Renda Extra'
+                    clean_desc = description.replace('Pix: ', '').lower()
+                    for rb in income_rubrics_cache:
+                        if rb['desc'] in clean_desc or clean_desc in rb['desc']:
+                            matched_rubric_id = rb['id']
+                            matched_category = rb['category']
+                            break
+
                     new_record = {
                         'description': description, 'amount': amount, 'day': dt.day,
                         'month': dt.month - 1, 'year': dt.year,
-                        'category': 'Renda Extra', 'isReceived': True, 'date': iso_date,
-                        'google_message_id': msg_id, 'pix_id': pix_id
+                        'category': matched_category, 'isReceived': True, 'date': iso_date,
+                        'google_message_id': msg_id, 'pix_id': pix_id,
+                        'rubricId': matched_rubric_id
                     }
                     db.collection('finance_income').add(new_record)
                     existing_income.append({'amount': amount, 'date': dt, 'pix_id': pix_id, 'description': description})
@@ -1350,7 +1371,18 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 'amount': d.get('amount'),
                 'month': d.get('month'),
                 'year': d.get('year'),
-                'isPaid': d.get('isPaid', False)
+                'isPaid': d.get('isPaid', False),
+                'rubricId': d.get('rubricId')
+            })
+
+        # Cache de rubricas para vinculação automática
+        rubrics_cache = []
+        for r in db.collection('bill_rubrics').stream():
+            d = r.to_dict()
+            rubrics_cache.append({
+                'id': r.id,
+                'desc': d.get('description', '').lower(),
+                'category': d.get('category', 'Conta Fixa')
             })
 
         processed_emails_doc = db.collection('system').document('processed_emails').get()
@@ -1377,24 +1409,37 @@ def sync_boletos_gmail(service, sync_ref, logs):
             
             find_pdf(msg['payload'])
             
-            prompt = """
+            # Formata rubricas para o prompt
+            rubrics_text = "\n".join([f"- {r['desc']} (ID: {r['id']}, Categoria: {r['category']})" for r in rubrics_cache])
+            
+            prompt = f"""
             Você é um assistente financeiro de elite. Analise o e-mail/documento anexo e extraia os dados abaixo para um BOLETO ou PAGAMENTO.
+            
+            Além disso, compare esta conta com a seguinte lista de RUBRICAS RECORRENTES do usuário:
+            {rubrics_text}
+            
+            Se o boleto corresponder a uma dessas rubricas (mesmo que o nome não seja idêntico, ex: "EDP ENERGIA" corresponde a "EDP (energia)"), informe o ID da rubrica.
+            
             Campos obrigatórios no JSON:
             - description: Nome curto da conta (ex: VIVO, Sabesp, Condomínio)
             - amount: valor numérico do boleto
             - due_date: data de vencimento (formato YYYY-MM-DD)
             - barcode: linha digitável ou código de barras (apenas números)
             - pix_code: código Pix Copia e Cola (geralmente começa com 000201...)
+            - rubric_id: ID da rubrica correspondente (se houver match) ou null
+            - category: Categoria da conta (use a da rubrica se houver match)
 
             Responda APENAS em JSON no formato:
-            {
+            {{
               "description": "...",
               "amount": 123.45,
               "due_date": "YYYY-MM-DD",
               "barcode": "...",
-              "pix_code": "..."
-            }
-            Se não for um boleto/fatura ou se não encontrar dados, responda {"error": "not_a_bill"}.
+              "pix_code": "...",
+              "rubric_id": "...",
+              "category": "..."
+            }}
+            Se não for um boleto/fatura ou se não encontrar dados, responda {{"error": "not_a_bill"}}.
             """
             
             content_parts = [prompt, f"E-mail Fragment: {snippet}"]
@@ -1421,18 +1466,30 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 found_existing_id = None
                 is_exact_dup = False
                 name_extracted = data['description'].lower()
+                # Prioriza o match de rubrica feito pela IA
+                rubric_id_from_ai = data.get('rubric_id')
 
                 for eb in existing_bills_cache:
                     if eb['month'] == month and eb['year'] == year:
-                        # Lógica de vinculação inteligente (Pela descrição aproximada)
+                        # 1. Tenta match por rubricId (IA indicou este card)
+                        if rubric_id_from_ai and eb.get('rubricId') == rubric_id_from_ai:
+                            found_existing_id = eb['id']
+                            found_existing_rubric_id = eb.get('rubricId')
+                            # Se valor for igual, é exatamente o mesmo registro
+                            if abs(eb['amount'] - data['amount']) < 0.01:
+                                is_exact_dup = True
+                            break
+
+                        # 2. Lógica de vinculação via nome (Fallback/Ambiguidade)
                         if name_extracted in eb['desc'] or eb['desc'] in name_extracted:
                             # Se o valor também for igual, é uma duplicata exata
                             if abs(eb['amount'] - data['amount']) < 0.01:
                                 is_exact_dup = True
                                 break
-                            # Caso contrário, se o nome bater, vamos vincular a este card (atualizá-lo)
+                            # Caso contrário, vamos vincular a este card (atualizá-lo)
                             found_existing_id = eb['id']
-                            break # Achamos o card para vincular
+                            found_existing_rubric_id = eb.get('rubricId')
+                            break 
 
                 if is_exact_dup:
                     new_processed_ids.append(msg_id)
@@ -1440,16 +1497,38 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 
                 if found_existing_id:
                     # VINCULAÇÃO: Atualiza card existente
-                    db.collection('fixed_bills').document(found_existing_id).update({
+                    update_data = {
                         'amount': data['amount'],
                         'barcode': data.get('barcode', ''),
                         'pixCode': data.get('pix_code', ''),
                         'google_message_id': msg_id,
                         'updated_at': datetime.now().isoformat()
-                    })
+                    }
+                    
+                    # Se o card existente não tiver rubricId, usa o da IA ou tenta achar
+                    if not found_existing_rubric_id:
+                        update_data['rubricId'] = rubric_id_from_ai
+                        if not update_data['rubricId']:
+                            for rb in rubrics_cache:
+                                if name_extracted in rb['desc'] or rb['desc'] in name_extracted:
+                                    update_data['rubricId'] = rb['id']
+                                    break
+                                
+                    db.collection('fixed_bills').document(found_existing_id).update(update_data)
                     log_to_firestore(sync_ref, logs, f"[BOLETO] Vinculado ao card '{data['description']}': R$ {data['amount']}")
                     processed_count += 1
                 else:
+                    # BUSCA EM RUBRICAS (Fallback se a IA não retornou rubric_id)
+                    matched_rubric_id = rubric_id_from_ai
+                    matched_category = data.get('category', 'Conta Fixa')
+                    
+                    if not matched_rubric_id:
+                        for rb in rubrics_cache:
+                            if name_extracted in rb['desc'] or rb['desc'] in name_extracted:
+                                matched_rubric_id = rb['id']
+                                matched_category = rb['category']
+                                break
+
                     # CRIAÇÃO: Adiciona novo card
                     db.collection('fixed_bills').add({
                         'description': data['description'],
@@ -1460,7 +1539,8 @@ def sync_boletos_gmail(service, sync_ref, logs):
                         'barcode': data.get('barcode', ''),
                         'pixCode': data.get('pix_code', ''),
                         'isPaid': False,
-                        'category': 'Conta Fixa',
+                        'category': matched_category,
+                        'rubricId': matched_rubric_id,
                         'google_message_id': msg_id,
                         'created_at': datetime.now().isoformat()
                     })

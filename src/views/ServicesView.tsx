@@ -33,7 +33,49 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
     } else {
         setLocalDoc(null);
     }
-  }, [selectedServiceId]);
+  }, [selectedServiceId, selectedService]);
+
+  // --- Auto-Conclusion Logic ---
+  useEffect(() => {
+     const now = new Date();
+     services.forEach(service => {
+         if (service.status === 'Ativo' && service.data_termino) {
+             const end = new Date(service.data_termino + 'T23:59:59');
+             if (end < now) {
+                 onUpdateService(service.id, { status: 'Concluído' });
+             }
+         }
+     });
+  }, [services, onUpdateService]);
+
+  const handleApproveService = (id: string) => {
+      onUpdateService(id, { status: 'Ativo' });
+  };
+
+  const handleCancelService = (id: string) => {
+      if (!confirm("Tem certeza que deseja cancelar este serviço? Todas as parcelas futuras serão removidas.")) return;
+      
+      const now = new Date();
+      const todayStr = now.toISOString().split('T')[0];
+      
+      // Filter parcelas: keep only those with date <= now
+      const currentParcelas = selectedService?.parcelas || [];
+      const updatedParcelas = currentParcelas.filter(p => new Date(p.data_prevista) <= now);
+      
+      onUpdateService(id, { 
+          status: 'Cancelado', 
+          data_termino: todayStr,
+          parcelas: updatedParcelas
+      });
+      setSelectedServiceId(null);
+  };
+
+  const handleUpdateTotalFromParcelas = () => {
+      if (!localDoc?.parcelas || !selectedService) return;
+      const total = localDoc.parcelas.reduce((acc, curr) => acc + (curr.valor || 0), 0);
+      setLocalDoc(prev => prev ? { ...prev, valor_total: total } : null);
+      onUpdateService(selectedService.id, { valor_total: total });
+  };
 
   // --- Dashboard Metrics Logic ---
   const activeServices = useMemo(() => services.filter(s => s.status === 'Ativo'), [services]);
@@ -117,7 +159,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
         {/* Header & Tabs */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 md:p-8 rounded-[2rem] border border-slate-200 shadow-sm">
             <div>
-                <h3 className="text-3xl font-black text-slate-900 tracking-tighter">Serviços e Contratos</h3>
+                <h3 className="text-3xl font-black text-slate-950 tracking-tighter">Portfólio de Serviços</h3>
                 <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">Gestão de Portfólio e Faturamento</p>
             </div>
             <div className="flex bg-slate-100 p-1 rounded-xl">
@@ -187,23 +229,24 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
         {activeTab === 'list' && (
             <div className="bg-white p-6 md:p-10 rounded-[2rem] border border-slate-200 shadow-xl overflow-hidden min-h-[500px]">
                 <div className="flex items-center justify-between mb-8 pb-6 border-b border-slate-100">
-                    <h3 className="text-xl font-black text-slate-900 tracking-tight">Portfólio de Serviços</h3>
+                    <h3 className="text-xl font-black text-slate-950 tracking-tight">Portfólio de Serviços</h3>
                     <button
                         onClick={() => {
                             // Temporary placeholder for creating a new service
                             const dummyService: Omit<Servico, 'id' | 'data_criacao' | 'data_atualizacao'> = {
                                 titulo: 'Novo Serviço ' + Math.floor(Math.random() * 100),
-                                descricao: 'Descrição do serviço',
-                                cliente: 'Cliente Exemplo',
-                                papel: 'Papel do prestador',
+                                descricao: 'Descreva os detalhes do serviço aqui...',
+                                cliente: 'Nome do Cliente',
+                                papel: 'Seu papel / cargo',
                                 status: 'Prospecção',
                                 tags: [],
                                 data_inicio: new Date().toISOString().split('T')[0],
                                 data_termino: new Date().toISOString().split('T')[0],
-                                carga_horaria_semanal: 10,
-                                tipo_contrato: 'Pacote Fechado',
-                                valor_total: 1000,
-                                parcelas: []
+                                carga_horaria_semanal: 0,
+                                tipo_contrato: 'Mensalidade',
+                                valor_total: 0,
+                                parcelas: [],
+                                categoria_financeira: 'Serviço Particular'
                             };
                             onCreateService(dummyService);
                         }}
@@ -218,7 +261,8 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                     {services.map(service => (
                         <div
                             key={service.id}
-                            className="group bg-slate-50 border border-slate-200 rounded-2xl p-6 hover:shadow-lg hover:border-indigo-300 transition-all relative overflow-hidden"
+                            onClick={() => setSelectedServiceId(service.id)}
+                            className="group bg-slate-50 border border-slate-200 rounded-2xl p-6 hover:shadow-lg hover:border-indigo-300 transition-all relative overflow-hidden cursor-pointer"
                         >
                             <div className="flex items-start justify-between mb-4">
                                 <div>
@@ -236,7 +280,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                 </div>
                             </div>
 
-                            <h4 className="text-lg font-black text-slate-900 leading-tight mb-2 group-hover:text-indigo-700 transition-colors">{service.titulo}</h4>
+                            <h4 className="text-lg font-black text-slate-950 leading-tight mb-2 group-hover:text-indigo-700 transition-colors">{service.titulo}</h4>
                             <p className="text-xs text-slate-500 font-medium line-clamp-2 mb-4">{service.descricao}</p>
 
                             <div className="space-y-2 mb-6">
@@ -248,22 +292,22 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                     <span className="font-bold text-slate-400">Papel</span>
                                     <span className="font-bold text-slate-700">{service.papel}</span>
                                 </div>
-                                <div className="flex items-center justify-between text-xs">
-                                    <span className="font-bold text-slate-400">Carga</span>
-                                    <span className="font-bold text-slate-700">{service.carga_horaria_semanal}h / sem</span>
-                                </div>
+                                {service.status !== 'Prospecção' && (
+                                    <div className="flex items-center justify-between text-xs">
+                                        <span className="font-bold text-slate-400">Carga</span>
+                                        <span className="font-bold text-slate-700">{service.carga_horaria_semanal}h / sem</span>
+                                    </div>
+                                )}
                             </div>
 
                             <div className="pt-4 border-t border-slate-200 flex items-center justify-between">
                                 <div className="text-lg font-black text-slate-900 tracking-tighter">
                                     R$ {service.valor_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </div>
-                                <button
-                                    onClick={() => setSelectedServiceId(service.id)}
-                                    className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors font-black text-[10px] uppercase tracking-widest"
-                                >
-                                    Abrir
-                                </button>
+                                <div className="text-indigo-600 opacity-0 group-hover:opacity-100 transition-all font-black text-[10px] uppercase tracking-widest flex items-center gap-1">
+                                    Ver Detalhes
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
+                                </div>
                             </div>
                         </div>
                     ))}
@@ -297,11 +341,31 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{selectedService.tipo_contrato}</span>
                             </div>
                             <input
-                                className="text-3xl font-black text-slate-900 tracking-tighter bg-transparent border-none outline-none focus:ring-2 focus:ring-indigo-500 rounded p-1 w-full"
+                                className="text-3xl font-black text-slate-950 tracking-tighter bg-transparent border-none outline-none focus:ring-2 focus:ring-indigo-500 rounded p-1 w-full"
                                 value={localDoc?.titulo || ''}
                                 onChange={(e) => setLocalDoc(prev => prev ? { ...prev, titulo: e.target.value } : null)}
                                 onBlur={(e) => onUpdateService(selectedService.id, { titulo: e.target.value })}
                             />
+                            <div className="mt-4 flex gap-2">
+                                {selectedService.status === 'Prospecção' && (
+                                    <button 
+                                        onClick={() => handleApproveService(selectedService.id)}
+                                        className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-emerald-700 transition-all flex items-center gap-2"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                        Aprovar Serviço
+                                    </button>
+                                )}
+                                {selectedService.status === 'Ativo' && (
+                                    <button 
+                                        onClick={() => handleCancelService(selectedService.id)}
+                                        className="bg-rose-50 text-rose-600 border border-rose-100 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-100 transition-all flex items-center gap-2"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                                        Cancelar Serviço
+                                    </button>
+                                )}
+                            </div>
                         </div>
                         <div className="flex items-center gap-4">
                             <button
@@ -364,55 +428,56 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Início</label>
                                         <input
                                             type="date"
+                                            disabled={localDoc?.status === 'Prospecção'}
                                             value={localDoc?.data_inicio?.split('T')[0] || ''}
                                             onChange={(e) => {
                                                 const val = new Date(e.target.value).toISOString();
                                                 setLocalDoc(prev => prev ? { ...prev, data_inicio: val } : null);
                                                 onUpdateService(selectedService.id, { data_inicio: val });
                                             }}
-                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
                                         />
                                     </div>
                                     <div>
                                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Término Previsto</label>
                                         <input
                                             type="date"
+                                            disabled={localDoc?.status === 'Prospecção'}
                                             value={localDoc?.data_termino?.split('T')[0] || ''}
                                             onChange={(e) => {
                                                 const val = new Date(e.target.value).toISOString();
                                                 setLocalDoc(prev => prev ? { ...prev, data_termino: val } : null);
                                                 onUpdateService(selectedService.id, { data_termino: val });
                                             }}
-                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
                                         />
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Status</label>
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">Classificação Financeira</label>
                                         <select
-                                            value={localDoc?.status || ''}
+                                            value={localDoc?.categoria_financeira || 'Serviço Particular'}
                                             onChange={(e) => {
                                                 const val = e.target.value as any;
-                                                setLocalDoc(prev => prev ? { ...prev, status: val } : null);
-                                                onUpdateService(selectedService.id, { status: val });
+                                                setLocalDoc(prev => prev ? { ...prev, categoria_financeira: val } : null);
+                                                onUpdateService(selectedService.id, { categoria_financeira: val });
                                             }}
                                             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
                                         >
-                                            <option value="Prospecção">Prospecção</option>
-                                            <option value="Ativo">Ativo</option>
-                                            <option value="Concluído">Concluído</option>
-                                            <option value="Cancelado">Cancelado</option>
+                                            <option value="Serviço Particular">Serviço Particular</option>
+                                            <option value="Bolsa">Bolsa</option>
                                         </select>
                                     </div>
                                     <div>
                                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Carga Horária (h/sem)</label>
                                         <input
                                             type="number"
+                                            disabled={localDoc?.status === 'Prospecção'}
                                             value={localDoc?.carga_horaria_semanal || 0}
                                             onChange={(e) => setLocalDoc(prev => prev ? { ...prev, carga_horaria_semanal: Number(e.target.value) } : null)}
                                             onBlur={(e) => onUpdateService(selectedService.id, { carga_horaria_semanal: Number(e.target.value) })}
-                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
                                         />
                                     </div>
                                 </div>
@@ -425,6 +490,14 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                         onBlur={(e) => onUpdateService(selectedService.id, { valor_total: Number(e.target.value) })}
                                         className="w-full bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 text-xl font-black text-indigo-900 outline-none focus:ring-2 focus:ring-indigo-500"
                                     />
+                                    <button 
+                                        onClick={handleUpdateTotalFromParcelas}
+                                        disabled={!localDoc?.parcelas || localDoc.parcelas.length === 0}
+                                        className="mt-3 text-[10px] font-black text-indigo-600 hover:text-indigo-800 disabled:text-slate-300 disabled:cursor-not-allowed uppercase tracking-widest flex items-center gap-1.5 transition-colors pl-1"
+                                    >
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+                                        Sincronizar com Cronograma
+                                    </button>
                                 </div>
                             </div>
                         </div>

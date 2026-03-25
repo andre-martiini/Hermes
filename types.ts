@@ -221,6 +221,8 @@ export interface IncomeEntry {
     rubricId?: string;
     google_message_id?: string;
     status?: 'active' | 'deleted';
+    parcela_id?: string;
+    service_id?: string;
 }
 
 export interface IncomeRubric {
@@ -683,6 +685,7 @@ export interface Servico {
     tipo_contrato: 'Mensalidade' | 'Pacote Fechado';
     valor_total: number;
     parcelas: ParcelaServico[];
+    categoria_financeira?: 'Bolsa' | 'Serviço Particular';
     data_criacao: string;
     data_atualizacao: string;
 }
