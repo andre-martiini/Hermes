@@ -79,6 +79,728 @@ def get_db():
     return firestore.client()
 
 
+SERVICE_PIPELINE_VERSION = 1
+SERVICE_ACTIVE_STATUS = 'Ativo'
+
+
+def iso_now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def build_default_service_stage_templates():
+    return [
+        {
+            'codigo_etapa': 'ativacao',
+            'titulo': 'Ativacao',
+            'descricao': 'Confirma a entrada oficial do servico no fluxo autonomo.',
+            'ordem': 1,
+            'agente_dono': 'orquestrador',
+            'obrigatorios': ['status', 'cliente', 'descricao'],
+            'exit_criteria': [
+                {'code': 'service_is_active', 'label': 'Servico esta ativo', 'type': 'field_presence', 'required': True, 'status': 'pending'},
+                {'code': 'has_cliente', 'label': 'Cliente preenchido', 'type': 'field_presence', 'required': True, 'status': 'pending'},
+                {'code': 'has_descricao', 'label': 'Descricao preenchida', 'type': 'field_presence', 'required': True, 'status': 'pending'},
+                {'code': 'has_billing_reference', 'label': 'Ha parcela ou referencia de faturamento', 'type': 'custom', 'required': True, 'status': 'pending'},
+            ],
+            'faturavel': False,
+            'human_review_required': False,
+        },
+        {
+            'codigo_etapa': 'escopo_validado',
+            'titulo': 'Escopo Validado',
+            'descricao': 'Formalizacao minima do escopo e criterios de aceite.',
+            'ordem': 2,
+            'agente_dono': 'analista',
+            'obrigatorios': ['resumo_escopo', 'entregaveis_previstos', 'premissas', 'restricoes', 'criterios_aceite', 'responsavel_tecnico'],
+            'exit_criteria': [
+                {'code': 'required_fields_completed', 'label': 'Campos obrigatorios preenchidos', 'type': 'field_presence', 'required': True, 'status': 'pending'},
+                {'code': 'has_scope_summary', 'label': 'Resumo de escopo definido', 'type': 'field_presence', 'required': True, 'status': 'pending'},
+            ],
+            'faturavel': False,
+            'human_review_required': False,
+        },
+        {
+            'codigo_etapa': 'planejamento_tecnico',
+            'titulo': 'Planejamento Tecnico',
+            'descricao': 'Planejamento inicial da execucao tecnica do servico.',
+            'ordem': 3,
+            'agente_dono': 'analista',
+            'obrigatorios': ['plano_inicial'],
+            'exit_criteria': [
+                {'code': 'has_initial_plan', 'label': 'Plano inicial registrado', 'type': 'field_presence', 'required': True, 'status': 'pending'},
+                {'code': 'has_initial_task_links', 'label': 'Ha tarefas vinculadas ao servico', 'type': 'min_links', 'required': True, 'status': 'pending', 'min': 1},
+            ],
+            'faturavel': False,
+            'human_review_required': False,
+        },
+        {
+            'codigo_etapa': 'execucao',
+            'titulo': 'Execucao',
+            'descricao': 'Execucao tecnica em andamento com evidencias de progresso.',
+            'ordem': 4,
+            'agente_dono': 'desenvolvedor',
+            'obrigatorios': [],
+            'exit_criteria': [
+                {'code': 'has_execution_evidence', 'label': 'Ha evidencias tecnicas de execucao', 'type': 'min_links', 'required': True, 'status': 'pending', 'min': 1},
+            ],
+            'faturavel': False,
+            'human_review_required': False,
+        },
+        {
+            'codigo_etapa': 'validacao_entrega',
+            'titulo': 'Validacao de Entrega',
+            'descricao': 'Validacao final da entrega e das evidencias do servico.',
+            'ordem': 5,
+            'agente_dono': 'desenvolvedor',
+            'obrigatorios': [],
+            'exit_criteria': [
+                {'code': 'has_delivery_evidence', 'label': 'Ha evidencia de entrega', 'type': 'min_links', 'required': True, 'status': 'pending', 'min': 1},
+            ],
+            'faturavel': False,
+            'human_review_required': True,
+        },
+        {
+            'codigo_etapa': 'faturamento',
+            'titulo': 'Faturamento',
+            'descricao': 'Preparacao e disparo do fluxo fiscal do servico.',
+            'ordem': 6,
+            'agente_dono': 'contador',
+            'obrigatorios': ['referencia_faturamento'],
+            'exit_criteria': [
+                {'code': 'has_fiscal_reference', 'label': 'Referencia de faturamento definida', 'type': 'field_presence', 'required': True, 'status': 'pending'},
+                {'code': 'has_cliente_cnpj', 'label': 'CNPJ do cliente informado', 'type': 'field_presence', 'required': True, 'status': 'pending'},
+            ],
+            'faturavel': True,
+            'human_review_required': True,
+        },
+        {
+            'codigo_etapa': 'encerramento',
+            'titulo': 'Encerramento',
+            'descricao': 'Fechamento administrativo e consolidacao do servico.',
+            'ordem': 7,
+            'agente_dono': 'orquestrador',
+            'obrigatorios': [],
+            'exit_criteria': [
+                {'code': 'pipeline_can_close', 'label': 'Servico pode ser encerrado', 'type': 'custom', 'required': True, 'status': 'pending'},
+            ],
+            'faturavel': False,
+            'human_review_required': False,
+        },
+    ]
+
+
+def stage_doc_id_for_service(service_id, stage_code):
+    return f"{service_id}_{stage_code}"
+
+
+def build_service_stage_document(service_id, service_data, stage_template):
+    now = iso_now()
+    is_first_stage = stage_template['ordem'] == 1
+    return {
+        'service_id': service_id,
+        'codigo_etapa': stage_template['codigo_etapa'],
+        'titulo': stage_template['titulo'],
+        'descricao': stage_template.get('descricao', ''),
+        'ordem': stage_template['ordem'],
+        'status': 'em_andamento' if is_first_stage else 'pendente',
+        'agente_dono': stage_template['agente_dono'],
+        'entrada_disparada_em': now if is_first_stage else '',
+        'data_inicio': now if is_first_stage else '',
+        'data_conclusao': '',
+        'data_bloqueio': '',
+        'bloqueio_motivo': '',
+        'obrigatorios': stage_template.get('obrigatorios', []),
+        'dados': {},
+        'exit_criteria': stage_template.get('exit_criteria', []),
+        'exit_evaluation': {
+            'status': 'pending',
+            'pendingCriteria': [criterion['code'] for criterion in stage_template.get('exit_criteria', [])],
+            'checkedAt': now,
+            'checkedBy': 'sistema',
+        },
+        'evidencias': {
+            'tarefa_ids': [],
+            'knowledge_item_ids': [],
+            'log_ids': [],
+            'parcela_ids': [p.get('id') for p in (service_data.get('parcelas') or []) if isinstance(p, dict) and p.get('id')],
+            'links': [],
+        },
+        'faturavel': stage_template.get('faturavel', False),
+        'faturamento_disparado': False,
+        'faturamento_referencia': '',
+        'human_review_required': stage_template.get('human_review_required', False),
+        'human_review_status': 'pendente' if stage_template.get('human_review_required', False) else 'nao_requer',
+        'ultima_avaliacao_em': now,
+        'ultima_avaliacao_por': 'sistema',
+    }
+
+
+def initialize_service_pipeline(db, service_id, service_data):
+    now = iso_now()
+    stage_templates = build_default_service_stage_templates()
+    first_stage_id = stage_doc_id_for_service(service_id, stage_templates[0]['codigo_etapa'])
+
+    etapas_ref = db.collection('servico_etapas')
+    logs_ref = db.collection('servico_logs')
+    service_ref = db.collection('servicos').document(service_id)
+
+    first_stage_snapshot = etapas_ref.document(first_stage_id).get()
+    if first_stage_snapshot.exists:
+        service_ref.set({
+            'pipeline_status': service_data.get('pipeline_status') or 'inicializada',
+            'pipeline_initialized_at': service_data.get('pipeline_initialized_at') or now,
+            'pipeline_version': service_data.get('pipeline_version') or SERVICE_PIPELINE_VERSION,
+            'etapa_atual_codigo': service_data.get('etapa_atual_codigo') or stage_templates[0]['codigo_etapa'],
+            'etapa_atual_id': service_data.get('etapa_atual_id') or first_stage_id,
+            'agente_responsavel_atual': service_data.get('agente_responsavel_atual') or stage_templates[0]['agente_dono'],
+            'requires_human_review': service_data.get('requires_human_review', False),
+            'ultimo_checkpoint_em': service_data.get('ultimo_checkpoint_em') or now,
+            'ultimo_checkpoint_status': service_data.get('ultimo_checkpoint_status') or 'ok',
+            'nfse_status': service_data.get('nfse_status') or ('pendente' if service_data.get('categoria_financeira') == 'Serviço Particular' else 'nao_aplicavel'),
+            'metadata_agentes': {
+                **(service_data.get('metadata_agentes') or {}),
+                'pipeline_bootstrap_checked_at': now,
+            },
+            'data_atualizacao': now,
+        }, merge=True)
+        return False
+
+    batch = db.batch()
+
+    for template in stage_templates:
+        stage_id = stage_doc_id_for_service(service_id, template['codigo_etapa'])
+        stage_doc = build_service_stage_document(service_id, service_data, template)
+        batch.set(etapas_ref.document(stage_id), stage_doc, merge=True)
+
+    batch.set(service_ref, {
+        'pipeline_status': 'inicializada',
+        'pipeline_initialized_at': now,
+        'pipeline_version': SERVICE_PIPELINE_VERSION,
+        'etapa_atual_codigo': stage_templates[0]['codigo_etapa'],
+        'etapa_atual_id': first_stage_id,
+        'agente_responsavel_atual': stage_templates[0]['agente_dono'],
+        'requires_human_review': False,
+        'ultimo_checkpoint_em': now,
+        'ultimo_checkpoint_status': 'ok',
+        'nfse_status': service_data.get('nfse_status') or ('pendente' if service_data.get('categoria_financeira') == 'Serviço Particular' else 'nao_aplicavel'),
+        'metadata_agentes': {
+            **(service_data.get('metadata_agentes') or {}),
+            'pipeline_bootstrap_source': 'service_ativo_trigger',
+            'pipeline_bootstrap_at': now,
+        },
+        'data_atualizacao': now,
+    }, merge=True)
+
+    log_ref = logs_ref.document()
+    batch.set(log_ref, {
+        'service_id': service_id,
+        'etapa_id': first_stage_id,
+        'tipo': 'pipeline',
+        'agente': 'sistema',
+        'acao': 'bootstrap_pipeline',
+        'mensagem': 'Pipeline de servico inicializada automaticamente ao entrar em Ativo.',
+        'fundamento': 'Mudanca de status do servico para Ativo.',
+        'dados_antes': None,
+        'dados_depois': {
+            'pipeline_status': 'inicializada',
+            'etapa_atual_codigo': stage_templates[0]['codigo_etapa'],
+            'etapa_atual_id': first_stage_id,
+        },
+        'evidencias': {
+            'parcela_ids': [p.get('id') for p in (service_data.get('parcelas') or []) if isinstance(p, dict) and p.get('id')],
+            'tarefa_ids': [],
+            'knowledge_item_ids': [],
+            'log_ids': [],
+            'links': [],
+        },
+        'sucesso': True,
+        'criticidade': 'media',
+        'timestamp': now,
+    })
+
+    batch.commit()
+    return True
+
+
+def normalize_stage_value(value):
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
+def get_service_stage_tasks(db, service_id):
+    return [doc.to_dict() | {'id': doc.id} for doc in db.collection('tarefas').where('service_id', '==', service_id).stream()]
+
+
+def evaluate_single_criterion(criterion, service_data, stage_data, linked_tasks):
+    code = criterion.get('code')
+    criterion_type = criterion.get('type')
+    stage_fields = stage_data.get('dados') or {}
+    evidencias = stage_data.get('evidencias') or {}
+    parcela_ids = evidencias.get('parcela_ids') or []
+    tarefa_ids = evidencias.get('tarefa_ids') or []
+    min_required = criterion.get('min', 1)
+
+    status = 'failed'
+    details = ''
+
+    if criterion_type == 'field_presence':
+        field_mapping = {
+            'service_is_active': service_data.get('status'),
+            'has_cliente': service_data.get('cliente'),
+            'has_descricao': service_data.get('descricao'),
+            'has_scope_summary': stage_fields.get('resumo_escopo'),
+            'required_fields_completed': all(normalize_stage_value(stage_fields.get(field)) not in (None, '', [], {}) for field in (stage_data.get('obrigatorios') or [])),
+            'has_initial_plan': stage_fields.get('plano_inicial'),
+            'has_fiscal_reference': stage_fields.get('referencia_faturamento') or stage_data.get('faturamento_referencia'),
+            'has_cliente_cnpj': service_data.get('cliente_cnpj'),
+        }
+        value = field_mapping.get(code)
+        if code == 'service_is_active':
+            status = 'passed' if value == SERVICE_ACTIVE_STATUS else 'failed'
+        elif code == 'required_fields_completed':
+            status = 'passed' if value is True else 'failed'
+        else:
+            status = 'passed' if normalize_stage_value(value) not in (None, '', [], {}) else 'failed'
+        details = f"valor={value}" if value not in (None, '') else 'campo ausente'
+
+    elif criterion_type == 'min_links':
+        if code == 'has_initial_task_links':
+            count = len(linked_tasks)
+        elif code == 'has_execution_evidence':
+            count = len([task for task in linked_tasks if (task.get('acompanhamento') or task.get('pool_dados') or task.get('is_service_evidence'))])
+        elif code == 'has_delivery_evidence':
+            count = len([
+                task for task in linked_tasks
+                if task.get('status') == 'concluído' or task.get('evidence_type') in ('entrega', 'homologacao')
+            ])
+        else:
+            count = len(tarefa_ids)
+        status = 'passed' if count >= min_required else 'failed'
+        details = f"count={count}, min={min_required}"
+
+    elif criterion_type == 'custom':
+        if code == 'has_billing_reference':
+            has_reference = bool(service_data.get('parcelas')) or bool(parcela_ids)
+            status = 'passed' if has_reference else 'failed'
+            details = f"parcelas={len(service_data.get('parcelas') or [])}"
+        elif code == 'pipeline_can_close':
+            open_tasks = [
+                task for task in linked_tasks
+                if task.get('status') not in ('concluído', 'excluído')
+            ]
+            status = 'passed' if len(open_tasks) == 0 else 'failed'
+            details = f"tarefas_abertas={len(open_tasks)}"
+        else:
+            details = 'criterio custom sem avaliador especifico'
+            status = 'failed'
+
+    return {
+        **criterion,
+        'status': status,
+        'details': details,
+    }
+
+
+def build_stage_evaluation(stage_data, service_data, linked_tasks):
+    evaluated_criteria = [
+        evaluate_single_criterion(criterion, service_data, stage_data, linked_tasks)
+        for criterion in (stage_data.get('exit_criteria') or [])
+    ]
+    pending_criteria = [criterion.get('code') for criterion in evaluated_criteria if criterion.get('required') and criterion.get('status') != 'passed']
+    overall_status = 'passed' if not pending_criteria else 'failed'
+
+    return evaluated_criteria, {
+        'status': overall_status,
+        'pendingCriteria': pending_criteria,
+        'checkedAt': iso_now(),
+        'checkedBy': 'sistema',
+    }
+
+
+def determine_stage_runtime_status(previous_status, evaluation_status):
+    if previous_status in ('concluida', 'cancelada'):
+        return previous_status
+    if evaluation_status == 'passed':
+        if previous_status in ('em_andamento', 'bloqueada'):
+            return 'aguardando_validacao'
+        return previous_status
+    if previous_status == 'pendente':
+        return previous_status
+    return 'bloqueada'
+
+
+def sort_service_stages(stage_docs):
+    return sorted(stage_docs, key=lambda stage: (stage.get('ordem', 999), stage.get('codigo_etapa', '')))
+
+
+def can_auto_advance_stage(stage_data):
+    if stage_data.get('status') != 'aguardando_validacao':
+        return False
+    if stage_data.get('human_review_required'):
+        return stage_data.get('human_review_status') == 'aprovado'
+    return True
+
+
+def parse_service_datetime(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+    raw = str(value).strip()
+    if not raw:
+        return None
+
+    try:
+        if re.fullmatch(r'\d{4}-\d{2}-\d{2}', raw):
+            return datetime.fromisoformat(f"{raw}T00:00:00+00:00")
+        normalized = raw.replace('Z', '+00:00')
+        parsed = datetime.fromisoformat(normalized)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def select_service_installment_for_billing(service_data, stage_data):
+    parcelas = [p for p in (service_data.get('parcelas') or []) if isinstance(p, dict)]
+    stage_fields = stage_data.get('dados') or {}
+    reference = (
+        stage_data.get('faturamento_referencia')
+        or stage_fields.get('referencia_faturamento')
+        or stage_fields.get('parcela_id')
+    )
+
+    if reference:
+        selected = next(
+            (
+                parcela for parcela in parcelas
+                if parcela.get('id') == reference or parcela.get('descricao') == reference
+            ),
+            None
+        )
+        if selected:
+            return selected
+
+    unpaid = [parcela for parcela in parcelas if str(parcela.get('status', '')).lower() != 'pago']
+    if unpaid:
+        unpaid.sort(key=lambda parcela: parse_service_datetime(parcela.get('data_prevista')) or datetime.max.replace(tzinfo=timezone.utc))
+        return unpaid[0]
+
+    if parcelas:
+        parcelas.sort(key=lambda parcela: parse_service_datetime(parcela.get('data_prevista')) or datetime.max.replace(tzinfo=timezone.utc))
+        return parcelas[0]
+
+    return None
+
+
+def build_service_nfse_payload(service_id, stage_id, service_data, stage_data):
+    installment = select_service_installment_for_billing(service_data, stage_data)
+    if not installment:
+        raise ValueError("Nenhuma parcela ou referência de faturamento encontrada para o serviço.")
+
+    liquido = float(installment.get('valor') or 0)
+    if liquido <= 0:
+        raise ValueError("A parcela selecionada não possui valor válido para faturamento.")
+
+    regras_fiscais = service_data.get('regras_fiscais') or {}
+    retem_inss = regras_fiscais.get('retem_inss')
+    retem_irrf = regras_fiscais.get('retem_irrf')
+    cp_rate = 0.11 if retem_inss is not False else 0.0
+    irrf_rate = 0.0 if retem_irrf is False or retem_irrf is None else 0.0
+
+    bruto = round(liquido / (1 - cp_rate), 2) if cp_rate > 0 else round(liquido, 2)
+    valor_cp = round(bruto * cp_rate, 2)
+    valor_irrf = round(bruto * irrf_rate, 2)
+
+    due_date = parse_service_datetime(installment.get('data_prevista')) or parse_service_datetime(service_data.get('data_termino')) or datetime.now(timezone.utc)
+    competencia = due_date.strftime('%d%m%Y')
+    mes_ref = due_date.strftime('%m/%Y')
+
+    cliente_nome = service_data.get('cliente_razao_social') or service_data.get('cliente') or 'Cliente'
+    descricao = (
+        (stage_data.get('dados') or {}).get('descricao_nfse')
+        or f"{service_data.get('papel') or 'Prestação de serviços'} referente ao serviço {service_data.get('titulo')} para {cliente_nome}. Competência {mes_ref}."
+    )
+
+    payload = {
+        'data_competencia': competencia,
+        'cnpj_tomador': re.sub(r'\D', '', service_data.get('cliente_cnpj') or ''),
+        'descricao': descricao,
+        'valor_bruto': f"{bruto:.2f}".replace('.', ','),
+        'valor_irrf': f"{valor_irrf:.2f}".replace('.', ','),
+        'valor_cp': f"{valor_cp:.2f}".replace('.', ','),
+        'portal_login': '',
+        'portal_senha': '',
+        'service_id': service_id,
+        'stage_id': stage_id,
+        'parcela_id': installment.get('id'),
+        'trigger_source': 'agente_contador',
+    }
+
+    memory = {
+        'parcela_id': installment.get('id'),
+        'parcela_descricao': installment.get('descricao'),
+        'parcela_status': installment.get('status'),
+        'valor_liquido_base': liquido,
+        'valor_bruto_calculado': bruto,
+        'valor_cp_calculado': valor_cp,
+        'valor_irrf_calculado': valor_irrf,
+        'competencia': competencia,
+        'mes_referencia': mes_ref,
+        'regras_fiscais_aplicadas': {
+            'retem_inss': retem_inss,
+            'retem_irrf': retem_irrf,
+            'cp_rate': cp_rate,
+            'irrf_rate': irrf_rate,
+        },
+        'premissa': 'Cálculo inicial alinhado ao gerador atual de NFS-e do Hermes.',
+    }
+
+    return payload, memory
+
+
+def sync_service_pipeline_cursor(db, service_id):
+    service_ref = db.collection('servicos').document(service_id)
+    service_snapshot = service_ref.get()
+    if not service_snapshot.exists:
+        return None
+
+    service_data = service_snapshot.to_dict() or {}
+    stages = sort_service_stages([
+        doc.to_dict() | {'id': doc.id}
+        for doc in db.collection('servico_etapas').where('service_id', '==', service_id).stream()
+    ])
+    if not stages:
+        return None
+
+    current_stage = next((stage for stage in stages if stage.get('status') in ('em_andamento', 'bloqueada', 'aguardando_validacao')), None)
+    current_stage = current_stage or next((stage for stage in stages if stage.get('status') == 'pendente'), stages[-1])
+
+    pipeline_status = 'em_execucao'
+    checkpoint_status = 'ok'
+    requires_review = bool(current_stage.get('human_review_required') and current_stage.get('human_review_status') != 'aprovado')
+
+    if any(stage.get('status') == 'bloqueada' for stage in stages):
+        pipeline_status = 'bloqueada'
+        checkpoint_status = 'bloqueado'
+    elif all(stage.get('status') in ('concluida', 'cancelada') for stage in stages):
+        pipeline_status = 'concluida'
+
+    payload = {
+        'pipeline_status': pipeline_status,
+        'etapa_atual_codigo': current_stage.get('codigo_etapa'),
+        'etapa_atual_id': current_stage.get('id'),
+        'agente_responsavel_atual': current_stage.get('agente_dono'),
+        'requires_human_review': requires_review,
+        'ultimo_checkpoint_em': iso_now(),
+        'ultimo_checkpoint_status': checkpoint_status,
+        'data_atualizacao': iso_now(),
+    }
+    service_ref.set(payload, merge=True)
+    return payload
+
+
+def advance_service_pipeline_if_ready(db, service_id, trigger_source='system'):
+    service_ref = db.collection('servicos').document(service_id)
+    service_snapshot = service_ref.get()
+    if not service_snapshot.exists:
+        return None
+
+    service_data = service_snapshot.to_dict() or {}
+    stages = sort_service_stages([
+        doc.to_dict() | {'id': doc.id}
+        for doc in db.collection('servico_etapas').where('service_id', '==', service_id).stream()
+    ])
+    if not stages:
+        return None
+
+    current_stage_id = service_data.get('etapa_atual_id')
+    current_stage = next((stage for stage in stages if stage.get('id') == current_stage_id), None)
+    if current_stage is None:
+        current_stage = next((stage for stage in stages if stage.get('status') in ('em_andamento', 'bloqueada', 'aguardando_validacao')), None)
+    if current_stage is None:
+        current_stage = next((stage for stage in stages if stage.get('status') == 'pendente'), None)
+    if current_stage is None:
+        return None
+
+    if not can_auto_advance_stage(current_stage):
+        return sync_service_pipeline_cursor(db, service_id)
+
+    now = iso_now()
+    current_stage_ref = db.collection('servico_etapas').document(current_stage['id'])
+    next_stage = next((stage for stage in stages if stage.get('ordem', 999) > current_stage.get('ordem', 999) and stage.get('status') == 'pendente'), None)
+
+    batch = db.batch()
+    batch.set(current_stage_ref, {
+        'status': 'concluida',
+        'data_conclusao': now,
+        'ultima_avaliacao_em': now,
+        'ultima_avaliacao_por': 'orquestrador',
+    }, merge=True)
+
+    new_service_payload = {
+        'pipeline_status': 'em_execucao',
+        'requires_human_review': False,
+        'ultimo_checkpoint_em': now,
+        'ultimo_checkpoint_status': 'ok',
+        'agente_responsavel_atual': current_stage.get('agente_dono'),
+    }
+
+    if next_stage:
+        next_stage_ref = db.collection('servico_etapas').document(next_stage['id'])
+        batch.set(next_stage_ref, {
+            'status': 'em_andamento',
+            'entrada_disparada_em': now,
+            'data_inicio': next_stage.get('data_inicio') or now,
+            'ultima_avaliacao_em': now,
+            'ultima_avaliacao_por': 'orquestrador',
+        }, merge=True)
+        new_service_payload.update({
+            'etapa_atual_codigo': next_stage.get('codigo_etapa'),
+            'etapa_atual_id': next_stage.get('id'),
+            'agente_responsavel_atual': next_stage.get('agente_dono'),
+            'requires_human_review': bool(next_stage.get('human_review_required') and next_stage.get('human_review_status') != 'aprovado'),
+        })
+    else:
+        new_service_payload.update({
+            'pipeline_status': 'concluida',
+            'etapa_atual_codigo': current_stage.get('codigo_etapa'),
+            'etapa_atual_id': current_stage.get('id'),
+        })
+
+    batch.set(service_ref, {
+        **new_service_payload,
+        'data_atualizacao': now,
+    }, merge=True)
+
+    log_ref = db.collection('servico_logs').document()
+    batch.set(log_ref, {
+        'service_id': service_id,
+        'etapa_id': current_stage.get('id'),
+        'tipo': 'movimentacao',
+        'agente': 'orquestrador',
+        'acao': 'advance_service_stage',
+        'mensagem': (
+            f"Etapa {current_stage.get('codigo_etapa')} concluida e etapa {next_stage.get('codigo_etapa')} iniciada."
+            if next_stage else
+            f"Etapa {current_stage.get('codigo_etapa')} concluida e pipeline finalizada."
+        ),
+        'fundamento': f"Avanco automatico disparado por {trigger_source}.",
+        'dados_antes': {
+            'etapa_atual_codigo': current_stage.get('codigo_etapa'),
+            'etapa_atual_id': current_stage.get('id'),
+            'status_etapa': current_stage.get('status'),
+        },
+        'dados_depois': {
+            'etapa_atual_codigo': next_stage.get('codigo_etapa') if next_stage else current_stage.get('codigo_etapa'),
+            'etapa_atual_id': next_stage.get('id') if next_stage else current_stage.get('id'),
+            'status_pipeline': new_service_payload.get('pipeline_status'),
+        },
+        'evidencias': current_stage.get('evidencias') or {},
+        'sucesso': True,
+        'criticidade': 'media',
+        'timestamp': now,
+    })
+
+    batch.commit()
+    return new_service_payload
+
+
+def evaluate_service_stage(db, stage_id, stage_data=None, trigger_source='system'):
+    stage_ref = db.collection('servico_etapas').document(stage_id)
+    snapshot = stage_ref.get() if stage_data is None else None
+    current_stage = stage_data or ((snapshot.to_dict() | {'id': snapshot.id}) if snapshot and snapshot.exists else None)
+    if not current_stage:
+        return None
+
+    service_id = current_stage.get('service_id')
+    if not service_id:
+        return None
+
+    service_snapshot = db.collection('servicos').document(service_id).get()
+    if not service_snapshot.exists:
+        return None
+
+    service_data = service_snapshot.to_dict() or {}
+    linked_tasks = get_service_stage_tasks(db, service_id)
+    evaluated_criteria, exit_evaluation = build_stage_evaluation(current_stage, service_data, linked_tasks)
+    new_status = determine_stage_runtime_status(current_stage.get('status'), exit_evaluation['status'])
+    now = exit_evaluation['checkedAt']
+
+    previous_eval = current_stage.get('exit_evaluation') or {}
+    previous_pending = previous_eval.get('pendingCriteria') or []
+    previous_status = current_stage.get('status')
+    should_log = (
+        previous_eval.get('status') != exit_evaluation['status']
+        or previous_pending != exit_evaluation['pendingCriteria']
+        or previous_status != new_status
+    )
+
+    update_payload = {
+        'exit_criteria': evaluated_criteria,
+        'exit_evaluation': exit_evaluation,
+        'status': new_status,
+        'ultima_avaliacao_em': now,
+        'ultima_avaliacao_por': 'sistema',
+        'data_bloqueio': now if new_status == 'bloqueada' else '',
+        'bloqueio_motivo': (
+            f"Criterios pendentes: {', '.join(exit_evaluation['pendingCriteria'])}"
+            if new_status == 'bloqueada' and exit_evaluation['pendingCriteria']
+            else ''
+        ),
+        'evidencias': {
+            **(current_stage.get('evidencias') or {}),
+            'tarefa_ids': [task.get('id') for task in linked_tasks if task.get('id')],
+        },
+    }
+    stage_ref.set(update_payload, merge=True)
+
+    if should_log:
+        db.collection('servico_logs').add({
+            'service_id': service_id,
+            'etapa_id': stage_id,
+            'tipo': 'avaliacao' if exit_evaluation['status'] == 'passed' else 'bloqueio',
+            'agente': 'sistema',
+            'acao': 'evaluate_exit_criteria',
+            'mensagem': (
+                'Etapa apta para validacao.' if exit_evaluation['status'] == 'passed'
+                else 'Etapa bloqueada por criterios pendentes.'
+            ),
+            'fundamento': f"Avaliacao automatica disparada por {trigger_source}.",
+            'dados_antes': {
+                'status': previous_status,
+                'exit_evaluation': previous_eval,
+            },
+            'dados_depois': {
+                'status': new_status,
+                'exit_evaluation': exit_evaluation,
+            },
+            'evidencias': update_payload['evidencias'],
+            'sucesso': exit_evaluation['status'] == 'passed',
+            'criticidade': 'media' if exit_evaluation['status'] == 'passed' else 'alta',
+            'timestamp': now,
+        })
+
+    return {
+        'stage_id': stage_id,
+        'service_id': service_id,
+        'status': new_status,
+        'evaluation': exit_evaluation,
+    }
+
+
+def reevaluate_service_stages(db, service_id, trigger_source='system'):
+    stage_docs = db.collection('servico_etapas').where('service_id', '==', service_id).stream()
+    results = []
+    for stage_doc in stage_docs:
+        stage_data = stage_doc.to_dict() | {'id': stage_doc.id}
+        results.append(evaluate_service_stage(db, stage_doc.id, stage_data, trigger_source=trigger_source))
+    advance_service_pipeline_if_ready(db, service_id, trigger_source=trigger_source)
+    sync_service_pipeline_cursor(db, service_id)
+    return results
+
+
 
 def get_google_creds():
     """Busca as credenciais OAuth2 do Firestore e renova se necessário"""
@@ -1669,6 +2391,126 @@ def run_full_sync(trigger_reason='unspecified'):
 
 
 
+@firestore_fn.on_document_written(document="servicos/{serviceId}")
+def on_servico_written(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot]]):
+
+    """Inicializa e reavalia a pipeline quando campos relevantes do serviço mudam."""
+
+    if not event.data or not event.data.after or not event.data.after.exists:
+        return
+
+    after = event.data.after.to_dict() or {}
+    before = event.data.before.to_dict() if event.data.before and event.data.before.exists else {}
+
+    after_status = after.get('status')
+    before_status = before.get('status')
+    pipeline_status = after.get('pipeline_status')
+    watched_keys = [
+        'status',
+        'cliente',
+        'cliente_cnpj',
+        'cliente_razao_social',
+        'descricao',
+        'papel',
+        'parcelas',
+        'categoria_financeira',
+        'regras_fiscais',
+        'data_inicio',
+        'data_termino',
+    ]
+
+    if after_status != SERVICE_ACTIVE_STATUS:
+        return
+
+    status_just_changed = before_status != SERVICE_ACTIVE_STATUS
+    should_initialize = status_just_changed or not pipeline_status or pipeline_status == 'nao_iniciada'
+    relevant_change_detected = status_just_changed or any(before.get(key) != after.get(key) for key in watched_keys)
+
+    if not should_initialize and not relevant_change_detected:
+        return
+
+    db = get_db()
+    service_id = event.params['serviceId']
+    if should_initialize:
+        initialize_service_pipeline(db, service_id, after)
+    reevaluate_service_stages(db, service_id, trigger_source='service_write')
+
+
+@firestore_fn.on_document_written(document="servico_etapas/{stageId}")
+def on_servico_etapa_written(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot]]):
+
+    """Reavalia uma ficha de etapa quando seus dados ou evidencias mudam."""
+
+    if not event.data or not event.data.after or not event.data.after.exists:
+        return
+
+    after = event.data.after.to_dict() or {}
+    before = event.data.before.to_dict() if event.data.before and event.data.before.exists else {}
+
+    watched_keys = ['dados', 'obrigatorios', 'evidencias', 'human_review_status', 'faturamento_referencia']
+    if before and all(before.get(key) == after.get(key) for key in watched_keys):
+        return
+
+    db = get_db()
+    stage_id = event.params['stageId']
+    evaluate_service_stage(db, stage_id, after | {'id': stage_id}, trigger_source='stage_write')
+
+
+@firestore_fn.on_document_written(document="automations/hermes_robot")
+def on_hermes_robot_written(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot]]):
+
+    """Espelha erros do robô fiscal para o serviço vinculado quando houver contexto."""
+
+    if not event.data or not event.data.after or not event.data.after.exists:
+        return
+
+    after = event.data.after.to_dict() or {}
+    before = event.data.before.to_dict() if event.data.before and event.data.before.exists else {}
+    if before.get('status') == after.get('status'):
+        return
+
+    service_id = after.get('service_id') or (after.get('params') or {}).get('service_id')
+    stage_id = after.get('stage_id') or (after.get('params') or {}).get('stage_id')
+    if not service_id:
+        return
+
+    status = after.get('status')
+    if status not in ('processing', 'error'):
+        return
+
+    db = get_db()
+    now = iso_now()
+
+    service_updates = {
+        'nfse_status': 'enviada_ao_robo' if status == 'processing' else 'erro',
+        'data_atualizacao': now,
+    }
+    db.collection('servicos').document(service_id).set(service_updates, merge=True)
+
+    if status == 'error':
+        db.collection('servico_logs').add({
+            'service_id': service_id,
+            'etapa_id': stage_id,
+            'tipo': 'erro',
+            'agente': 'sistema',
+            'acao': 'hermes_robot_error',
+            'mensagem': 'O Hermes Robot reportou erro durante o fluxo de NFS-e.',
+            'fundamento': after.get('error_msg') or 'Falha retornada pelo bridge do robô fiscal.',
+            'dados_antes': {'robot_status': before.get('status')},
+            'dados_depois': {'robot_status': status, 'nfse_status': 'erro'},
+            'evidencias': {
+                'tarefa_ids': [],
+                'knowledge_item_ids': [],
+                'log_ids': [],
+                'parcela_ids': [((after.get('params') or {}).get('parcela_id'))] if (after.get('params') or {}).get('parcela_id') else [],
+                'links': [],
+            },
+            'sucesso': False,
+            'criticidade': 'alta',
+            'timestamp': now,
+        })
+
+
 @firestore_fn.on_document_updated(document="system/sync")
 
 def on_sync_request(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot]]):
@@ -2075,6 +2917,10 @@ def on_tarefa_written(event: firestore_fn.Event[firestore_fn.Change[firestore_fn
                 'requested_at': datetime.now(timezone.utc).isoformat(),
                 'last_trigger': 'task-schedule-change'
             }, merge=True)
+
+    service_id = after.get('service_id') or before.get('service_id')
+    if service_id:
+        reevaluate_service_stages(db, service_id, trigger_source='task_write')
     
 @firestore_fn.on_document_updated(document="tarefas/{taskId}")
 def on_processo_updated(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot]]):
@@ -4647,6 +5493,622 @@ def askTaskAssistant(req: https_fn.CallableRequest):
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.INTERNAL,
             message=f"Erro ao processar consulta da tarefa: {str(e)}"
+        )
+
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=120
+)
+def runServiceAnalyst(req: https_fn.CallableRequest):
+    """
+    Executa o Agente Analista em modo assistido para sugerir preenchimento
+    das etapas de escopo e planejamento técnico de um serviço.
+    """
+    from google import genai
+
+    data = req.data or {}
+    service_id = data.get('serviceId')
+    stage_id = data.get('stageId')
+
+    if not service_id or not stage_id:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="serviceId e stageId são obrigatórios."
+        )
+
+    try:
+        db = get_db()
+        service_snap = db.collection('servicos').document(service_id).get()
+        stage_snap = db.collection('servico_etapas').document(stage_id).get()
+
+        if not service_snap.exists:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.NOT_FOUND,
+                message="Serviço não encontrado."
+            )
+        if not stage_snap.exists:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.NOT_FOUND,
+                message="Etapa não encontrada."
+            )
+
+        service_data = service_snap.to_dict() or {}
+        stage_data = stage_snap.to_dict() or {}
+
+        allowed_stage_codes = {'escopo_validado', 'planejamento_tecnico'}
+        stage_code = stage_data.get('codigo_etapa')
+        if stage_code not in allowed_stage_codes:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                message="O Agente Analista está habilitado apenas para escopo_validado e planejamento_tecnico nesta fase."
+            )
+
+        keys_doc = db.collection('system').document('api_keys').get()
+        gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+        if not gemini_key:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                message="Chave Gemini não configurada."
+            )
+
+        linked_tasks = get_service_stage_tasks(db, service_id)
+        client = genai.Client(api_key=gemini_key)
+
+        stage_specific_instruction = (
+            "Você é o Agente Analista do Hermes. "
+            "Analise o serviço e produza um preenchimento estruturado, objetivo e auditável em pt-BR. "
+            "Não invente dados factuais. Quando faltar evidência, sinalize em pendencias. "
+            "Responda em JSON estrito, sem markdown, usando exatamente este formato: "
+            "{\"resumo\":\"...\",\"fields_to_update\":{...},\"pendencias\":[...],\"recomendacoes\":[...]}"
+        )
+
+        prompt = f"""
+        SERVICO:
+        titulo: {service_data.get('titulo')}
+        cliente: {service_data.get('cliente')}
+        papel: {service_data.get('papel')}
+        descricao: {service_data.get('descricao')}
+        status: {service_data.get('status')}
+        etapa_atual: {service_data.get('etapa_atual_codigo')}
+
+        ETAPA:
+        codigo: {stage_code}
+        titulo: {stage_data.get('titulo')}
+        obrigatorios: {json.dumps(stage_data.get('obrigatorios') or [], ensure_ascii=False)}
+        dados_atuais: {json.dumps(stage_data.get('dados') or {}, ensure_ascii=False)}
+
+        TAREFAS_VINCULADAS:
+        {json.dumps([
+            {
+                "id": task.get("id"),
+                "titulo": task.get("titulo"),
+                "status": task.get("status"),
+                "descricao": task.get("descricao"),
+                "etapa_codigo": task.get("etapa_codigo"),
+            }
+            for task in linked_tasks[:12]
+        ], ensure_ascii=False)}
+
+        ORIENTACAO ESPECIFICA:
+        - Se a etapa for escopo_validado, priorize:
+          resumo_escopo, entregaveis_previstos, premissas, restricoes, criterios_aceite, responsavel_tecnico.
+        - Se a etapa for planejamento_tecnico, priorize:
+          plano_inicial, proximas_acoes, dependencias, riscos_iniciais.
+        - Use listas curtas e práticas.
+        - Se um campo não puder ser inferido com segurança, não invente; registre em pendencias.
+        """
+
+        response = client.models.generate_content(
+            model="gemini-3.1-flash-lite-preview",
+            contents=[stage_specific_instruction, prompt]
+        )
+        text_response = (response.text or '').strip().replace('```json', '').replace('```', '').strip()
+        result_data = json.loads(text_response)
+
+        fields_to_update = result_data.get('fields_to_update') or {}
+        now = iso_now()
+        updated_stage_data = {
+            **(stage_data.get('dados') or {}),
+            **fields_to_update,
+            '_analyst_last_result': {
+                'resumo': result_data.get('resumo', ''),
+                'pendencias': result_data.get('pendencias', []),
+                'recomendacoes': result_data.get('recomendacoes', []),
+                'generated_at': now,
+            }
+        }
+
+        db.collection('servico_etapas').document(stage_id).set({
+            'dados': updated_stage_data,
+            'ultima_avaliacao_em': now,
+            'ultima_avaliacao_por': 'analista',
+        }, merge=True)
+
+        db.collection('servico_logs').add({
+            'service_id': service_id,
+            'etapa_id': stage_id,
+            'tipo': 'avaliacao',
+            'agente': 'analista',
+            'acao': 'run_service_analyst',
+            'mensagem': f'Agente Analista executado para a etapa {stage_code}.',
+            'fundamento': result_data.get('resumo', 'Sugestão estruturada gerada por IA para preenchimento assistido da etapa.'),
+            'dados_antes': {
+                'dados': stage_data.get('dados') or {},
+            },
+            'dados_depois': {
+                'dados': updated_stage_data,
+            },
+            'evidencias': {
+                'tarefa_ids': [task.get('id') for task in linked_tasks if task.get('id')],
+                'knowledge_item_ids': [],
+                'log_ids': [],
+                'parcela_ids': [p.get('id') for p in (service_data.get('parcelas') or []) if isinstance(p, dict) and p.get('id')],
+                'links': [],
+            },
+            'sucesso': True,
+            'criticidade': 'media',
+            'timestamp': now,
+        })
+
+        evaluate_service_stage(db, stage_id, trigger_source='service_analyst')
+        advance_service_pipeline_if_ready(db, service_id, trigger_source='service_analyst')
+        sync_service_pipeline_cursor(db, service_id)
+
+        return {
+            'success': True,
+            'stageId': stage_id,
+            'serviceId': service_id,
+            'summary': result_data.get('resumo', ''),
+            'pending': result_data.get('pendencias', []),
+            'recommendations': result_data.get('recomendacoes', []),
+            'updatedFields': list(fields_to_update.keys()),
+        }
+
+    except https_fn.HttpsError:
+        raise
+    except Exception as e:
+        print(f"Erro em runServiceAnalyst: {e}")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=f"Erro ao executar Agente Analista: {str(e)}"
+        )
+
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=120
+)
+def runServiceDeveloper(req: https_fn.CallableRequest):
+    """
+    Executa o Agente Desenvolvedor em modo assistido para consolidar
+    evidências técnicas das etapas de execução e validação de entrega.
+    """
+    from google import genai
+
+    data = req.data or {}
+    service_id = data.get('serviceId')
+    stage_id = data.get('stageId')
+
+    if not service_id or not stage_id:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="serviceId e stageId são obrigatórios."
+        )
+
+    try:
+        db = get_db()
+        service_snap = db.collection('servicos').document(service_id).get()
+        stage_snap = db.collection('servico_etapas').document(stage_id).get()
+
+        if not service_snap.exists:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.NOT_FOUND,
+                message="Serviço não encontrado."
+            )
+        if not stage_snap.exists:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.NOT_FOUND,
+                message="Etapa não encontrada."
+            )
+
+        service_data = service_snap.to_dict() or {}
+        stage_data = stage_snap.to_dict() or {}
+        stage_code = stage_data.get('codigo_etapa')
+        allowed_stage_codes = {'execucao', 'validacao_entrega'}
+        if stage_code not in allowed_stage_codes:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                message="O Agente Desenvolvedor está habilitado apenas para execucao e validacao_entrega nesta fase."
+            )
+
+        keys_doc = db.collection('system').document('api_keys').get()
+        gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+        if not gemini_key:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                message="Chave Gemini não configurada."
+            )
+
+        linked_tasks = get_service_stage_tasks(db, service_id)
+        client = genai.Client(api_key=gemini_key)
+
+        developer_instruction = (
+            "Você é o Agente Desenvolvedor do Hermes. "
+            "Avalie a execução técnica do serviço com base apenas no que está registrado. "
+            "Seja objetivo, auditável e conservador. Não invente evidências. "
+            "Responda em JSON estrito, sem markdown, usando exatamente este formato: "
+            "{\"resumo\":\"...\",\"fields_to_update\":{...},\"pendencias\":[...],\"recomendacoes\":[...],\"evidence_summary\":[...]}"
+        )
+
+        prompt = f"""
+        SERVICO:
+        titulo: {service_data.get('titulo')}
+        cliente: {service_data.get('cliente')}
+        papel: {service_data.get('papel')}
+        descricao: {service_data.get('descricao')}
+        etapa_atual: {service_data.get('etapa_atual_codigo')}
+
+        ETAPA:
+        codigo: {stage_code}
+        titulo: {stage_data.get('titulo')}
+        dados_atuais: {json.dumps(stage_data.get('dados') or {}, ensure_ascii=False)}
+        pendencias_atuais: {json.dumps((stage_data.get('exit_evaluation') or {}).get('pendingCriteria') or [], ensure_ascii=False)}
+
+        TAREFAS_VINCULADAS:
+        {json.dumps([
+            {
+                "id": task.get("id"),
+                "titulo": task.get("titulo"),
+                "status": task.get("status"),
+                "descricao": task.get("descricao"),
+                "etapa_codigo": task.get("etapa_codigo"),
+                "acompanhamento_count": len(task.get("acompanhamento") or []),
+                "anexos_count": len(task.get("pool_dados") or []),
+                "evidence_type": task.get("evidence_type"),
+            }
+            for task in linked_tasks[:20]
+        ], ensure_ascii=False)}
+
+        ORIENTACAO ESPECIFICA:
+        - Para execucao, sintetize progresso, entregas parciais, riscos e proximas_acoes.
+        - Para validacao_entrega, sintetize evidencias de entrega, itens concluídos e pendencias finais.
+        - Gere apenas campos que possam ser inferidos com segurança.
+        - Se faltar evidência, isso deve aparecer em pendencias.
+        """
+
+        response = client.models.generate_content(
+            model="gemini-3.1-flash-lite-preview",
+            contents=[developer_instruction, prompt]
+        )
+        text_response = (response.text or '').strip().replace('```json', '').replace('```', '').strip()
+        result_data = json.loads(text_response)
+
+        fields_to_update = result_data.get('fields_to_update') or {}
+        now = iso_now()
+        updated_stage_data = {
+            **(stage_data.get('dados') or {}),
+            **fields_to_update,
+            '_developer_last_result': {
+                'resumo': result_data.get('resumo', ''),
+                'pendencias': result_data.get('pendencias', []),
+                'recomendacoes': result_data.get('recomendacoes', []),
+                'evidence_summary': result_data.get('evidence_summary', []),
+                'generated_at': now,
+            }
+        }
+
+        db.collection('servico_etapas').document(stage_id).set({
+            'dados': updated_stage_data,
+            'ultima_avaliacao_em': now,
+            'ultima_avaliacao_por': 'desenvolvedor',
+        }, merge=True)
+
+        db.collection('servico_logs').add({
+            'service_id': service_id,
+            'etapa_id': stage_id,
+            'tipo': 'avaliacao',
+            'agente': 'desenvolvedor',
+            'acao': 'run_service_developer',
+            'mensagem': f'Agente Desenvolvedor executado para a etapa {stage_code}.',
+            'fundamento': result_data.get('resumo', 'Síntese técnica gerada por IA para consolidação assistida da etapa.'),
+            'dados_antes': {
+                'dados': stage_data.get('dados') or {},
+            },
+            'dados_depois': {
+                'dados': updated_stage_data,
+            },
+            'evidencias': {
+                'tarefa_ids': [task.get('id') for task in linked_tasks if task.get('id')],
+                'knowledge_item_ids': [],
+                'log_ids': [],
+                'parcela_ids': [p.get('id') for p in (service_data.get('parcelas') or []) if isinstance(p, dict) and p.get('id')],
+                'links': [],
+            },
+            'sucesso': True,
+            'criticidade': 'media',
+            'timestamp': now,
+        })
+
+        evaluate_service_stage(db, stage_id, trigger_source='service_developer')
+        advance_service_pipeline_if_ready(db, service_id, trigger_source='service_developer')
+        sync_service_pipeline_cursor(db, service_id)
+
+        return {
+            'success': True,
+            'stageId': stage_id,
+            'serviceId': service_id,
+            'summary': result_data.get('resumo', ''),
+            'pending': result_data.get('pendencias', []),
+            'recommendations': result_data.get('recomendacoes', []),
+            'updatedFields': list(fields_to_update.keys()),
+        }
+
+    except https_fn.HttpsError:
+        raise
+    except Exception as e:
+        print(f"Erro em runServiceDeveloper: {e}")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=f"Erro ao executar Agente Desenvolvedor: {str(e)}"
+        )
+
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=120
+)
+def runServiceAccountant(req: https_fn.CallableRequest):
+    """
+    Prepara o payload fiscal do serviço na etapa de faturamento, registra
+    memória de cálculo e deixa o envio ao robô aguardando checkpoint humano.
+    """
+    data = req.data or {}
+    service_id = data.get('serviceId')
+    stage_id = data.get('stageId')
+
+    if not service_id or not stage_id:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="serviceId e stageId são obrigatórios."
+        )
+
+    try:
+        db = get_db()
+        service_snap = db.collection('servicos').document(service_id).get()
+        stage_snap = db.collection('servico_etapas').document(stage_id).get()
+
+        if not service_snap.exists:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.NOT_FOUND,
+                message="Serviço não encontrado."
+            )
+        if not stage_snap.exists:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.NOT_FOUND,
+                message="Etapa não encontrada."
+            )
+
+        service_data = service_snap.to_dict() or {}
+        stage_data = stage_snap.to_dict() or {}
+        stage_code = stage_data.get('codigo_etapa')
+
+        if stage_code != 'faturamento':
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                message="O Agente Contador está habilitado apenas para a etapa de faturamento."
+            )
+
+        payload_nfse, memory = build_service_nfse_payload(service_id, stage_id, service_data, stage_data)
+        now = iso_now()
+        updated_stage_data = {
+            **(stage_data.get('dados') or {}),
+            'referencia_faturamento': memory['parcela_id'],
+            'payload_nfse_preparado': payload_nfse,
+            '_accountant_last_result': {
+                'resumo': f"Payload fiscal preparado para a parcela {memory.get('parcela_descricao') or memory['parcela_id']}.",
+                'memoria_calculo': memory,
+                'generated_at': now,
+            }
+        }
+
+        db.collection('servico_etapas').document(stage_id).set({
+            'dados': updated_stage_data,
+            'faturamento_referencia': memory['parcela_id'],
+            'ultima_avaliacao_em': now,
+            'ultima_avaliacao_por': 'contador',
+            'human_review_status': 'pendente',
+        }, merge=True)
+
+        db.collection('servicos').document(service_id).set({
+            'nfse_status': 'pronta_para_envio',
+            'cliente_razao_social': service_data.get('cliente_razao_social') or service_data.get('cliente') or '',
+            'metadata_agentes': {
+                **(service_data.get('metadata_agentes') or {}),
+                'last_nfse_payload': payload_nfse,
+                'last_nfse_prepared_at': now,
+            },
+            'data_atualizacao': now,
+        }, merge=True)
+
+        db.collection('servico_logs').add({
+            'service_id': service_id,
+            'etapa_id': stage_id,
+            'tipo': 'faturamento',
+            'agente': 'contador',
+            'acao': 'run_service_accountant',
+            'mensagem': 'Agente Contador preparou o payload fiscal do serviço.',
+            'fundamento': memory.get('premissa'),
+            'dados_antes': {
+                'dados': stage_data.get('dados') or {},
+                'nfse_status': service_data.get('nfse_status'),
+            },
+            'dados_depois': {
+                'dados': updated_stage_data,
+                'nfse_status': 'pronta_para_envio',
+            },
+            'evidencias': {
+                'tarefa_ids': [],
+                'knowledge_item_ids': [],
+                'log_ids': [],
+                'parcela_ids': [memory['parcela_id']],
+                'links': [],
+            },
+            'sucesso': True,
+            'criticidade': 'alta',
+            'timestamp': now,
+        })
+
+        evaluate_service_stage(db, stage_id, trigger_source='service_accountant')
+        advance_service_pipeline_if_ready(db, service_id, trigger_source='service_accountant')
+        sync_service_pipeline_cursor(db, service_id)
+
+        return {
+            'success': True,
+            'serviceId': service_id,
+            'stageId': stage_id,
+            'parcelaId': memory['parcela_id'],
+            'nfseStatus': 'pronta_para_envio',
+            'summary': updated_stage_data['_accountant_last_result']['resumo'],
+        }
+
+    except https_fn.HttpsError:
+        raise
+    except Exception as e:
+        print(f"Erro em runServiceAccountant: {e}")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=f"Erro ao executar Agente Contador: {str(e)}"
+        )
+
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=120
+)
+def dispatchServiceNFSe(req: https_fn.CallableRequest):
+    """
+    Dispara o payload fiscal preparado para o Hermes Robot e trata esse envio
+    como checkpoint humano explícito da etapa de faturamento.
+    """
+    data = req.data or {}
+    service_id = data.get('serviceId')
+    stage_id = data.get('stageId')
+
+    if not service_id or not stage_id:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="serviceId e stageId são obrigatórios."
+        )
+
+    try:
+        db = get_db()
+        service_snap = db.collection('servicos').document(service_id).get()
+        stage_snap = db.collection('servico_etapas').document(stage_id).get()
+
+        if not service_snap.exists:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.NOT_FOUND,
+                message="Serviço não encontrado."
+            )
+        if not stage_snap.exists:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.NOT_FOUND,
+                message="Etapa não encontrada."
+            )
+
+        service_data = service_snap.to_dict() or {}
+        stage_data = stage_snap.to_dict() or {}
+        if stage_data.get('codigo_etapa') != 'faturamento':
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                message="O envio ao robô só pode ser feito na etapa de faturamento."
+            )
+
+        payload_nfse = ((stage_data.get('dados') or {}).get('payload_nfse_preparado') or {})
+        if not payload_nfse:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                message="Nenhum payload fiscal preparado foi encontrado. Execute o Agente Contador primeiro."
+            )
+
+        now = iso_now()
+        db.collection('automations').document('hermes_robot').set({
+            'params': payload_nfse,
+            'service_id': service_id,
+            'stage_id': stage_id,
+            'status': 'requested',
+            'timestamp': now,
+        }, merge=True)
+
+        db.collection('servico_etapas').document(stage_id).set({
+            'faturamento_disparado': True,
+            'human_review_status': 'aprovado',
+            'ultima_avaliacao_em': now,
+            'ultima_avaliacao_por': 'humano',
+        }, merge=True)
+
+        db.collection('servicos').document(service_id).set({
+            'nfse_status': 'enviada_ao_robo',
+            'metadata_agentes': {
+                **(service_data.get('metadata_agentes') or {}),
+                'last_nfse_dispatch_at': now,
+                'last_nfse_dispatch_stage_id': stage_id,
+            },
+            'data_atualizacao': now,
+        }, merge=True)
+
+        db.collection('servico_logs').add({
+            'service_id': service_id,
+            'etapa_id': stage_id,
+            'tipo': 'nfse',
+            'agente': 'humano',
+            'acao': 'dispatch_service_nfse',
+            'mensagem': 'Payload fiscal enviado ao Hermes Robot com checkpoint humano.',
+            'fundamento': 'A revisão humana aprovou o disparo do robô fiscal.',
+            'dados_antes': {
+                'nfse_status': service_data.get('nfse_status'),
+                'faturamento_disparado': stage_data.get('faturamento_disparado'),
+            },
+            'dados_depois': {
+                'nfse_status': 'enviada_ao_robo',
+                'faturamento_disparado': True,
+                'robot_status': 'requested',
+            },
+            'evidencias': {
+                'tarefa_ids': [],
+                'knowledge_item_ids': [],
+                'log_ids': [],
+                'parcela_ids': [payload_nfse.get('parcela_id')] if payload_nfse.get('parcela_id') else [],
+                'links': [],
+            },
+            'sucesso': True,
+            'criticidade': 'alta',
+            'timestamp': now,
+        })
+
+        evaluate_service_stage(db, stage_id, trigger_source='service_nfse_dispatch')
+        advance_service_pipeline_if_ready(db, service_id, trigger_source='service_nfse_dispatch')
+        sync_service_pipeline_cursor(db, service_id)
+
+        return {
+            'success': True,
+            'serviceId': service_id,
+            'stageId': stage_id,
+            'nfseStatus': 'enviada_ao_robo',
+        }
+
+    except https_fn.HttpsError:
+        raise
+    except Exception as e:
+        print(f"Erro em dispatchServiceNFSe: {e}")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=f"Erro ao enviar payload para o Hermes Robot: {str(e)}"
         )
 
 

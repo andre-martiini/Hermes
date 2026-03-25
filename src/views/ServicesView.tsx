@@ -1,20 +1,48 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Servico, ParcelaServico } from '../../types';
+import { Servico, ParcelaServico, Tarefa, ServicoEtapa, ServicoLog } from '../../types';
 
 interface ServicesViewProps {
   services: Servico[];
+  tasks: Tarefa[];
+  stages: ServicoEtapa[];
+  logs: ServicoLog[];
   onCreateService: (service: Omit<Servico, 'id' | 'data_criacao' | 'data_atualizacao'>) => Promise<void>;
   onUpdateService: (id: string, service: Partial<Servico>) => Promise<void>;
   onDeleteService: (id: string) => Promise<void>;
+  onDeleteServiceCascade: (id: string) => Promise<void>;
+  onCreateLinkedTask: (service: Servico) => void;
+  onSelectTask: (task: Tarefa) => void;
+  onRunAnalyst: (service: Servico, stage: ServicoEtapa) => Promise<void>;
+  onRunDeveloper: (service: Servico, stage: ServicoEtapa) => Promise<void>;
+  onRunAccountant: (service: Servico, stage: ServicoEtapa) => Promise<void>;
+  onDispatchNFSe: (service: Servico, stage: ServicoEtapa) => Promise<void>;
+  analystBusyStageId?: string | null;
+  developerBusyStageId?: string | null;
+  accountantBusyStageId?: string | null;
+  nfseDispatchBusyStageId?: string | null;
 }
 
 export const ServicesView: React.FC<ServicesViewProps> = ({
   services,
+  tasks,
+  stages,
+  logs,
   onCreateService,
   onUpdateService,
-  onDeleteService
+  onDeleteService,
+  onDeleteServiceCascade,
+  onCreateLinkedTask,
+  onSelectTask,
+  onRunAnalyst,
+  onRunDeveloper,
+  onRunAccountant,
+  onDispatchNFSe,
+  analystBusyStageId,
+  developerBusyStageId,
+  accountantBusyStageId,
+  nfseDispatchBusyStageId
 }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'list'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'list' | 'pipeline'>('dashboard');
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
   const [localDoc, setLocalDoc] = useState<Servico | null>(null);
   const [showBatchForm, setShowBatchForm] = useState(false);
@@ -26,6 +54,31 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
   } as { start: string, end: string, day: number, value: number });
 
   const selectedService = useMemo(() => services.find(s => s.id === selectedServiceId), [services, selectedServiceId]);
+  const selectedServiceTasks = useMemo(() => {
+    if (!selectedServiceId) return [];
+    return tasks.filter(task => task.service_id === selectedServiceId);
+  }, [tasks, selectedServiceId]);
+  const selectedServiceStages = useMemo(() => {
+    if (!selectedServiceId) return [];
+    return [...stages]
+      .filter(stage => stage.service_id === selectedServiceId)
+      .sort((a, b) => a.ordem - b.ordem);
+  }, [stages, selectedServiceId]);
+  const selectedServiceLogs = useMemo(() => {
+    if (!selectedServiceId) return [];
+    return [...logs]
+      .filter(log => log.service_id === selectedServiceId)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, 8);
+  }, [logs, selectedServiceId]);
+  const currentStage = useMemo(() => {
+    if (!selectedService) return null;
+    return selectedServiceStages.find(stage => stage.id === selectedService.etapa_atual_id)
+      || selectedServiceStages.find(stage => stage.codigo_etapa === selectedService.etapa_atual_codigo)
+      || selectedServiceStages.find(stage => stage.status === 'em_andamento' || stage.status === 'bloqueada' || stage.status === 'aguardando_validacao')
+      || selectedServiceStages[0]
+      || null;
+  }, [selectedService, selectedServiceStages]);
 
   useEffect(() => {
     if (selectedService) {
@@ -153,6 +206,471 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
     }
   };
 
+  const renderPipelinePanel = () => {
+    if (!selectedService) {
+      return (
+        <div className="bg-white p-10 rounded-[2rem] border border-slate-200 shadow-xl min-h-[500px] flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-slate-400 font-black uppercase tracking-widest text-xs">Selecione um serviço para ver a pipeline</p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="bg-white p-6 md:p-8 rounded-[2rem] border border-slate-200 shadow-xl min-h-[500px]">
+        <div className="flex flex-col gap-5 mb-8 pb-6 border-b border-slate-100">
+          <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-4">
+            <div className="space-y-2">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.24em]">Central da Pipeline</p>
+              <div className="max-w-sm">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Serviço</label>
+                <select
+                  value={selectedServiceId || ''}
+                  onChange={(event) => setSelectedServiceId(event.target.value || null)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-black text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  {services.map(service => (
+                    <option key={service.id} value={service.id}>
+                      {service.titulo} • {service.cliente}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <h3 className="text-2xl font-black text-slate-950 tracking-tight">{selectedService.titulo}</h3>
+                <p className="text-xs text-slate-500 font-medium mt-1">{selectedService.cliente} • {selectedService.papel}</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest ${
+                selectedService.pipeline_status === 'bloqueada' ? 'bg-rose-100 text-rose-700' :
+                selectedService.pipeline_status === 'concluida' ? 'bg-emerald-100 text-emerald-700' :
+                selectedService.pipeline_status === 'inicializada' ? 'bg-indigo-100 text-indigo-700' :
+                'bg-slate-100 text-slate-600'
+              }`}>
+                {selectedService.pipeline_status || 'nao_iniciada'}
+              </span>
+              <span className={`text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest ${
+                selectedService.nfse_status === 'erro' ? 'bg-rose-100 text-rose-700' :
+                selectedService.nfse_status === 'enviada_ao_robo' ? 'bg-sky-100 text-sky-700' :
+                selectedService.nfse_status === 'pronta_para_envio' ? 'bg-emerald-100 text-emerald-700' :
+                'bg-slate-100 text-slate-600'
+              }`}>
+                nfse: {selectedService.nfse_status || 'nao_aplicavel'}
+              </span>
+              {selectedService.requires_human_review && (
+                <span className="text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest bg-amber-100 text-amber-700">
+                  revisão humana
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {currentStage && (currentStage.codigo_etapa === 'escopo_validado' || currentStage.codigo_etapa === 'planejamento_tecnico') && (
+              <button
+                onClick={() => onRunAnalyst(selectedService, currentStage)}
+                disabled={analystBusyStageId === currentStage.id}
+                className="bg-violet-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {analystBusyStageId === currentStage.id ? 'Analisando...' : 'Rodar Agente Analista'}
+              </button>
+            )}
+            {currentStage && (currentStage.codigo_etapa === 'execucao' || currentStage.codigo_etapa === 'validacao_entrega') && (
+              <button
+                onClick={() => onRunDeveloper(selectedService, currentStage)}
+                disabled={developerBusyStageId === currentStage.id}
+                className="bg-sky-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {developerBusyStageId === currentStage.id ? 'Validando...' : 'Rodar Agente Desenvolvedor'}
+              </button>
+            )}
+            {currentStage && currentStage.codigo_etapa === 'faturamento' && (
+              <button
+                onClick={() => onRunAccountant(selectedService, currentStage)}
+                disabled={accountantBusyStageId === currentStage.id}
+                className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {accountantBusyStageId === currentStage.id ? 'Preparando...' : 'Preparar Faturamento'}
+              </button>
+            )}
+            {currentStage && currentStage.codigo_etapa === 'faturamento' && selectedService.nfse_status === 'pronta_para_envio' && (
+              <button
+                onClick={() => onDispatchNFSe(selectedService, currentStage)}
+                disabled={nfseDispatchBusyStageId === currentStage.id}
+                className="bg-amber-500 text-slate-950 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {nfseDispatchBusyStageId === currentStage.id ? 'Enviando...' : 'Enviar ao Robô'}
+              </button>
+            )}
+            <button
+              onClick={() => onCreateLinkedTask(selectedService)}
+              className="bg-slate-900 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all"
+            >
+              Nova Ação
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Etapa Atual</p>
+              <p className="text-base font-black text-slate-900 mt-2">{currentStage?.titulo || 'Não iniciada'}</p>
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">
+                {currentStage?.status || selectedService.etapa_atual_codigo || 'sem etapa'}
+              </p>
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Pendências</p>
+              <p className="text-2xl font-black text-slate-900 mt-2">{currentStage?.exit_evaluation?.pendingCriteria?.length || 0}</p>
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">critérios em aberto</p>
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Último Checkpoint</p>
+              <p className="text-base font-black text-slate-900 mt-2">{selectedService.ultimo_checkpoint_status || 'pendente'}</p>
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">
+                {selectedService.ultimo_checkpoint_em ? new Date(selectedService.ultimo_checkpoint_em).toLocaleString('pt-BR') : 'sem registro'}
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-slate-950 text-white rounded-[2rem] p-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-5">
+              <div>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.24em]">Execução Técnica</p>
+                <h4 className="text-xl font-black tracking-tight mt-2">Ações vinculadas com maior destaque</h4>
+              </div>
+              <p className="text-xs text-slate-400 font-medium">
+                {selectedServiceTasks.length} ação{selectedServiceTasks.length !== 1 ? 'ões' : ''} ligada{selectedServiceTasks.length !== 1 ? 's' : ''} a este serviço
+              </p>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {selectedServiceTasks.map(task => (
+                <button
+                  key={task.id}
+                  onClick={() => onSelectTask(task)}
+                  className="text-left rounded-2xl border border-white/10 bg-white/5 p-4 hover:bg-white/10 transition-all"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-black text-white">{task.titulo}</p>
+                      <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-1">
+                        {task.etapa_codigo || selectedService.etapa_atual_codigo || 'sem etapa'} • {task.status}
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-cyan-300">Abrir</span>
+                  </div>
+                </button>
+              ))}
+              {selectedServiceTasks.length === 0 && (
+                <div className="col-span-full py-8 text-center border border-dashed border-white/10 rounded-2xl">
+                  <p className="text-slate-400 font-black uppercase tracking-widest text-[10px]">Nenhuma ação vinculada</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.24em]">Linha do Tempo</p>
+                <h4 className="text-lg font-black text-slate-950 tracking-tight mt-1">Fichas de etapa em sequência</h4>
+              </div>
+              <p className="text-xs text-slate-500 font-medium">Arraste horizontalmente se necessário</p>
+            </div>
+            <div className="overflow-x-auto pb-2">
+              <div className="flex items-stretch gap-3 min-w-max">
+                {selectedServiceStages.map((stage, index) => (
+                  <div key={stage.id} className="flex items-stretch gap-3">
+                    <div className={`w-[220px] rounded-2xl border p-4 ${
+                      stage.status === 'concluida' ? 'border-emerald-200 bg-emerald-50' :
+                      stage.status === 'bloqueada' ? 'border-rose-200 bg-rose-50' :
+                      stage.status === 'aguardando_validacao' ? 'border-amber-200 bg-amber-50' :
+                      stage.status === 'em_andamento' ? 'border-indigo-200 bg-indigo-50' :
+                      'border-slate-200 bg-slate-50'
+                    }`}>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">#{stage.ordem}</span>
+                        <span className={`text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-widest ${
+                          stage.status === 'concluida' ? 'bg-emerald-100 text-emerald-700' :
+                          stage.status === 'bloqueada' ? 'bg-rose-100 text-rose-700' :
+                          stage.status === 'aguardando_validacao' ? 'bg-amber-100 text-amber-700' :
+                          stage.status === 'em_andamento' ? 'bg-indigo-100 text-indigo-700' :
+                          'bg-slate-200 text-slate-600'
+                        }`}>
+                          {stage.status}
+                        </span>
+                      </div>
+                      <p className="text-sm font-black text-slate-900 mt-3">{stage.titulo}</p>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                        {stage.codigo_etapa} • {stage.agente_dono}
+                      </p>
+                      <p className="text-[11px] text-slate-600 mt-3 line-clamp-3">
+                        {stage.exit_evaluation?.pendingCriteria && stage.exit_evaluation.pendingCriteria.length > 0
+                          ? `Pendências: ${stage.exit_evaluation.pendingCriteria.join(', ')}`
+                          : 'Sem pendências críticas registradas.'}
+                      </p>
+                    </div>
+                    {index < selectedServiceStages.length - 1 && (
+                      <div className="w-8 flex items-center justify-center text-slate-300 font-black text-xl">→</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-4">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.24em]">Auditoria</p>
+              <h4 className="text-lg font-black text-slate-950 tracking-tight mt-1">Feed recente da pipeline</h4>
+            </div>
+            <div className="space-y-3">
+              {selectedServiceLogs.map(log => (
+                <div key={log.id} className="flex gap-3 items-start">
+                  <div className={`w-3 h-3 rounded-full mt-2 ${
+                    log.tipo === 'bloqueio' || log.tipo === 'erro' ? 'bg-rose-500' :
+                    log.tipo === 'movimentacao' ? 'bg-indigo-500' :
+                    log.tipo === 'faturamento' || log.tipo === 'nfse' ? 'bg-emerald-500' :
+                    'bg-slate-400'
+                  }`} />
+                  <div className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">{log.tipo}</span>
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                        {new Date(log.timestamp).toLocaleString('pt-BR')}
+                      </span>
+                    </div>
+                    <p className="text-sm font-bold text-slate-900 mt-2">{log.mensagem}</p>
+                    <p className="text-[11px] text-slate-500 mt-1">{log.fundamento || 'Sem fundamento registrado.'}</p>
+                  </div>
+                </div>
+              ))}
+              {selectedServiceLogs.length === 0 && (
+                <div className="py-8 text-center border-2 border-dashed border-slate-200 rounded-xl">
+                  <p className="text-slate-400 font-black uppercase tracking-widest text-[10px]">Sem eventos de auditoria</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+
+    return (
+      <div className="bg-white p-6 md:p-10 rounded-[2rem] border border-slate-200 shadow-xl min-h-[500px]">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 pb-6 border-b border-slate-100">
+          <div>
+            <h3 className="text-xl font-black text-slate-950 tracking-tight">{selectedService.titulo}</h3>
+            <p className="text-xs text-slate-500 font-medium mt-1">{selectedService.cliente} • {selectedService.papel}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {currentStage && (currentStage.codigo_etapa === 'escopo_validado' || currentStage.codigo_etapa === 'planejamento_tecnico') && (
+              <button
+                onClick={() => onRunAnalyst(selectedService, currentStage)}
+                disabled={analystBusyStageId === currentStage.id}
+                className="bg-violet-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {analystBusyStageId === currentStage.id ? 'Analisando...' : 'Rodar Agente Analista'}
+              </button>
+            )}
+            {currentStage && (currentStage.codigo_etapa === 'execucao' || currentStage.codigo_etapa === 'validacao_entrega') && (
+              <button
+                onClick={() => onRunDeveloper(selectedService, currentStage)}
+                disabled={developerBusyStageId === currentStage.id}
+                className="bg-sky-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {developerBusyStageId === currentStage.id ? 'Validando...' : 'Rodar Agente Desenvolvedor'}
+              </button>
+            )}
+            {currentStage && currentStage.codigo_etapa === 'faturamento' && (
+              <button
+                onClick={() => onRunAccountant(selectedService, currentStage)}
+                disabled={accountantBusyStageId === currentStage.id}
+                className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {accountantBusyStageId === currentStage.id ? 'Preparando...' : 'Preparar Faturamento'}
+              </button>
+            )}
+            {currentStage && currentStage.codigo_etapa === 'faturamento' && selectedService.nfse_status === 'pronta_para_envio' && (
+              <button
+                onClick={() => onDispatchNFSe(selectedService, currentStage)}
+                disabled={nfseDispatchBusyStageId === currentStage.id}
+                className="bg-amber-500 text-slate-950 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {nfseDispatchBusyStageId === currentStage.id ? 'Enviando...' : 'Enviar ao Robô'}
+              </button>
+            )}
+            <button
+              onClick={() => onCreateLinkedTask(selectedService)}
+              className="bg-slate-900 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all"
+            >
+              Nova Ação
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-8">
+          <div>
+            <div className="flex flex-wrap items-center gap-2 mb-6">
+              <span className={`text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest ${
+                selectedService.pipeline_status === 'bloqueada' ? 'bg-rose-100 text-rose-700' :
+                selectedService.pipeline_status === 'concluida' ? 'bg-emerald-100 text-emerald-700' :
+                selectedService.pipeline_status === 'inicializada' ? 'bg-indigo-100 text-indigo-700' :
+                'bg-slate-100 text-slate-600'
+              }`}>
+                {selectedService.pipeline_status || 'nao_iniciada'}
+              </span>
+              <span className={`text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest ${
+                selectedService.nfse_status === 'erro' ? 'bg-rose-100 text-rose-700' :
+                selectedService.nfse_status === 'enviada_ao_robo' ? 'bg-sky-100 text-sky-700' :
+                selectedService.nfse_status === 'pronta_para_envio' ? 'bg-emerald-100 text-emerald-700' :
+                'bg-slate-100 text-slate-600'
+              }`}>
+                nfse: {selectedService.nfse_status || 'nao_aplicavel'}
+              </span>
+              {selectedService.requires_human_review && (
+                <span className="text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest bg-amber-100 text-amber-700">
+                  revisão humana
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Etapa Atual</p>
+                <p className="text-sm font-black text-slate-900 mt-2">{currentStage?.titulo || 'Não iniciada'}</p>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">
+                  {currentStage?.status || selectedService.etapa_atual_codigo || 'sem etapa'}
+                </p>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Pendências</p>
+                <p className="text-sm font-black text-slate-900 mt-2">
+                  {currentStage?.exit_evaluation?.pendingCriteria?.length || 0}
+                </p>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">
+                  critérios em aberto
+                </p>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Último Checkpoint</p>
+                <p className="text-sm font-black text-slate-900 mt-2">{selectedService.ultimo_checkpoint_status || 'pendente'}</p>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">
+                  {selectedService.ultimo_checkpoint_em ? new Date(selectedService.ultimo_checkpoint_em).toLocaleString('pt-BR') : 'sem registro'}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-6">
+              <div className="space-y-3">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Fichas de Etapa</p>
+                {selectedServiceStages.map(stage => (
+                  <div key={stage.id} className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-black text-slate-900">{stage.titulo}</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                          {stage.codigo_etapa} • {stage.agente_dono}
+                        </p>
+                      </div>
+                      <span className={`text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest ${
+                        stage.status === 'concluida' ? 'bg-emerald-100 text-emerald-700' :
+                        stage.status === 'bloqueada' ? 'bg-rose-100 text-rose-700' :
+                        stage.status === 'aguardando_validacao' ? 'bg-amber-100 text-amber-700' :
+                        stage.status === 'em_andamento' ? 'bg-indigo-100 text-indigo-700' :
+                        'bg-slate-100 text-slate-600'
+                      }`}>
+                        {stage.status}
+                      </span>
+                    </div>
+                    <div className="mt-3 text-[11px] text-slate-600">
+                      {stage.exit_evaluation?.pendingCriteria && stage.exit_evaluation.pendingCriteria.length > 0 ? (
+                        <span>Pendências: {stage.exit_evaluation.pendingCriteria.join(', ')}</span>
+                      ) : (
+                        <span>Sem pendências críticas registradas.</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {selectedServiceStages.length === 0 && (
+                  <div className="py-8 text-center border-2 border-dashed border-slate-200 rounded-xl">
+                    <p className="text-slate-400 font-black uppercase tracking-widest text-[10px]">Pipeline ainda não inicializada</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Auditoria Recente</p>
+                {selectedServiceLogs.map(log => (
+                  <div key={log.id} className="bg-white border border-slate-200 rounded-2xl p-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <span className={`text-[10px] font-black uppercase tracking-widest ${
+                        log.tipo === 'bloqueio' || log.tipo === 'erro' ? 'text-rose-600' :
+                        log.tipo === 'movimentacao' ? 'text-indigo-600' :
+                        'text-slate-500'
+                      }`}>
+                        {log.tipo}
+                      </span>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        {new Date(log.timestamp).toLocaleDateString('pt-BR')}
+                      </span>
+                    </div>
+                    <p className="text-sm font-bold text-slate-800 mt-2">{log.mensagem}</p>
+                    <p className="text-[11px] text-slate-500 mt-1">{log.fundamento || 'Sem fundamento registrado.'}</p>
+                  </div>
+                ))}
+                {selectedServiceLogs.length === 0 && (
+                  <div className="py-8 text-center border-2 border-dashed border-slate-200 rounded-xl">
+                    <p className="text-slate-400 font-black uppercase tracking-widest text-[10px]">Sem eventos de auditoria</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-8 border-t border-slate-100">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Execução Técnica</h4>
+                <p className="text-xs text-slate-500 font-medium mt-1">
+                  {selectedServiceTasks.length} ação{selectedServiceTasks.length !== 1 ? 'ões' : ''} vinculada{selectedServiceTasks.length !== 1 ? 's' : ''} a este serviço
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {selectedServiceTasks.map(task => (
+                <button
+                  key={task.id}
+                  onClick={() => onSelectTask(task)}
+                  className="w-full text-left bg-slate-50 border border-slate-200 rounded-xl p-4 hover:border-indigo-300 hover:bg-white transition-all"
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-black text-slate-900">{task.titulo}</p>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                        {task.etapa_codigo || selectedService.etapa_atual_codigo || 'sem etapa'} • {task.status}
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">Abrir</span>
+                  </div>
+                </button>
+              ))}
+              {selectedServiceTasks.length === 0 && (
+                <div className="py-8 text-center border-2 border-dashed border-slate-200 rounded-xl">
+                  <p className="text-slate-400 font-black uppercase tracking-widest text-[10px]">Nenhuma ação vinculada</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
 
   return (
     <div className="space-y-8 animate-in fade-in pb-20">
@@ -174,6 +692,12 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                     className={`px-6 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'list' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
                 >
                     Meus Serviços
+                </button>
+                <button
+                    onClick={() => setActiveTab('pipeline')}
+                    className={`px-6 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'pipeline' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                    Pipeline
                 </button>
             </div>
         </div>
@@ -237,6 +761,8 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                 titulo: 'Novo Serviço ' + Math.floor(Math.random() * 100),
                                 descricao: 'Descreva os detalhes do serviço aqui...',
                                 cliente: 'Nome do Cliente',
+                                cliente_cnpj: '',
+                                cliente_razao_social: 'Nome do Cliente',
                                 papel: 'Seu papel / cargo',
                                 status: 'Prospecção',
                                 tags: [],
@@ -246,7 +772,16 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                 tipo_contrato: 'Mensalidade',
                                 valor_total: 0,
                                 parcelas: [],
-                                categoria_financeira: 'Serviço Particular'
+                                categoria_financeira: 'Serviço Particular',
+                                pipeline_status: 'nao_iniciada',
+                                pipeline_initialized_at: '',
+                                pipeline_version: 1,
+                                etapa_atual_id: '',
+                                requires_human_review: false,
+                                ultimo_checkpoint_em: '',
+                                nfse_status: 'nao_aplicavel',
+                                regras_fiscais: {},
+                                metadata_agentes: {}
                             };
                             onCreateService(dummyService);
                         }}
@@ -278,6 +813,16 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                 <div className="bg-white px-2 py-1 rounded border border-slate-200 text-[10px] font-bold text-slate-500 uppercase">
                                     {service.tipo_contrato}
                                 </div>
+                                <button
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        onCreateLinkedTask(service);
+                                    }}
+                                    className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-indigo-700 transition-all flex items-center gap-2"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+                                    Criar Ação Vinculada
+                                </button>
                             </div>
 
                             <h4 className="text-lg font-black text-slate-950 leading-tight mb-2 group-hover:text-indigo-700 transition-colors">{service.titulo}</h4>
@@ -321,8 +866,57 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
             </div>
         )}
 
+        {activeTab === 'pipeline' && renderPipelinePanel()}
+
+        {activeTab === 'pipeline' && false && (
+            <div className="grid grid-cols-1 xl:grid-cols-[320px_minmax(0,1fr)] gap-6 items-start">
+                <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-xl">
+                    <div className="mb-6 pb-4 border-b border-slate-100">
+                        <h3 className="text-lg font-black text-slate-950 tracking-tight">Serviços na Pipeline</h3>
+                        <p className="text-xs text-slate-500 font-medium mt-1">Selecione um serviço para abrir a visão operacional da cadeia de agentes.</p>
+                    </div>
+                    <div className="space-y-3 max-h-[680px] overflow-y-auto pr-1">
+                        {services.map(service => (
+                            <button
+                                key={service.id}
+                                onClick={() => setSelectedServiceId(service.id)}
+                                className={`w-full text-left rounded-2xl border p-4 transition-all ${
+                                    selectedServiceId === service.id
+                                        ? 'border-indigo-300 bg-indigo-50'
+                                        : 'border-slate-200 bg-slate-50 hover:border-indigo-200 hover:bg-white'
+                                }`}
+                            >
+                                <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                        <p className="text-sm font-black text-slate-900">{service.titulo}</p>
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">{service.cliente}</p>
+                                    </div>
+                                    <span className={`text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-widest ${
+                                        service.pipeline_status === 'bloqueada' ? 'bg-rose-100 text-rose-700' :
+                                        service.pipeline_status === 'concluida' ? 'bg-emerald-100 text-emerald-700' :
+                                        'bg-slate-200 text-slate-600'
+                                    }`}>
+                                        {service.pipeline_status || 'nao_iniciada'}
+                                    </span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-3">
+                                    Etapa atual: {service.etapa_atual_codigo || 'sem etapa'}
+                                </p>
+                            </button>
+                        ))}
+                        {services.length === 0 && (
+                            <div className="py-8 text-center border-2 border-dashed border-slate-200 rounded-xl">
+                                <p className="text-slate-400 font-black uppercase tracking-widest text-[10px]">Nenhum serviço cadastrado.</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+                {renderPipelinePanel()}
+            </div>
+        )}
+
         {/* --- Detail View Modal --- */}
-        {selectedService && (
+        {selectedService && activeTab === 'list' && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
                 <div className="bg-white w-full max-w-4xl rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in zoom-in-95">
 
@@ -378,6 +972,18 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                 className="p-3 text-rose-500 hover:bg-rose-50 rounded-xl transition-all" title="Excluir"
                             >
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                            </button>
+                            <button
+                                onClick={() => {
+                                    if (confirm("Tem certeza que deseja excluir este serviço com todas as ações vinculadas, fichas de etapa, logs e lançamentos relacionados?")) {
+                                        onDeleteServiceCascade(selectedService.id);
+                                        setSelectedServiceId(null);
+                                    }
+                                }}
+                                className="px-4 py-3 text-[10px] font-black uppercase tracking-widest text-rose-700 bg-rose-100 hover:bg-rose-200 rounded-xl transition-all"
+                                title="Excluir tudo"
+                            >
+                                Excluir Tudo
                             </button>
                             <button onClick={() => setSelectedServiceId(null)} className="p-3 text-slate-400 hover:bg-slate-200 rounded-xl transition-all">
                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -499,6 +1105,208 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                         Sincronizar com Cronograma
                                     </button>
                                 </div>
+                            </div>
+                        </div>
+
+                        <div className="hidden">
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                                <div>
+                                    <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Pipeline Autônoma</h4>
+                                    <p className="text-xs text-slate-500 font-medium mt-1">Governança, critérios de saída e auditoria do serviço</p>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    {currentStage && (currentStage.codigo_etapa === 'escopo_validado' || currentStage.codigo_etapa === 'planejamento_tecnico') && (
+                                        <button
+                                            onClick={() => onRunAnalyst(selectedService, currentStage)}
+                                            disabled={analystBusyStageId === currentStage.id}
+                                            className="bg-violet-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                        >
+                                            {analystBusyStageId === currentStage.id ? 'Analisando...' : 'Rodar Agente Analista'}
+                                        </button>
+                                    )}
+                                    {currentStage && (currentStage.codigo_etapa === 'execucao' || currentStage.codigo_etapa === 'validacao_entrega') && (
+                                        <button
+                                            onClick={() => onRunDeveloper(selectedService, currentStage)}
+                                            disabled={developerBusyStageId === currentStage.id}
+                                            className="bg-sky-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                        >
+                                            {developerBusyStageId === currentStage.id ? 'Validando...' : 'Rodar Agente Desenvolvedor'}
+                                        </button>
+                                    )}
+                                    {currentStage && currentStage.codigo_etapa === 'faturamento' && (
+                                        <button
+                                            onClick={() => onRunAccountant(selectedService, currentStage)}
+                                            disabled={accountantBusyStageId === currentStage.id}
+                                            className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                        >
+                                            {accountantBusyStageId === currentStage.id ? 'Preparando...' : 'Preparar Faturamento'}
+                                        </button>
+                                    )}
+                                    {currentStage && currentStage.codigo_etapa === 'faturamento' && selectedService.nfse_status === 'pronta_para_envio' && (
+                                        <button
+                                            onClick={() => onDispatchNFSe(selectedService, currentStage)}
+                                            disabled={nfseDispatchBusyStageId === currentStage.id}
+                                            className="bg-amber-500 text-slate-950 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                        >
+                                            {nfseDispatchBusyStageId === currentStage.id ? 'Enviando...' : 'Enviar ao Robô'}
+                                        </button>
+                                    )}
+                                    <span className={`text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest ${
+                                        selectedService.pipeline_status === 'bloqueada' ? 'bg-rose-100 text-rose-700' :
+                                        selectedService.pipeline_status === 'concluida' ? 'bg-emerald-100 text-emerald-700' :
+                                        selectedService.pipeline_status === 'inicializada' ? 'bg-indigo-100 text-indigo-700' :
+                                        'bg-slate-100 text-slate-600'
+                                    }`}>
+                                        {selectedService.pipeline_status || 'nao_iniciada'}
+                                    </span>
+                                    <span className={`text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest ${
+                                        selectedService.nfse_status === 'erro' ? 'bg-rose-100 text-rose-700' :
+                                        selectedService.nfse_status === 'enviada_ao_robo' ? 'bg-sky-100 text-sky-700' :
+                                        selectedService.nfse_status === 'pronta_para_envio' ? 'bg-emerald-100 text-emerald-700' :
+                                        'bg-slate-100 text-slate-600'
+                                    }`}>
+                                        nfse: {selectedService.nfse_status || 'nao_aplicavel'}
+                                    </span>
+                                    {selectedService.requires_human_review && (
+                                        <span className="text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest bg-amber-100 text-amber-700">
+                                            revisão humana
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Etapa Atual</p>
+                                    <p className="text-sm font-black text-slate-900 mt-2">{currentStage?.titulo || 'Não iniciada'}</p>
+                                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">
+                                        {currentStage?.status || selectedService.etapa_atual_codigo || 'sem etapa'}
+                                    </p>
+                                </div>
+                                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Pendências</p>
+                                    <p className="text-sm font-black text-slate-900 mt-2">
+                                        {currentStage?.exit_evaluation?.pendingCriteria?.length || 0}
+                                    </p>
+                                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">
+                                        critérios em aberto
+                                    </p>
+                                </div>
+                                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Último Checkpoint</p>
+                                    <p className="text-sm font-black text-slate-900 mt-2">{selectedService.ultimo_checkpoint_status || 'pendente'}</p>
+                                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">
+                                        {selectedService.ultimo_checkpoint_em ? new Date(selectedService.ultimo_checkpoint_em).toLocaleString('pt-BR') : 'sem registro'}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] gap-6">
+                                <div className="space-y-3">
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Fichas de Etapa</p>
+                                    {selectedServiceStages.map(stage => (
+                                        <div key={stage.id} className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                                            <div className="flex items-start justify-between gap-4">
+                                                <div>
+                                                    <p className="text-sm font-black text-slate-900">{stage.titulo}</p>
+                                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                                                        {stage.codigo_etapa} • {stage.agente_dono}
+                                                    </p>
+                                                </div>
+                                                <span className={`text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest ${
+                                                    stage.status === 'concluida' ? 'bg-emerald-100 text-emerald-700' :
+                                                    stage.status === 'bloqueada' ? 'bg-rose-100 text-rose-700' :
+                                                    stage.status === 'aguardando_validacao' ? 'bg-amber-100 text-amber-700' :
+                                                    stage.status === 'em_andamento' ? 'bg-indigo-100 text-indigo-700' :
+                                                    'bg-slate-100 text-slate-600'
+                                                }`}>
+                                                    {stage.status}
+                                                </span>
+                                            </div>
+                                            <div className="mt-3 text-[11px] text-slate-600">
+                                                {stage.exit_evaluation?.pendingCriteria && stage.exit_evaluation.pendingCriteria.length > 0 ? (
+                                                    <span>Pendências: {stage.exit_evaluation.pendingCriteria.join(', ')}</span>
+                                                ) : (
+                                                    <span>Sem pendências críticas registradas.</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {selectedServiceStages.length === 0 && (
+                                        <div className="py-8 text-center border-2 border-dashed border-slate-200 rounded-xl">
+                                            <p className="text-slate-400 font-black uppercase tracking-widest text-[10px]">Pipeline ainda não inicializada</p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="space-y-3">
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Auditoria Recente</p>
+                                    {selectedServiceLogs.map(log => (
+                                        <div key={log.id} className="bg-white border border-slate-200 rounded-2xl p-4">
+                                            <div className="flex items-center justify-between gap-4">
+                                                <span className={`text-[10px] font-black uppercase tracking-widest ${
+                                                    log.tipo === 'bloqueio' || log.tipo === 'erro' ? 'text-rose-600' :
+                                                    log.tipo === 'movimentacao' ? 'text-indigo-600' :
+                                                    'text-slate-500'
+                                                }`}>
+                                                    {log.tipo}
+                                                </span>
+                                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                                    {new Date(log.timestamp).toLocaleDateString('pt-BR')}
+                                                </span>
+                                            </div>
+                                            <p className="text-sm font-bold text-slate-800 mt-2">{log.mensagem}</p>
+                                            <p className="text-[11px] text-slate-500 mt-1">{log.fundamento || 'Sem fundamento registrado.'}</p>
+                                        </div>
+                                    ))}
+                                    {selectedServiceLogs.length === 0 && (
+                                        <div className="py-8 text-center border-2 border-dashed border-slate-200 rounded-xl">
+                                            <p className="text-slate-400 font-black uppercase tracking-widest text-[10px]">Sem eventos de auditoria</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="hidden">
+                            <div className="flex items-center justify-between mb-6">
+                                <div>
+                                    <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Execução Técnica</h4>
+                                    <p className="text-xs text-slate-500 font-medium mt-1">
+                                        {selectedServiceTasks.length} ação{selectedServiceTasks.length !== 1 ? 'ões' : ''} vinculada{selectedServiceTasks.length !== 1 ? 's' : ''} a este serviço
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => onCreateLinkedTask(selectedService)}
+                                    className="bg-slate-900 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all"
+                                >
+                                    Nova Ação
+                                </button>
+                            </div>
+
+                            <div className="space-y-3">
+                                {selectedServiceTasks.map(task => (
+                                    <button
+                                        key={task.id}
+                                        onClick={() => onSelectTask(task)}
+                                        className="w-full text-left bg-slate-50 border border-slate-200 rounded-xl p-4 hover:border-indigo-300 hover:bg-white transition-all"
+                                    >
+                                        <div className="flex items-center justify-between gap-4">
+                                            <div>
+                                                <p className="text-sm font-black text-slate-900">{task.titulo}</p>
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                                                    {task.etapa_codigo || selectedService.etapa_atual_codigo || 'sem etapa'} • {task.status}
+                                                </p>
+                                            </div>
+                                            <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">Abrir</span>
+                                        </div>
+                                    </button>
+                                ))}
+                                {selectedServiceTasks.length === 0 && (
+                                    <div className="py-8 text-center border-2 border-dashed border-slate-200 rounded-xl">
+                                        <p className="text-slate-400 font-black uppercase tracking-widest text-[10px]">Nenhuma ação vinculada</p>
+                                    </div>
+                                )}
                             </div>
                         </div>
 

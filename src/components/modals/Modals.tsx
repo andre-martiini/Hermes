@@ -961,7 +961,13 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
     descricao: initialData?.descricao || '',
     horario_inicio: initialData?.horario_inicio || '',
     horario_fim: initialData?.horario_fim || '',
-    origem: 'manual' as any
+    origem: 'manual' as any,
+    service_id: initialData?.service_id || '',
+    service_title_snapshot: initialData?.service_title_snapshot || '',
+    etapa_codigo: initialData?.etapa_codigo || '',
+    origem_fluxo: initialData?.origem_fluxo,
+    is_service_evidence: initialData?.is_service_evidence || false,
+    evidence_type: initialData?.evidence_type
   });
 
   const [planoAcao, setPlanoAcao] = useState<ActionPlanItem[]>([]);
@@ -1201,6 +1207,13 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
         </div>
 
         <div className="p-4 space-y-4 overflow-y-auto custom-scrollbar flex-1">
+          {formData.service_id && (
+            <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
+              <p className="text-[9px] font-black text-amber-600 uppercase tracking-widest">Ação vinculada a serviço</p>
+              <p className="text-sm font-bold text-slate-800 mt-2">{formData.service_title_snapshot || 'Serviço sem título'}</p>
+              <p className="text-[10px] font-medium text-slate-500 mt-1">Etapa atual: {formData.etapa_codigo || 'não definida'}</p>
+            </div>
+          )}
           {/* Seção de Ingestão para Deep Work */}
           {tipoAcao === 'deep' && (
             <div className="space-y-4 animate-in slide-in-from-top-4 duration-300 border-b border-slate-100 pb-4">
@@ -1603,7 +1616,13 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
     descricao: task.descricao || '',
     entregas_relacionadas: task.entregas_relacionadas || [],
     horario_inicio: task.horario_inicio || '',
-    horario_fim: task.horario_fim || ''
+    horario_fim: task.horario_fim || '',
+    service_id: task.service_id || '',
+    service_title_snapshot: task.service_title_snapshot || '',
+    etapa_codigo: task.etapa_codigo || '',
+    origem_fluxo: task.origem_fluxo,
+    is_service_evidence: task.is_service_evidence || false,
+    evidence_type: task.evidence_type
   });
 
   const [planoAcao, setPlanoAcao] = useState<ActionPlanItem[]>(task.plano_acao || []);
