@@ -25,6 +25,7 @@ import DashboardView from './DashboardView';
 import KnowledgeView from './KnowledgeView';
 import ProjectsView from './ProjectsView';
 import RAGBasesView from './src/views/RAGBasesView';
+import { AutonomousOperationsView } from './src/views/AutonomousOperationsView';
 import { ServicesView } from './src/views/ServicesView';
 
 // Importações dos módulos extraídos pelo split.js
@@ -1715,8 +1716,8 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude' | 'servicos'>('dashboard');
-  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'finance' | 'saude' | 'ferramentas' | 'sistemas-dev' | 'knowledge' | 'services' | 'rag-bases'>('dashboard');
+  const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude' | 'servicos' | 'operacoes-autonomas'>('dashboard');
+  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'finance' | 'saude' | 'ferramentas' | 'sistemas-dev' | 'knowledge' | 'services' | 'rag-bases' | 'autonomous-operations'>('dashboard');
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
   const [isSidebarRetracted, setIsSidebarRetracted] = useState(false);
   const [financeActiveTab, setFinanceActiveTab] = useState<'dashboard' | 'fixed'>('dashboard');
@@ -4681,6 +4682,7 @@ const App: React.FC = () => {
                 { id: 'dashboard', label: 'Dashboard', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>, active: viewMode === 'dashboard', onClick: () => { setActiveModule('dashboard'); setViewMode('dashboard'); } },
                 { id: 'acoes', label: 'Ações', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>, active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'pgc' || viewMode === 'licitacoes' || viewMode === 'assistencia'), onClick: () => { setActiveModule('acoes'); setViewMode('gallery'); } },
                 { id: 'servicos', label: 'Serviços', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>, active: activeModule === 'servicos' && viewMode === 'services', onClick: () => { setActiveModule('servicos'); setViewMode('services'); } },
+                { id: 'operacoes-autonomas', label: 'Operações', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>, active: activeModule === 'operacoes-autonomas' && viewMode === 'autonomous-operations', onClick: () => { setActiveModule('operacoes-autonomas'); setViewMode('autonomous-operations'); } },
                 { id: 'finance', label: 'Financeiro', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>, active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
                 { id: 'saude', label: 'Saúde', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>, active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
                 { id: 'sistemas', label: 'Sistemas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>, active: viewMode === 'sistemas-dev', onClick: () => { setActiveModule('acoes'); setViewMode('sistemas-dev'); } },
@@ -4825,7 +4827,7 @@ const App: React.FC = () => {
                       </div>
                     )}
 
-                    {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && (
+                    {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && viewMode !== 'autonomous-operations' && (
                       <button
                         onClick={() => setIsCreateModalOpen(true)}
                         className="bg-slate-900 text-white p-1.5 rounded-lg md:rounded-xl shadow-lg hover:bg-slate-800 transition-all active:scale-95"
@@ -4927,12 +4929,14 @@ const App: React.FC = () => {
                       >
                         <h1 className="text-xl font-black tracking-tighter text-slate-900 uppercase">
                           {viewMode === 'services' ? 'Serviços' :
+                            viewMode === 'autonomous-operations' ? 'Operações Autônomas' :
                             viewMode === 'rag-bases' ? 'Bases RAG' :
                             viewMode === 'knowledge' ? 'Conhecimento' :
                               viewMode === 'sistemas-dev' ? 'Sistemas' :
                                 viewMode === 'ferramentas' ? 'Ferramentas' :
                                   activeModule === 'dashboard' ? 'Dashboard' :
                                     activeModule === 'acoes' ? 'Ações' :
+                                      activeModule === 'operacoes-autonomas' ? 'Operações Autônomas' :
                                       activeModule === 'financeiro' ? 'Financeiro' :
                                         activeModule === 'saude' ? 'Saúde' : 'Hermes'}
                         </h1>
@@ -4961,7 +4965,7 @@ const App: React.FC = () => {
                       </div>
                     )}
 
-                    {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'services' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
+                    {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'services' && viewMode !== 'autonomous-operations' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && activeModule !== 'operacoes-autonomas' && (
                       <nav className="flex bg-slate-100 p-1 rounded-lg md:rounded-xl border border-slate-200">
                         <button
                           onClick={() => {
@@ -5061,7 +5065,7 @@ const App: React.FC = () => {
                   )}
 
                   {/* Standard Action Buttons (Search, Sync, Create) */}
-                  {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && (
+                  {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && viewMode !== 'autonomous-operations' && (
                     <div className="flex items-center gap-4">
                       {activeModule !== 'dashboard' && (
                         <div className="hidden lg:flex items-center bg-slate-50 border border-slate-200 rounded-lg md:rounded-xl px-4 py-2 w-64 group focus-within:ring-2 focus-within:ring-blue-500 focus-within:bg-white transition-all">
@@ -5154,6 +5158,7 @@ const App: React.FC = () => {
                       { label: 'Dashboard', active: viewMode === 'dashboard', onClick: () => { setActiveModule('dashboard'); setViewMode('dashboard'); } },
                       { label: 'Ações', active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'licitacoes' || viewMode === 'assistencia'), onClick: () => { setActiveModule('acoes'); setViewMode('gallery'); } },
                       { label: 'Serviços', active: activeModule === 'servicos' && viewMode === 'services', onClick: () => { setActiveModule('servicos'); setViewMode('services'); } },
+                      { label: 'Operações Autônomas', active: activeModule === 'operacoes-autonomas' && viewMode === 'autonomous-operations', onClick: () => { setActiveModule('operacoes-autonomas'); setViewMode('autonomous-operations'); } },
                       { label: 'PGD', active: activeModule === 'acoes' && viewMode === 'pgc', onClick: () => { setActiveModule('acoes'); setViewMode('pgc'); } },
                       { label: 'Financeiro', active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
                       { label: 'Saúde', active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
@@ -5720,6 +5725,8 @@ const App: React.FC = () => {
                     onUpdateService={handleUpdateService}
                     onDeleteService={handleDeleteService}
                   />
+                ) : viewMode === 'autonomous-operations' ? (
+                  <AutonomousOperationsView showToast={showToast} />
                 ) : viewMode === 'finance' ? (
                   <FinanceView
                     transactions={financeTransactions}
