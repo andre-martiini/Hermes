@@ -10,7 +10,7 @@ import {
   formatDate, formatDateLocalISO, Sistema, SistemaStatus, WorkItem, WorkItemPhase,
   WorkItemPriority, QualityLog, WorkItemAudit, GoogleCalendarEvent,
   PoolItem, CustomNotification, HealthExam, ConhecimentoItem, UndoAction, HermesModalProps,
-  ShoppingItem, Projeto, SlideHistoryEntry, BaseConhecimento, TipoAcao, Servico, ServicoEtapa, ServicoLog
+  ShoppingItem, Projeto, SlideHistoryEntry, BaseConhecimento, TipoAcao, Servico
 } from './types';
 import HealthView from './HealthView';
 import { MeetingTranscriptionTool } from './src/components/tools/MeetingTranscriptionTool';
@@ -1001,12 +1001,6 @@ const App: React.FC = () => {
   const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>([]);
   // Services State
   const [services, setServices] = useState<Servico[]>([]);
-  const [serviceStages, setServiceStages] = useState<ServicoEtapa[]>([]);
-  const [serviceLogs, setServiceLogs] = useState<ServicoLog[]>([]);
-  const [analystBusyStageId, setAnalystBusyStageId] = useState<string | null>(null);
-  const [developerBusyStageId, setDeveloperBusyStageId] = useState<string | null>(null);
-  const [accountantBusyStageId, setAccountantBusyStageId] = useState<string | null>(null);
-  const [nfseDispatchBusyStageId, setNfseDispatchBusyStageId] = useState<string | null>(null);
 
   const [isImportPlanOpen, setIsImportPlanOpen] = useState(false);
   const [isCompletedTasksOpen, setIsCompletedTasksOpen] = useState(false);
@@ -1257,12 +1251,6 @@ const App: React.FC = () => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Servico[];
       setServices(data);
     });
-    const unsubServiceStages = onSnapshot(collection(db, 'servico_etapas'), (snapshot) => {
-      setServiceStages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ServicoEtapa)));
-    });
-    const unsubServiceLogs = onSnapshot(collection(db, 'servico_logs'), (snapshot) => {
-      setServiceLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ServicoLog)));
-    });
 
     // Health Sync
     const unsubHealthWeights = onSnapshot(collection(db, 'health_weights'), (snapshot) => {
@@ -1305,8 +1293,6 @@ const App: React.FC = () => {
       unsubIncomeRubrics();
       unsubShopping();
       unsubProjects();
-      unsubServiceStages();
-      unsubServiceLogs();
       unsubHealthWeights();
       unsubHealthHabits();
       unsubHealthSettings();
@@ -1660,26 +1646,7 @@ const App: React.FC = () => {
   const handleCreateService = async (service: Omit<Servico, 'id' | 'data_criacao' | 'data_atualizacao'>) => {
     try {
       const now = new Date().toISOString();
-      const payload = JSON.parse(JSON.stringify({
-        ...service,
-        pipeline_status: service.pipeline_status || 'nao_iniciada',
-        pipeline_initialized_at: service.pipeline_initialized_at || '',
-        pipeline_version: service.pipeline_version || 1,
-        etapa_atual_codigo: service.etapa_atual_codigo,
-        etapa_atual_id: service.etapa_atual_id || '',
-        agente_responsavel_atual: service.agente_responsavel_atual,
-        requires_human_review: service.requires_human_review || false,
-        ultimo_checkpoint_em: service.ultimo_checkpoint_em || '',
-        ultimo_checkpoint_status: service.ultimo_checkpoint_status,
-        nfse_status: service.nfse_status || 'nao_aplicavel',
-        cliente_cnpj: service.cliente_cnpj || '',
-        cliente_razao_social: service.cliente_razao_social || service.cliente,
-        regras_fiscais: service.regras_fiscais || {},
-        metadata_agentes: service.metadata_agentes || {},
-        data_criacao: now,
-        data_atualizacao: now
-      }));
-      await addDoc(collection(db, 'servicos'), payload);
+      await addDoc(collection(db, 'servicos'), { ...service, data_criacao: now, data_atualizacao: now });
       showToast("Serviço criado com sucesso!", "success");
     } catch (error) {
       console.error("Error creating service:", error);
@@ -1689,8 +1656,7 @@ const App: React.FC = () => {
 
   const handleUpdateService = async (id: string, service: Partial<Servico>) => {
     try {
-      const payload = JSON.parse(JSON.stringify({ ...service, data_atualizacao: new Date().toISOString() }));
-      await updateDoc(doc(db, 'servicos', id), payload);
+      await updateDoc(doc(db, 'servicos', id), { ...service, data_atualizacao: new Date().toISOString() });
       showToast("Serviço atualizado!", "success");
     } catch (error) {
       console.error("Error updating service:", error);
@@ -1705,64 +1671,6 @@ const App: React.FC = () => {
     } catch (error) {
       console.error("Error deleting service:", error);
       showToast("Erro ao remover serviço.", "error");
-    }
-  };
-
-  const handleDeleteServiceCascade = async (id: string) => {
-    try {
-      const [
-        taskSnapshot,
-        stageSnapshot,
-        logSnapshot,
-        incomeSnapshot,
-      ] = await Promise.all([
-        getDocs(query(collection(db, 'tarefas'), where('service_id', '==', id))),
-        getDocs(query(collection(db, 'servico_etapas'), where('service_id', '==', id))),
-        getDocs(query(collection(db, 'servico_logs'), where('service_id', '==', id))),
-        getDocs(query(collection(db, 'income_entries'), where('service_id', '==', id))),
-      ]);
-
-      const taskDocs = taskSnapshot.docs;
-      const stageDocs = stageSnapshot.docs;
-      const logDocs = logSnapshot.docs;
-      const incomeDocs = incomeSnapshot.docs;
-
-      const knowledgeSnapshots = await Promise.all(
-        taskDocs.map((taskDoc) =>
-          getDocs(query(collection(db, 'conhecimento'), where('origem.id_origem', '==', taskDoc.id)))
-        )
-      );
-
-      const docsToDelete = [
-        ...taskDocs,
-        ...stageDocs,
-        ...logDocs,
-        ...incomeDocs,
-        ...knowledgeSnapshots.flatMap((snapshot) => snapshot.docs),
-      ];
-
-      const uniqueDocs = Array.from(
-        new Map(docsToDelete.map((documentSnapshot) => [documentSnapshot.ref.path, documentSnapshot])).values()
-      );
-
-      const chunkSize = 400;
-      for (let index = 0; index < uniqueDocs.length; index += chunkSize) {
-        const batch = writeBatch(db);
-        uniqueDocs.slice(index, index + chunkSize).forEach((documentSnapshot) => {
-          batch.delete(documentSnapshot.ref);
-        });
-        await batch.commit();
-      }
-
-      await deleteDoc(doc(db, 'servicos', id));
-
-      showToast(
-        `Serviço e vínculos removidos. ${taskDocs.length} ação(ões), ${stageDocs.length} etapa(s), ${logDocs.length} log(s) e ${incomeDocs.length} lançamento(s) apagados.`,
-        'success'
-      );
-    } catch (error) {
-      console.error("Error deleting service cascade:", error);
-      showToast("Erro ao remover serviço com todos os vínculos.", "error");
     }
   };
 
@@ -3585,134 +3493,6 @@ const App: React.FC = () => {
     }
   };
 
-  const handleCreateLinkedTaskForService = (service: Servico) => {
-    setTaskInitialData({
-      titulo: `Execução - ${service.titulo}`,
-      descricao: service.descricao || '',
-      categoria: 'GERAL',
-      status: 'em andamento',
-      service_id: service.id,
-      service_title_snapshot: service.titulo,
-      etapa_codigo: service.etapa_atual_codigo,
-      origem_fluxo: 'servico_particular',
-      is_service_evidence: true,
-      evidence_type: 'execucao'
-    });
-    setIsCreateModalOpen(true);
-  };
-
-  const handleRunServiceAnalyst = async (service: Servico, stage: ServicoEtapa) => {
-    try {
-      setAnalystBusyStageId(stage.id);
-      const fn = httpsCallable(functions, 'runServiceAnalyst');
-      const response = await fn({
-        serviceId: service.id,
-        stageId: stage.id
-      });
-      const data = response.data as {
-        success: boolean;
-        summary?: string;
-        pending?: string[];
-        updatedFields?: string[];
-      };
-
-      if (data.success) {
-        const pendingCount = data.pending?.length || 0;
-        const updatedCount = data.updatedFields?.length || 0;
-        showToast(
-          `Agente Analista executado. ${updatedCount} campo(s) sugerido(s) e ${pendingCount} pendência(s) identificada(s).`,
-          'success'
-        );
-      }
-    } catch (err: any) {
-      console.error('Erro ao executar Agente Analista:', err);
-      showToast(err?.message || 'Erro ao executar Agente Analista.', 'error');
-    } finally {
-      setAnalystBusyStageId(null);
-    }
-  };
-
-  const handleRunServiceDeveloper = async (service: Servico, stage: ServicoEtapa) => {
-    try {
-      setDeveloperBusyStageId(stage.id);
-      const fn = httpsCallable(functions, 'runServiceDeveloper');
-      const response = await fn({
-        serviceId: service.id,
-        stageId: stage.id
-      });
-      const data = response.data as {
-        success: boolean;
-        summary?: string;
-        pending?: string[];
-        updatedFields?: string[];
-      };
-
-      if (data.success) {
-        const pendingCount = data.pending?.length || 0;
-        const updatedCount = data.updatedFields?.length || 0;
-        showToast(
-          `Agente Desenvolvedor executado. ${updatedCount} campo(s) sugerido(s) e ${pendingCount} pendÃªncia(s) identificada(s).`,
-          'success'
-        );
-      }
-    } catch (err: any) {
-      console.error('Erro ao executar Agente Desenvolvedor:', err);
-      showToast(err?.message || 'Erro ao executar Agente Desenvolvedor.', 'error');
-    } finally {
-      setDeveloperBusyStageId(null);
-    }
-  };
-
-  const handleRunServiceAccountant = async (service: Servico, stage: ServicoEtapa) => {
-    try {
-      setAccountantBusyStageId(stage.id);
-      const fn = httpsCallable(functions, 'runServiceAccountant');
-      const response = await fn({
-        serviceId: service.id,
-        stageId: stage.id
-      });
-      const data = response.data as {
-        success: boolean;
-        parcelaId?: string;
-        summary?: string;
-      };
-
-      if (data.success) {
-        showToast(
-          data.summary || `Payload fiscal preparado para a parcela ${data.parcelaId || 'selecionada'}.`,
-          'success'
-        );
-      }
-    } catch (err: any) {
-      console.error('Erro ao executar Agente Contador:', err);
-      showToast(err?.message || 'Erro ao executar Agente Contador.', 'error');
-    } finally {
-      setAccountantBusyStageId(null);
-    }
-  };
-
-  const handleDispatchServiceNFSe = async (service: Servico, stage: ServicoEtapa) => {
-    try {
-      setNfseDispatchBusyStageId(stage.id);
-      const fn = httpsCallable(functions, 'dispatchServiceNFSe');
-      const response = await fn({
-        serviceId: service.id,
-        stageId: stage.id
-      });
-      const data = response.data as {
-        success: boolean;
-      };
-
-      if (data.success) {
-        showToast('Payload enviado ao Hermes Robot. O bridge local pode solicitar login manual para concluir a emissão.', 'success');
-      }
-    } catch (err: any) {
-      console.error('Erro ao enviar NFS-e ao robô:', err);
-      showToast(err?.message || 'Erro ao enviar payload ao Hermes Robot.', 'error');
-    } finally {
-      setNfseDispatchBusyStageId(null);
-    }
-  };
 
 
   useEffect(() => {
@@ -5936,26 +5716,9 @@ const App: React.FC = () => {
                 ) : viewMode === 'services' ? (
                   <ServicesView
                     services={services}
-                    tasks={tarefas}
-                    stages={serviceStages}
-                    logs={serviceLogs}
                     onCreateService={handleCreateService}
                     onUpdateService={handleUpdateService}
                     onDeleteService={handleDeleteService}
-                    onDeleteServiceCascade={handleDeleteServiceCascade}
-                    onCreateLinkedTask={handleCreateLinkedTaskForService}
-                    onSelectTask={(task) => {
-                      setSelectedTask(task);
-                      setTaskModalMode('execute');
-                    }}
-                    onRunAnalyst={handleRunServiceAnalyst}
-                    onRunDeveloper={handleRunServiceDeveloper}
-                    onRunAccountant={handleRunServiceAccountant}
-                    onDispatchNFSe={handleDispatchServiceNFSe}
-                    analystBusyStageId={analystBusyStageId}
-                    developerBusyStageId={developerBusyStageId}
-                    accountantBusyStageId={accountantBusyStageId}
-                    nfseDispatchBusyStageId={nfseDispatchBusyStageId}
                   />
                 ) : viewMode === 'finance' ? (
                   <FinanceView

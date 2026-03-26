@@ -76,12 +76,6 @@ export interface Tarefa {
     reuniao_vinculada_id?: string;
     knowledge_item_ids?: string[];
     extra_context_id?: string;
-    service_id?: string;
-    service_title_snapshot?: string;
-    etapa_codigo?: string;
-    origem_fluxo?: 'servico_particular';
-    is_service_evidence?: boolean;
-    evidence_type?: 'execucao' | 'homologacao' | 'documentacao' | 'entrega';
 }
 
 export interface AtividadeRealizada {
@@ -677,99 +671,6 @@ export interface ParcelaServico {
     status: 'pendente' | 'pago';
 }
 
-export type PipelineStatus = 'nao_iniciada' | 'inicializada' | 'em_execucao' | 'bloqueada' | 'concluida';
-export type AgenteResponsavel = 'orquestrador' | 'analista' | 'desenvolvedor' | 'contador';
-export type ServicoEtapaStatus = 'pendente' | 'em_andamento' | 'aguardando_validacao' | 'concluida' | 'bloqueada' | 'cancelada';
-export type HumanReviewStatus = 'nao_requer' | 'pendente' | 'aprovado' | 'rejeitado';
-export type CodigoEtapaServico =
-    | 'ativacao'
-    | 'escopo_validado'
-    | 'planejamento_tecnico'
-    | 'execucao'
-    | 'validacao_entrega'
-    | 'faturamento'
-    | 'encerramento';
-
-export interface ExitCriterion {
-    code: string;
-    label: string;
-    type: 'field_presence' | 'min_links' | 'manual' | 'custom';
-    required: boolean;
-    status: 'pending' | 'passed' | 'failed';
-    min?: number;
-    details?: string;
-}
-
-export interface ExitEvaluation {
-    status: 'pending' | 'passed' | 'failed';
-    pendingCriteria?: string[];
-    checkedAt: string;
-    checkedBy: AgenteResponsavel | 'humano' | 'sistema';
-}
-
-export interface ServicoEtapaEvidencias {
-    tarefa_ids?: string[];
-    knowledge_item_ids?: string[];
-    log_ids?: string[];
-    parcela_ids?: string[];
-    links?: string[];
-}
-
-export interface RegraFiscalServico {
-    regime_tributario?: string;
-    municipio_prestacao?: string;
-    uf_prestacao?: string;
-    retem_iss?: boolean;
-    retem_irrf?: boolean;
-    retem_inss?: boolean;
-    observacoes?: string;
-}
-
-export interface ServicoEtapa {
-    id: string;
-    service_id: string;
-    codigo_etapa: CodigoEtapaServico;
-    titulo: string;
-    descricao?: string;
-    ordem: number;
-    status: ServicoEtapaStatus;
-    agente_dono: AgenteResponsavel;
-    entrada_disparada_em?: string;
-    data_inicio?: string;
-    data_conclusao?: string;
-    data_bloqueio?: string;
-    bloqueio_motivo?: string;
-    obrigatorios: string[];
-    dados: Record<string, any>;
-    exit_criteria: ExitCriterion[];
-    exit_evaluation?: ExitEvaluation;
-    evidencias?: ServicoEtapaEvidencias;
-    faturavel: boolean;
-    faturamento_disparado: boolean;
-    faturamento_referencia?: string;
-    human_review_required: boolean;
-    human_review_status: HumanReviewStatus;
-    ultima_avaliacao_em?: string;
-    ultima_avaliacao_por?: AgenteResponsavel | 'humano' | 'sistema';
-}
-
-export interface ServicoLog {
-    id: string;
-    service_id: string;
-    etapa_id?: string;
-    tipo: 'pipeline' | 'avaliacao' | 'bloqueio' | 'movimentacao' | 'faturamento' | 'nfse' | 'erro' | 'intervencao_humana';
-    agente: AgenteResponsavel | 'humano' | 'sistema';
-    acao: string;
-    mensagem: string;
-    fundamento?: string;
-    dados_antes?: Record<string, any> | null;
-    dados_depois?: Record<string, any> | null;
-    evidencias?: ServicoEtapaEvidencias;
-    sucesso: boolean;
-    criticidade: 'baixa' | 'media' | 'alta';
-    timestamp: string;
-}
-
 export interface Servico {
     id: string;
     titulo: string;
@@ -785,20 +686,6 @@ export interface Servico {
     valor_total: number;
     parcelas: ParcelaServico[];
     categoria_financeira?: 'Bolsa' | 'Serviço Particular';
-    pipeline_status?: PipelineStatus;
-    pipeline_initialized_at?: string;
-    pipeline_version?: number;
-    etapa_atual_codigo?: CodigoEtapaServico;
-    etapa_atual_id?: string;
-    agente_responsavel_atual?: AgenteResponsavel;
-    requires_human_review?: boolean;
-    ultimo_checkpoint_em?: string;
-    ultimo_checkpoint_status?: 'ok' | 'pendente' | 'bloqueado';
-    nfse_status?: 'nao_aplicavel' | 'pendente' | 'pronta_para_envio' | 'enviada_ao_robo' | 'emitida' | 'erro';
-    cliente_cnpj?: string;
-    cliente_razao_social?: string;
-    regras_fiscais?: RegraFiscalServico;
-    metadata_agentes?: Record<string, any>;
     data_criacao: string;
     data_atualizacao: string;
 }
