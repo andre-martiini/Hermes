@@ -6,6 +6,17 @@ import { functions } from '@/firebase';
 
 GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
 
+declare global {
+  interface Window {
+    gapi: any;
+    google: any;
+  }
+}
+
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
+const GOOGLE_PICKER_API_KEY = import.meta.env.VITE_GOOGLE_PICKER_API_KEY as string | undefined;
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+
 type ToastType = 'success' | 'error' | 'info';
 
 interface AutonomousOperationsViewProps {
@@ -106,6 +117,8 @@ export function AutonomousOperationsView({ showToast }: AutonomousOperationsView
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribingAudio, setIsTranscribingAudio] = useState(false);
   const [audioSeconds, setAudioSeconds] = useState(0);
+
+  const [isDriveLoading, setIsDriveLoading] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -286,6 +299,116 @@ export function AutonomousOperationsView({ showToast }: AutonomousOperationsView
     }
   };
 
+  const loadScript = (src: string, readyCheck: () => boolean): Promise<void> =>
+    new Promise((resolve, reject) => {
+      if (readyCheck()) { resolve(); return; }
+      const script = document.createElement('script');
+      script.src = src;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error(`Falha ao carregar: ${src}`));
+      document.head.appendChild(script);
+    });
+
+  const downloadAndProcessDriveFile = async (
+    doc: { id: string; name: string; mimeType: string },
+    accessToken: string,
+  ) => {
+    setIsDriveLoading(true);
+    try {
+      let url: string;
+      let fileName = doc.name;
+
+      if (doc.mimeType === 'application/vnd.google-apps.document') {
+        url = `https://www.googleapis.com/drive/v3/files/${doc.id}/export?mimeType=text/plain`;
+        if (!fileName.endsWith('.txt')) fileName += '.txt';
+      } else {
+        url = `https://www.googleapis.com/drive/v3/files/${doc.id}?alt=media`;
+      }
+
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      if (!response.ok) throw new Error(`Drive API ${response.status}`);
+
+      const blob = await response.blob();
+      const file = new File([blob], fileName, { type: blob.type || doc.mimeType });
+      await handleFileSelection([file]);
+    } catch (error) {
+      console.error('Erro ao baixar arquivo do Drive:', error);
+      showToast?.('Não foi possível baixar o arquivo do Google Drive.', 'error');
+    } finally {
+      setIsDriveLoading(false);
+    }
+  };
+
+  const handleDriveImport = async () => {
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_PICKER_API_KEY) {
+      showToast?.('Configure VITE_GOOGLE_CLIENT_ID e VITE_GOOGLE_PICKER_API_KEY no .env para usar o Drive.', 'error');
+      return;
+    }
+
+    setIsDriveLoading(true);
+    try {
+      await Promise.all([
+        loadScript('https://apis.google.com/js/api.js', () => !!window.gapi),
+        loadScript('https://accounts.google.com/gsi/client', () => !!window.google?.accounts?.oauth2),
+      ]);
+
+      await new Promise<void>((resolve, reject) => {
+        window.gapi.load('picker', { callback: resolve, onerror: reject });
+      });
+
+      const tokenClient = window.google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: DRIVE_SCOPE,
+        callback: (tokenResponse: { error?: string; access_token: string }) => {
+          if (tokenResponse.error) {
+            showToast?.('Autenticação com o Google Drive recusada.', 'error');
+            setIsDriveLoading(false);
+            return;
+          }
+
+          const accessToken = tokenResponse.access_token;
+
+          const picker = new window.google.picker.PickerBuilder()
+            .addView(
+              new window.google.picker.DocsView()
+                .setMimeTypes(
+                  [
+                    'application/pdf',
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'text/plain',
+                    'text/markdown',
+                    'application/vnd.google-apps.document',
+                  ].join(','),
+                )
+                .setIncludeFolders(true),
+            )
+            .setOAuthToken(accessToken)
+            .setDeveloperKey(GOOGLE_PICKER_API_KEY!)
+            .setCallback(async (data: { action: string; docs?: { id: string; name: string; mimeType: string }[] }) => {
+              if (data.action === window.google.picker.Action.PICKED && data.docs?.[0]) {
+                await downloadAndProcessDriveFile(data.docs[0], accessToken);
+              } else if (data.action === window.google.picker.Action.CANCEL) {
+                setIsDriveLoading(false);
+              }
+            })
+            .build();
+
+          picker.setVisible(true);
+          setIsDriveLoading(false);
+        },
+      });
+
+      tokenClient.requestAccessToken({ prompt: '' });
+    } catch (error) {
+      console.error('Erro ao abrir o Google Drive:', error);
+      showToast?.('Não foi possível abrir o Google Drive.', 'error');
+      setIsDriveLoading(false);
+    }
+  };
+
   const handleSubmit = async () => {
     if (!brainDump.trim() && uploadedFiles.length === 0) {
       showToast?.('Adicione um briefing ou anexo antes de enviar.', 'info');
@@ -427,7 +550,7 @@ export function AutonomousOperationsView({ showToast }: AutonomousOperationsView
                 Captura por microfone com transcrição automática e limite de até 2 minutos.
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
-                Leitura imediata de arquivos `txt`, `docx`, `pdf`, `md` e `markdown`.
+                Leitura imediata de arquivos `txt`, `docx`, `pdf`, `md` e `markdown` — local ou via Google Drive.
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
                 Sinalizador de urgência e feedback de envio com card de processamento.
@@ -531,12 +654,33 @@ export function AutonomousOperationsView({ showToast }: AutonomousOperationsView
                     Arraste aqui o PDF do cliente, o `docx` da reunião, um `.txt` exportado ou um arquivo Markdown.
                   </p>
                 </div>
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-5 py-3 text-[11px] font-black uppercase tracking-[0.24em] text-slate-700 transition-all hover:border-blue-300 hover:text-blue-600"
-                >
-                  Selecionar arquivo
-                </button>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <button
+                    onClick={handleDriveImport}
+                    disabled={isDriveLoading}
+                    className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-5 py-3 text-[11px] font-black uppercase tracking-[0.24em] text-slate-700 transition-all hover:border-blue-300 hover:text-blue-600 disabled:opacity-50"
+                  >
+                    {isDriveLoading ? (
+                      <div className="h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent animate-spin" />
+                    ) : (
+                      <svg className="h-3.5 w-3.5" viewBox="0 0 87.3 78" fill="currentColor">
+                        <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3L27.5 53H0c0 1.55.4 3.1 1.2 4.5z" fill="#0066da" />
+                        <path d="M43.65 25L29.9 0c-1.35.8-2.5 1.9-3.3 3.3L1.2 48.5c-.8 1.4-1.2 2.95-1.2 4.5h27.5z" fill="#00ac47" />
+                        <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75L86.1 57.5c.8-1.4 1.2-2.95 1.2-4.5H59.8l5.85 11.25z" fill="#ea4335" />
+                        <path d="M43.65 25L57.4 0H29.9z" fill="#00832d" />
+                        <path d="M59.8 53H87.3c0-1.55-.4-3.1-1.2-4.5L60.8 3.3C60 1.9 58.85.8 57.5 0L43.75 25z" fill="#2684fc" />
+                        <path d="M43.65 53L27.5 53l-13.65 23.8c1.35.8 2.9 1.2 4.5 1.2h51.25c1.6 0 3.15-.45 4.5-1.2z" fill="#ffba00" />
+                      </svg>
+                    )}
+                    Google Drive
+                  </button>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-5 py-3 text-[11px] font-black uppercase tracking-[0.24em] text-slate-700 transition-all hover:border-blue-300 hover:text-blue-600"
+                  >
+                    Selecionar arquivo
+                  </button>
+                </div>
                 <input
                   ref={fileInputRef}
                   type="file"
