@@ -235,6 +235,28 @@ export interface IncomeRubric {
 
 
 // Health Module Types
+export type PullupPhase = 'dead_hang' | 'negative' | 'assisted' | 'full';
+
+export interface ExerciseLog {
+    id: string; // date string (YYYY-MM-DD)
+    pushups?: { done: number; goal: number };
+    pullups?: { done: number; goal: number; phase: PullupPhase };
+    walk?: { done: number }; // minutes
+}
+
+export interface ExerciseSettings {
+    pushups?: {
+        activeGoal: number;
+        floor: number;
+    };
+    pullups?: {
+        activeGoal: number;
+        phase: PullupPhase;
+        consecutiveGateMet: number; // 0, 1, or 2 — advance phase at 2
+        floor: number;
+    };
+}
+
 export interface HealthWeight {
     id: string;
     date: string;
