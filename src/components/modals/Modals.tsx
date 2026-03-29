@@ -875,8 +875,7 @@ export const DailyHabitsModal = ({
           {[
             { id: 'noSugar', label: 'Sem Açúcar', color: 'rose' },
             { id: 'noAlcohol', label: 'Sem Ãlcool', color: 'purple' },
-            { id: 'noSnacks', label: 'Sem Lanches/Delivery', color: 'orange' },
-            { id: 'workout', label: 'Treino do Dia', color: 'emerald' },
+            { id: 'noSnacks', label: 'Sem Lanches/Delivery', color: 'orange' },
             { id: 'eatUntil18', label: 'Comer até as 18h', color: 'blue' },
             { id: 'eatSlowly', label: 'Comer Devagar', color: 'indigo' }
           ].map((habit) => {

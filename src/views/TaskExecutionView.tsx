@@ -46,12 +46,6 @@ interface TaskExecutionViewProps {
   onMarkAsRead: (id: string) => void;
   onDismiss: (id: string) => void;
   onCreateAction: () => void;
-  isGlobalTimerRunning: boolean;
-  globalTimerSeconds: number;
-  globalPomodoroMode: 'focus' | 'break';
-  onToggleGlobalTimer: () => void;
-  onResetGlobalTimer: () => void;
-  onSkipGlobalPhase: () => void;
 }
 
 type MobileTab = 'mapa' | 'diario' | 'copiloto';
@@ -79,12 +73,6 @@ export const TaskExecutionView = ({
   onMarkAsRead,
   onDismiss,
   onCreateAction,
-  isGlobalTimerRunning: isTimerRunning,
-  globalTimerSeconds: seconds,
-  globalPomodoroMode: pomodoroMode,
-  onToggleGlobalTimer: handleToggleTimer,
-  onResetGlobalTimer: handleResetTimer,
-  onSkipGlobalPhase: handleSkipPhase
 }: TaskExecutionViewProps) => {
 
   // ─── Derived Data ─────────────────────────────────────────────
@@ -167,8 +155,8 @@ export const TaskExecutionView = ({
   const audioChunksRef = useRef<Blob[]>([]);
   const diaryEndRef = useRef<HTMLDivElement>(null);
 
-  const isBreakActive = appSettings.pomodoro?.enabled && pomodoroMode === 'break' && isTimerRunning;
-  const isDark = isTimerRunning;
+  const isBreakActive = false;
+  const isDark = false;
 
   const progressPercent = useMemo(() => {
     const items = currentTaskData.plano_acao || [];
@@ -176,15 +164,6 @@ export const TaskExecutionView = ({
     const done = items.filter(i => i.completed).length;
     return Math.round((done / items.length) * 100);
   }, [currentTaskData.plano_acao]);
-
-  // ─── Timer Formatter ──────────────────────────────────────────
-  const formatTimer = (s: number) => {
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = s % 60;
-    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-    return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-  };
 
   // ─── Checklist Toggle (with auto-diary entry) ─────────────────
   const handleToggleChecklistItem = (itemId: string) => {
@@ -722,18 +701,6 @@ export const TaskExecutionView = ({
             <option value="concluído">Concluído</option>
           </select>
 
-          {/* Timer (if active) */}
-          {(isTimerRunning || seconds > 0) && (
-            <div className={`order-4 hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border shrink-0 ${isTimerRunning ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' : isDark ? 'bg-white/5 border-white/10 text-white/40' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
-              <span className="text-[9px] font-black uppercase tracking-widest opacity-60">{pomodoroMode === 'focus' ? 'Foco' : 'Pausa'}</span>
-              <span className="text-sm font-black tabular-nums">{formatTimer(seconds)}</span>
-              <button onClick={handleToggleTimer} className={`p-1 rounded-lg ${isTimerRunning ? 'bg-rose-500 text-white' : 'bg-emerald-500 text-white'}`}>
-                {isTimerRunning
-                  ? <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
-                  : <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>}
-              </button>
-            </div>
-          )}
         </div>
 
         {/* Row 2: Progress bar */}
@@ -1079,7 +1046,7 @@ export const TaskExecutionView = ({
               handleFileUploadInput={handleFileUploadInput}
               setModalConfig={setModalConfig}
               applyFormatting={() => {}}
-              isTimerRunning={isTimerRunning}
+              isTimerRunning={false}
               diaryEndRef={diaryEndRef}
               handleDiaryScroll={() => {}}
               handleEditDiaryEntry={(index) => {
