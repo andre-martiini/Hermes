@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { HealthWeight, DailyHabits, HealthSettings, formatDate, formatDateLocalISO, HealthExam, PoolItem } from './types';
+import { HealthWeight, DailyHabits, HealthSettings, ExerciseLog, ExerciseSettings, PullupPhase, formatDate, formatDateLocalISO, HealthExam, PoolItem } from './types';
 
 interface HealthViewProps {
     weights: HealthWeight[];
@@ -9,6 +9,9 @@ interface HealthViewProps {
     onAddWeight: (weight: number, date: string) => void;
     onDeleteWeight: (id: string) => void;
     onUpdateHabits: (date: string, habits: Partial<DailyHabits>) => void;
+    exerciseLogs: ExerciseLog[];
+    exerciseSettings: ExerciseSettings;
+    onSaveExerciseLog: (date: string, data: Partial<Pick<ExerciseLog, 'pushups' | 'pullups' | 'walk'>>) => Promise<void>;
     exams: HealthExam[];
     onAddExam: (exam: Omit<HealthExam, 'id' | 'data_criacao' | 'pool_dados'>, files: File[]) => void;
     onDeleteExam: (id: string) => void;
@@ -116,6 +119,348 @@ const HabitHeatmap = ({ habits, selectedDate, onSelectDate }: { habits: DailyHab
                 })}
             </div>
         </HealthSection>
+    );
+};
+
+const PULLUP_PHASE_LABELS: Record<PullupPhase, { name: string; metric: string; gate: string; tip: string }> = {
+    dead_hang: { name: 'Fase 1 — Barra Parada', metric: 'segundos pendurado', gate: 'Meta de avanço: 30s contínuos (2 sessões)', tip: 'Segure-se na barra com os braços estendidos. Foco no grip.' },
+    negative: { name: 'Fase 2 — Negativas', metric: 'repetições', gate: 'Meta de avanço: 5 negativas (2 sessões)', tip: 'Suba com auxílio e desça bem devagar (~5s). Foco no controle.' },
+    assisted: { name: 'Fase 3 — Barra Assistida', metric: 'repetições', gate: 'Meta de avanço: 8 repetições (2 sessões)', tip: 'Use faixa elástica na barra para reduzir o peso corporal.' },
+    full: { name: 'Fase 4 — Barra Completa', metric: 'repetições', gate: '', tip: 'Puxada completa do zero até o queixo acima da barra.' },
+};
+
+interface ProtocolStep {
+    label: string;
+    detail?: string;
+}
+
+function getProtocol(
+    exercise: 'pushups' | 'pullups' | 'walk',
+    goal: number,
+    phase?: PullupPhase
+): ProtocolStep[] {
+    if (exercise === 'walk') {
+        return [
+            { label: '5 min aquecimento', detail: 'Caminhada leve para preparar as articulações' },
+            { label: 'Ritmo constante', detail: 'Mantenha um passo que permita conversar' },
+            { label: 'Hidrate a cada 30 min', detail: 'Tome pelo menos um gole de água' },
+            { label: '5 min desaquecimento', detail: 'Reduza o ritmo gradualmente nos últimos 5 min' },
+        ];
+    }
+
+    if (exercise === 'pullups') {
+        const ph = phase ?? 'dead_hang';
+        if (ph === 'dead_hang') {
+            const targetSec = Math.max(5, Math.round(goal * 0.7));
+            const sets = 3;
+            return [
+                { label: `${sets} séries de ${targetSec}s pendurado`, detail: 'Braços estendidos, grip firme, ombros ativos' },
+                { label: '90s de descanso entre séries', detail: 'Solte, respire fundo, aguarde' },
+                { label: 'Se aguentar mais, ótimo!', detail: 'Registre o total do melhor set' },
+            ];
+        }
+        if (ph === 'negative') {
+            return [
+                { label: `${goal} negativas no total`, detail: 'Suba com auxílio (banco ou impulso), desça em ~5s' },
+                { label: 'Desça controlado — 5 a 8 segundos', detail: 'Sinta a tensão nos dorsais durante a descida' },
+                { label: '2 min de descanso entre repetições', detail: 'Recupere bem antes da próxima' },
+            ];
+        }
+        if (ph === 'assisted') {
+            const sets = 3;
+            const repsPerSet = Math.ceil(goal / sets);
+            return [
+                { label: `${sets} séries de ${repsPerSet} repetições`, detail: 'Use faixa elástica para reduzir o peso' },
+                { label: '2 min de descanso entre séries', detail: 'Aguarde antes de iniciar a próxima série' },
+                { label: 'Movimento completo', detail: 'Braços estendidos embaixo, queixo acima da barra em cima' },
+            ];
+        }
+        // full
+        const sets = 3;
+        const repsPerSet = Math.ceil(goal * 0.6);
+        return [
+            { label: `${sets} séries de ${repsPerSet} repetições`, detail: 'Puxada completa, sem embalo' },
+            { label: '2 min de descanso entre séries', detail: 'Respire fundo e relaxe a musculatura' },
+            { label: 'Controlado na descida', detail: '2–3 segundos para descer após o topo' },
+        ];
+    }
+
+    // pushups
+    if (goal <= 10) {
+        const sets = 3;
+        const reps = Math.ceil(goal * 0.6);
+        return [
+            { label: `${sets} séries de ${reps} repetições`, detail: 'Corpo reto, desça até o peito quase tocar o chão' },
+            { label: '60s de descanso entre séries', detail: 'Descanse e respire antes de continuar' },
+            { label: 'Última série: força máxima', detail: 'Faça o máximo que conseguir com boa forma' },
+        ];
+    }
+    if (goal <= 20) {
+        const sets = 3;
+        const reps = Math.ceil(goal * 0.6);
+        return [
+            { label: `${sets} séries de ${reps} repetições`, detail: 'Ritmo constante, sem prender a respiração' },
+            { label: '90s de descanso entre séries', detail: 'Levante-se e caminhe levemente' },
+            { label: 'Última série: força máxima', detail: 'Tente ir além das repetições planejadas' },
+        ];
+    }
+    // goal > 20
+    const sets = 4;
+    const reps = Math.ceil(goal * 0.5);
+    return [
+        { label: `${sets} séries de ${reps} repetições`, detail: 'Mantenha tensão no core durante todo o movimento' },
+        { label: '90s de descanso entre séries', detail: 'Respire e movimente os braços levemente' },
+        { label: 'Série final: máximo esforço', detail: 'Vá até a falha com boa técnica' },
+    ];
+}
+
+const ProtocolPanel = ({ steps, accentClass }: { steps: ProtocolStep[]; accentClass: string }) => {
+    const [open, setOpen] = useState(false);
+    return (
+        <div className="mt-1">
+            <button
+                onClick={() => setOpen(o => !o)}
+                className={`flex items-center gap-1 text-[9px] font-black uppercase tracking-widest ${accentClass} opacity-70 hover:opacity-100 transition-opacity`}
+            >
+                <svg className={`w-2.5 h-2.5 transition-transform ${open ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" />
+                </svg>
+                Como treinar
+            </button>
+            {open && (
+                <ol className="mt-2 space-y-1.5 pl-1">
+                    {steps.map((step, i) => (
+                        <li key={i} className="flex gap-2">
+                            <span className={`text-[9px] font-black ${accentClass} opacity-60 mt-0.5 shrink-0`}>{i + 1}.</span>
+                            <div>
+                                <span className="text-[9px] font-black text-slate-700">{step.label}</span>
+                                {step.detail && (
+                                    <span className="text-[9px] text-slate-400 ml-1">— {step.detail}</span>
+                                )}
+                            </div>
+                        </li>
+                    ))}
+                </ol>
+            )}
+        </div>
+    );
+};
+
+const ExerciseGoalsSection = ({
+    exerciseLogs,
+    exerciseSettings,
+    onSaveExerciseLog,
+    selectedDate,
+}: {
+    exerciseLogs: ExerciseLog[];
+    exerciseSettings: ExerciseSettings;
+    onSaveExerciseLog: (date: string, data: Partial<Pick<ExerciseLog, 'pushups' | 'pullups' | 'walk'>>) => Promise<void>;
+    selectedDate: string;
+}) => {
+    const todayLog = exerciseLogs.find(l => l.id === selectedDate);
+
+    const [pushupsInput, setPushupsInput] = useState('');
+    const [pullupsInput, setPullupsInput] = useState('');
+    const [walkInput, setWalkInput] = useState('');
+    const [saving, setSaving] = useState(false);
+
+    const sortedLogs = useMemo(() =>
+        [...exerciseLogs].sort((a, b) => b.id.localeCompare(a.id)),
+        [exerciseLogs]
+    );
+    const recentPushups = sortedLogs.filter(l => l.pushups !== undefined).slice(0, 7);
+    const recentPullups = sortedLogs.filter(l => l.pullups !== undefined).slice(0, 7);
+    const recentWalks = sortedLogs.filter(l => l.walk !== undefined).slice(0, 7);
+
+    const pushupsGoal = exerciseSettings.pushups?.activeGoal;
+    const pullupPhase: PullupPhase = exerciseSettings.pullups?.phase ?? 'dead_hang';
+    const pullupsGoal = exerciseSettings.pullups?.activeGoal;
+    const pullupPhaseInfo = PULLUP_PHASE_LABELS[pullupPhase];
+
+    const formatWalkDisplay = (minutes: number) => {
+        const h = Math.floor(minutes / 60);
+        const m = minutes % 60;
+        return h > 0 ? `${h}h${m > 0 ? String(m).padStart(2, '0') : ''}` : `${m}min`;
+    };
+
+    const handleSave = async () => {
+        const data: Partial<Pick<ExerciseLog, 'pushups' | 'pullups' | 'walk'>> = {};
+        if (pushupsInput) {
+            const done = parseInt(pushupsInput);
+            data.pushups = { done, goal: pushupsGoal ?? done };
+        }
+        if (pullupsInput) {
+            const done = parseInt(pullupsInput);
+            data.pullups = { done, goal: pullupsGoal ?? done, phase: pullupPhase };
+        }
+        if (walkInput) {
+            data.walk = { done: parseInt(walkInput) };
+        }
+        if (Object.keys(data).length === 0) return;
+        setSaving(true);
+        try {
+            await onSaveExerciseLog(selectedDate, data);
+            setPushupsInput('');
+            setPullupsInput('');
+            setWalkInput('');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const MiniHistory = ({ sessions, renderDot }: { sessions: ExerciseLog[]; renderDot: (log: ExerciseLog) => React.ReactNode }) => (
+        <div className="flex gap-1.5 mt-3">
+            {sessions.length === 0 ? (
+                <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest italic">sem histórico</span>
+            ) : sessions.map(log => (
+                <div key={log.id} title={log.id}>{renderDot(log)}</div>
+            ))}
+        </div>
+    );
+
+    return (
+        <div>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">
+                Registre após os exercícios — metas se ajustam automaticamente
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+
+                {/* Flexões no chão */}
+                <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-5 flex flex-col gap-3">
+                    <div>
+                        <span className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">Flexões no Chão</span>
+                        <div className="flex items-baseline gap-1 mt-1">
+                            {pushupsGoal ? (
+                                <>
+                                    <span className="text-3xl font-black text-slate-900">{pushupsGoal}</span>
+                                    <span className="text-xs font-bold text-slate-400">reps (meta)</span>
+                                </>
+                            ) : (
+                                <span className="text-sm font-black text-slate-400">Primeiro registro = baseline</span>
+                            )}
+                        </div>
+                        {todayLog?.pushups && (
+                            <div className={`mt-1 text-[10px] font-black uppercase ${todayLog.pushups.done >= todayLog.pushups.goal ? 'text-emerald-600' : 'text-amber-500'}`}>
+                                Hoje: {todayLog.pushups.done} reps {todayLog.pushups.done >= todayLog.pushups.goal ? '✓' : ''}
+                            </div>
+                        )}
+                        <ProtocolPanel steps={getProtocol('pushups', pushupsGoal ?? 10)} accentClass="text-emerald-600" />
+                    </div>
+                    <div className="flex gap-2">
+                        <input
+                            type="number"
+                            min="1"
+                            placeholder="Reps feitas"
+                            value={pushupsInput}
+                            onChange={e => setPushupsInput(e.target.value)}
+                            className="flex-1 bg-white border border-emerald-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-emerald-400"
+                        />
+                    </div>
+                    <MiniHistory sessions={recentPushups} renderDot={log => {
+                        const hit = log.pushups!.done >= log.pushups!.goal;
+                        return <div className={`w-4 h-4 rounded-md ${hit ? 'bg-emerald-500' : 'bg-rose-300'}`} title={`${log.id}: ${log.pushups!.done}/${log.pushups!.goal}`} />;
+                    }} />
+                </div>
+
+                {/* Barra */}
+                <div className="bg-violet-50 border border-violet-100 rounded-2xl p-5 flex flex-col gap-3">
+                    <div>
+                        <span className="text-[9px] font-black text-violet-600 uppercase tracking-widest">Barra</span>
+                        <div className="flex items-baseline gap-1 mt-1">
+                            {pullupsGoal ? (
+                                <>
+                                    <span className="text-3xl font-black text-slate-900">{pullupsGoal}</span>
+                                    <span className="text-xs font-bold text-slate-400">{pullupPhaseInfo.metric} (meta)</span>
+                                </>
+                            ) : (
+                                <span className="text-sm font-black text-slate-400">Primeiro registro = baseline</span>
+                            )}
+                        </div>
+                        <div className="mt-1 text-[9px] font-black text-violet-500 uppercase tracking-widest">{pullupPhaseInfo.name}</div>
+                        {todayLog?.pullups && (
+                            <div className={`mt-1 text-[10px] font-black uppercase ${todayLog.pullups.done >= todayLog.pullups.goal ? 'text-emerald-600' : 'text-amber-500'}`}>
+                                Hoje: {todayLog.pullups.done} {pullupPhaseInfo.metric} {todayLog.pullups.done >= todayLog.pullups.goal ? '✓' : ''}
+                            </div>
+                        )}
+                        <p className="text-[9px] text-slate-400 mt-1 italic leading-tight">{pullupPhaseInfo.tip}</p>
+                        {pullupPhaseInfo.gate && (
+                            <p className="text-[9px] font-black text-violet-400 mt-1 uppercase tracking-wider">{pullupPhaseInfo.gate}</p>
+                        )}
+                        <ProtocolPanel steps={getProtocol('pullups', pullupsGoal ?? 10, pullupPhase)} accentClass="text-violet-600" />
+                    </div>
+                    <div className="flex gap-2">
+                        <input
+                            type="number"
+                            min="1"
+                            placeholder={pullupPhase === 'dead_hang' ? 'Segundos' : 'Reps feitas'}
+                            value={pullupsInput}
+                            onChange={e => setPullupsInput(e.target.value)}
+                            className="flex-1 bg-white border border-violet-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-violet-400"
+                        />
+                    </div>
+                    <MiniHistory sessions={recentPullups} renderDot={log => {
+                        const hit = log.pullups!.done >= log.pullups!.goal;
+                        return <div className={`w-4 h-4 rounded-md ${hit ? 'bg-violet-500' : 'bg-rose-300'}`} title={`${log.id}: ${log.pullups!.done}/${log.pullups!.goal}`} />;
+                    }} />
+                </div>
+
+                {/* Caminhada */}
+                <div className="bg-sky-50 border border-sky-100 rounded-2xl p-5 flex flex-col gap-3">
+                    <div>
+                        <span className="text-[9px] font-black text-sky-600 uppercase tracking-widest">Caminhada</span>
+                        <div className="flex items-baseline gap-1 mt-1">
+                            <span className="text-3xl font-black text-slate-900">1h–2h</span>
+                        </div>
+                        <div className="text-[9px] font-black text-slate-400 uppercase mt-1">Meta mínima: 1h — Ideal: 2h</div>
+                        <ProtocolPanel steps={getProtocol('walk', 60)} accentClass="text-sky-600" />
+                        {todayLog?.walk && (() => {
+                            const done = todayLog.walk!.done;
+                            const pct = Math.min(100, Math.round(((done - 60) / 60) * 100));
+                            const metMin = done >= 60;
+                            const metIdeal = done >= 120;
+                            return (
+                                <div className="mt-2">
+                                    <div className={`text-[10px] font-black uppercase mb-1 ${metIdeal ? 'text-emerald-600' : metMin ? 'text-sky-600' : 'text-amber-500'}`}>
+                                        Hoje: {formatWalkDisplay(done)} {metIdeal ? '— Meta ideal ✓' : metMin ? '— Mínimo ✓' : '— Abaixo do mínimo'}
+                                    </div>
+                                    {metMin && !metIdeal && (
+                                        <div className="w-full bg-sky-100 rounded-full h-1.5">
+                                            <div className="bg-sky-500 h-1.5 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })()}
+                    </div>
+                    <div className="flex gap-2">
+                        <input
+                            type="number"
+                            min="1"
+                            placeholder="Minutos caminhados"
+                            value={walkInput}
+                            onChange={e => setWalkInput(e.target.value)}
+                            className="flex-1 bg-white border border-sky-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-sky-400"
+                        />
+                    </div>
+                    <MiniHistory sessions={recentWalks} renderDot={log => {
+                        const done = log.walk!.done;
+                        const color = done >= 120 ? 'bg-emerald-500' : done >= 60 ? 'bg-sky-400' : 'bg-rose-300';
+                        return <div className={`w-4 h-4 rounded-md ${color}`} title={`${log.id}: ${formatWalkDisplay(done)}`} />;
+                    }} />
+                </div>
+            </div>
+
+            <div className="flex justify-end">
+                <button
+                    onClick={handleSave}
+                    disabled={saving || (!pushupsInput && !pullupsInput && !walkInput)}
+                    className="bg-violet-500 text-white px-8 py-3 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-violet-600 transition-all shadow-lg shadow-violet-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                    {saving ? 'Salvando...' : 'Registrar Exercícios'}
+                </button>
+            </div>
+        </div>
     );
 };
 
@@ -339,6 +684,9 @@ const HealthView: React.FC<HealthViewProps> = ({
     onAddWeight,
     onDeleteWeight,
     onUpdateHabits,
+    exerciseLogs,
+    exerciseSettings,
+    onSaveExerciseLog,
     exams,
     onAddExam,
     onDeleteExam,
@@ -669,62 +1017,69 @@ const HealthView: React.FC<HealthViewProps> = ({
             {/* Habit Consistency Heatmap */}
             <HabitHeatmap habits={dailyHabits} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 md:gap-8">
-                {/* Daily Habits */}
-                <div className="lg:col-span-12 flex flex-col">
-                    <HealthSection title={selectedDate === todayStr ? "Hábitos de Hoje" : `Hábitos do dia ${selectedDate.split('-').reverse().join('/')}`} iconColor="bg-amber-500">
-                        <div className="space-y-4">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1 mb-4">
-                                {selectedDate === todayStr ? "Consistência é o segredo" : "Editando registros retroativos"}
-                            </p>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                {[
-                                    { id: 'noSugar', label: 'Sem Açúcar', color: 'rose' },
-                                    { id: 'noAlcohol', label: 'Sem Álcool', color: 'purple' },
-                                    { id: 'noSnacks', label: 'Sem Lanches/Delivery', color: 'orange' },
-                                    { id: 'workout', label: 'Treino do Dia', color: 'emerald' },
-                                    { id: 'eatUntil18', label: 'Comer até as 18h', color: 'blue' },
-                                    { id: 'eatSlowly', label: 'Comer Devagar', color: 'indigo' }
-                                ].map((habit) => {
-                                    const colorMap: Record<string, { bg: string, border: string, text: string, dot: string }> = {
-                                        rose: { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', dot: 'bg-rose-500' },
-                                        purple: { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700', dot: 'bg-purple-500' },
-                                        orange: { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', dot: 'bg-orange-500' },
-                                        emerald: { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', dot: 'bg-emerald-500' },
-                                        blue: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', dot: 'bg-blue-500' },
-                                        indigo: { bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700', dot: 'bg-indigo-500' }
-                                    };
-                                    const colors = colorMap[habit.color] || colorMap.rose;
-                                    const isActive = !!currentHabits[habit.id as keyof DailyHabits];
+            <HealthSection title={selectedDate === todayStr ? "Hábitos de Hoje" : `Hábitos do dia ${selectedDate.split('-').reverse().join('/')}`} iconColor="bg-amber-500">
+                <div className="space-y-8">
+                    {/* Habit toggles (sem workout) */}
+                    <div>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">
+                            {selectedDate === todayStr ? "Consistência é o segredo" : "Editando registros retroativos"}
+                        </p>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                            {[
+                                { id: 'noSugar', label: 'Sem Açúcar', color: 'rose' },
+                                { id: 'noAlcohol', label: 'Sem Álcool', color: 'purple' },
+                                { id: 'noSnacks', label: 'Sem Lanches/Delivery', color: 'orange' },
+                                { id: 'eatUntil18', label: 'Comer até as 18h', color: 'blue' },
+                                { id: 'eatSlowly', label: 'Comer Devagar', color: 'indigo' }
+                            ].map((habit) => {
+                                const colorMap: Record<string, { bg: string, border: string, text: string, dot: string }> = {
+                                    rose: { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', dot: 'bg-rose-500' },
+                                    purple: { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700', dot: 'bg-purple-500' },
+                                    orange: { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', dot: 'bg-orange-500' },
+                                    blue: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', dot: 'bg-blue-500' },
+                                    indigo: { bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700', dot: 'bg-indigo-500' }
+                                };
+                                const colors = colorMap[habit.color] || colorMap.rose;
+                                const isActive = !!currentHabits[habit.id as keyof DailyHabits];
 
-                                    return (
-                                        <button
-                                            key={habit.id}
-                                            onClick={() => handleHabitToggle(habit.id as keyof DailyHabits)}
-                                            className={`w-full flex items-center justify-between p-4 rounded-lg md:rounded-2xl border-2 transition-all duration-300 ${isActive
-                                                ? `${colors.bg} ${colors.border} shadow-sm`
-                                                : 'bg-white border-slate-100 hover:border-slate-200'
-                                                }`}
-                                        >
-                                            <span className={`text-sm font-bold ${isActive ? colors.text : 'text-slate-600'}`}>
-                                                {habit.label}
-                                            </span>
-                                            <div className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${isActive
-                                                ? `${colors.dot} text-white scale-110`
-                                                : 'border-2 border-slate-200'
-                                                }`}>
-                                                {isActive && (
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>
-                                                )}
-                                            </div>
-                                        </button>
-                                    );
-                                })}
-                            </div>
+                                return (
+                                    <button
+                                        key={habit.id}
+                                        onClick={() => handleHabitToggle(habit.id as keyof DailyHabits)}
+                                        className={`w-full flex items-center justify-between p-4 rounded-lg md:rounded-2xl border-2 transition-all duration-300 ${isActive
+                                            ? `${colors.bg} ${colors.border} shadow-sm`
+                                            : 'bg-white border-slate-100 hover:border-slate-200'
+                                            }`}
+                                    >
+                                        <span className={`text-sm font-bold ${isActive ? colors.text : 'text-slate-600'}`}>
+                                            {habit.label}
+                                        </span>
+                                        <div className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${isActive
+                                            ? `${colors.dot} text-white scale-110`
+                                            : 'border-2 border-slate-200'
+                                            }`}>
+                                            {isActive && (
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>
+                                            )}
+                                        </div>
+                                    </button>
+                                );
+                            })}
                         </div>
-                    </HealthSection>
+                    </div>
+
+                    {/* Divisor */}
+                    <div className="border-t border-slate-100 pt-6">
+                        <p className="text-[10px] font-black text-violet-500 uppercase tracking-widest mb-4">Metas Físicas</p>
+                        <ExerciseGoalsSection
+                            exerciseLogs={exerciseLogs}
+                            exerciseSettings={exerciseSettings}
+                            onSaveExerciseLog={onSaveExerciseLog}
+                            selectedDate={selectedDate}
+                        />
+                    </div>
                 </div>
-            </div>
+            </HealthSection>
             {/* Exams and Consultations Section */}
             <div className="flex flex-col gap-0 md:gap-8">
                 <HealthSection title="Exames e Consultas" iconColor="bg-sky-500">
