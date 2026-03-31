@@ -7,7 +7,7 @@ import {
 } from '../../types';
 import { normalizeStatus } from '../utils/helpers';
 import { buildDiaryRichNote, ensureHttpUrl, getRenamedFileName, parseDiaryRichNote } from '../utils/diaryEntries';
-import { AutoExpandingTextarea, NotificationCenter } from '../components/ui/UIComponents';
+import { NotificationCenter } from '../components/ui/UIComponents';
 import { db, functions } from '../../firebase';
 import { httpsCallable } from 'firebase/functions';
 import { setDoc, doc } from 'firebase/firestore';
@@ -1458,7 +1458,7 @@ export const TaskExecutionView = ({
       ══════════════════════════════════════════════════════════ */}
       {modalConfig.isOpen && (
         <div className="fixed inset-0 z-[300] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className={`w-full max-w-md p-6 rounded-3xl shadow-2xl ${isDark ? 'bg-[#1A1A2E] text-white border border-white/10' : 'bg-white text-slate-900'}`}>
+          <div className={`w-full ${modalConfig.type === 'edit_diary' ? 'max-w-4xl max-h-[90vh]' : 'max-w-md'} p-6 rounded-3xl shadow-2xl overflow-hidden ${isDark ? 'bg-[#1A1A2E] text-white border border-white/10' : 'bg-white text-slate-900'}`}>
             <h3 className="text-base font-black mb-4 tracking-tighter">
               {modalConfig.type === 'confirm_delete' ? 'Excluir Registro'
                 : modalConfig.type === 'reminder' ? 'Agendar Lembrete'
@@ -1469,8 +1469,11 @@ export const TaskExecutionView = ({
             </h3>
 
             {modalConfig.type === 'edit_diary' && (
-              <AutoExpandingTextarea value={modalInputValue} onChange={e => setModalInputValue(e.target.value)}
-                className={`w-full p-4 rounded-xl border outline-none min-h-[120px] ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`} />
+              <textarea
+                value={modalInputValue}
+                onChange={e => setModalInputValue(e.target.value)}
+                className={`w-full p-4 rounded-xl border outline-none min-h-[45vh] max-h-[65vh] overflow-y-auto resize-y ${isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
+              />
             )}
             {(modalConfig.type === 'link') && (
               <div className="flex flex-col gap-3">
