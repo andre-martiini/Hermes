@@ -1,5 +1,6 @@
 import time
 import datetime
+import calendar
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
 from selenium.webdriver.support import expected_conditions as EC
@@ -20,7 +21,13 @@ def preencher_ponto_eletronico():
         hoje = datetime.date.today()
         primeiro_dia_mes_atual = hoje.replace(day=1)
         ultimo_dia_mes_anterior = primeiro_dia_mes_atual - datetime.timedelta(days=1)
-        mes_anterior = ultimo_dia_mes_anterior.month
+
+        ultimo_dia_mes_atual = calendar.monthrange(hoje.year, hoje.month)[1]
+        if hoje.day == ultimo_dia_mes_atual:
+            mes_anterior = hoje.month
+            print(f"Último dia do mês detectado ({hoje}). Registrando ponto do mês atual.")
+        else:
+            mes_anterior = ultimo_dia_mes_anterior.month
 
         select_mes_el = espera.until(EC.presence_of_element_located((
             By.XPATH, "//select[contains(@id, 'mes') or contains(@name, 'mes') or contains(@id, 'Mes') or contains(@name, 'Mes')]"

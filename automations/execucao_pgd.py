@@ -114,63 +114,64 @@ def preencher_execucao_pgd(dados_pgd):
                         time.sleep(2)
 
                         # --- PREENCHIMENTO DO FORMULÁRIO ---
-                        
-                        # 1. Descrição
-                        campo_desc = espera.until(EC.element_to_be_clickable((By.XPATH, "//textarea | //input[contains(@class, 'form-control')]")))
-                        campo_desc.click()
-                        actions = ActionChains(driver)
-                        actions.key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).send_keys(Keys.BACKSPACE).perform()
-                        campo_desc.send_keys(reg.get('descricao_atividade', ''))
 
-                        # 2. Expansão da Seta (Datas)
-                        driver.find_element(By.XPATH, "//i[contains(@class, 'bi-arrow-down-circle')]").click()
-                        time.sleep(1.2)
+                        # 1. Descrição — único textarea da página quando o formulário está aberto
+                        campo_desc = WebDriverWait(driver, 15).until(
+                            lambda d: d.execute_script("return document.querySelector('textarea');")
+                        )
+                        driver.execute_script("arguments[0].focus();", campo_desc)
+                        time.sleep(0.3)
+                        driver.execute_script("arguments[0].value = '';", campo_desc)
+                        campo_desc.send_keys(reg.get('descricao_atividade', ''))
+                        campo_desc.send_keys(Keys.TAB)  # dispara o blur/change do Angular
+                        time.sleep(0.3)
+
+                        # 2. Expansão da Seta (Datas) — clica só se ainda estiver recolhido (down = recolhido)
+                        try:
+                            arrow_down = driver.find_element(By.XPATH, "//i[contains(@class, 'bi-arrow-down-circle')]")
+                            driver.execute_script("arguments[0].click();", arrow_down)
+                            time.sleep(1.2)
+                        except:
+                            pass  # Já expandido (seta virou bi-arrow-up-circle) ou não presente
 
                         # Regra André: Se mesmo dia, termina no dia seguinte
                         ini_dt = datetime.fromisoformat(reg.get('data_inicio').replace('Z', ''))
                         fim_dt = datetime.fromisoformat(reg.get('data_fim').replace('Z', ''))
                         if ini_dt.date() == fim_dt.date():
                             fim_dt = fim_dt + timedelta(days=1)
-                        
-                        data_ini_str = ini_dt.strftime("%d%m%Y")
-                        data_fim_str = fim_dt.strftime("%d%m%Y")
 
-                        # 3. Digitação com Estratégia das 5 Setas
-                        campo_data_ini = driver.find_element(By.ID, "ID_homeexecucao_datainicio_date")
-                        driver.execute_script("arguments[0].click();", campo_data_ini) # Clique via JS para garantir foco
+                        data_ini_iso = ini_dt.strftime("%Y-%m-%dT%H:%M")
+                        data_fim_iso = fim_dt.strftime("%Y-%m-%dT%H:%M")
+
+                        # 3. Injeta datas via JS — busca por type em vez de ID (IDs não são acessíveis)
+                        js_set_value = """
+                            var el = arguments[0];
+                            var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                            setter.call(el, arguments[1]);
+                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                        """
+                        campos_data = WebDriverWait(driver, 10).until(
+                            lambda d: d.find_elements(By.XPATH, "//input[@type='datetime-local']") or None
+                        )
+                        driver.execute_script(js_set_value, campos_data[0], data_ini_iso)
+                        time.sleep(0.3)
+                        driver.execute_script(js_set_value, campos_data[1], data_fim_iso)
                         time.sleep(0.5)
-                        
-                        actions = ActionChains(driver)
-                        
-                        # Estratégia André: Bater no muro da esquerda
-                        print("  > Posicionando cursor no início...")
-                        for _ in range(7): # Aumentei para 7 para garantir
-                            actions.send_keys(Keys.LEFT).perform()
-                        
-                        # Digita Início número a número
-                        for n in data_ini_str:
-                            actions.send_keys(n).perform()
-                            time.sleep(0.05)
-                        
-                        # Navega até Fim (4 TABs)
-                        for _ in range(4): actions.send_keys(Keys.TAB).perform()
-                        time.sleep(0.2)
-                        
-                        # Digita Fim número a número
-                        for n in data_fim_str:
-                            actions.send_keys(n).perform()
-                            time.sleep(0.05)
-                        
-                        # Navega até Concluir (4 TABs) e ENTER
-                        for _ in range(4): actions.send_keys(Keys.TAB).perform()
-                        time.sleep(0.5)
-                        actions.send_keys(Keys.ENTER).perform()
-                        
-                        print(f"  > [SUCESSO] {data_ini_str} -> {data_fim_str}")
-                        
-                        # Espera Robusta: Aguarda o modal sumir da tela
-                        WebDriverWait(driver, 10).until(EC.invisibility_of_element_located((By.CLASS_NAME, "modal-content")))
-                        time.sleep(2)
+
+                        # 4. Clica no botão de salvar (check azul)
+                        btn_salvar = espera.until(EC.element_to_be_clickable((By.XPATH,
+                            "//button[contains(@class, 'btn-outline-primary') and .//i[contains(@class, 'bi-check-circle')]]"
+                        )))
+                        driver.execute_script("arguments[0].click();", btn_salvar)
+
+                        print(f"  > [SUCESSO] {data_ini_iso} -> {data_fim_iso}")
+
+                        # Aguarda o formulário fechar (textarea some da página)
+                        WebDriverWait(driver, 10).until(
+                            lambda d: not d.execute_script("return !!document.querySelector('textarea');")
+                        )
+                        time.sleep(1)
 
                         # Limpeza Final: Retrai a entrega
                         try:
@@ -180,11 +181,16 @@ def preencher_execucao_pgd(dados_pgd):
                         except: pass
 
                 except Exception as e:
-                    print(f"  > Erro no registro: {str(e)}")
-                    # Tenta fechar o modal no botão 'X' para não travar o loop
+                    print(f"  > Erro no registro [{type(e).__name__}]: {str(e)[:200]}")
+                    # Cancela o formulário aberto (botão vermelho bi-dash-circle)
                     try:
-                        driver.execute_script("document.querySelector('.modal-header .btn-close')?.click();")
-                    except: pass
+                        btn_cancelar = driver.find_element(By.XPATH,
+                            "//button[contains(@class, 'btn-outline-danger') and .//i[contains(@class, 'bi-dash-circle')]]"
+                        )
+                        driver.execute_script("arguments[0].click();", btn_cancelar)
+                        time.sleep(1)
+                    except:
+                        pass
                     time.sleep(2)
 
     except Exception as general_error:
