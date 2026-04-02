@@ -5697,7 +5697,7 @@ const App: React.FC = () => {
                       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
                     }).reduce((acc, curr) => acc + curr.amount, 0)}
                     currentMonthIncome={incomeEntries.filter(e => {
-                      return e.month === currentMonth && e.year === currentYear;
+                      return e.month === currentMonth && e.year === currentYear && e.isReceived;
                     }).reduce((acc, curr) => acc + curr.amount, 0)}
                     fixedBills={fixedBills}
                     billRubrics={billRubrics}
@@ -5710,7 +5710,25 @@ const App: React.FC = () => {
                     onUpdateIncomeRubric={async (rubric) => { await updateDoc(doc(db, 'income_rubrics', rubric.id), rubric as any); }}
                     onDeleteIncomeRubric={async (id) => { await deleteDoc(doc(db, 'income_rubrics', id)); }}
                     onAddIncomeEntry={async (entry) => { await addDoc(collection(db, 'income_entries'), { ...entry, month: currentMonth, year: currentYear, status: 'active' }); }}
-                    onUpdateIncomeEntry={async (entry) => { await updateDoc(doc(db, 'income_entries', entry.id), entry as any); }}
+                    onUpdateIncomeEntry={async (entry) => {
+                      await updateDoc(doc(db, 'income_entries', entry.id), entry as any);
+
+                      if (entry.service_id && entry.parcela_id) {
+                        const relatedService = services.find(service => service.id === entry.service_id);
+                        if (relatedService) {
+                          const updatedParcelas = (relatedService.parcelas || []).map(parcela =>
+                            parcela.id === entry.parcela_id
+                              ? { ...parcela, status: entry.isReceived ? 'pago' : 'pendente' }
+                              : parcela
+                          );
+
+                          await updateDoc(doc(db, 'servicos', relatedService.id), {
+                            parcelas: updatedParcelas,
+                            data_atualizacao: new Date().toISOString()
+                          });
+                        }
+                      }
+                    }}
                     onDeleteIncomeEntry={async (id) => { await updateDoc(doc(db, 'income_entries', id), { status: 'deleted' }); }}
                     onUpdateSettings={(newSettings) => setDoc(doc(db, 'finance_settings', 'config'), newSettings)}
                     onAddGoal={(goal) => addDoc(collection(db, 'finance_goals'), { ...goal, priority: financeGoals.length + 1 })}

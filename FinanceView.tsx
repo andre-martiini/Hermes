@@ -68,6 +68,31 @@ const FinanceSection = ({ title, children, defaultExpanded = true }: { title: st
     );
 };
 
+type SortDirection = 'asc' | 'desc';
+
+const formatCurrency = (value: number) => `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+
+const getSortIndicator = (isActive: boolean, direction: SortDirection) => {
+    if (!isActive) return '<->';
+    return direction === 'asc' ? '^' : 'v';
+};
+
+const sortByDirection = <T,>(items: T[], getValue: (item: T) => string | number | boolean, direction: SortDirection) => {
+    return [...items].sort((a, b) => {
+        const valueA = getValue(a);
+        const valueB = getValue(b);
+
+        if (typeof valueA === 'string' && typeof valueB === 'string') {
+            const comparison = valueA.localeCompare(valueB, 'pt-BR', { sensitivity: 'base' });
+            return direction === 'asc' ? comparison : -comparison;
+        }
+
+        const normalizedA = Number(valueA);
+        const normalizedB = Number(valueB);
+        return direction === 'asc' ? normalizedA - normalizedB : normalizedB - normalizedA;
+    });
+};
+
 const FinanceView = ({
     transactions,
     goals,
@@ -128,7 +153,12 @@ const FinanceView = ({
     const [editingIncomeRubric, setEditingIncomeRubric] = useState<IncomeRubric | null>(null);
     const [newIncomeRubric, setNewIncomeRubric] = useState<Partial<IncomeRubric>>({ category: 'Renda Principal' });
     const [isAddingIncome, setIsAddingIncome] = useState(false);
-    const [newIncome, setNewIncome] = useState<Partial<IncomeEntry>>({ category: 'Renda Principal' });
+    const [newIncome, setNewIncome] = useState<Partial<IncomeEntry>>({ category: 'Renda Principal', isReceived: false });
+    const [incomeSearch, setIncomeSearch] = useState('');
+    const [incomeStatusFilter, setIncomeStatusFilter] = useState<'all' | 'received' | 'pending'>('all');
+    const [incomeCategoryFilter, setIncomeCategoryFilter] = useState('all');
+    const [incomeSort, setIncomeSort] = useState<{ key: 'description' | 'category' | 'amount' | 'day' | 'status'; direction: SortDirection }>({ key: 'day', direction: 'asc' });
+    const [expandedIncomeId, setExpandedIncomeId] = useState<string | null>(null);
 
     // Category States for Settings
     const [newBillCategoryInput, setNewBillCategoryInput] = useState('');
@@ -144,6 +174,10 @@ const FinanceView = ({
     const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
     const [expandedBillId, setExpandedBillId] = useState<string | null>(null);
     const [activeBillTabs, setActiveBillTabs] = useState<Record<string, 'codigo' | 'arquivo'>>({});
+    const [billSearch, setBillSearch] = useState('');
+    const [billStatusFilter, setBillStatusFilter] = useState<'all' | 'paid' | 'unpaid'>('all');
+    const [billCategoryFilter, setBillCategoryFilter] = useState('all');
+    const [billSort, setBillSort] = useState<{ key: 'description' | 'category' | 'amount' | 'dueDay' | 'status' | 'barcode' | 'pix'; direction: SortDirection }>({ key: 'dueDay', direction: 'asc' });
 
     // NFSe Generator State
     const [isNFSeGeneratorOpen, setIsNFSeGeneratorOpen] = useState(false);
@@ -212,7 +246,7 @@ const FinanceView = ({
         const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
 
         const prevIncome = incomeEntries
-            .filter(e => e.month === prevMonth && e.year === prevYear)
+            .filter(e => e.month === prevMonth && e.year === prevYear && e.isReceived)
             .reduce((acc, curr) => acc + curr.amount, 0);
 
         const prevBills = fixedBills
@@ -226,6 +260,82 @@ const FinanceView = ({
     const currentTotalBills = fixedBills
         .filter(b => b.month === currentMonth && b.year === currentYear)
         .reduce((acc, curr) => acc + curr.amount, 0);
+    const currentMonthIncomeEntries = incomeEntries.filter(e => e.month === currentMonth && e.year === currentYear);
+    const currentMonthBills = fixedBills.filter(b => b.month === currentMonth && b.year === currentYear);
+    const pendingIncomeRubrics = incomeRubrics.filter(rubric => !currentMonthIncomeEntries.some(entry => entry.rubricId === rubric.id));
+    const pendingBillRubrics = billRubrics.filter(rubric => !currentMonthBills.some(bill => bill.rubricId === rubric.id));
+
+    const toggleIncomeSort = (key: 'description' | 'category' | 'amount' | 'day' | 'status') => {
+        setIncomeSort(current => current.key === key
+            ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+            : { key, direction: 'asc' });
+    };
+
+    const toggleBillSort = (key: 'description' | 'category' | 'amount' | 'dueDay' | 'status' | 'barcode' | 'pix') => {
+        setBillSort(current => current.key === key
+            ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+            : { key, direction: 'asc' });
+    };
+
+    let visibleIncomeEntries = currentMonthIncomeEntries.filter(entry => {
+        const matchesStatus = incomeStatusFilter === 'all'
+            || (incomeStatusFilter === 'received' && entry.isReceived)
+            || (incomeStatusFilter === 'pending' && !entry.isReceived);
+        const matchesCategory = incomeCategoryFilter === 'all' || entry.category === incomeCategoryFilter;
+        const matchesSearch = incomeSearch.trim() === '' || entry.description.toLowerCase().includes(incomeSearch.trim().toLowerCase());
+        return matchesStatus && matchesCategory && matchesSearch;
+    });
+
+    visibleIncomeEntries = sortByDirection(visibleIncomeEntries, entry => {
+        switch (incomeSort.key) {
+            case 'description': return entry.description;
+            case 'category': return entry.category || '';
+            case 'amount': return entry.amount;
+            case 'day': return entry.day;
+            case 'status': return entry.isReceived ? 1 : 0;
+        }
+    }, incomeSort.direction);
+
+    let visibleBills = currentMonthBills.filter(bill => {
+        const matchesStatus = billStatusFilter === 'all'
+            || (billStatusFilter === 'paid' && bill.isPaid)
+            || (billStatusFilter === 'unpaid' && !bill.isPaid);
+        const matchesCategory = billCategoryFilter === 'all' || bill.category === billCategoryFilter;
+        const term = billSearch.trim().toLowerCase();
+        const matchesSearch = term === ''
+            || bill.description.toLowerCase().includes(term)
+            || (bill.barcode || '').toLowerCase().includes(term)
+            || (bill.pixCode || '').toLowerCase().includes(term);
+        return matchesStatus && matchesCategory && matchesSearch;
+    });
+
+    visibleBills = sortByDirection(visibleBills, bill => {
+        switch (billSort.key) {
+            case 'description': return bill.description;
+            case 'category': return bill.category || '';
+            case 'amount': return bill.amount;
+            case 'dueDay': return bill.dueDay;
+            case 'status': return bill.isPaid ? 1 : 0;
+            case 'barcode': return bill.barcode ? 1 : 0;
+            case 'pix': return bill.pixCode ? 1 : 0;
+        }
+    }, billSort.direction);
+
+    const incomeReceivedTotal = currentMonthIncomeEntries
+        .filter(entry => entry.isReceived)
+        .reduce((acc, curr) => acc + curr.amount, 0);
+    const incomePendingTotal = currentMonthIncomeEntries
+        .filter(entry => !entry.isReceived)
+        .reduce((acc, curr) => acc + curr.amount, 0);
+    const incomeOverallTotal = currentMonthIncomeEntries.reduce((acc, curr) => acc + curr.amount, 0);
+
+    const billsPaidTotal = currentMonthBills
+        .filter(bill => bill.isPaid)
+        .reduce((acc, curr) => acc + curr.amount, 0);
+    const billsPendingTotal = currentMonthBills
+        .filter(bill => !bill.isPaid)
+        .reduce((acc, curr) => acc + curr.amount, 0);
+    const billsOverallTotal = currentMonthBills.reduce((acc, curr) => acc + curr.amount, 0);
 
     const getHealthStatus = () => {
         if (currentMonthIncome === 0) return { label: 'Aguardando Renda', color: 'text-slate-400', icon: '⏳' };
@@ -1022,14 +1132,18 @@ const FinanceView = ({
                         {/* Formulário de Registro de Recebimento */}
                         {isAddingIncome && (
                             <div className="bg-white p-6 rounded-none md:rounded-[2rem] border border-emerald-200 shadow-none md:shadow-xl space-y-4 animate-in slide-in-from-top-4">
-                                <h5 className="text-sm font-black text-emerald-900 uppercase tracking-widest">Efetivar Recebimento</h5>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    <input type="text" placeholder="Origem" className="px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium" value={newIncome.description || ''} onChange={(e) => setNewIncome({ ...newIncome, description: e.target.value })} />
+                                <h5 className="text-sm font-black text-emerald-900 uppercase tracking-widest">Registrar Ganho</h5>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    <input type="text" placeholder="Descricao" className="px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium" value={newIncome.description || ''} onChange={(e) => setNewIncome({ ...newIncome, description: e.target.value })} />
                                     <div className="flex gap-2">
                                         <span className="px-4 py-3 bg-emerald-50 rounded-xl font-bold text-emerald-600">R$</span>
-                                        <input type="number" placeholder="Valor Recebido" className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium" value={newIncome.amount || ''} onChange={(e) => setNewIncome({ ...newIncome, amount: Number(e.target.value) })} />
+                                        <input type="number" placeholder="Valor" className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium" value={newIncome.amount || ''} onChange={(e) => setNewIncome({ ...newIncome, amount: Number(e.target.value) })} />
                                     </div>
-                                    <input type="number" placeholder="Dia Recebimento" max={31} min={1} className="px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium" value={newIncome.day || ''} onChange={(e) => setNewIncome({ ...newIncome, day: Number(e.target.value) })} />
+                                    <input type="number" placeholder="Previsao de Recebimento" max={31} min={1} className="px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium" value={newIncome.day || ''} onChange={(e) => setNewIncome({ ...newIncome, day: Number(e.target.value) })} />
+                                    <label className="px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium flex items-center gap-3 text-slate-600">
+                                        <input type="checkbox" checked={Boolean(newIncome.isReceived)} onChange={(e) => setNewIncome({ ...newIncome, isReceived: e.target.checked })} className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
+                                        Ja Recebi
+                                    </label>
                                 </div>
                                 <div className="flex justify-end gap-3 pt-4">
                                     <button onClick={() => setIsAddingIncome(false)} className="px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest text-slate-500 hover:bg-slate-100">Cancelar</button>
@@ -1040,20 +1154,180 @@ const FinanceView = ({
                                                     ...newIncome as Omit<IncomeEntry, 'id'>,
                                                     month: currentMonth,
                                                     year: currentYear,
-                                                    isReceived: true
+                                                    category: newIncome.category || (settings.incomeCategories?.[0] || 'Renda Principal'),
+                                                    isReceived: Boolean(newIncome.isReceived)
                                                 });
                                                 setIsAddingIncome(false);
-                                                setNewIncome({ category: 'Renda Principal' });
+                                                setNewIncome({ category: 'Renda Principal', isReceived: false });
                                             }
                                         }}
                                         className="bg-emerald-900 text-white px-8 py-2 rounded-xl text-xs font-black uppercase tracking-widest shadow-lg hover:bg-emerald-800"
                                     >
-                                        Efetivar Recebimento
+                                        Salvar Ganho
                                     </button>
                                 </div>
                             </div>
                         )}
 
+                        {pendingIncomeRubrics.length > 0 && (
+                            <div className="mb-6 rounded-none md:rounded-[2rem] border border-emerald-900/20 bg-emerald-950 p-5 text-white shadow-none md:shadow-xl">
+                                <div className="mb-3">
+                                    <h5 className="text-sm font-black uppercase tracking-widest text-emerald-100">Fontes sem lancamento no periodo</h5>
+                                    <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-300/50">Clique em uma fonte para pre-preencher um novo ganho</p>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                    {pendingIncomeRubrics.map(rubric => (
+                                        <button
+                                            key={rubric.id}
+                                            onClick={() => {
+                                                setNewIncome({
+                                                    description: rubric.description,
+                                                    category: rubric.category,
+                                                    day: rubric.expectedDay,
+                                                    amount: rubric.defaultAmount,
+                                                    rubricId: rubric.id,
+                                                    isReceived: false
+                                                });
+                                                setIsAddingIncome(true);
+                                            }}
+                                            className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-widest transition-colors hover:bg-white/20"
+                                        >
+                                            {rubric.description}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+                            <div className="rounded-none border border-emerald-100 bg-emerald-50 p-5 shadow-none md:rounded-[1.75rem] md:shadow-sm">
+                                <div className="text-[10px] font-black uppercase tracking-widest text-emerald-700/60">Total Recebido</div>
+                                <div className="mt-2 text-2xl font-black tracking-tight text-emerald-700">{formatCurrency(incomeReceivedTotal)}</div>
+                                <div className="mt-2 text-xs font-bold text-emerald-700/70">{currentMonthIncomeEntries.filter(entry => entry.isReceived).length} item(ns) recebidos</div>
+                            </div>
+                            <div className="rounded-none border border-amber-100 bg-amber-50 p-5 shadow-none md:rounded-[1.75rem] md:shadow-sm">
+                                <div className="text-[10px] font-black uppercase tracking-widest text-amber-700/60">Total Pendente</div>
+                                <div className="mt-2 text-2xl font-black tracking-tight text-amber-700">{formatCurrency(incomePendingTotal)}</div>
+                                <div className="mt-2 text-xs font-bold text-amber-700/70">{currentMonthIncomeEntries.filter(entry => !entry.isReceived).length} item(ns) pendentes</div>
+                            </div>
+                            <div className="rounded-none border border-slate-200 bg-white p-5 shadow-none md:rounded-[1.75rem] md:shadow-sm">
+                                <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">Total Geral</div>
+                                <div className="mt-2 text-2xl font-black tracking-tight text-slate-900">{formatCurrency(incomeOverallTotal)}</div>
+                                <div className="mt-2 text-xs font-bold text-slate-500">{currentMonthIncomeEntries.length} item(ns) no periodo</div>
+                            </div>
+                        </div>
+
+                        <div className="mb-6 overflow-hidden rounded-none border border-slate-200 bg-white shadow-none md:rounded-[2rem] md:shadow-lg">
+                            <div className="border-b border-slate-200 bg-slate-50 p-4">
+                                <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
+                                    <input
+                                        type="text"
+                                        placeholder="Filtrar por descricao"
+                                        value={incomeSearch}
+                                        onChange={(e) => setIncomeSearch(e.target.value)}
+                                        className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium"
+                                    />
+                                    <select value={incomeStatusFilter} onChange={(e) => setIncomeStatusFilter(e.target.value as 'all' | 'received' | 'pending')} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium">
+                                        <option value="all">Todos os status</option>
+                                        <option value="received">Recebidos</option>
+                                        <option value="pending">Pendentes</option>
+                                    </select>
+                                    <select value={incomeCategoryFilter} onChange={(e) => setIncomeCategoryFilter(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium">
+                                        <option value="all">Todas as categorias</option>
+                                        {(settings.incomeCategories || []).map(cat => (
+                                            <option key={cat} value={cat}>{cat}</option>
+                                        ))}
+                                    </select>
+                                    <div className="flex items-center justify-center rounded-xl bg-emerald-50 px-4 py-3 text-sm font-black uppercase tracking-widest text-emerald-700">
+                                        {visibleIncomeEntries.length} registro(s)
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="overflow-x-auto">
+                                <table className="min-w-full text-sm">
+                                    <thead className="bg-slate-100 text-[10px] uppercase tracking-widest text-slate-500">
+                                        <tr>
+                                            <th className="px-4 py-3 text-left font-black">Recebido</th>
+                                            <th className="px-4 py-3 text-left font-black"><button onClick={() => toggleIncomeSort('description')} className="flex items-center gap-2">Descricao <span>{incomeSort.key === 'description' ? (incomeSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button></th>
+                                            <th className="px-4 py-3 text-left font-black"><button onClick={() => toggleIncomeSort('category')} className="flex items-center gap-2">Categoria <span>{incomeSort.key === 'category' ? (incomeSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button></th>
+                                            <th className="px-4 py-3 text-left font-black"><button onClick={() => toggleIncomeSort('day')} className="flex items-center gap-2">Previsao <span>{incomeSort.key === 'day' ? (incomeSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button></th>
+                                            <th className="px-4 py-3 text-left font-black"><button onClick={() => toggleIncomeSort('amount')} className="flex items-center gap-2">Valor <span>{incomeSort.key === 'amount' ? (incomeSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button></th>
+                                            <th className="px-4 py-3 text-left font-black"><button onClick={() => toggleIncomeSort('status')} className="flex items-center gap-2">Status <span>{incomeSort.key === 'status' ? (incomeSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span></button></th>
+                                            <th className="px-4 py-3 text-right font-black">Acoes</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 bg-white">
+                                        {visibleIncomeEntries.map(entry => {
+                                            const prevEntry = incomeEntries.find(e =>
+                                                e.description === entry.description &&
+                                                e.month === (currentMonth === 0 ? 11 : currentMonth - 1) &&
+                                                e.year === (currentMonth === 0 ? currentYear - 1 : currentYear)
+                                            );
+                                            const diff = prevEntry ? entry.amount - prevEntry.amount : 0;
+                                            const isExpanded = expandedIncomeId === entry.id;
+
+                                            return (
+                                                <React.Fragment key={entry.id}>
+                                                    <tr className={`cursor-pointer transition-colors ${isExpanded ? 'bg-emerald-50/70' : 'hover:bg-slate-50'}`} onClick={() => setExpandedIncomeId(isExpanded ? null : entry.id)}>
+                                                        <td className="px-4 py-4">
+                                                            <input type="checkbox" checked={entry.isReceived} onClick={(e) => e.stopPropagation()} onChange={() => onUpdateIncomeEntry({ ...entry, isReceived: !entry.isReceived })} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
+                                                        </td>
+                                                        <td className="px-4 py-4">
+                                                            <div className="font-bold text-slate-900">{entry.description}</div>
+                                                            {entry.rubricId && <div className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">Vinculado a rubrica</div>}
+                                                        </td>
+                                                        <td className="px-4 py-4 font-semibold text-slate-600">{entry.category || 'Renda'}</td>
+                                                        <td className="px-4 py-4 font-semibold text-slate-600">Dia {entry.day}</td>
+                                                        <td className="px-4 py-4">
+                                                            <div className="font-black text-emerald-600">{formatCurrency(entry.amount)}</div>
+                                                            {diff !== 0 && <div className={`text-[11px] font-bold ${diff > 0 ? 'text-emerald-600' : 'text-rose-500'}`}>{diff > 0 ? '↑' : '↓'} {formatCurrency(Math.abs(diff))}</div>}
+                                                        </td>
+                                                        <td className="px-4 py-4">
+                                                            <span className={`inline-flex rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${entry.isReceived ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                                {entry.isReceived ? 'Recebido' : 'Pendente'}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-4">
+                                                            <div className="flex items-center justify-end gap-2">
+                                                                <button onClick={(e) => { e.stopPropagation(); setExpandedIncomeId(isExpanded ? null : entry.id); }} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+                                                                    <svg className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                                                                </button>
+                                                                <button onClick={(e) => { e.stopPropagation(); handleTwoStepDelete(`income_entry_${entry.id}`, () => onDeleteIncomeEntry(entry.id)); }} className={`rounded-lg p-2 transition-colors ${pendingDeleteKey === `income_entry_${entry.id}` ? 'bg-rose-500 text-white' : 'text-slate-300 hover:bg-rose-50 hover:text-rose-500'}`}>
+                                                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                    {isExpanded && (
+                                                        <tr className="bg-emerald-50/40">
+                                                            <td colSpan={7} className="px-4 py-4">
+                                                                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+                                                                    <input type="text" defaultValue={entry.description} onBlur={(e) => onUpdateIncomeEntry({ ...entry, description: e.target.value })} className="rounded-xl border border-emerald-100 bg-white px-4 py-3 font-medium" />
+                                                                    <input type="number" defaultValue={entry.amount} onBlur={(e) => onUpdateIncomeEntry({ ...entry, amount: Number(e.target.value) })} className="rounded-xl border border-emerald-100 bg-white px-4 py-3 font-medium" />
+                                                                    <input type="number" min={1} max={31} defaultValue={entry.day} onBlur={(e) => onUpdateIncomeEntry({ ...entry, day: Number(e.target.value) })} className="rounded-xl border border-emerald-100 bg-white px-4 py-3 font-medium" />
+                                                                    <select defaultValue={entry.category} onBlur={(e) => onUpdateIncomeEntry({ ...entry, category: e.target.value })} className="rounded-xl border border-emerald-100 bg-white px-4 py-3 font-medium">
+                                                                        {(settings.incomeCategories || ['Renda Principal', 'Renda Extra', 'Dividendos', 'Outros']).map(cat => (
+                                                                            <option key={cat} value={cat}>{cat}</option>
+                                                                        ))}
+                                                                    </select>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    )}
+                                                </React.Fragment>
+                                            );
+                                        })}
+                                        {visibleIncomeEntries.length === 0 && (
+                                            <tr>
+                                                <td colSpan={7} className="px-4 py-12 text-center text-[10px] font-bold uppercase tracking-widest text-slate-400">Nenhuma renda encontrada com os filtros atuais</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        {false && (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             {/* Rubricas de Renda Pendentes */}
                             {incomeRubrics
@@ -1077,7 +1351,8 @@ const FinanceView = ({
                                                     category: rubric.category,
                                                     day: rubric.expectedDay,
                                                     amount: rubric.defaultAmount,
-                                                    rubricId: rubric.id
+                                                    rubricId: rubric.id,
+                                                    isReceived: false
                                                 });
                                                 setIsAddingIncome(true);
                                             }}
@@ -1111,7 +1386,10 @@ const FinanceView = ({
                                                     <div className="text-[10px] font-black text-emerald-600/50 uppercase tracking-widest mb-0.5">{entry.category || 'Renda'}</div>
                                                     <div className="text-sm font-black text-slate-800 leading-none">{entry.description}</div>
                                                     <div className="text-[10px] text-slate-400 font-bold mt-1 flex items-center gap-2">
-                                                        Recebido dia {entry.day}
+                                                        {entry.isReceived ? 'Recebido' : 'Previsto'} dia {entry.day}
+                                                        <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${entry.isReceived ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                                                            {entry.isReceived ? 'Recebido' : 'Pendente'}
+                                                        </span>
                                                         {diff !== 0 && (
                                                             <span className={`text-[8px] font-black ${diff > 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                                                                 {diff > 0 ? '↑' : '↓'} R$ {Math.abs(diff).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -1121,6 +1399,13 @@ const FinanceView = ({
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-4">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={entry.isReceived}
+                                                    onChange={() => onUpdateIncomeEntry({ ...entry, isReceived: !entry.isReceived })}
+                                                    className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                                    title={entry.isReceived ? 'Marcar como nao recebido' : 'Marcar como recebido'}
+                                                />
                                                 <div className="text-lg font-black text-emerald-600 tracking-tighter">R$ {entry.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
                                                 <button onClick={() => handleTwoStepDelete(`income_entry_${entry.id}`, () => onDeleteIncomeEntry(entry.id))} className={`p-2 rounded-lg transition-colors opacity-0 group-hover:opacity-100 ${pendingDeleteKey === `income_entry_${entry.id}` ? 'bg-rose-500 text-white opacity-100' : 'text-slate-200 hover:text-rose-400'}`}>
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
@@ -1131,6 +1416,7 @@ const FinanceView = ({
                                 })
                             }
                         </div>
+                        )}
                     </FinanceSection>
 
                     <div className="h-px bg-slate-100 w-full opacity-50" />
@@ -1351,23 +1637,16 @@ const FinanceView = ({
                             </div>
                         )}
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {/* Rubricas que ainda não têm lançamento no mês atual */}
-                            {billRubrics
-                                .filter(rubric => !fixedBills.some(bill =>
-                                    bill.rubricId === rubric.id &&
-                                    bill.month === currentMonth &&
-                                    bill.year === currentYear
-                                ))
-                                .map(rubric => (
-                                    <div key={rubric.id} className="bg-slate-800 p-6 rounded-none md:rounded-[2rem] border-2 border-dashed border-slate-700 shadow-2xl transition-all group hover:bg-slate-900 border-blue-500/30">
-                                        <div className="text-[10px] font-black uppercase tracking-widest mb-2 px-3 py-1 rounded-full w-fit bg-slate-700 text-slate-300 border border-slate-600">{rubric.category}</div>
-                                        <h5 className="text-lg font-black text-white leading-tight">{rubric.description}</h5>
-                                        <div className="mt-4 text-[10px] font-black text-slate-400 uppercase tracking-widest italic mb-4 flex items-center gap-2">
-                                            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-                                            Aguardando lançamento de {new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}
-                                        </div>
+                        {pendingBillRubrics.length > 0 && (
+                            <div className="mb-6 rounded-none md:rounded-[2rem] border border-blue-900/20 bg-slate-950 p-5 text-white shadow-none md:shadow-xl">
+                                <div className="mb-3">
+                                    <h5 className="text-sm font-black uppercase tracking-widest text-blue-100">Rubricas sem lancamento no periodo</h5>
+                                    <p className="text-[10px] font-bold uppercase tracking-widest text-blue-200/50">Clique em uma rubrica para preencher uma nova conta</p>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                    {pendingBillRubrics.map(rubric => (
                                         <button
+                                            key={rubric.id}
                                             onClick={() => {
                                                 setNewBill({
                                                     description: rubric.description,
@@ -1378,346 +1657,258 @@ const FinanceView = ({
                                                 });
                                                 setIsAddingBill(true);
                                             }}
-                                            className="w-full bg-white text-slate-900 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all flex items-center justify-center gap-2 shadow-sm"
+                                            className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-widest transition-colors hover:bg-white/20"
                                         >
-                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-                                            Lançar Valor
+                                            {rubric.description}
                                         </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+                            <div className="rounded-none border border-emerald-100 bg-emerald-50 p-5 shadow-none md:rounded-[1.75rem] md:shadow-sm">
+                                <div className="text-[10px] font-black uppercase tracking-widest text-emerald-700/60">Total Pago</div>
+                                <div className="mt-2 text-2xl font-black tracking-tight text-emerald-700">{formatCurrency(billsPaidTotal)}</div>
+                                <div className="mt-2 text-xs font-bold text-emerald-700/70">{currentMonthBills.filter(bill => bill.isPaid).length} conta(s) pagas</div>
+                            </div>
+                            <div className="rounded-none border border-rose-100 bg-rose-50 p-5 shadow-none md:rounded-[1.75rem] md:shadow-sm">
+                                <div className="text-[10px] font-black uppercase tracking-widest text-rose-700/60">Total Nao Pago</div>
+                                <div className="mt-2 text-2xl font-black tracking-tight text-rose-700">{formatCurrency(billsPendingTotal)}</div>
+                                <div className="mt-2 text-xs font-bold text-rose-700/70">{currentMonthBills.filter(bill => !bill.isPaid).length} conta(s) pendentes</div>
+                            </div>
+                            <div className="rounded-none border border-slate-200 bg-white p-5 shadow-none md:rounded-[1.75rem] md:shadow-sm">
+                                <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">Total Geral</div>
+                                <div className="mt-2 text-2xl font-black tracking-tight text-slate-900">{formatCurrency(billsOverallTotal)}</div>
+                                <div className="mt-2 text-xs font-bold text-slate-500">{currentMonthBills.length} conta(s) no periodo</div>
+                            </div>
+                        </div>
+
+                        <div className="overflow-hidden rounded-none border border-slate-200 bg-white shadow-none md:rounded-[2rem] md:shadow-lg">
+                            <div className="border-b border-slate-200 bg-slate-50 p-4">
+                                <div className="grid grid-cols-1 gap-3 xl:grid-cols-5">
+                                    <input
+                                        type="text"
+                                        placeholder="Buscar descricao, linha ou pix"
+                                        value={billSearch}
+                                        onChange={(e) => setBillSearch(e.target.value)}
+                                        className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium"
+                                    />
+                                    <select value={billStatusFilter} onChange={(e) => setBillStatusFilter(e.target.value as 'all' | 'paid' | 'unpaid')} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium">
+                                        <option value="all">Todos os status</option>
+                                        <option value="paid">Pagas</option>
+                                        <option value="unpaid">Nao pagas</option>
+                                    </select>
+                                    <select value={billCategoryFilter} onChange={(e) => setBillCategoryFilter(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium">
+                                        <option value="all">Todas as categorias</option>
+                                        {(settings.billCategories || []).map(cat => (
+                                            <option key={cat} value={cat}>{cat}</option>
+                                        ))}
+                                    </select>
+                                    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-500">
+                                        {visibleBills.filter(bill => bill.isPaid).length} paga(s) / {visibleBills.filter(bill => !bill.isPaid).length} pendente(s)
                                     </div>
-                                ))
-                            }
+                                    <div className="flex items-center justify-center rounded-xl bg-blue-50 px-4 py-3 text-sm font-black uppercase tracking-widest text-blue-700">
+                                        {visibleBills.length} registro(s)
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="overflow-x-auto">
+                                <table className="min-w-full text-sm">
+                                    <thead className="bg-slate-100 text-[10px] uppercase tracking-widest text-slate-500">
+                                        <tr>
+                                            <th className="px-4 py-3 text-left font-black">Pago</th>
+                                            <th className="px-4 py-3 text-left font-black"><button onClick={() => toggleBillSort('description')} className="flex items-center gap-2">Descricao <span>{getSortIndicator(billSort.key === 'description', billSort.direction)}</span></button></th>
+                                            <th className="px-4 py-3 text-left font-black"><button onClick={() => toggleBillSort('category')} className="flex items-center gap-2">Categoria <span>{getSortIndicator(billSort.key === 'category', billSort.direction)}</span></button></th>
+                                            <th className="px-4 py-3 text-left font-black"><button onClick={() => toggleBillSort('dueDay')} className="flex items-center gap-2">Vencimento <span>{getSortIndicator(billSort.key === 'dueDay', billSort.direction)}</span></button></th>
+                                            <th className="px-4 py-3 text-left font-black"><button onClick={() => toggleBillSort('amount')} className="flex items-center gap-2">Valor <span>{getSortIndicator(billSort.key === 'amount', billSort.direction)}</span></button></th>
+                                            <th className="px-4 py-3 text-left font-black"><button onClick={() => toggleBillSort('barcode')} className="flex items-center gap-2">Linha <span>{getSortIndicator(billSort.key === 'barcode', billSort.direction)}</span></button></th>
+                                            <th className="px-4 py-3 text-left font-black"><button onClick={() => toggleBillSort('pix')} className="flex items-center gap-2">PIX <span>{getSortIndicator(billSort.key === 'pix', billSort.direction)}</span></button></th>
+                                            <th className="px-4 py-3 text-left font-black"><button onClick={() => toggleBillSort('status')} className="flex items-center gap-2">Status <span>{getSortIndicator(billSort.key === 'status', billSort.direction)}</span></button></th>
+                                            <th className="px-4 py-3 text-right font-black">Acoes</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 bg-white">
+                                        {visibleBills.map(bill => {
+                                            const prevBill = fixedBills.find(b =>
+                                                b.description === bill.description &&
+                                                b.month === (currentMonth === 0 ? 11 : currentMonth - 1) &&
+                                                b.year === (currentMonth === 0 ? currentYear - 1 : currentYear)
+                                            );
+                                            const diff = prevBill ? bill.amount - prevBill.amount : 0;
+                                            const isExpanded = expandedBillId === bill.id;
+                                            const activeBillTab = activeBillTabs[bill.id] || 'codigo';
 
-                            {/* Contas já lançadas (Compactas) */}
-                            {fixedBills
-                                .filter(b => b.month === currentMonth && b.year === currentYear)
-                                .map(bill => {
-                                    const prevBill = fixedBills.find(b =>
-                                        b.description === bill.description &&
-                                        b.month === (currentMonth === 0 ? 11 : currentMonth - 1) &&
-                                        b.year === (currentMonth === 0 ? currentYear - 1 : currentYear)
-                                    );
-                                    const diff = prevBill ? bill.amount - prevBill.amount : 0;
-                                    const isVariable = bill.amount === 0;
+                                            return (
+                                                <React.Fragment key={bill.id}>
+                                                    <tr className={`cursor-pointer transition-colors ${isExpanded ? 'bg-blue-50/60' : 'hover:bg-slate-50'}`} onClick={() => setExpandedBillId(isExpanded ? null : bill.id)}>
+                                                        <td className="px-4 py-4">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={bill.isPaid}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                                onChange={() => onUpdateBill({ ...bill, isPaid: !bill.isPaid })}
+                                                                className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                                            />
+                                                        </td>
+                                                        <td className="px-4 py-4">
+                                                            <div className={`font-bold ${bill.isPaid ? 'text-slate-400 line-through' : 'text-slate-900'}`}>{bill.description}</div>
+                                                            {bill.rubricId && <div className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">Vinculada a rubrica</div>}
+                                                        </td>
+                                                        <td className="px-4 py-4 font-semibold text-slate-600">{bill.category || 'Conta Fixa'}</td>
+                                                        <td className="px-4 py-4 font-semibold text-slate-600">Dia {bill.dueDay}</td>
+                                                        <td className="px-4 py-4">
+                                                            <div className={`font-black ${bill.isPaid ? 'text-slate-400' : 'text-slate-900'}`}>{formatCurrency(bill.amount)}</div>
+                                                            {diff !== 0 && <div className={`text-[11px] font-bold ${diff < 0 ? 'text-emerald-600' : 'text-rose-500'}`}>{diff < 0 ? '-' : '+'} {formatCurrency(Math.abs(diff))}</div>}
+                                                        </td>
+                                                        <td className="px-4 py-4">
+                                                            <span className={`inline-flex rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${bill.barcode ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                                                                {bill.barcode ? 'Disponivel' : 'Sem linha'}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-4">
+                                                            <span className={`inline-flex rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${bill.pixCode ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                                                                {bill.pixCode ? 'Disponivel' : 'Sem PIX'}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-4">
+                                                            <span className={`inline-flex rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${bill.isPaid ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                                {bill.isPaid ? 'Paga' : 'Pendente'}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-4">
+                                                            <div className="flex items-center justify-end gap-2">
+                                                                <button onClick={(e) => { e.stopPropagation(); setExpandedBillId(isExpanded ? null : bill.id); }} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+                                                                    <svg className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                                                                </button>
+                                                                <button onClick={(e) => { e.stopPropagation(); handleTwoStepDelete(`bill_${bill.id}`, () => onDeleteBill(bill.id)); }} className={`rounded-lg p-2 transition-colors ${pendingDeleteKey === `bill_${bill.id}` ? 'bg-rose-500 text-white' : 'text-slate-300 hover:bg-rose-50 hover:text-rose-500'}`}>
+                                                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                    {isExpanded && (
+                                                        <tr className="bg-blue-50/40">
+                                                            <td colSpan={9} className="px-4 py-4">
+                                                                <div className="space-y-4">
+                                                                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                                                                        <input type="text" defaultValue={bill.description} onBlur={(e) => onUpdateBill({ ...bill, description: e.target.value })} className="rounded-xl border border-blue-100 bg-white px-4 py-3 font-medium" />
+                                                                        <input type="number" defaultValue={bill.amount} onBlur={(e) => onUpdateBill({ ...bill, amount: Number(e.target.value) })} className="rounded-xl border border-blue-100 bg-white px-4 py-3 font-medium" />
+                                                                        <input type="number" min={1} max={31} defaultValue={bill.dueDay} onBlur={(e) => onUpdateBill({ ...bill, dueDay: Number(e.target.value) })} className="rounded-xl border border-blue-100 bg-white px-4 py-3 font-medium" />
+                                                                        <select defaultValue={bill.category} onBlur={(e) => onUpdateBill({ ...bill, category: e.target.value })} className="rounded-xl border border-blue-100 bg-white px-4 py-3 font-medium">
+                                                                            {(settings.billCategories || ['Conta Fixa', 'Poupanca', 'Investimento']).map(cat => (
+                                                                                <option key={cat} value={cat}>{cat}</option>
+                                                                            ))}
+                                                                        </select>
+                                                                    </div>
 
-                                    return (
-                                        <div key={bill.id}
-                                            className={`transition-all flex flex-col group rounded-xl md:rounded-2xl border ${bill.isPaid
-                                                ? 'border-emerald-100 bg-emerald-50/30'
-                                                : isVariable
-                                                    ? 'bg-slate-800 border-2 border-dashed border-slate-700 shadow-2xl transition-all hover:bg-slate-900 border-blue-500/30'
-                                                    : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
-                                                }`}
-                                        >
-                                            {/* Header do Card - Design Imagem */}
-                                            <div className="flex flex-col p-4 md:p-5">
-                                                {/* Tags Topo */}
-                                                <div className="flex items-center gap-2 mb-3">
-                                                    <span className={`text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider ${isVariable ? 'bg-slate-700 text-slate-300 border border-slate-600' : 'bg-slate-50 text-slate-500'}`}>
-                                                        {bill.category || 'Conta Fixa'}
-                                                    </span>
-                                                    {isVariable && (
-                                                        <span className="text-[10px] font-bold bg-slate-700 text-slate-300 border border-slate-600 px-3 py-1 rounded-full uppercase tracking-wider">
-                                                            Variável
-                                                        </span>
-                                                    )}
-                                                </div>
+                                                                    <div className="flex flex-wrap gap-2">
+                                                                        <button
+                                                                            onClick={(e) => { e.stopPropagation(); setActiveBillTabs(prev => ({ ...prev, [bill.id]: 'codigo' })); }}
+                                                                            className={`rounded-lg px-4 py-2 text-xs font-black uppercase tracking-widest transition-colors ${activeBillTab === 'codigo' ? 'bg-slate-900 text-white' : 'bg-white text-slate-500 hover:bg-slate-100'}`}
+                                                                        >
+                                                                            Codigos
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={(e) => { e.stopPropagation(); setActiveBillTabs(prev => ({ ...prev, [bill.id]: 'arquivo' })); }}
+                                                                            className={`rounded-lg px-4 py-2 text-xs font-black uppercase tracking-widest transition-colors ${activeBillTab === 'arquivo' ? 'bg-slate-900 text-white' : 'bg-white text-slate-500 hover:bg-slate-100'}`}
+                                                                        >
+                                                                            Arquivos
+                                                                        </button>
+                                                                    </div>
 
-                                                <div className="flex items-start gap-4">
-                                                    {/* Checkbox */}
-                                                    <div className="flex-shrink-0 pt-0.5">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={bill.isPaid}
-                                                            disabled={isVariable}
-                                                            onChange={() => onUpdateBill({ ...bill, isPaid: !bill.isPaid })}
-                                                            className={`w-5 h-5 rounded-[4px] border-slate-300 text-emerald-500 focus:ring-emerald-500 transition-all ${isVariable ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer hover:border-emerald-400'}`}
-                                                        />
-                                                    </div>
-
-                                                    {/* Corpo e Informações */}
-                                                    <div className="flex-1 flex flex-col justify-start">
-                                                        <div className={`text-lg md:text-xl font-bold leading-tight ${bill.isPaid
-                                                            ? 'text-slate-400 line-through'
-                                                            : isVariable
-                                                                ? 'text-white'
-                                                                : 'text-slate-900'
-                                                            }`}>
-                                                            {bill.description}
-                                                        </div>
-                                                        <div className={`text-sm font-semibold flex items-center gap-2 mt-1 ${isVariable ? 'text-slate-400' : 'text-slate-500'}`}>
-                                                            Vencimento dia {bill.dueDay}
-                                                            {isVariable && (
-                                                                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse ml-2" />
-                                                            )}
-                                                            {diff !== 0 && !isVariable && (
-                                                                <span className={`font-bold ${diff < 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                                                    ({diff < 0 ? '↓' : '↑'} R$ {Math.abs(diff).toLocaleString('pt-BR')})
-                                                                </span>
-                                                            )}
-                                                        </div>
-
-                                                        {/* Valor e Ações de Valor */}
-                                                        <div className="mt-4">
-                                                            {editingAmountId === bill.id ? (
-                                                                <div className="flex items-center gap-1.5 w-fit">
-                                                                    <span className="text-xs font-semibold text-slate-400">R$</span>
-                                                                    <input
-                                                                        autoFocus
-                                                                        type="number"
-                                                                        className="w-24 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
-                                                                        value={tempAmount}
-                                                                        onChange={e => setTempAmount(e.target.value)}
-                                                                        onBlur={() => {
-                                                                            if (tempAmount !== '') {
-                                                                                onUpdateBill({ ...bill, amount: Number(tempAmount) });
-                                                                            }
-                                                                            setEditingAmountId(null);
-                                                                        }}
-                                                                        onKeyDown={e => {
-                                                                            if (e.key === 'Enter') {
-                                                                                if (tempAmount !== '') {
-                                                                                    onUpdateBill({ ...bill, amount: Number(tempAmount) });
-                                                                                }
-                                                                                setEditingAmountId(null);
-                                                                            }
-                                                                            if (e.key === 'Escape') setEditingAmountId(null);
-                                                                        }}
-                                                                    />
-                                                                </div>
-                                                            ) : (
-                                                                <div
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        setEditingAmountId(bill.id);
-                                                                        setTempAmount(isVariable ? '' : String(bill.amount));
-                                                                    }}
-                                                                    className={`w-fit cursor-pointer transition-colors ${bill.isPaid ? 'text-slate-400' : 'text-slate-800'}`}
-                                                                >
-                                                                    {isVariable ? (
-                                                                        <span className="text-xs font-bold text-amber-300 hover:text-amber-200 bg-slate-700 hover:bg-slate-600 border border-slate-600 px-4 py-2 flex rounded-lg transition-colors shadow-sm">
-                                                                            Informar Valor
-                                                                        </span>
+                                                                    {activeBillTab === 'codigo' ? (
+                                                                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                                                                            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                                                                                <label className="mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-400">Linha digitavel</label>
+                                                                                <div className="flex gap-2">
+                                                                                    <input type="text" defaultValue={bill.barcode || ''} onBlur={(e) => onUpdateBill({ ...bill, barcode: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-sm" />
+                                                                                    {bill.barcode && (
+                                                                                        <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(bill.barcode || ''); }} className="rounded-xl bg-slate-100 px-4 py-3 text-xs font-black uppercase tracking-widest text-slate-600 hover:bg-slate-200">
+                                                                                            Copiar
+                                                                                        </button>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                            <div className="rounded-2xl border border-emerald-100 bg-white p-4">
+                                                                                <label className="mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-400">Codigo PIX</label>
+                                                                                <div className="flex gap-2">
+                                                                                    <input type="text" defaultValue={bill.pixCode || ''} onBlur={(e) => onUpdateBill({ ...bill, pixCode: e.target.value })} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-sm" />
+                                                                                    {bill.pixCode && (
+                                                                                        <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(bill.pixCode || ''); }} className="rounded-xl bg-slate-100 px-4 py-3 text-xs font-black uppercase tracking-widest text-slate-600 hover:bg-slate-200">
+                                                                                            Copiar
+                                                                                        </button>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
                                                                     ) : (
-                                                                        <span className="text-base font-bold bg-slate-50 border border-slate-200 px-4 py-1.5 rounded-lg shadow-sm">
-                                                                            R$ {bill.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                                        </span>
+                                                                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                                                                            <div
+                                                                                onClick={() => {
+                                                                                    const input = document.createElement('input');
+                                                                                    input.type = 'file';
+                                                                                    input.accept = 'image/*,.pdf';
+                                                                                    input.onchange = async (e) => {
+                                                                                        const file = (e.target as HTMLInputElement).files?.[0];
+                                                                                        if (file) {
+                                                                                            const url = await handleFileUpload(file);
+                                                                                            if (url) onUpdateBill({ ...bill, attachmentUrl: url });
+                                                                                        }
+                                                                                    };
+                                                                                    input.click();
+                                                                                }}
+                                                                                className={`cursor-pointer rounded-2xl border border-dashed p-4 transition-colors ${bill.attachmentUrl ? 'border-blue-200 bg-blue-50' : 'border-slate-300 bg-white hover:bg-slate-50'}`}
+                                                                            >
+                                                                                <div className="mb-2 text-xs font-black uppercase tracking-widest text-slate-400">Boleto / PDF</div>
+                                                                                <div className="text-sm font-semibold text-slate-700">{bill.attachmentUrl ? 'Arquivo anexado' : 'Clique para anexar'}</div>
+                                                                                {bill.attachmentUrl && (
+                                                                                    <a href={bill.attachmentUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="mt-3 inline-flex rounded-lg bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-blue-600 shadow-sm">
+                                                                                        Visualizar
+                                                                                    </a>
+                                                                                )}
+                                                                            </div>
+                                                                            <div
+                                                                                onClick={() => {
+                                                                                    const input = document.createElement('input');
+                                                                                    input.type = 'file';
+                                                                                    input.accept = 'image/*';
+                                                                                    input.onchange = async (e) => {
+                                                                                        const file = (e.target as HTMLInputElement).files?.[0];
+                                                                                        if (file) {
+                                                                                            const url = await handleFileUpload(file);
+                                                                                            if (url) onUpdateBill({ ...bill, pixQrCodeUrl: url });
+                                                                                        }
+                                                                                    };
+                                                                                    input.click();
+                                                                                }}
+                                                                                className={`cursor-pointer rounded-2xl border border-dashed p-4 transition-colors ${bill.pixQrCodeUrl ? 'border-emerald-200 bg-emerald-50' : 'border-slate-300 bg-white hover:bg-slate-50'}`}
+                                                                            >
+                                                                                <div className="mb-2 text-xs font-black uppercase tracking-widest text-slate-400">Imagem do QR PIX</div>
+                                                                                <div className="text-sm font-semibold text-slate-700">{bill.pixQrCodeUrl ? 'QR anexado' : 'Clique para anexar'}</div>
+                                                                                {bill.pixQrCodeUrl && (
+                                                                                    <a href={bill.pixQrCodeUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="mt-3 inline-flex rounded-lg bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-emerald-600 shadow-sm">
+                                                                                        Visualizar
+                                                                                    </a>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
                                                                     )}
                                                                 </div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-
-                                                    {/* Ações Laterais */}
-                                                    <div className={`flex items-center gap-2 border-l pl-4 py-1 self-start ${isVariable ? 'border-slate-700' : 'border-slate-100'}`}>
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setExpandedBillId(expandedBillId === bill.id ? null : bill.id);
-                                                            }}
-                                                            className={`p-1.5 rounded-lg transition-all ${expandedBillId === bill.id
-                                                                ? 'bg-slate-700 text-white'
-                                                                : isVariable
-                                                                    ? 'text-slate-400 hover:text-white hover:bg-slate-700'
-                                                                    : 'text-slate-400 hover:text-slate-700 hover:bg-slate-50'
-                                                                }`}
-                                                            title="Expandir detalhes"
-                                                        >
-                                                            <svg className={`w-5 h-5 transition-transform duration-300 ${expandedBillId === bill.id ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
-                                                            </svg>
-                                                        </button>
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                handleTwoStepDelete(`bill_${bill.id}`, () => onDeleteBill(bill.id));
-                                                            }}
-                                                            className={`p-1.5 rounded-lg transition-colors ${pendingDeleteKey === `bill_${bill.id}`
-                                                                ? 'bg-rose-500 text-white'
-                                                                : isVariable
-                                                                    ? 'text-slate-500 hover:text-rose-400'
-                                                                    : 'text-slate-300 hover:text-rose-500 hover:bg-rose-50'
-                                                                }`}
-                                                            title="Excluir"
-                                                        >
-                                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {/* Área Expandida - Tabs Clean */}
-                                            {expandedBillId === bill.id && (
-                                                <div className="px-5 pb-6 pt-3 border-t border-slate-100 animate-in slide-in-from-top-2 duration-200">
-
-                                                    {/* Tabs Header */}
-                                                    <div className="flex gap-2 mb-5">
-                                                        <button
-                                                            onClick={e => { e.stopPropagation(); setActiveBillTabs(prev => ({ ...prev, [bill.id]: 'codigo' })); }}
-                                                            className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-colors ${activeBillTabs[bill.id] !== 'arquivo' ? 'bg-slate-800 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-800'}`}
-                                                        >
-                                                            Digitar Código
-                                                        </button>
-                                                        <button
-                                                            onClick={e => { e.stopPropagation(); setActiveBillTabs(prev => ({ ...prev, [bill.id]: 'arquivo' })); }}
-                                                            className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-colors ${activeBillTabs[bill.id] === 'arquivo' ? 'bg-slate-800 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-800'}`}
-                                                        >
-                                                            Anexar Arquivo
-                                                        </button>
-                                                    </div>
-
-                                                    <div className="flex flex-col gap-5 max-w-2xl">
-                                                        {activeBillTabs[bill.id] !== 'arquivo' ? (
-                                                            <>
-                                                                {/* Inputs de Texto */}
-                                                                <div>
-                                                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Linha Digitável / Código de Barras</label>
-                                                                    <div className="flex gap-2">
-                                                                        <div className="relative flex-1">
-                                                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                                                                <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
-                                                                            </div>
-                                                                            <input
-                                                                                type="text"
-                                                                                placeholder="00000.00000.00000.000000..."
-                                                                                className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 py-2.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono"
-                                                                                defaultValue={bill.barcode || ''}
-                                                                                onBlur={(e) => onUpdateBill({ ...bill, barcode: e.target.value })}
-                                                                            />
-                                                                        </div>
-                                                                        {bill.barcode && (
-                                                                            <button onClick={() => navigator.clipboard.writeText(bill.barcode || '')} className="px-4 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 hover:text-slate-800 transition-colors flex items-center justify-center font-bold text-xs">
-                                                                                Copiar
-                                                                            </button>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-
-                                                                <div>
-                                                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Código PIX</label>
-                                                                    <div className="flex gap-2">
-                                                                        <div className="relative flex-1">
-                                                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                                                                <svg className="w-4 h-4 text-emerald-500" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2.5 7.5v9L12 22l9.5-5.5v-9L12 2zm0 2.24l7.5 4.33-7.5 4.33-7.5-4.33L12 4.24zm-8.5 6.1v7.62l7.5 4.33v-8.66l-7.5-4.33zm17 0l-7.5 4.33v8.66l7.5-4.33V10.34z" /></svg>
-                                                                            </div>
-                                                                            <input
-                                                                                type="text"
-                                                                                placeholder="00020126360014BR.GOV.BCB.PIX..."
-                                                                                className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 py-2.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500 transition-all font-mono"
-                                                                                defaultValue={bill.pixCode || ''}
-                                                                                onBlur={(e) => onUpdateBill({ ...bill, pixCode: e.target.value })}
-                                                                            />
-                                                                        </div>
-                                                                        {bill.pixCode && (
-                                                                            <button onClick={() => navigator.clipboard.writeText(bill.pixCode || '')} className="px-4 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 hover:text-slate-800 transition-colors flex items-center justify-center font-bold text-xs">
-                                                                                Copiar
-                                                                            </button>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                {/* Arquivos Relacionados - Empilhados Verticalmente */}
-                                                                <div className="flex flex-col gap-3 mt-2">
-                                                                    {/* Dropzone PDF */}
-                                                                    <div>
-                                                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Boleto / PDF</label>
-                                                                        <div
-                                                                            onClick={() => {
-                                                                                const input = document.createElement('input');
-                                                                                input.type = 'file';
-                                                                                input.accept = 'image/*,.pdf';
-                                                                                input.onchange = async (e) => {
-                                                                                    const file = (e.target as HTMLInputElement).files?.[0];
-                                                                                    if (file) {
-                                                                                        const url = await handleFileUpload(file);
-                                                                                        if (url) onUpdateBill({ ...bill, attachmentUrl: url });
-                                                                                    }
-                                                                                };
-                                                                                input.click();
-                                                                            }}
-                                                                            className={`flex items-center gap-4 border border-dashed rounded-lg p-4 cursor-pointer transition-colors group ${bill.attachmentUrl ? 'bg-blue-50/50 border-blue-200 hover:border-blue-400' : 'bg-slate-50 border-slate-300 hover:bg-slate-100 hover:border-slate-400'}`}
-                                                                        >
-                                                                            <div className={`p-3 rounded-full ${bill.attachmentUrl ? 'bg-blue-100 text-blue-500' : 'bg-slate-200 text-slate-400 group-hover:bg-blue-100 group-hover:text-blue-500'} transition-colors`}>
-                                                                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                                                                            </div>
-                                                                            <div className="flex-1">
-                                                                                {bill.attachmentUrl ? (
-                                                                                    <>
-                                                                                        <div className="text-sm font-bold text-blue-700">Arquivo Anexado com Sucesso</div>
-                                                                                        <div className="text-[11px] text-blue-500 mt-0.5">Clique para alterar o arquivo</div>
-                                                                                    </>
-                                                                                ) : (
-                                                                                    <>
-                                                                                        <div className="text-sm font-semibold text-slate-600 group-hover:text-slate-800">Anexar Arquivo de Boleto</div>
-                                                                                        <div className="text-[11px] text-slate-400 mt-0.5">Faça o upload do PDF ou Imagem</div>
-                                                                                    </>
-                                                                                )}
-                                                                            </div>
-                                                                            {bill.attachmentUrl && (
-                                                                                <a href={bill.attachmentUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="px-4 py-2 bg-white border border-blue-200 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-50 transition-colors shadow-sm">
-                                                                                    Visualizar
-                                                                                </a>
-                                                                            )}
-                                                                        </div>
-                                                                    </div>
-
-                                                                    {/* Dropzone QR PIX */}
-                                                                    <div>
-                                                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Imagem do QR Code</label>
-                                                                        <div
-                                                                            onClick={() => {
-                                                                                const input = document.createElement('input');
-                                                                                input.type = 'file';
-                                                                                input.accept = 'image/*';
-                                                                                input.onchange = async (e) => {
-                                                                                    const file = (e.target as HTMLInputElement).files?.[0];
-                                                                                    if (file) {
-                                                                                        const url = await handleFileUpload(file);
-                                                                                        if (url) onUpdateBill({ ...bill, pixQrCodeUrl: url });
-                                                                                    }
-                                                                                };
-                                                                                input.click();
-                                                                            }}
-                                                                            className={`flex items-center gap-4 border border-dashed rounded-lg p-4 cursor-pointer transition-colors group ${bill.pixQrCodeUrl ? 'bg-emerald-50/50 border-emerald-200 hover:border-emerald-400' : 'bg-slate-50 border-slate-300 hover:bg-slate-100 hover:border-slate-400'}`}
-                                                                        >
-                                                                            <div className={`p-3 rounded-full ${bill.pixQrCodeUrl ? 'bg-emerald-100 text-emerald-500' : 'bg-slate-200 text-slate-400 group-hover:bg-emerald-100 group-hover:text-emerald-500'} transition-colors`}>
-                                                                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" /></svg>
-                                                                            </div>
-                                                                            <div className="flex-1">
-                                                                                {bill.pixQrCodeUrl ? (
-                                                                                    <>
-                                                                                        <div className="text-sm font-bold text-emerald-700">QR Code Anexado com Sucesso</div>
-                                                                                        <div className="text-[11px] text-emerald-500 mt-0.5">Clique para alterar a imagem</div>
-                                                                                    </>
-                                                                                ) : (
-                                                                                    <>
-                                                                                        <div className="text-sm font-semibold text-slate-600 group-hover:text-slate-800">Anexar QR Code do PIX</div>
-                                                                                        <div className="text-[11px] text-slate-400 mt-0.5">Faça o upload de uma imagem do código</div>
-                                                                                    </>
-                                                                                )}
-                                                                            </div>
-                                                                            {bill.pixQrCodeUrl && (
-                                                                                <a href={bill.pixQrCodeUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="px-4 py-2 bg-white border border-emerald-200 text-emerald-600 rounded-lg text-xs font-bold hover:bg-emerald-50 transition-colors shadow-sm">
-                                                                                    Visualizar
-                                                                                </a>
-                                                                            )}
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                            {fixedBills.filter(b => b.month === currentMonth && b.year === currentYear).length === 0 && billRubrics.length === 0 && (
-                                <div className="col-span-full py-12 text-center border border-dashed border-slate-200 rounded-none md:rounded-[2rem]">
-                                    <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">Nenhuma obrigação registrada</p>
-                                </div>
-                            )}
+                                                            </td>
+                                                        </tr>
+                                                    )}
+                                                </React.Fragment>
+                                            );
+                                        })}
+                                        {visibleBills.length === 0 && (
+                                            <tr>
+                                                <td colSpan={9} className="px-4 py-12 text-center text-[10px] font-bold uppercase tracking-widest text-slate-400">Nenhuma conta encontrada com os filtros atuais</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </FinanceSection>
                 </div>
