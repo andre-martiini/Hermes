@@ -481,7 +481,7 @@ export const AutoExpandingTextarea = (props: AutoExpandingTextareaProps) => {
   );
 };
 
-export const WysiwygEditor = ({ value, onChange, onKeyDown, placeholder, className, id }: WysiwygEditorProps) => {
+export const WysiwygEditor = ({ value, onChange, onKeyDown, placeholder, className, id, onPaste }: WysiwygEditorProps) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-expand logic
@@ -589,6 +589,7 @@ export const WysiwygEditor = ({ value, onChange, onKeyDown, placeholder, classNa
         value={value}
         onChange={handleInput}
         onKeyDown={onKeyDown}
+        onPaste={onPaste}
         placeholder={placeholder}
         className="w-full bg-transparent border-none px-4 py-4 text-sm font-medium leading-relaxed text-transparent caret-blue-500 outline-none transition-all resize-none overflow-hidden block relative z-10"
         style={{

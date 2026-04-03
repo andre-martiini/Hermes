@@ -6208,6 +6208,20 @@ const App: React.FC = () => {
                                                       <WysiwygEditor
                                                         value={newLogText}
                                                         onChange={setNewLogText}
+                                                        onPaste={async e => {
+                                                          const items = e.clipboardData?.items;
+                                                          if (!items) return;
+                                                          for (let i = 0; i < items.length; i++) {
+                                                            if (items[i].type.indexOf('image') !== -1) {
+                                                              const file = items[i].getAsFile();
+                                                              if (file) {
+                                                                e.preventDefault();
+                                                                const item = await handleFileUploadToDrive(file);
+                                                                if (item) setNewLogAttachments(prev => [...prev, item]);
+                                                              }
+                                                            }
+                                                          }
+                                                        }}
                                                         placeholder="O que foi feito no sistema?"
                                                         className="bg-white min-h-[110px] pb-10"
                                                       />

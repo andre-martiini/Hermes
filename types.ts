@@ -518,6 +518,7 @@ export interface WysiwygEditorProps {
     placeholder?: string;
     className?: string;
     id?: string;
+    onPaste?: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
 }
 
 export type StatusConvocacao = 'Em regularização' | 'Ativo(a)' | 'Concluído(a)' | 'Desligado(a)';

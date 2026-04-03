@@ -547,6 +547,20 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
             <textarea
               value={newLogText}
               onChange={e => setNewLogText(e.target.value)}
+              onPaste={async e => {
+                const items = e.clipboardData?.items;
+                if (!items) return;
+                for (let i = 0; i < items.length; i++) {
+                  if (items[i].type.indexOf('image') !== -1) {
+                    const file = items[i].getAsFile();
+                    if (file) {
+                      e.preventDefault();
+                      const item = await handleFileUploadToDrive(file);
+                      if (item) setNewLogAttachments(prev => [...prev, item]);
+                    }
+                  }
+                }
+              }}
               placeholder="O que foi feito ou precisa ser feito no sistema?"
               className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 pr-14 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-violet-400 transition-all resize-none min-h-[100px]"
             />
