@@ -198,7 +198,7 @@ const FinanceView = ({
     const currentDay = isCurrentMonth ? today.getDate() : 31;
     const currentSprint = currentDay < 8 ? 1 : currentDay < 15 ? 2 : currentDay < 22 ? 3 : 4;
     const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-    const monthProgress = isCurrentMonth ? (currentDay / daysInMonth) * 100 : 100;
+    const monthProgress = isCurrentMonth ? (today.getDate() / daysInMonth) * 100 : null;
 
     const getSprintStatus = () => {
         const budgetPerSprint = currentBudget / 4;
@@ -627,15 +627,32 @@ const FinanceView = ({
                             </div>
                         </div>
 
-                        <div className="relative h-6 bg-slate-100 rounded-full overflow-hidden shadow-inner">
+                        <div className="relative h-6 overflow-visible">
+                            <div className="absolute inset-0 bg-slate-100 rounded-full overflow-hidden shadow-inner">
+                                <div
+                                    className={`h-full transition-all duration-1000 ${getBudgetColor(budgetPercentage)}`}
+                                    style={{ width: `${budgetPercentage}%` }}
+                                />
+                            </div>
                             <div className="absolute top-0 bottom-0 left-[25%] w-0.5 bg-white/50 z-10 flex flex-col justify-end"><span className="text-[8px] font-bold text-slate-400 -ml-1">25%</span></div>
                             <div className="absolute top-0 bottom-0 left-[50%] w-0.5 bg-white/50 z-10 flex flex-col justify-end"><span className="text-[8px] font-bold text-slate-400 -ml-1">50%</span></div>
                             <div className="absolute top-0 bottom-0 left-[75%] w-0.5 bg-white/50 z-10 flex flex-col justify-end"><span className="text-[8px] font-bold text-slate-400 -ml-1">75%</span></div>
 
-                            <div
-                                className={`h-full transition-all duration-1000 ${getBudgetColor(budgetPercentage)}`}
-                                style={{ width: `${budgetPercentage}%` }}
-                            />
+                            {monthProgress !== null && (
+                                <div
+                                    className="absolute top-1/2 -translate-y-1/2 z-20"
+                                    style={{ left: `${Math.min(monthProgress, 100)}%` }}
+                                >
+                                    <div className="relative -translate-x-1/2">
+                                        <div className="absolute left-1/2 -top-8 h-8 w-0.5 -translate-x-1/2 bg-slate-900/30" />
+                                        <div className="absolute left-1/2 top-2 h-2.5 w-2.5 -translate-x-1/2 rounded-full border-2 border-white bg-slate-900 shadow-sm" />
+                                        <div className="absolute left-1/2 -top-12 -translate-x-1/2 whitespace-nowrap rounded-full bg-slate-900 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-white shadow-lg">
+                                            Hoje
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-900/40">
                                 {budgetPercentage.toFixed(1)}%
                             </div>
