@@ -3,10 +3,19 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Tarefa, AppSettings, PoolItem, ConhecimentoItem, Acompanhamento, ActionPlanItem,
-  ChatMessage, BaseConhecimento, formatDate, formatDateLocalISO
+  ChatMessage, BaseConhecimento, TranscriptionResponse, RoutingAssessment, formatDate, formatDateLocalISO, POP, POPLearningEvent, POPRun, POPStepRun
 } from '../../types';
 import { normalizeStatus } from '../utils/helpers';
 import { buildDiaryRichNote, ensureHttpUrl, getRenamedFileName, parseDiaryRichNote } from '../utils/diaryEntries';
+import { buildKnowledgeItemFromPoolItem } from '../utils/intake';
+import { assessTaskRouting } from '../utils/routing';
+import { logRoutingEvent } from '../utils/routingLog';
+import { logContextUsageEvent } from '../utils/contextUsageLog';
+import { callRegisteredTool, evaluateRegisteredToolExecution } from '../utils/callRegisteredTool';
+import { getRecentPOPs } from '../utils/pop';
+import { buildPOPRationale, rankPOPsForCase } from '../utils/popMatching';
+import { applyPOPStepResolution, canTransitionPOPRunStatus, createPOPLearningEvent, createPOPRunFromPOP, getPOPRunById, getRecentPOPLearningEvents, updatePOPRunStatus } from '../utils/popRun';
+import { buildContextLayers } from '../utils/contextLayers';
 import { AutoExpandingTextarea, NotificationCenter } from '../components/ui/UIComponents';
 import { db, functions } from '../../firebase';
 import { httpsCallable } from 'firebase/functions';
@@ -28,6 +37,7 @@ interface TaskExecutionViewProps {
   tarefas: Tarefa[];
   appSettings: AppSettings;
   knowledgeBases?: BaseConhecimento[];
+  knowledgeItems?: ConhecimentoItem[];
   onSave: (id: string, updates: Partial<Tarefa>) => void;
   onClose: () => void;
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
@@ -61,6 +71,7 @@ export const TaskExecutionView = ({
   tarefas,
   appSettings,
   knowledgeBases = [],
+  knowledgeItems = [],
   onSave,
   onClose,
   showToast,
@@ -92,6 +103,29 @@ export const TaskExecutionView = ({
     tarefas.find(t => t.id === task.id) || task,
     [tarefas, task.id, task]
   );
+  const routingAssessment: RoutingAssessment = useMemo(() => (
+    currentTaskData.routing_assessment || assessTaskRouting({
+      tipoAcao: currentTaskData.tipo_acao || 'fast',
+      origin: currentTaskData.origem,
+      inputText: currentTaskData.descricao || currentTaskData.titulo || '',
+      extraContext: currentTaskData.notas || '',
+      hasRagContext: !!currentTaskData.base_conhecimento,
+      extraContextFileCount: currentTaskData.knowledge_item_ids?.length || 0,
+      hasMeetingContext: !!currentTaskData.reuniao_vinculada_id,
+    })
+  ), [currentTaskData]);
+  const layerContext = useMemo(() => {
+    const linkedKnowledge = knowledgeItems.filter(item =>
+      (currentTaskData.knowledge_item_ids || []).includes(item.id) ||
+      (!!currentTaskData.base_conhecimento && item.base_id === currentTaskData.base_conhecimento),
+    );
+    return buildContextLayers({
+      task: currentTaskData,
+      systemName: currentTaskData.sistema,
+      knowledgeItems: linkedKnowledge,
+      sessionMessages: (currentTaskData.chat_history || []).slice(-6).map(msg => ({ role: msg.role, content: msg.content })),
+    });
+  }, [currentTaskData, knowledgeItems]);
 
   // ─── States ───────────────────────────────────────────────────
   const [mobileTab, setMobileTab] = useState<MobileTab>('diario');
@@ -113,6 +147,10 @@ export const TaskExecutionView = ({
 
   useEffect(() => {
     setChatMessages(currentTaskData.chat_history || []);
+  }, [currentTaskData.id]);
+
+  useEffect(() => {
+    setApprovalGranted(false);
   }, [currentTaskData.id]);
 
   useEffect(() => {
@@ -159,6 +197,88 @@ export const TaskExecutionView = ({
   const [sessionExtraFiles, setSessionExtraFiles] = useState<{ id: string; name: string; status: 'uploading' | 'ready' | 'error' }[]>([]);
   const [isUploadingExtra, setIsUploadingExtra] = useState(false);
   const extraFileInputRef = useRef<HTMLInputElement>(null);
+  const [approvalGranted, setApprovalGranted] = useState(false);
+  const [layersExpanded, setLayersExpanded] = useState(false);
+  const [availablePOPs, setAvailablePOPs] = useState<POP[]>([]);
+  const [isCreatingPOPRun, setIsCreatingPOPRun] = useState(false);
+  const [currentPOPRun, setCurrentPOPRun] = useState<POPRun | null>(null);
+  const [learningEvents, setLearningEvents] = useState<POPLearningEvent[]>([]);
+  const [learningDraft, setLearningDraft] = useState('');
+  const [isSavingLearning, setIsSavingLearning] = useState(false);
+  const [runningAutoActionId, setRunningAutoActionId] = useState<string | null>(null);
+  const executableKnowledgeActions = useMemo(() => {
+    const linkedKnowledge = knowledgeItems.filter(item => (currentTaskData.knowledge_item_ids || []).includes(item.id));
+    return linkedKnowledge
+      .filter(item => item.texto_bruto && !(item as any).embedding)
+      .slice(0, 5)
+      .map(item => ({
+        type: 'knowledge_vectorization' as const,
+        item,
+        decision: evaluateRegisteredToolExecution('knowledge_vectorization', {
+          routingAssessment,
+          approvalGranted,
+          domainHint: currentTaskData.intake_record?.domain_hint || 'captura_e_conhecimento',
+        }, 'auto'),
+      }));
+  }, [knowledgeItems, currentTaskData.knowledge_item_ids, currentTaskData.intake_record?.domain_hint, routingAssessment, approvalGranted]);
+
+  // ─── Routing audit log ────────────────────────────────────────
+  useEffect(() => {
+    if (routingAssessment.approval_mode !== 'automatic') {
+      logRoutingEvent(db, {
+        context_kind: 'task',
+        context_id: task.id,
+        context_label: task.titulo,
+        assessment: routingAssessment,
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routingAssessment.approval_mode, routingAssessment.risk_level]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getRecentPOPs(db, 200)
+      .then(items => {
+        if (!cancelled) {
+          setAvailablePOPs(items.filter(item => item.status === 'active' || item.status === 'draft'));
+        }
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPOPRunContext = async () => {
+      if (!currentTaskData.pop_run_id || !currentTaskData.suggested_pop_id) {
+        if (!cancelled) {
+          setCurrentPOPRun(null);
+          setLearningEvents([]);
+        }
+        return;
+      }
+
+      try {
+        const [popRun, events] = await Promise.all([
+          getPOPRunById(db, currentTaskData.pop_run_id),
+          getRecentPOPLearningEvents(db, currentTaskData.suggested_pop_id, 12),
+        ]);
+        if (!cancelled) {
+          setCurrentPOPRun(popRun);
+          setLearningEvents(events);
+        }
+      } catch {
+        if (!cancelled) {
+          setCurrentPOPRun(null);
+          setLearningEvents([]);
+        }
+      }
+    };
+
+    loadPOPRunContext();
+    return () => { cancelled = true; };
+  }, [currentTaskData.pop_run_id, currentTaskData.suggested_pop_id]);
 
   // Audio / transcription
   const [isRecording, setIsRecording] = useState(false);
@@ -176,6 +296,154 @@ export const TaskExecutionView = ({
     const done = items.filter(i => i.completed).length;
     return Math.round((done / items.length) * 100);
   }, [currentTaskData.plano_acao]);
+
+  const suggestedPOPAssessment = useMemo(() => {
+    const expectedArtifacts = routingAssessment.route === 'orchestrated'
+      ? ['minuta', 'checklist', 'plano de execução']
+      : ['checklist'];
+    const inferredDomain = currentTaskData.sistema
+      ? 'sistemas_e_codigo'
+      : currentTaskData.processo_sei
+        ? 'operacoes_administrativas'
+        : 'captura_e_conhecimento';
+
+    const ranked = rankPOPsForCase(availablePOPs, {
+      dominio: inferredDomain,
+      routing_assessment: routingAssessment,
+      intake_record: currentTaskData.intake_record,
+      tags: [
+        currentTaskData.categoria,
+        currentTaskData.origem,
+        currentTaskData.tipo_acao,
+      ].filter(Boolean) as string[],
+      expectedArtifacts,
+      text: `${currentTaskData.titulo || ''} ${currentTaskData.descricao || ''} ${currentTaskData.notas || ''}`,
+    });
+
+    if (currentTaskData.suggested_pop_id) {
+      return ranked.find(item => item.pop.id === currentTaskData.suggested_pop_id) || ranked[0] || null;
+    }
+    return ranked[0] || null;
+  }, [availablePOPs, currentTaskData, routingAssessment]);
+
+  const canUseAssistedExecution = routingAssessment.approval_mode === 'automatic' || approvalGranted;
+
+  const guardAssistedExecution = () => {
+    if (routingAssessment.approval_mode === 'automatic') return true;
+    if (approvalGranted) return true;
+    showToast(
+      routingAssessment.approval_mode === 'required'
+        ? 'Esta ação exige liberação explícita antes de usar o copiloto.'
+        : 'Confirme a execução assistida desta sessão antes de usar o copiloto.',
+      'info'
+    );
+    return false;
+  };
+
+  const handleAdoptSuggestedPOP = () => {
+    if (!suggestedPOPAssessment) return;
+    onSave(task.id, {
+      suggested_pop_id: suggestedPOPAssessment.pop.id,
+    });
+    showToast(`POP "${suggestedPOPAssessment.pop.nome}" vinculado à tarefa.`, 'success');
+  };
+
+  const handleCreatePOPRun = async () => {
+    if (!suggestedPOPAssessment) return;
+    if (currentTaskData.pop_run_id) {
+      showToast('Esta tarefa já possui uma execução de POP vinculada.', 'info');
+      return;
+    }
+    setIsCreatingPOPRun(true);
+    try {
+      const popRunId = await createPOPRunFromPOP(db, {
+        pop: suggestedPOPAssessment.pop,
+        caso_origem_tipo: 'task',
+        caso_origem_id: task.id,
+        assessment: routingAssessment,
+        input_refs: currentTaskData.intake_record?.source_refs,
+      });
+      onSave(task.id, {
+        suggested_pop_id: suggestedPOPAssessment.pop.id,
+        pop_run_id: popRunId,
+      });
+      showToast('Execução inicial do POP criada para esta tarefa.', 'success');
+    } catch {
+      showToast('Erro ao criar execução do POP.', 'error');
+    } finally {
+      setIsCreatingPOPRun(false);
+    }
+  };
+
+  const handleTogglePOPRunStep = async (stepId: string) => {
+    if (!currentPOPRun) return;
+    const updatedSteps = currentPOPRun.steps_resolved.map(step =>
+      step.step_id === stepId
+        ? { ...step, status: step.status === 'completed' ? 'pending' : 'completed' }
+        : step,
+    );
+
+    try {
+      await applyPOPStepResolution(db, currentPOPRun.id, updatedSteps);
+      setCurrentPOPRun({
+        ...currentPOPRun,
+        steps_resolved: updatedSteps,
+        updated_at: new Date().toISOString(),
+      });
+      showToast('Passo do procedimento atualizado.', 'success');
+    } catch {
+      showToast('Erro ao atualizar o passo do procedimento.', 'error');
+    }
+  };
+
+  const handleCreateLearningEvent = async () => {
+    if (!suggestedPOPAssessment || !learningDraft.trim()) return;
+    setIsSavingLearning(true);
+    try {
+      const eventId = await createPOPLearningEvent(db, suggestedPOPAssessment.pop.id, {
+        pop_run_id: currentTaskData.pop_run_id,
+        tipo: 'step_adjusted',
+        descricao: learningDraft.trim(),
+        impacto: routingAssessment.risk_level,
+        review_status: 'pending',
+      });
+      const createdEvent: POPLearningEvent = {
+        id: eventId,
+        pop_id: suggestedPOPAssessment.pop.id,
+        pop_run_id: currentTaskData.pop_run_id,
+        tipo: 'step_adjusted',
+        descricao: learningDraft.trim(),
+        impacto: routingAssessment.risk_level,
+        review_status: 'pending',
+        created_at: new Date().toISOString(),
+      };
+      setLearningEvents(prev => [createdEvent, ...prev]);
+      setLearningDraft('');
+      showToast('Evento de aprendizado registrado para revisão.', 'success');
+    } catch {
+      showToast('Erro ao registrar aprendizado do POP.', 'error');
+    } finally {
+      setIsSavingLearning(false);
+    }
+  };
+
+  const handlePOPRunStatusChange = async (newStatus: POPRun['status']) => {
+    if (!currentPOPRun) return;
+    if (!canTransitionPOPRunStatus(currentPOPRun.status, newStatus)) return;
+    if ((newStatus === 'approved' || newStatus === 'applied') && !guardAssistedExecution()) return;
+
+    try {
+      await updatePOPRunStatus(db, currentPOPRun.id, currentPOPRun.status, newStatus);
+      setCurrentPOPRun({
+        ...currentPOPRun,
+        status: newStatus,
+        updated_at: new Date().toISOString(),
+      });
+      showToast(`Execução do POP atualizada para ${newStatus}.`, 'success');
+    } catch (error: any) {
+      showToast(error.message ?? 'Erro ao atualizar status do procedimento.', 'error');
+    }
+  };
 
   // ─── Timer Formatter ──────────────────────────────────────────
   const formatTimer = (s: number) => {
@@ -293,7 +561,13 @@ export const TaskExecutionView = ({
         acompanhamento: [...(currentTaskData.acompanhamento || []), ...newEntries]
       });
       for (const item of uploadedItems) {
-        const ki: ConhecimentoItem = { id: item.id, titulo: item.nome || 'Sem título', tipo_arquivo: item.nome?.split('.').pop()?.toLowerCase() || 'unknown', url_drive: item.valor, tamanho: 0, data_criacao: item.data_criacao, origem: { modulo: 'tarefas', id_origem: task.id } };
+        const ki = buildKnowledgeItemFromPoolItem({
+          item,
+          origem: { modulo: 'tarefas', id_origem: task.id },
+          categoria: 'Ações',
+          intakeChannel: 'uploaded_file',
+          domainHint: 'operacoes_administrativas'
+        });
         setDoc(doc(db, 'conhecimento', item.id), ki).catch(console.error);
       }
       showToast(`${uploadedItems.length} arquivo(s) carregado(s).`, 'success');
@@ -369,8 +643,11 @@ export const TaskExecutionView = ({
         try {
           const b64 = (reader.result as string).split(',')[1];
           const fn = httpsCallable(functions, 'transcreverAudio');
-          const res = await fn({ audioBase64: b64 });
-          const data = res.data as { raw: string; refined: string };
+          const res = await fn({
+            audioBase64: b64,
+            sourceRef: { kind: 'task', id: task.id, label: task.titulo },
+          });
+          const data = res.data as TranscriptionResponse;
           if (data.refined) setter(prev => prev + (prev ? '\n' : '') + data.refined);
         } catch { showToast('Erro ao processar áudio.', 'error'); }
         finally { setIsProcessingTranscription(false); }
@@ -480,6 +757,7 @@ export const TaskExecutionView = ({
 
   const sendChatMessage = async (messageText: string, asArtifact = false) => {
     if (!messageText.trim() || isChatLoading) return;
+    if (!guardAssistedExecution()) return;
     
     const userMsg: ChatMessage = { role: 'user', content: messageText };
     const historyWithUser = [...chatMessages, userMsg];
@@ -487,10 +765,10 @@ export const TaskExecutionView = ({
     setIsChatLoading(true);
     
     try {
-      const fn = httpsCallable(functions, 'askTaskAssistant');
-      
       const customPrompt = `
         Comando: ${messageText}
+        ---
+        ${buildContextPromptBlock()}
         ---
         IMPORTANTE: Se o usuário pedir para criar, alterar ou sugerir um plano de ação, retorne sua sugestão normal no texto E TAMBÉM inclua no final da sua resposta um bloco JSON exatamente assim:
         [PROPOSAL]
@@ -502,16 +780,46 @@ export const TaskExecutionView = ({
         Use IDs únicos (pode ser timestamps ou strings aleatórias). Preserve os itens que já estão concluídos se fizer sentido. O plano deve ter no máximo 5 etapas — priorize as mais relevantes e agrupe ações similares quando necessário.
       `;
 
-      const res = await fn({
+      const res = await callRegisteredTool<{ result: string }>('task_copilot', {
         prompt: customPrompt,
         historyContext: buildHistoryContext(),
         categoria: task.categoria,
         ragContext: currentTaskData.base_conhecimento,
         extraContextId: currentTaskData.extra_context_id,
         knowledgeItemIds: currentTaskData.knowledge_item_ids || [],
+        contextBundle: currentTaskData.context_bundle_snapshot || layerContext,
+        suggestedPopId: currentTaskData.suggested_pop_id || suggestedPOPAssessment?.pop.id || null,
+        popRunId: currentTaskData.pop_run_id || null,
+        activeProcedure: buildActivePopPayload(),
+      }, {
+        db,
+        functions,
+        routingAssessment,
+        approvalGranted,
+        domainHint: currentTaskData.intake_record?.domain_hint || 'operacoes_administrativas',
+        onBlocked: (reason) => {
+          setIsChatLoading(false);
+          showToast(
+            reason === 'not_registered'
+              ? 'Copiloto não homologado — chamada bloqueada.'
+              : 'Libere a sessão antes de usar o copiloto.',
+            'info',
+          );
+        },
+        context: { kind: 'task', id: task.id, label: task.titulo },
       });
-      
-      let result = (res.data as any).result || '';
+      if (res === null) return;
+      logContextUsageEvent(db, {
+        context_kind: 'task',
+        context_id: task.id,
+        context_label: task.titulo,
+        usage_kind: 'task_copilot',
+        context_bundle: currentTaskData.context_bundle_snapshot || layerContext,
+        suggested_pop_id: currentTaskData.suggested_pop_id || suggestedPOPAssessment?.pop.id || null,
+        pop_run_id: currentTaskData.pop_run_id || null,
+      });
+
+      let result = res.result || '';
       let proposedPlan: ActionPlanItem[] | undefined = undefined;
 
       // Detect proposal
@@ -571,20 +879,50 @@ export const TaskExecutionView = ({
   };
 
   const handleSummarizeWithAI = async () => {
+    if (!guardAssistedExecution()) return;
     const prompt = 'Faça um resumo executivo desta ação: o que foi feito, decisões tomadas, pendências e próximos passos recomendados.';
     setChatMessages(prev => [...prev, { role: 'user', content: '📋 Resumir com IA' }]);
     setIsChatLoading(true);
     try {
-      const fn = httpsCallable(functions, 'askTaskAssistant');
-      const res = await fn({
-        prompt,
+      const res = await callRegisteredTool<{ result: string }>('task_copilot', {
+        prompt: `${prompt}\n\n${buildContextPromptBlock()}`,
         historyContext: buildHistoryContext(),
         categoria: task.categoria,
         ragContext: currentTaskData.base_conhecimento,
         extraContextId: currentTaskData.extra_context_id,
         knowledgeItemIds: currentTaskData.knowledge_item_ids || [],
+        contextBundle: currentTaskData.context_bundle_snapshot || layerContext,
+        suggestedPopId: currentTaskData.suggested_pop_id || suggestedPOPAssessment?.pop.id || null,
+        popRunId: currentTaskData.pop_run_id || null,
+        activeProcedure: buildActivePopPayload(),
+      }, {
+        db,
+        functions,
+        routingAssessment,
+        approvalGranted,
+        domainHint: currentTaskData.intake_record?.domain_hint || 'operacoes_administrativas',
+        onBlocked: (reason) => {
+          setIsChatLoading(false);
+          showToast(
+            reason === 'not_registered'
+              ? 'Copiloto não homologado — chamada bloqueada.'
+              : 'Libere a sessão antes de usar o copiloto.',
+            'info',
+          );
+        },
+        context: { kind: 'task', id: task.id, label: task.titulo },
       });
-      const result = (res.data as any).result || '';
+      if (res === null) return;
+      logContextUsageEvent(db, {
+        context_kind: 'task',
+        context_id: task.id,
+        context_label: task.titulo,
+        usage_kind: 'task_copilot',
+        context_bundle: currentTaskData.context_bundle_snapshot || layerContext,
+        suggested_pop_id: currentTaskData.suggested_pop_id || suggestedPOPAssessment?.pop.id || null,
+        pop_run_id: currentTaskData.pop_run_id || null,
+      });
+      const result = res.result || '';
       const artifact: Artifact = {
         id: Date.now().toString(),
         title: `Resumo Executivo — ${new Date().toLocaleDateString('pt-BR')}`,
@@ -651,9 +989,11 @@ export const TaskExecutionView = ({
       const result = await fn({ fileBase64: base64, filename: file.name, mimeType: file.type, extraContextId });
       const docId = (result.data as any).docId;
       setSessionExtraFiles(prev => prev.map(f => f.id === tempId ? { ...f, id: docId, status: 'ready' } : f));
-      if (!currentTaskData.extra_context_id) {
-        onSave(task.id, { extra_context_id: extraContextId });
-      }
+      const mergedKnowledgeIds = Array.from(new Set([...(currentTaskData.knowledge_item_ids || []), docId]));
+      onSave(task.id, {
+        extra_context_id: extraContextId,
+        knowledge_item_ids: mergedKnowledgeIds
+      });
       showToast(`"${file.name}" adicionado ao contexto.`, 'success');
     } catch {
       setSessionExtraFiles(prev => prev.map(f => f.id === tempId ? { ...f, status: 'error' } : f));
@@ -686,6 +1026,86 @@ export const TaskExecutionView = ({
   const showMapa = mobileTab === 'mapa';
   const showDiario = mobileTab === 'diario';
   const showCopiloto = mobileTab === 'copiloto';
+  const buildContextPromptBlock = () => {
+    const contextBundle = currentTaskData.context_bundle_snapshot || layerContext;
+    const layers = [
+      ['L0', contextBundle.identity],
+      ['L1', contextBundle.session],
+      ['L2', contextBundle.scoped],
+      ['L3', contextBundle.deep],
+    ] as const;
+    const layerLines = layers
+      .map(([level, entries]) => `${level}: ${entries.slice(0, 3).map(entry => `${entry.label} (${entry.rationale})`).join(' | ') || 'sem contexto'}`)
+      .join('\n');
+
+    const popLines = suggestedPOPAssessment
+      ? [
+          `POP sugerido: ${suggestedPOPAssessment.pop.nome}`,
+          `Domínio do POP: ${suggestedPOPAssessment.pop.dominio}`,
+          `Racional do POP: ${buildPOPRationale(suggestedPOPAssessment)}`,
+          currentPOPRun
+            ? `Execução do POP: status=${currentPOPRun.status}; passos=${currentPOPRun.steps_resolved.map(step => `${step.step_id}:${step.status}`).join(', ')}`
+            : 'Execução do POP: não instanciada',
+        ].join('\n')
+      : 'POP sugerido: nenhum';
+
+    return `CONTEXTO ESTRUTURADO DA AÇÃO\n${layerLines}\n${popLines}`;
+  };
+
+  const handleRunKnowledgeAutoAction = async (knowledgeId: string) => {
+    setRunningAutoActionId(knowledgeId);
+    try {
+      const res = await callRegisteredTool<{ success: boolean; message?: string }>('knowledge_vectorization', {
+        knowledgeId,
+      }, {
+        db,
+        functions,
+        routingAssessment,
+        approvalGranted,
+        domainHint: currentTaskData.intake_record?.domain_hint || 'captura_e_conhecimento',
+        onBlocked: (reason) => {
+          showToast(
+            reason === 'not_registered'
+              ? 'Ferramenta não homologada.'
+              : 'Libere a sessão antes de executar esta ação automática.',
+            'info',
+          );
+        },
+        context: { kind: 'task', id: task.id, label: task.titulo },
+      });
+      if (res?.success) {
+        showToast(res.message || 'Item vetorizado.', 'success');
+      }
+    } catch {
+      showToast('Erro ao executar ação automática.', 'error');
+    } finally {
+      setRunningAutoActionId(null);
+    }
+  };
+  const buildActivePopPayload = () => ({
+    suggestedPop: suggestedPOPAssessment
+      ? {
+          id: suggestedPOPAssessment.pop.id,
+          nome: suggestedPOPAssessment.pop.nome,
+          dominio: suggestedPOPAssessment.pop.dominio,
+          rationale: buildPOPRationale(suggestedPOPAssessment),
+          missingRequirements: suggestedPOPAssessment.missing_requirements,
+        }
+      : null,
+    popRun: currentPOPRun
+      ? {
+          id: currentPOPRun.id,
+          status: currentPOPRun.status,
+          steps: currentPOPRun.steps_resolved,
+        }
+      : null,
+    learningEvents: learningEvents.slice(0, 5).map(event => ({
+      id: event.id,
+      type: event.tipo,
+      description: event.descricao,
+      review_status: event.review_status,
+    })),
+  });
 
   // ─── Render ───────────────────────────────────────────────────
   return (
@@ -752,6 +1172,61 @@ export const TaskExecutionView = ({
         )}
       </header>
 
+      {routingAssessment.approval_mode !== 'automatic' && (
+        approvalGranted ? (
+          <div className={`mx-4 lg:mx-4 mt-3 flex items-center gap-2 px-3 py-1.5 rounded-xl border self-start w-fit ${isDark ? 'bg-emerald-500/10 border-emerald-400/20' : 'bg-emerald-50 border-emerald-200'}`}>
+            <svg className={`w-3 h-3 shrink-0 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+            </svg>
+            <span className={`text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>
+              Sessão liberada · risco {routingAssessment.risk_level}
+            </span>
+          </div>
+        ) : (
+          <div className={`mx-4 lg:mx-4 mt-3 rounded-2xl border px-4 py-3 flex flex-col gap-2 ${routingAssessment.approval_mode === 'required'
+            ? (isDark ? 'bg-rose-500/10 border-rose-400/30' : 'bg-rose-50 border-rose-200')
+            : (isDark ? 'bg-amber-500/10 border-amber-400/30' : 'bg-amber-50 border-amber-200')
+          }`}>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className={`text-[10px] font-black uppercase tracking-widest ${routingAssessment.approval_mode === 'required'
+                  ? (isDark ? 'text-rose-300' : 'text-rose-700')
+                  : (isDark ? 'text-amber-300' : 'text-amber-700')
+                }`}>
+                  Governança de Execução
+                </p>
+                <p className={`text-xs font-medium mt-1 ${isDark ? 'text-white/70' : 'text-slate-600'}`}>
+                  {routingAssessment.approval_mode === 'required'
+                    ? 'Esta ação exige liberação explícita antes de usar o copiloto e gerar artefatos.'
+                    : 'Esta ação pede confirmação curta antes de usar o copiloto nesta sessão.'}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setApprovalGranted(true);
+                  logRoutingEvent(db, {
+                    context_kind: 'task',
+                    context_id: task.id,
+                    context_label: task.titulo,
+                    assessment: routingAssessment,
+                    session_released: true,
+                  });
+                }}
+                className={`shrink-0 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${routingAssessment.approval_mode === 'required'
+                  ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                  : 'bg-amber-500 hover:bg-amber-600 text-white'
+                }`}
+              >
+                Liberar sessão
+              </button>
+            </div>
+            <div className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? 'text-white/40' : 'text-slate-500'}`}>
+              {routingAssessment.route === 'orchestrated' ? 'Rota orquestrada' : 'Rota direta'} · risco {routingAssessment.risk_level}
+            </div>
+          </div>
+        )
+      )}
+
       {/* ══════════════════════════════════════════════════════════
           MOBILE TAB BAR
       ══════════════════════════════════════════════════════════ */}
@@ -798,6 +1273,239 @@ export const TaskExecutionView = ({
               <p className={`text-xs leading-relaxed ${isDark ? 'text-white/70' : 'text-slate-600'}`}>
                 {currentTaskData.descricao}
               </p>
+            </div>
+          )}
+
+          <div className={`rounded-2xl border ${cardBg}`}>
+            <button
+              onClick={() => setLayersExpanded(v => !v)}
+              className="w-full flex items-center justify-between gap-2 px-4 py-3"
+            >
+              <p className={labelCls}>Contexto em Camadas</p>
+              <div className="flex items-center gap-2">
+                <span className={`text-[10px] font-bold ${isDark ? 'text-white/40' : 'text-slate-400'}`}>
+                  {layerContext.identity.length + layerContext.session.length + layerContext.scoped.length + layerContext.deep.length} itens
+                </span>
+                <svg
+                  className={`w-3.5 h-3.5 transition-transform ${layersExpanded ? 'rotate-180' : ''} ${isDark ? 'text-white/40' : 'text-slate-400'}`}
+                  fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
+            </button>
+            {layersExpanded && (
+              <div className="px-4 pb-4 space-y-3">
+                {([
+                  ['L0', layerContext.identity],
+                  ['L1', layerContext.session],
+                  ['L2', layerContext.scoped],
+                  ['L3', layerContext.deep],
+                ] as const).map(([level, entries]) => (
+                  <div key={level}>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className={`text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>{level}</p>
+                      <span className={`text-[10px] font-bold ${isDark ? 'text-white/40' : 'text-slate-400'}`}>{entries.length} item(ns)</span>
+                    </div>
+                    {entries.length === 0 ? (
+                      <p className={`mt-1 text-[11px] ${isDark ? 'text-white/35' : 'text-slate-400'}`}>Sem contexto carregado nesta camada.</p>
+                    ) : (
+                      <div className="mt-2 space-y-2">
+                        {entries.slice(0, 3).map(entry => (
+                          <div key={entry.id} className={`rounded-xl px-3 py-2 ${isDark ? 'bg-white/5 border border-white/10' : 'bg-slate-50 border border-slate-100'}`}>
+                            <p className={`text-xs font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{entry.label}</p>
+                            <p className={`mt-1 text-[11px] leading-relaxed ${isDark ? 'text-white/60' : 'text-slate-600'}`}>{entry.rationale}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {executableKnowledgeActions.length > 0 && (
+            <div className={`rounded-2xl border p-4 ${cardBg}`}>
+              <p className={`${labelCls} mb-2`}>Ações Executáveis</p>
+              <div className="space-y-2">
+                {executableKnowledgeActions.map(action => (
+                  <div key={action.item.id} className={`rounded-xl border px-3 py-3 ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-100'}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className={`text-xs font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>Vetorizar conhecimento</p>
+                        <p className={`mt-1 text-[11px] ${isDark ? 'text-white/60' : 'text-slate-600'}`}>{action.item.titulo}</p>
+                      </div>
+                      <button
+                        onClick={() => handleRunKnowledgeAutoAction(action.item.id)}
+                        disabled={!action.decision.allowed || runningAutoActionId === action.item.id}
+                        className={`shrink-0 rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-widest transition-all ${
+                          action.decision.allowed
+                            ? (isDark ? 'bg-blue-500 text-white hover:bg-blue-400' : 'bg-blue-600 text-white hover:bg-blue-700')
+                            : 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                        }`}
+                      >
+                        {runningAutoActionId === action.item.id ? 'Executando...' : 'Executar'}
+                      </button>
+                    </div>
+                    {!action.decision.allowed && (
+                      <p className={`mt-2 text-[10px] font-bold uppercase tracking-widest ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
+                        {action.decision.reason === 'approval_required' ? 'Requer liberação' : 'Bloqueada pela política'}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {suggestedPOPAssessment && (
+            <div className={`rounded-2xl border p-4 ${isDark ? 'bg-emerald-500/10 border-emerald-400/20' : 'bg-emerald-50 border-emerald-200'}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className={`text-[9px] font-black uppercase tracking-widest ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>Procedimento sugerido</p>
+                  <h3 className={`mt-1 text-sm font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{suggestedPOPAssessment.pop.nome}</h3>
+                </div>
+                <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-widest ${isDark ? 'bg-black/20 text-emerald-200 border border-emerald-300/20' : 'bg-white text-emerald-700 border border-emerald-100'}`}>
+                  {Math.round(suggestedPOPAssessment.score * 100)}%
+                </span>
+              </div>
+
+              <p className={`mt-3 text-xs leading-relaxed ${isDark ? 'text-white/75' : 'text-slate-700'}`}>
+                {buildPOPRationale(suggestedPOPAssessment)}
+              </p>
+
+              {suggestedPOPAssessment.missing_requirements.length > 0 && (
+                <p className={`mt-2 text-[11px] font-semibold ${isDark ? 'text-amber-200' : 'text-amber-700'}`}>
+                  Lacunas: {suggestedPOPAssessment.missing_requirements.join(' ')}
+                </p>
+              )}
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                {!currentTaskData.suggested_pop_id && (
+                  <button
+                    onClick={handleAdoptSuggestedPOP}
+                    className={`rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-emerald-500 text-black hover:bg-emerald-400' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+                  >
+                    Vincular POP
+                  </button>
+                )}
+                <button
+                  onClick={handleCreatePOPRun}
+                  disabled={isCreatingPOPRun || !!currentTaskData.pop_run_id}
+                  className={`rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-50 disabled:cursor-not-allowed ${isDark ? 'bg-white/10 text-white hover:bg-white/15' : 'bg-slate-900 text-white hover:bg-slate-700'}`}
+                >
+                  {currentTaskData.pop_run_id ? 'Execução vinculada' : isCreatingPOPRun ? 'Criando...' : 'Instanciar execução'}
+                </button>
+              </div>
+
+              <div className={`mt-3 text-[10px] font-bold uppercase tracking-widest ${isDark ? 'text-white/40' : 'text-slate-500'}`}>
+                {suggestedPOPAssessment.pop.dominio} · v{suggestedPOPAssessment.pop.versao}
+              </div>
+            </div>
+          )}
+
+          {suggestedPOPAssessment && currentPOPRun && (
+            <div className={`rounded-2xl border p-4 ${cardBg}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className={labelCls}>Execução do Procedimento</p>
+                  <h3 className={`mt-1 text-sm font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                    {suggestedPOPAssessment.pop.nome}
+                  </h3>
+                </div>
+                <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-widest ${isDark ? 'bg-white/10 text-white/70' : 'bg-slate-100 text-slate-600'}`}>
+                  {currentPOPRun.status}
+                </span>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                <div className="flex flex-wrap gap-2">
+                  {(['proposed', 'in_review', 'approved', 'applied'] as POPRun['status'][])
+                    .filter(status => canTransitionPOPRunStatus(currentPOPRun.status, status))
+                    .map(status => (
+                      <button
+                        key={status}
+                        onClick={() => handlePOPRunStatusChange(status)}
+                        className={`rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-white/10 text-white hover:bg-white/15' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                      >
+                        {status}
+                      </button>
+                    ))}
+                </div>
+
+                {suggestedPOPAssessment.pop.passos
+                  .slice()
+                  .sort((a, b) => a.ordem - b.ordem)
+                  .map(step => {
+                    const resolved = currentPOPRun.steps_resolved.find((item: POPStepRun) => item.step_id === step.id);
+                    const completed = resolved?.status === 'completed';
+                    return (
+                      <button
+                        key={step.id}
+                        onClick={() => handleTogglePOPRunStep(step.id)}
+                        className={`w-full rounded-xl border px-3 py-3 text-left transition-all ${isDark ? 'border-white/10 hover:bg-white/5' : 'border-slate-100 hover:bg-slate-50'}`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className={`mt-0.5 h-4 w-4 rounded border-2 flex items-center justify-center shrink-0 ${completed ? 'bg-emerald-500 border-emerald-500' : isDark ? 'border-white/30' : 'border-slate-300'}`}>
+                            {completed && (
+                              <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className={`text-[10px] font-black uppercase tracking-widest ${mutedText}`}>Passo {step.ordem} · {step.tipo}</p>
+                            <p className={`mt-1 text-sm font-bold ${completed ? (isDark ? 'text-white/40 line-through' : 'text-slate-400 line-through') : (isDark ? 'text-white' : 'text-slate-900')}`}>{step.titulo}</p>
+                            <p className={`mt-1 text-xs leading-relaxed ${completed ? mutedText : (isDark ? 'text-white/65' : 'text-slate-600')}`}>{step.descricao}</p>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+              </div>
+
+              <div className={`mt-4 rounded-2xl border p-3 ${isDark ? 'border-white/10 bg-black/20' : 'border-slate-100 bg-slate-50/70'}`}>
+                <p className={labelCls}>Aprendizado do POP</p>
+                <textarea
+                  value={learningDraft}
+                  onChange={e => setLearningDraft(e.target.value)}
+                  rows={3}
+                  placeholder="Registre aqui correções humanas, exceções ou ajustes que este procedimento deveria aprender..."
+                  className={`mt-2 w-full rounded-xl border px-3 py-2 text-xs font-medium resize-none focus:outline-none ${isDark ? 'border-white/10 bg-white/5 text-white placeholder:text-white/25' : 'border-slate-200 bg-white text-slate-700 placeholder:text-slate-400'}`}
+                />
+                <div className="mt-2 flex justify-end">
+                  <button
+                    onClick={handleCreateLearningEvent}
+                    disabled={isSavingLearning || !learningDraft.trim()}
+                    className={`rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-50 disabled:cursor-not-allowed ${isDark ? 'bg-white/10 text-white hover:bg-white/15' : 'bg-slate-900 text-white hover:bg-slate-700'}`}
+                  >
+                    {isSavingLearning ? 'Salvando...' : 'Registrar aprendizado'}
+                  </button>
+                </div>
+              </div>
+
+              {learningEvents.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  <p className={labelCls}>Correções Recentes</p>
+                  {learningEvents.slice(0, 4).map(event => (
+                    <div key={event.id} className={`rounded-xl border px-3 py-3 ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-100 bg-white'}`}>
+                      <div className="flex items-center justify-between gap-3">
+                        <p className={`text-[10px] font-black uppercase tracking-widest ${mutedText}`}>{event.tipo}</p>
+                        <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-widest ${event.review_status === 'pending'
+                          ? (isDark ? 'bg-amber-500/15 text-amber-300' : 'bg-amber-100 text-amber-700')
+                          : event.review_status === 'accepted'
+                            ? (isDark ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-100 text-emerald-700')
+                            : (isDark ? 'bg-rose-500/15 text-rose-300' : 'bg-rose-100 text-rose-700')
+                        }`}>
+                          {event.review_status}
+                        </span>
+                      </div>
+                      <p className={`mt-2 text-xs leading-relaxed ${isDark ? 'text-white/75' : 'text-slate-700'}`}>{event.descricao}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

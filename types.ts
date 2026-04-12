@@ -8,6 +8,76 @@ export interface Acompanhamento {
 
 export type Categoria = string;
 
+export type IntakeChannel =
+    | 'manual_text'
+    | 'audio_upload'
+    | 'audio_recording'
+    | 'file_upload'
+    | 'whatsapp_messages'
+    | 'drive_file'
+    | 'uploaded_file'
+    | 'shared_link'
+    | 'meeting_transcript'
+    | 'meeting_transcription'
+    | 'repository_event';
+
+export type IntakeConfidentiality = 'internal' | 'restricted' | 'sensitive' | 'public';
+export type IntakeProcessingStatus = 'received' | 'prepared' | 'processing' | 'rejected' | 'linked' | 'transcribed' | 'vectorized' | 'error';
+
+export interface IntakeSourceRef {
+    kind:
+        | 'task'
+        | 'system'
+        | 'knowledge_base'
+        | 'meeting'
+        | 'meeting_window'
+        | 'extra_context'
+        | 'extra_context_bucket'
+        | 'uploaded_file'
+        | 'drive_file'
+        | 'repository'
+        | 'audio_upload'
+        | 'unknown';
+    id?: string;
+    label?: string;
+    filename?: string;
+    mime_type?: string;
+    size_bytes?: number;
+    url?: string;
+    started_at?: string;
+    ended_at?: string;
+    default_branch?: string;
+    sistema_id?: string;
+    chunk_type?: string;
+    extension?: string;
+}
+
+export interface IntakeRecord {
+    id?: string;
+    received_at?: string;
+    captured_at?: string;
+    channel: IntakeChannel;
+    confidentiality: IntakeConfidentiality;
+    processing_status: IntakeProcessingStatus;
+    domain_hint?: string;
+    requested_by?: string;
+    request_text?: string;
+    source_artifact_ids?: string[];
+    source_refs?: IntakeSourceRef[];
+}
+
+export interface TranscriptionResponse {
+    raw: string;
+    refined: string;
+    intake_record?: IntakeRecord;
+    artifact_role?: 'source' | 'derived';
+    artifact_origin_kind?: 'file_upload' | 'link_capture' | 'meeting_transcription' | 'audio_transcription' | 'extra_context' | 'repository_sync';
+    source_artifact_id?: string | null;
+    version?: number;
+    last_update_reason?: 'human_edit' | 'ocr_extraction' | 'vectorization' | 'ingestion' | 'system_sync';
+    last_updated_by?: string;
+}
+
 export interface PoolItem {
     id: string;
     tipo: 'link' | 'telefone' | 'arquivo';
@@ -18,6 +88,20 @@ export interface PoolItem {
 }
 
 export type TipoAcao = 'fast' | 'deep';
+
+export type RoutingMode = 'deterministic' | 'orchestrated';
+export type ApprovalMode = 'automatic' | 'confirm' | 'required';
+export type RiskLevel = 'low' | 'medium' | 'high';
+
+export interface RoutingAssessment {
+    route: RoutingMode;
+    approval_mode: ApprovalMode;
+    risk_level: RiskLevel;
+    clarity_score: number;
+    context_score: number;
+    impact_score: number;
+    rationale: string[];
+}
 
 export interface ActionPlanItem {
     id: string;
@@ -76,6 +160,13 @@ export interface Tarefa {
     reuniao_vinculada_id?: string;
     knowledge_item_ids?: string[];
     extra_context_id?: string;
+    intake_record?: IntakeRecord;
+    routing_assessment?: RoutingAssessment;
+    suggested_pop_id?: string;
+    pop_run_id?: string;
+    context_bundle_snapshot?: ContextBundle;
+    resolved_knowledge_ids?: string[];
+    memory_room_hint?: string;
 }
 
 export interface AtividadeRealizada {
@@ -450,6 +541,84 @@ export interface ConhecimentoItem {
     is_folder?: boolean;
     orphan_action_title?: string;
     fileHandle?: any;
+    intake_record?: IntakeRecord;
+    artifact_role?: 'source' | 'derived';
+    artifact_origin_kind?: 'file_upload' | 'link_capture' | 'meeting_transcription' | 'audio_transcription' | 'extra_context' | 'repository_sync';
+    source_artifact_id?: string | null;
+    version?: number;
+    last_update_reason?: 'human_edit' | 'ocr_extraction' | 'vectorization' | 'ingestion' | 'system_sync';
+    last_updated_by?: string;
+    content_hash?: string;
+    memory_location?: MemoryLocation;
+}
+
+export interface MemoryLocation {
+    wing: string;
+    room: string;
+    drawer: string;
+    cabinet?: string;
+    path_label?: string;
+}
+
+// ── Fase 2B: Grafo Relacional ──────────────────────────────────────────────
+
+/** Semantic relation between two knowledge nodes. */
+export type RelationKind =
+    | 'references'    // este item referencia/cita o outro
+    | 'derived_from'  // este item é derivado do outro (ex: transcrição de áudio)
+    | 'supersedes'    // este item substitui o outro
+    | 'related_to'    // relação semântica genérica
+    | 'part_of';      // este item é componente/seção do outro
+
+/** Directed edge between two ConhecimentoItem nodes in the knowledge graph. */
+export interface KnowledgeEdge {
+    id: string;
+    source_id: string;
+    target_id: string;
+    relation_kind: RelationKind;
+    /** ISO date (YYYY-MM-DD) from which this relation is valid. Absence means no lower bound. */
+    valid_from?: string;
+    /** ISO date (YYYY-MM-DD) until which this relation is valid. Absence means no expiry. */
+    valid_until?: string;
+    notes?: string;
+    created_at: string;
+    created_by: string;
+}
+
+export interface KnowledgeVersionEntry {
+    id: string;
+    item_id: string;
+    captured_at: string;
+    version: number;
+    reason: 'human_edit' | 'ocr_extraction' | 'vectorization' | 'ingestion' | 'system_sync';
+    actor: string;
+    changed_fields?: string[];
+    content_hash?: string;
+    titulo?: string;
+    texto_bruto?: string;
+    resumo_tldr?: string;
+    tags?: string[];
+    categoria?: string;
+}
+
+export type ContextLayerLevel = 'L0' | 'L1' | 'L2' | 'L3';
+
+export interface ContextLayerEntry {
+    id: string;
+    level: ContextLayerLevel;
+    label: string;
+    rationale: string;
+    source_kind: 'task' | 'system' | 'knowledge_item' | 'knowledge_edge' | 'session';
+    source_id?: string;
+    content?: string;
+    score?: number;
+}
+
+export interface ContextBundle {
+    identity: ContextLayerEntry[];
+    session: ContextLayerEntry[];
+    scoped: ContextLayerEntry[];
+    deep: ContextLayerEntry[];
 }
 
 export interface BaseConhecimento {
@@ -669,6 +838,139 @@ export interface ParcelaServico {
     valor: number;
     data_prevista: string;
     status: 'pendente' | 'pago';
+}
+
+// ── Fase 5: Issue Packets (Propostas Técnicas Revisáveis) ─────────────────────
+
+export type IssuePacketStatus = 'draft' | 'review' | 'approved' | 'rejected' | 'applied';
+export type IssuePacketTipo = 'bug' | 'melhoria' | 'refatoracao' | 'seguranca';
+export type IssuePacketSeveridade = 'baixa' | 'media' | 'alta' | 'critica';
+
+/** A single file affected by the proposed change. */
+export interface AffectedFile {
+    path: string;
+    change_type: 'modified' | 'added' | 'deleted';
+    summary?: string;
+    /** Short diff excerpt (not the full diff). */
+    diff_preview?: string;
+}
+
+/**
+ * A structured, auditable technical proposal linking a problem
+ * (detected in a system or knowledge base) to a concrete change plan.
+ *
+ * Lifecycle: draft → review → approved | rejected → applied
+ */
+export interface IssuePacket {
+    id: string;
+    sistema_id: string;
+    titulo: string;
+    descricao: string;
+    tipo: IssuePacketTipo;
+    severidade: IssuePacketSeveridade;
+    status: IssuePacketStatus;
+    affected_files: AffectedFile[];
+    /** Markdown description of what should change and how. */
+    proposed_changes: string;
+    /** Why these changes are needed (business and technical rationale). */
+    rationale: string;
+    intake_record?: IntakeRecord;
+    routing_assessment?: RoutingAssessment;
+    suggested_pop_id?: string;
+    pop_run_id?: string;
+    /** IDs of ConhecimentoItem documents that serve as evidence. */
+    knowledge_item_ids?: string[];
+    reviewed_by?: string;
+    reviewed_at?: string;
+    review_note?: string;
+    created_at: string;
+    created_by: string;
+    data_atualizacao?: string;
+}
+
+// ── Fase 6: POPs Adaptativos ───────────────────────────────────────────────────
+
+export type POPStatus = 'draft' | 'active' | 'archived';
+export type POPStepType = 'collect' | 'analyze' | 'decide' | 'generate_artifact' | 'route' | 'validate' | 'close';
+export type POPRunStatus = 'draft' | 'proposed' | 'in_review' | 'approved' | 'rejected' | 'applied';
+export type POPLearningEventType = 'step_adjusted' | 'exception_added' | 'artifact_corrected' | 'validation_changed' | 'routing_changed';
+
+export interface POPStep {
+    id: string;
+    ordem: number;
+    titulo: string;
+    descricao: string;
+    tipo: POPStepType;
+    obrigatorio: boolean;
+    depends_on?: string[];
+    tool_hint?: string;
+    artifact_hint?: string;
+    validation_rule?: string;
+    approval_override?: ApprovalMode;
+    notes?: string;
+}
+
+export interface POP {
+    id: string;
+    nome: string;
+    slug: string;
+    descricao: string;
+    dominio: string;
+    subdominio?: string;
+    status: POPStatus;
+    versao: number;
+    gatilhos: string[];
+    pre_condicoes: string[];
+    passos: POPStep[];
+    excecoes: string[];
+    artefatos_gerados: string[];
+    criterios_validacao: string[];
+    risk_level: RiskLevel;
+    approval_mode_default: ApprovalMode;
+    tags?: string[];
+    source_refs?: IntakeSourceRef[];
+    created_at: string;
+    updated_at?: string;
+    last_update_reason?: string;
+    last_updated_by?: string;
+}
+
+export interface POPStepRun {
+    step_id: string;
+    status: 'pending' | 'completed' | 'skipped' | 'blocked';
+    rationale?: string;
+    artifact_id?: string;
+}
+
+export interface POPRun {
+    id: string;
+    pop_id: string;
+    caso_origem_tipo: 'task' | 'issue_packet' | 'knowledge_item' | 'processo';
+    caso_origem_id: string;
+    status: POPRunStatus;
+    assessment?: RoutingAssessment;
+    input_refs?: IntakeSourceRef[];
+    steps_resolved: POPStepRun[];
+    artifacts_produced?: string[];
+    user_edits?: string[];
+    final_outcome?: string;
+    approved_by?: string;
+    created_at: string;
+    updated_at?: string;
+}
+
+export interface POPLearningEvent {
+    id: string;
+    pop_id: string;
+    pop_run_id?: string;
+    tipo: POPLearningEventType;
+    descricao: string;
+    campo_afetado?: string;
+    antes?: string;
+    depois?: string;
+    impacto?: RiskLevel;
+    review_status: 'pending' | 'accepted' | 'rejected';
+    created_at: string;
 }
 
 export interface Servico {

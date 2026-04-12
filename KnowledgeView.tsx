@@ -1,5 +1,15 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { ConhecimentoItem, formatDate, Tarefa, WorkItem, BaseConhecimento } from './types';
+import { ConhecimentoItem, formatDate, Tarefa, WorkItem, BaseConhecimento, KnowledgeVersionEntry, KnowledgeEdge, RelationKind } from './types';
+import { db } from './firebase';
+import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore';
+import {
+    addEdge,
+    removeEdge,
+    getEdgesForItem,
+    isEdgeActive,
+    RELATION_KIND_LABELS,
+    RELATION_KIND_COLORS,
+} from './src/utils/knowledgeGraph';
 import {
     type KnowledgeSearchMode,
     ROOT_ACTIONS_FOLDER_ID,
@@ -15,6 +25,8 @@ import {
 import * as idb from 'idb-keyval';
 
 import { AutoExpandingTextarea } from './src/components/ui/UIComponents';
+import { KnowledgeGraphView } from './src/components/tools/KnowledgeGraphView';
+import { GlobalKnowledgeGraph } from './src/components/tools/GlobalKnowledgeGraph';
 
 interface KnowledgeViewProps {
     items: ConhecimentoItem[];
@@ -44,8 +56,9 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({
     onSaveItem, 
     onRenameAction, 
     onDeleteItem, 
-    onProcessWithAI, 
-    onNavigateToOrigin, 
+    onProcessWithAI,
+    onGenerateSlides,
+    onNavigateToOrigin,
     onCreateBase,
     onUpdateBase,
     onDeleteBase,
@@ -54,6 +67,91 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({
     masterKnowledge = [], 
     showConfirm 
 }) => {
+    const formatMemoryPath = (item: ConhecimentoItem) =>
+        item.memory_location
+            ? [item.memory_location.wing, item.memory_location.room, item.memory_location.drawer, item.memory_location.cabinet]
+                .filter(Boolean)
+                .join(' / ')
+            : 'Não localizado';
+
+    const isKnowledgeProcessingPending = (item: ConhecimentoItem) =>
+        !item.is_folder && Boolean(item.texto_bruto) && item.intake_record?.processing_status !== 'vectorized';
+
+    const getProcessingLabel = (item: ConhecimentoItem) => {
+        const status = item.intake_record?.processing_status;
+        switch (status) {
+            case 'vectorized':
+                return 'Vetorizado';
+            case 'prepared':
+                return 'Preparado';
+            case 'processing':
+                return 'Em processamento';
+            case 'rejected':
+                return 'Bloqueado';
+            default:
+                return item.texto_bruto ? 'Pronto para IA' : 'Bruto';
+        }
+    };
+
+    const getProcessingTone = (item: ConhecimentoItem) => {
+        const status = item.intake_record?.processing_status;
+        switch (status) {
+            case 'vectorized':
+                return 'bg-emerald-100 text-emerald-700';
+            case 'processing':
+                return 'bg-amber-100 text-amber-700';
+            case 'rejected':
+                return 'bg-rose-100 text-rose-700';
+            default:
+                return 'bg-slate-100 text-slate-600';
+        }
+    };
+
+    const formatUpdateReason = (reason?: string) => {
+        switch (reason) {
+            case 'human_edit':
+                return 'Edição humana';
+            case 'ocr_extraction':
+                return 'Extração OCR';
+            case 'vectorization':
+                return 'Vetorização';
+            case 'ingestion':
+                return 'Ingestão';
+            case 'system_sync':
+                return 'Sincronização';
+            default:
+                return 'Não informado';
+        }
+    };
+
+    const formatChangedFields = (fields?: string[]) => {
+        if (!fields || fields.length === 0) return null;
+        const labels: Record<string, string> = {
+            titulo: 'título',
+            texto_bruto: 'conteúdo',
+            resumo_tldr: 'resumo',
+            tags: 'tags',
+            categoria: 'categoria',
+            url_drive: 'arquivo',
+            tipo_arquivo: 'tipo',
+            base_id: 'base',
+            parent_id: 'pasta',
+            origem: 'origem',
+        };
+        return fields.map((f) => labels[f] ?? f).join(', ');
+    };
+
+    const formatOriginLabel = (item: ConhecimentoItem) => {
+        if (item.intake_record?.source_refs?.length) {
+            const primary = item.intake_record.source_refs[0];
+            return primary.label || primary.filename || primary.id || primary.kind;
+        }
+        if (item.origem?.modulo && item.origem?.id_origem) {
+            return `${item.origem.modulo}:${item.origem.id_origem}`;
+        }
+        return 'Não informado';
+    };
+
     const [activeTab, setActiveTab] = useState<'library' | 'master'>('library');
     const [searchTerm, setSearchTerm] = useState('');
     const [searchMode, setSearchMode] = useState<KnowledgeSearchMode>('all');
@@ -62,12 +160,24 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({
     const [moveTargetFolderId, setMoveTargetFolderId] = useState<string | null>(null);
     const [selectedItem, setSelectedItem] = useState<ConhecimentoItem | null>(null);
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+    const [isGlobalGraphOpen, setIsGlobalGraphOpen] = useState(false);
+    const [globalEdges, setGlobalEdges] = useState<KnowledgeEdge[]>([]);
     const [isProcessingAI, setIsProcessingAI] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isOcrExpanded, setIsOcrExpanded] = useState(false);
     const [newTag, setNewTag] = useState('');
     const [pendingDeleteItemId, setPendingDeleteItemId] = useState<string | null>(null);
+    const [versionHistory, setVersionHistory] = useState<KnowledgeVersionEntry[]>([]);
+    const [detailTab, setDetailTab] = useState<'overview' | 'content' | 'history' | 'graph'>('overview');
+
+    // Relational graph state (Fase 2B)
+    const [edges, setEdges] = useState<KnowledgeEdge[]>([]);
+    const [isAddingEdge, setIsAddingEdge] = useState(false);
+    const [newEdgeTargetId, setNewEdgeTargetId] = useState('');
+    const [newEdgeRelation, setNewEdgeRelation] = useState<RelationKind>('related_to');
+    const [newEdgeValidFrom, setNewEdgeValidFrom] = useState('');
+    const [newEdgeValidUntil, setNewEdgeValidUntil] = useState('');
 
     // Desktop UX State
     const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -113,6 +223,68 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({
         return items.find(i => i.id === selectedItem.id) || selectedItem;
     }, [items, selectedItem]);
 
+    useEffect(() => {
+        let cancelled = false;
+        const loadHistory = async () => {
+            if (!currentItem || currentItem.is_folder) {
+                setVersionHistory([]);
+                return;
+            }
+            try {
+                const historyQuery = query(
+                    collection(db, 'conhecimento', currentItem.id, 'history'),
+                    orderBy('captured_at', 'desc'),
+                    limit(6)
+                );
+                const snapshot = await getDocs(historyQuery);
+                if (cancelled) return;
+                setVersionHistory(snapshot.docs.map(docSnap => ({
+                    id: docSnap.id,
+                    ...docSnap.data(),
+                } as KnowledgeVersionEntry)));
+            } catch (error) {
+                console.error('Erro ao carregar histórico do conhecimento:', error);
+                if (!cancelled) setVersionHistory([]);
+            }
+        };
+        loadHistory();
+        return () => { cancelled = true; };
+    }, [currentItem]);
+
+    useEffect(() => {
+        setDetailTab('overview');
+        setIsOcrExpanded(false);
+        setEditOcrText(null);
+    }, [currentItem?.id]);
+
+    useEffect(() => {
+        let cancelled = false;
+        if (!currentItem || currentItem.is_folder) { setEdges([]); return; }
+        getEdgesForItem(db, currentItem.id).then(loaded => {
+            if (!cancelled) setEdges(loaded);
+        }).catch(() => {
+            if (!cancelled) setEdges([]);
+        });
+        return () => { cancelled = true; };
+    }, [currentItem]);
+
+    useEffect(() => {
+        let cancelled = false;
+        if (!isGlobalGraphOpen) return;
+        const loadAllEdges = async () => {
+            try {
+                const snapshot = await getDocs(collection(db, 'knowledge_edges'));
+                if (!cancelled) {
+                    setGlobalEdges(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as KnowledgeEdge)));
+                }
+            } catch (error) {
+                console.error("Erro no Mapa Global:", error);
+            }
+        };
+        loadAllEdges();
+        return () => { cancelled = true; };
+    }, [isGlobalGraphOpen]);
+
     const folderStructure = useMemo(() => {
         return computeFolderStructure(items, allTasks);
     }, [items, allTasks]);
@@ -141,6 +313,35 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({
     const currentItems = useMemo(() => {
         return filterCurrentItems(items, allTasks, folderStructure, currentFolderId, searchTerm, searchMode, activeBaseId);
     }, [items, currentFolderId, searchTerm, searchMode, allTasks, folderStructure, activeBaseId]);
+
+    const scopedKnowledgeStats = useMemo(() => {
+        const docs = currentItems.filter(item => !item.is_folder);
+        const folders = currentItems.filter(item => item.is_folder);
+        const pending = docs.filter(isKnowledgeProcessingPending);
+        const summarized = docs.filter(item => !!item.resumo_tldr);
+        const mapped = docs.filter(item => !!item.memory_location);
+        const linked = docs.filter(item => !!item.origem || !!item.base_id);
+        return {
+            docs: docs.length,
+            folders: folders.length,
+            pending: pending.length,
+            summarized: summarized.length,
+            mapped: mapped.length,
+            linked: linked.length,
+            pendingSamples: pending.slice(0, 3),
+            recentSamples: docs
+                .slice()
+                .sort((a, b) => (b.data_atualizacao || b.data_criacao || '').localeCompare(a.data_atualizacao || a.data_criacao || ''))
+                .slice(0, 3),
+        };
+    }, [currentItems]);
+
+    const currentScopeLabel = useMemo(() => {
+        if (activeTab === 'master') return 'Manual do Hermes';
+        if (currentFolderId) return breadcrumbs[breadcrumbs.length - 1]?.name || 'Pasta';
+        if (activeBaseId) return knowledgeBases.find(base => base.id === activeBaseId)?.nome || 'Base ativa';
+        return 'Biblioteca operacional';
+    }, [activeTab, currentFolderId, breadcrumbs, activeBaseId, knowledgeBases]);
 
     const isVirtualItem = (item: ConhecimentoItem) =>
         isRootKnowledgeFolderId(item.id) || isActionVirtualFolderId(item.id) || isActionDiaryItemId(item.id);
@@ -434,9 +635,67 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({
         setContextMenu({ x: e.clientX, y: e.clientY, itemId: item.id });
     };
 
+    const handleAddEdge = async () => {
+        if (!currentItem || !newEdgeTargetId) return;
+        const edge: Omit<KnowledgeEdge, 'id'> = {
+            source_id: currentItem.id,
+            target_id: newEdgeTargetId,
+            relation_kind: newEdgeRelation,
+            created_at: new Date().toISOString(),
+            created_by: 'user',
+            ...(newEdgeValidFrom ? { valid_from: newEdgeValidFrom } : {}),
+            ...(newEdgeValidUntil ? { valid_until: newEdgeValidUntil } : {}),
+        };
+        const id = await addEdge(db, edge);
+        setEdges(prev => [{ ...edge, id }, ...prev]);
+        setIsAddingEdge(false);
+        setNewEdgeTargetId('');
+        setNewEdgeRelation('related_to');
+        setNewEdgeValidFrom('');
+        setNewEdgeValidUntil('');
+    };
+
+    const handleRemoveEdge = async (edgeId: string) => {
+        await removeEdge(db, edgeId);
+        setEdges(prev => prev.filter(e => e.id !== edgeId));
+    };
+
     const handleCopyToClipboard = (text: string) => {
         navigator.clipboard.writeText(text);
         alert("Texto copiado para a área de transferência!");
+    };
+
+    const handleProcessCurrentItemWithAI = async () => {
+        if (!currentItem || !onProcessWithAI) return;
+        setIsProcessingAI(true);
+        try {
+            await onProcessWithAI(currentItem.id);
+            alert('Processamento com IA solicitado.');
+        } catch (error) {
+            console.error('Erro ao processar item com IA:', error);
+            alert('Falha ao processar item com IA.');
+        } finally {
+            setIsProcessingAI(false);
+        }
+    };
+
+    const handleGenerateCurrentSlides = async () => {
+        if (!currentItem || !onGenerateSlides) return;
+        const sourceText = currentItem.resumo_tldr || currentItem.texto_bruto || '';
+        if (!sourceText.trim()) {
+            alert('Este item ainda não possui conteúdo suficiente para slides.');
+            return;
+        }
+        try {
+            const slides = await onGenerateSlides(sourceText);
+            if (onSaveItem) {
+                await onSaveItem({ id: currentItem.id, slides_data: slides });
+            }
+            alert('Slides gerados e vinculados ao item.');
+        } catch (error) {
+            console.error('Erro ao gerar slides:', error);
+            alert('Falha ao gerar slides.');
+        }
     };
 
     const handleCreateFolder = async () => {
@@ -718,7 +977,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({
     };
 
     return (
-        <div className="flex h-[calc(100vh-120px)] bg-slate-50 overflow-hidden rounded-none md:rounded-[2.5rem] border border-slate-200 shadow-2xl animate-in fade-in duration-500">
+        <div className="flex min-h-[calc(100vh-88px)] bg-slate-50 overflow-hidden animate-in fade-in duration-500">
             {/* Sidebar - Folder Tree */}
             <aside className="hidden md:flex w-72 bg-white border-r border-slate-100 flex-col">
                 <div className="p-8 border-b border-slate-50">
@@ -988,6 +1247,162 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                         </button>
                     </div>
                 </header>
+
+                {activeTab === 'library' && (
+                    <section className="px-8 pt-6 pb-2 bg-slate-50 border-b border-slate-100/70">
+                        <div className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-sm">
+                            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
+                                <div className="space-y-3">
+                                    <div className="flex items-center gap-3 flex-wrap">
+                                        <span className="px-3 py-1 rounded-full bg-slate-900 text-white text-[10px] font-black uppercase tracking-[0.2em]">
+                                            Memória Operacional
+                                        </span>
+                                        <span className="px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-[10px] font-black uppercase tracking-[0.2em]">
+                                            {currentScopeLabel}
+                                        </span>
+                                        {activeBaseId && (
+                                            <span className="px-3 py-1 rounded-full bg-violet-50 text-violet-700 text-[10px] font-black uppercase tracking-[0.2em]">
+                                                Base ativa
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">
+                                            Conhecimento com contexto, proveniência e ação
+                                        </h2>
+                                        <p className="text-sm text-slate-500 font-medium max-w-3xl mt-2">
+                                            Este espaço agora prioriza o que está pronto para uso operacional: documentos com contexto, itens que ainda precisam de IA e memória já posicionada no MemPalace.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="flex flex-wrap gap-3">
+                                    <button
+                                        onClick={() => setIsGlobalGraphOpen(v => !v)}
+                                        className={`px-4 py-3 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center gap-2 ${isGlobalGraphOpen ? 'bg-violet-600 text-white shadow-violet-200 shadow-xl' : 'bg-violet-50 hover:bg-violet-100 text-violet-700'}`}
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                        {isGlobalGraphOpen ? 'Sair do Mapa' : 'Mapa Mental'}
+                                    </button>
+                                    <button
+                                        onClick={() => setIsNewFolderModalOpen(true)}
+                                        className="px-4 py-3 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-black uppercase tracking-[0.2em] transition-all"
+                                    >
+                                        Nova pasta
+                                    </button>
+                                    <button
+                                        onClick={() => setIsLinkModalOpen(true)}
+                                        className="px-4 py-3 rounded-2xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-[10px] font-black uppercase tracking-[0.2em] transition-all"
+                                    >
+                                        Novo link
+                                    </button>
+                                    <button
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className="px-4 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-black uppercase tracking-[0.2em] transition-all shadow-lg"
+                                    >
+                                        {isUploading ? 'Enviando...' : 'Adicionar arquivo'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {isGlobalGraphOpen ? (
+                                <div className="mt-8 h-[700px]">
+                                    <GlobalKnowledgeGraph 
+                                        items={items.filter(i => !i.is_folder)} 
+                                        edges={globalEdges} 
+                                        onNodeClick={(id) => {
+                                            const item = items.find(i => i.id === id);
+                                            if (item) {
+                                                setSelectedItem(item);
+                                                setIsGlobalGraphOpen(false);
+                                            }
+                                        }}
+                                    />
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="grid grid-cols-2 xl:grid-cols-6 gap-3 mt-6">
+                                        {[
+                                            { label: 'Documentos', value: scopedKnowledgeStats.docs, tone: 'bg-slate-50 text-slate-900 border-slate-200' },
+                                            { label: 'Pastas', value: scopedKnowledgeStats.folders, tone: 'bg-amber-50 text-amber-800 border-amber-200' },
+                                            { label: 'Pendentes IA', value: scopedKnowledgeStats.pending, tone: 'bg-rose-50 text-rose-700 border-rose-200' },
+                                            { label: 'Com resumo', value: scopedKnowledgeStats.summarized, tone: 'bg-blue-50 text-blue-700 border-blue-200' },
+                                            { label: 'No MemPalace', value: scopedKnowledgeStats.mapped, tone: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+                                            { label: 'Contextualizados', value: scopedKnowledgeStats.linked, tone: 'bg-violet-50 text-violet-700 border-violet-200' },
+                                        ].map((stat) => (
+                                            <div key={stat.label} className={`rounded-2xl border p-4 ${stat.tone}`}>
+                                                <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-80">{stat.label}</p>
+                                                <p className="text-2xl font-black mt-2">{stat.value}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-6">
+                                        <div className="rounded-[1.5rem] border border-slate-200 bg-slate-50/70 p-4">
+                                            <div className="flex items-center justify-between gap-3 mb-3">
+                                                <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500">Fila operacional</h3>
+                                                <span className="text-[10px] font-bold text-slate-400 uppercase">{scopedKnowledgeStats.pendingSamples.length} amostras</span>
+                                            </div>
+                                            {scopedKnowledgeStats.pendingSamples.length === 0 ? (
+                                                <p className="text-sm text-slate-400 font-medium">Nenhum item pendente de processamento neste escopo.</p>
+                                            ) : (
+                                                <div className="space-y-2">
+                                                    {scopedKnowledgeStats.pendingSamples.map(item => (
+                                                        <button
+                                                            key={item.id}
+                                                            onClick={() => setSelectedItem(item)}
+                                                            className="w-full text-left bg-white rounded-2xl border border-slate-200 p-3 hover:border-blue-300 hover:shadow-sm transition-all"
+                                                        >
+                                                            <div className="flex items-start justify-between gap-3">
+                                                                <div className="min-w-0">
+                                                                    <p className="text-sm font-bold text-slate-900 truncate">{item.titulo}</p>
+                                                                    <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">{item.resumo_tldr || item.texto_bruto || 'Sem resumo ainda'}</p>
+                                                                </div>
+                                                                <span className={`shrink-0 px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${getProcessingTone(item)}`}>
+                                                                    {getProcessingLabel(item)}
+                                                                </span>
+                                                            </div>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="rounded-[1.5rem] border border-slate-200 bg-slate-50/70 p-4">
+                                            <div className="flex items-center justify-between gap-3 mb-3">
+                                                <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500">Atualizações recentes</h3>
+                                                <span className="text-[10px] font-bold text-slate-400 uppercase">Memória viva</span>
+                                            </div>
+                                            {scopedKnowledgeStats.recentSamples.length === 0 ? (
+                                                <p className="text-sm text-slate-400 font-medium">Nenhum item recente neste escopo.</p>
+                                            ) : (
+                                                <div className="space-y-2">
+                                                    {scopedKnowledgeStats.recentSamples.map(item => (
+                                                        <button
+                                                            key={item.id}
+                                                            onClick={() => setSelectedItem(item)}
+                                                            className="w-full text-left bg-white rounded-2xl border border-slate-200 p-3 hover:border-violet-300 hover:shadow-sm transition-all"
+                                                        >
+                                                            <div className="flex items-center justify-between gap-3">
+                                                                <div className="min-w-0">
+                                                                    <p className="text-sm font-bold text-slate-900 truncate">{item.titulo}</p>
+                                                                    <p className="text-[11px] text-slate-500 mt-1 truncate">{formatMemoryPath(item)}</p>
+                                                                </div>
+                                                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 shrink-0">
+                                                                    {formatDate(item.data_atualizacao || item.data_criacao)}
+                                                                </span>
+                                                            </div>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </section>
+                )}
 
                 {/* Items Grid/List */}
                 <div
@@ -1408,9 +1823,87 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                             </button>
                         </header>
 
+                        <div className="px-8 py-4 border-b border-slate-100 bg-slate-50/70">
+                            <div className="flex flex-wrap items-center gap-2 mb-4">
+                                <span className="px-3 py-1 rounded-full bg-slate-900 text-white text-[9px] font-black uppercase tracking-[0.2em]">
+                                    {currentItem.categoria || 'Geral'}
+                                </span>
+                                <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-[0.2em] ${getProcessingTone(currentItem)}`}>
+                                    {getProcessingLabel(currentItem)}
+                                </span>
+                                {currentItem.resumo_tldr && (
+                                    <span className="px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-[9px] font-black uppercase tracking-[0.2em]">
+                                        Resumido
+                                    </span>
+                                )}
+                                {currentItem.memory_location && (
+                                    <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-[9px] font-black uppercase tracking-[0.2em]">
+                                        MemPalace
+                                    </span>
+                                )}
+                            </div>
+                            <div className="flex gap-2 overflow-x-auto no-scrollbar">
+                                {[
+                                    { id: 'overview', label: 'Visão geral' },
+                                    { id: 'content', label: 'Conteúdo' },
+                                    { id: 'history', label: 'Histórico' },
+                                    { id: 'graph', label: 'Relações' },
+                                ].map(tab => (
+                                    <button
+                                        key={tab.id}
+                                        onClick={() => setDetailTab(tab.id as typeof detailTab)}
+                                        className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all whitespace-nowrap ${detailTab === tab.id ? 'bg-white text-slate-900 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-700 hover:bg-white/60'}`}
+                                    >
+                                        {tab.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
                         <div className="flex-1 overflow-y-auto p-8 custom-scrollbar space-y-10">
+                            {detailTab === 'overview' && (
+                                <section className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white rounded-[2rem] p-6 shadow-xl">
+                                    <div className="flex flex-col gap-6">
+                                        <div>
+                                            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300">Painel operacional</p>
+                                            <h4 className="text-2xl font-black tracking-tight mt-2">Use este item como memória viva</h4>
+                                            <p className="text-sm text-slate-300 font-medium mt-2 max-w-2xl">
+                                                Proveniência, localização no MemPalace, histórico e relações estão reunidos para facilitar decisão, reuso e contextualização.
+                                            </p>
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <div className="rounded-2xl bg-white/10 border border-white/10 p-4">
+                                                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300">Proveniência</p>
+                                                <p className="text-sm font-bold mt-2 break-words">{formatOriginLabel(currentItem)}</p>
+                                            </div>
+                                            <div className="rounded-2xl bg-white/10 border border-white/10 p-4">
+                                                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300">MemPalace</p>
+                                                <p className="text-sm font-bold mt-2 break-words">{formatMemoryPath(currentItem)}</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-wrap gap-3">
+                                            {onProcessWithAI && (
+                                                <button onClick={handleProcessCurrentItemWithAI} disabled={isProcessingAI} className="px-4 py-3 rounded-2xl bg-blue-500 hover:bg-blue-400 text-white text-[10px] font-black uppercase tracking-[0.2em] transition-all disabled:opacity-50">
+                                                    {isProcessingAI ? 'Processando...' : 'Processar com IA'}
+                                                </button>
+                                            )}
+                                            {onGenerateSlides && (currentItem.texto_bruto || currentItem.resumo_tldr) && (
+                                                <button onClick={handleGenerateCurrentSlides} className="px-4 py-3 rounded-2xl bg-violet-500 hover:bg-violet-400 text-white text-[10px] font-black uppercase tracking-[0.2em] transition-all">
+                                                    Gerar slides
+                                                </button>
+                                            )}
+                                            {onNavigateToOrigin && currentItem.origem && (
+                                                <button onClick={() => onNavigateToOrigin(currentItem.origem!.modulo, currentItem.origem!.id_origem)} className="px-4 py-3 rounded-2xl bg-white/10 hover:bg-white/20 text-white text-[10px] font-black uppercase tracking-[0.2em] transition-all">
+                                                    Ir para origem
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                </section>
+                            )}
+
                             {/* Native Previews for Desktop UX */}
-                            {currentItem.tipo_arquivo === 'pdf' && currentItem.url_drive && (
+                            {(detailTab === 'overview' || detailTab === 'content') && currentItem.tipo_arquivo === 'pdf' && currentItem.url_drive && (
                                 <section className="w-full bg-slate-50 rounded-[2rem] p-8 border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-center gap-4">
                                     <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mb-2">
                                         <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
@@ -1425,14 +1918,14 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                                 </section>
                             )}
 
-                            {currentItem.tipo_arquivo === 'imagem' && currentItem.url_drive && (
+                            {(detailTab === 'overview' || detailTab === 'content') && currentItem.tipo_arquivo === 'imagem' && currentItem.url_drive && (
                                 <section className="flex justify-center bg-slate-100 rounded-[2rem] p-4 border border-slate-200">
                                     <img src={currentItem.url_drive} alt="Preview" className="max-h-96 object-contain rounded-xl shadow-sm" loading="lazy" />
                                 </section>
                             )}
 
                             {/* Same content viewers as before */}
-                            {currentItem.tipo_arquivo === 'link' && (
+                            {(detailTab === 'overview' || detailTab === 'content') && currentItem.tipo_arquivo === 'link' && (
                                 <section>
                                     <div className="bg-blue-50 p-6 rounded-[2rem] border border-blue-100 flex items-center justify-between">
                                         <div className="overflow-hidden">
@@ -1449,7 +1942,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                             )}
 
                             {/* Resumo TLDR */}
-                            {currentItem.resumo_tldr && (
+                            {detailTab === 'overview' && currentItem.resumo_tldr && (
                                 <section>
                                     <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 border-l-4 border-blue-500 pl-4">Resumo Executivo (TL;DR)</h4>
                                     <div className="bg-blue-50/50 p-6 rounded-[2rem] border border-blue-100 text-sm text-blue-900 font-medium leading-relaxed italic">
@@ -1458,8 +1951,248 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                                 </section>
                             )}
 
+                            {detailTab === 'overview' && <section>
+                                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 border-l-4 border-emerald-500 pl-4">Metadados do Documento</h4>
+                                <div className="bg-emerald-50/40 p-6 rounded-[2rem] border border-emerald-100 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Versão</p>
+                                        <p className="text-sm font-bold text-slate-900">{currentItem.version || 1}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Atualizado Em</p>
+                                        <p className="text-sm font-bold text-slate-900">{currentItem.data_atualizacao ? formatDate(currentItem.data_atualizacao) : 'Ainda não atualizado'}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Canal de Entrada</p>
+                                        <p className="text-sm font-bold text-slate-900">{currentItem.intake_record?.channel || 'Não informado'}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Status de Processamento</p>
+                                        <p className="text-sm font-bold text-slate-900">{currentItem.intake_record?.processing_status || 'Não informado'}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Origem do Artefato</p>
+                                        <p className="text-sm font-bold text-slate-900">{currentItem.artifact_origin_kind || 'Não informado'}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Fonte / Proveniência</p>
+                                        <p className="text-sm font-bold text-slate-900 break-words">{formatOriginLabel(currentItem)}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">MemPalace</p>
+                                        <p className="text-sm font-bold text-slate-900 break-words">
+                                            {currentItem.memory_location
+                                                ? [currentItem.memory_location.wing, currentItem.memory_location.room, currentItem.memory_location.drawer, currentItem.memory_location.cabinet]
+                                                    .filter(Boolean)
+                                                    .join(' / ')
+                                                : 'Não localizado'}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Última Mudança</p>
+                                        <p className="text-sm font-bold text-slate-900">{formatUpdateReason(currentItem.last_update_reason)}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Atualizado Por</p>
+                                        <p className="text-sm font-bold text-slate-900">{currentItem.last_updated_by || 'Não informado'}</p>
+                                    </div>
+                                </div>
+                            </section>}
+
+                            {detailTab === 'history' && versionHistory.length > 0 && (
+                                <section>
+                                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 border-l-4 border-amber-500 pl-4">Histórico Recente</h4>
+                                    <div className="space-y-2">
+                                        {versionHistory.map((entry) => {
+                                            const changedLabel = formatChangedFields(entry.changed_fields);
+                                            const preview = entry.resumo_tldr || entry.titulo;
+                                            return (
+                                                <div key={entry.id} className="bg-amber-50/40 border border-amber-100 rounded-2xl p-3">
+                                                    <div className="flex items-center justify-between gap-3">
+                                                        <p className="text-xs font-black text-slate-900">v{entry.version} · {formatUpdateReason(entry.reason)}</p>
+                                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest shrink-0">{entry.captured_at ? formatDate(entry.captured_at) : 'sem data'}</p>
+                                                    </div>
+                                                    {changedLabel && (
+                                                        <p className="text-[10px] text-amber-700 font-semibold mt-1">alterou: {changedLabel}</p>
+                                                    )}
+                                                    {preview && (
+                                                        <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">{preview}</p>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </section>
+                            )}
+
+                            {/* ── Relações (Fase 2B) ──────────────────────── */}
+                            {detailTab === 'graph' && <section className="space-y-6">
+                                <div className="h-[400px] w-full rounded-[2rem] overflow-hidden border border-slate-100 bg-slate-50 relative group">
+                                    <KnowledgeGraphView 
+                                        items={items} 
+                                        edges={edges} 
+                                        width={600} 
+                                        height={400} 
+                                        onNodeClick={(node) => {
+                                            const item = items.find(i => i.id === node.id);
+                                            if (item) setSelectedItem(item);
+                                        }}
+                                    />
+                                    <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <div className="bg-slate-900/80 backdrop-blur-md text-white px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest">
+                                            Interactive Graph
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex items-center justify-between mb-4 border-l-4 border-violet-500 pl-4">
+                                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+                                        Tabela de Relações
+                                        {edges.length > 0 && (
+                                            <span className="ml-2 bg-violet-100 text-violet-700 text-[9px] font-black rounded-full px-2 py-0.5">
+                                                {edges.length}
+                                            </span>
+                                        )}
+                                    </h4>
+                                    <button
+                                        onClick={() => { setIsAddingEdge(v => !v); setNewEdgeTargetId(''); setNewEdgeRelation('related_to'); setNewEdgeValidFrom(''); setNewEdgeValidUntil(''); }}
+                                        className="p-1.5 hover:bg-violet-50 rounded-lg text-violet-500 hover:text-violet-700 transition-all"
+                                        title="Adicionar relação"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+                                    </button>
+                                </div>
+
+                                {/* Add edge form */}
+                                {isAddingEdge && (
+                                    <div className="bg-violet-50/60 border border-violet-100 rounded-2xl p-4 mb-3 space-y-3">
+                                        <div>
+                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Item relacionado</label>
+                                            <select
+                                                value={newEdgeTargetId}
+                                                onChange={e => setNewEdgeTargetId(e.target.value)}
+                                                className="w-full text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300"
+                                            >
+                                                <option value="">Selecionar item…</option>
+                                                {items
+                                                    .filter(i => !i.is_folder && i.id !== currentItem.id)
+                                                    .sort((a, b) => a.titulo.localeCompare(b.titulo, 'pt-BR'))
+                                                    .map(i => (
+                                                        <option key={i.id} value={i.id}>{i.titulo}</option>
+                                                    ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Tipo de relação</label>
+                                            <select
+                                                value={newEdgeRelation}
+                                                onChange={e => setNewEdgeRelation(e.target.value as RelationKind)}
+                                                className="w-full text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300"
+                                            >
+                                                {(Object.keys(RELATION_KIND_LABELS) as RelationKind[]).map(k => (
+                                                    <option key={k} value={k}>{RELATION_KIND_LABELS[k]}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Válido de</label>
+                                                <input
+                                                    type="date"
+                                                    value={newEdgeValidFrom}
+                                                    onChange={e => setNewEdgeValidFrom(e.target.value)}
+                                                    className="w-full text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Válido até</label>
+                                                <input
+                                                    type="date"
+                                                    value={newEdgeValidUntil}
+                                                    onChange={e => setNewEdgeValidUntil(e.target.value)}
+                                                    className="w-full text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="flex justify-end gap-2">
+                                            <button
+                                                onClick={() => setIsAddingEdge(false)}
+                                                className="px-4 py-2 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-100 rounded-xl transition-all"
+                                            >
+                                                Cancelar
+                                            </button>
+                                            <button
+                                                onClick={handleAddEdge}
+                                                disabled={!newEdgeTargetId}
+                                                className="px-4 py-2 text-[10px] font-black uppercase tracking-widest bg-violet-600 text-white rounded-xl hover:bg-violet-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                            >
+                                                Adicionar
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Edge list */}
+                                {edges.length === 0 && !isAddingEdge ? (
+                                    <p className="text-xs text-slate-400 font-semibold text-center py-4">Nenhuma relação registrada.</p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {edges.map(edge => {
+                                            const isSource = edge.source_id === currentItem.id;
+                                            const otherId = isSource ? edge.target_id : edge.source_id;
+                                            const otherItem = items.find(i => i.id === otherId);
+                                            const active = isEdgeActive(edge);
+                                            return (
+                                                <div
+                                                    key={edge.id}
+                                                    className={`flex items-start gap-3 p-3 rounded-2xl border transition-all ${active ? 'bg-white border-slate-100' : 'bg-slate-50 border-slate-100 opacity-60'}`}
+                                                >
+                                                    {/* Direction arrow */}
+                                                    <div className="shrink-0 mt-0.5">
+                                                        <svg className={`w-4 h-4 ${isSource ? 'text-violet-400' : 'text-slate-300'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            {isSource
+                                                                ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                                                                : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 16l-4-4m0 0l4-4m-4 4h18" />
+                                                            }
+                                                        </svg>
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${RELATION_KIND_COLORS[edge.relation_kind]}`}>
+                                                                {RELATION_KIND_LABELS[edge.relation_kind]}
+                                                            </span>
+                                                            {!active && (
+                                                                <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-slate-100 text-slate-400">
+                                                                    Expirada
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <p className="text-xs font-bold text-slate-900 mt-1 truncate">
+                                                            {otherItem?.titulo ?? otherId}
+                                                        </p>
+                                                        {(edge.valid_from || edge.valid_until) && (
+                                                            <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
+                                                                {edge.valid_from && `de ${edge.valid_from}`}
+                                                                {edge.valid_from && edge.valid_until && ' '}
+                                                                {edge.valid_until && `até ${edge.valid_until}`}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                    <button
+                                                        onClick={() => handleRemoveEdge(edge.id)}
+                                                        className="shrink-0 p-1.5 hover:bg-rose-50 rounded-lg text-slate-300 hover:text-rose-500 transition-all"
+                                                        title="Remover relação"
+                                                    >
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </section>}
+
                             {/* OCR / Editor */}
-                            {(currentItem.texto_bruto || editOcrText !== null || currentItem.fileHandle) && (
+                            {detailTab === 'content' && (currentItem.texto_bruto || editOcrText !== null || currentItem.fileHandle) && (
                                 <section>
                                     <div className="flex items-center justify-between mb-4 border-l-4 border-slate-900 pl-4">
                                         <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{editOcrText !== null ? 'Modo Edição' : 'Conteúdo / OCR'}</h4>
@@ -1547,13 +2280,22 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({
                         </div>
 
                         <footer className="p-8 border-t border-slate-100 bg-slate-50 flex gap-4">
-                            {(!currentItem.resumo_tldr) && currentItem.tipo_arquivo !== 'link' && (
+                            {onProcessWithAI && (!currentItem.resumo_tldr) && currentItem.tipo_arquivo !== 'link' && (
                                 <button
-                                    onClick={() => setIsProcessingAI(true)} // Mocked for now, needs onProcessWithAI
+                                    onClick={handleProcessCurrentItemWithAI}
                                     disabled={isProcessingAI}
                                     className={`flex-1 bg-blue-600 text-white py-5 rounded-3xl text-[10px] font-black uppercase tracking-[0.2em] text-center shadow-lg hover:bg-blue-700 transition-all flex items-center justify-center gap-3 disabled:opacity-50`}
                                 >
-                                    Processar com IA
+                                    {isProcessingAI ? 'Processando...' : 'Processar com IA'}
+                                </button>
+                            )}
+
+                            {onGenerateSlides && (currentItem.texto_bruto || currentItem.resumo_tldr) && (
+                                <button
+                                    onClick={handleGenerateCurrentSlides}
+                                    className="flex-1 bg-violet-600 text-white py-5 rounded-3xl text-[10px] font-black uppercase tracking-[0.2em] text-center shadow-lg hover:bg-violet-700 transition-all flex items-center justify-center gap-3"
+                                >
+                                    Gerar Slides
                                 </button>
                             )}
 

@@ -1,14 +1,18 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { functions, db } from '../../../firebase';
 import { collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import type { MeetingHistoryEntry } from '../tools/MeetingTranscriptionTool';
 import {
   Tarefa, Status, Categoria, EntregaInstitucional, DailyHabits,
-  AppSettings, HermesModalProps, CustomNotification, TipoAcao, ActionPlanItem, ConhecimentoItem
+  AppSettings, HermesModalProps, CustomNotification, TipoAcao, ActionPlanItem, ConhecimentoItem, TranscriptionResponse, RoutingAssessment
 } from '../../../types';
 import { formatDate, formatDateLocalISO } from '../../../types';
 import { detectAreaFromTitle, callScrapeSipac } from '../../utils/helpers';
+import { createIntakeRecord, inferTaskIntakeChannel } from '../../utils/intake';
+import { assessTaskRouting } from '../../utils/routing';
+import { buildContextLayers } from '../../utils/contextLayers';
+import { deriveTaskMemoryRoom } from '../../utils/memoryPalace';
 import { WysiwygEditor } from '../ui/UIComponents';
 export const HermesModal = ({ isOpen, title, message, type, onConfirm, onCancel, confirmLabel, cancelLabel }: HermesModalProps) => {
   if (!isOpen) return null;
@@ -967,6 +971,59 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
   const [planoAcao, setPlanoAcao] = useState<ActionPlanItem[]>([]);
   const [newChecklistItem, setNewChecklistItem] = useState('');
   const [autoClassified, setAutoClassified] = useState(false);
+  const routingAssessment: RoutingAssessment = assessTaskRouting({
+    tipoAcao,
+    origin: tipoAcao === 'deep' ? origemIngestao : 'manual',
+    inputText,
+    extraContext,
+    hasRagContext: !!ragContext && ragContext !== 'Nenhum',
+    extraContextFileCount: extraContextFiles.filter(f => f.status === 'ready').length,
+    hasMeetingContext: !!selectedReuniao?.firestoreId,
+  });
+  const resolvedKnowledgeIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (ragContext && ragContext !== 'Nenhum') {
+      knowledgeItems
+        .filter(item => item.base_id === ragContext)
+        .slice(0, 12)
+        .forEach(item => ids.add(item.id));
+    }
+    extraContextFiles
+      .filter(file => file.status === 'ready')
+      .forEach(file => ids.add(file.id));
+    return Array.from(ids);
+  }, [ragContext, knowledgeItems, extraContextFiles]);
+
+  const contextBundleSnapshot = useMemo(() => {
+    const linkedKnowledge = knowledgeItems.filter(item => resolvedKnowledgeIds.includes(item.id));
+    const pseudoTask: Tarefa = {
+      id: `draft:${extraContextId}`,
+      titulo: formData.titulo || inputText || 'Nova ação',
+      projeto: 'Google Tasks',
+      data_inicio: formData.data_limite || formatDateLocalISO(new Date()),
+      data_limite: formData.data_limite || formatDateLocalISO(new Date()),
+      status: formData.status,
+      categoria: formData.categoria,
+      contabilizar_meta: false,
+      data_criacao: formData.data_criacao,
+      descricao: formData.descricao || inputText,
+      notas: extraContext || formData.notas,
+      sistema: formData.categoria,
+      knowledge_item_ids: resolvedKnowledgeIds,
+      chat_history: [
+        {
+          role: 'user',
+          content: [inputText, extraContext, formData.descricao].filter(Boolean).join('\n\n'),
+        },
+      ],
+    };
+    return buildContextLayers({
+      task: pseudoTask,
+      systemName: formData.categoria,
+      knowledgeItems: linkedKnowledge,
+      sessionMessages: pseudoTask.chat_history?.map(msg => ({ role: msg.role, content: msg.content })) || [],
+    });
+  }, [knowledgeItems, resolvedKnowledgeIds, extraContextId, formData, inputText, extraContext]);
 
   const recognitionRef = useRef<any>(null);
 
@@ -1080,8 +1137,11 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
             try {
               const b64 = (reader.result as string).split(',')[1];
               const fn = httpsCallable(functions, 'transcreverAudio');
-              const res = await fn({ audioBase64: b64 });
-              const data = res.data as { raw: string; refined: string };
+              const res = await fn({
+                audioBase64: b64,
+                sourceRef: { kind: 'unknown', label: 'task_create_modal' },
+              });
+              const data = res.data as TranscriptionResponse;
               if (data.refined) setInputText(prev => (prev ? prev + ' ' : '') + data.refined);
             } catch { showAlert('Erro', 'Erro ao transcrever o áudio.'); }
             finally { setIsTranscribing(false); }
@@ -1143,7 +1203,13 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
             completed: false
           })));
         }
-        showAlert("Sucesso", "Demanda gerada com sucesso pela IA!");
+        const approvalMessage =
+          routingAssessment.approval_mode === 'required'
+            ? 'Esta demanda foi classificada como de aprovação obrigatória antes de execução.'
+            : routingAssessment.approval_mode === 'confirm'
+              ? 'Esta demanda deve passar por confirmação curta antes de execução.'
+              : 'A demanda ficou apta para fluxo automático controlado.';
+        showAlert("Sucesso", `Demanda gerada com sucesso pela IA. ${approvalMessage}`);
       }
     } catch (error) {
       console.error("Erro ao gerar com IA:", error);
@@ -1382,6 +1448,21 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                 </div>
               )}
 
+              <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[10px] font-black text-amber-700 uppercase tracking-widest">Roteamento Operacional</p>
+                  <span className="rounded-full bg-white px-2.5 py-1 text-[9px] font-black uppercase tracking-widest text-slate-700">
+                    {routingAssessment.route === 'deterministic' ? 'Rota direta' : 'Rota orquestrada'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[10px] font-bold text-slate-700 uppercase tracking-wide">
+                  <span>Risco: {routingAssessment.risk_level}</span>
+                  <span>Aprovação: {routingAssessment.approval_mode}</span>
+                  <span>Contexto: {Math.round(routingAssessment.context_score * 100)}%</span>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">{routingAssessment.rationale.join(' ')}</p>
+              </div>
+
               {/* Área de Processamento Dinâmico */}
               {origemIngestao !== 'manual' && (
                 <div className="space-y-3 p-3 bg-slate-50 rounded-2xl border border-slate-100">
@@ -1568,12 +1649,33 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
               }
 
               onSave({
+                intake_record: createIntakeRecord({
+                  channel: inferTaskIntakeChannel(tipoAcao === 'deep' ? origemIngestao : 'manual'),
+                  domainHint: tipoAcao === 'deep' ? 'operacoes_administrativas' : 'captura_e_conhecimento',
+                  processingStatus: 'linked',
+                  requestText: inputText || extraContext || formData.descricao || formData.titulo,
+                  sourceArtifactIds: extraContextFiles.filter(f => f.status === 'ready').map(f => f.id),
+                  sourceRefs: [
+                    ...(selectedReuniao?.firestoreId ? [{ kind: 'meeting' as const, id: selectedReuniao.firestoreId, label: selectedReuniao.titulo }] : []),
+                    ...(ragContext && ragContext !== 'Nenhum' ? [{ kind: 'knowledge_base' as const, id: ragContext }] : []),
+                    ...(extraContextFiles.some(f => f.status === 'ready') ? [{ kind: 'extra_context' as const, id: extraContextId }] : [])
+                  ]
+                }),
                 ...formData,
                 tipo_acao: tipoAcao,
                 plano_acao: planoAcao,
                 data_inicio: formData.data_limite || '',
                 origem: tipoAcao === 'deep' ? origemIngestao : 'manual',
                 base_conhecimento: ragContext,
+                routing_assessment: routingAssessment,
+                context_bundle_snapshot: contextBundleSnapshot,
+                resolved_knowledge_ids: resolvedKnowledgeIds,
+                memory_room_hint: deriveTaskMemoryRoom({
+                  id: extraContextId,
+                  sistema: formData.categoria,
+                  categoria: formData.categoria,
+                  tipo_acao: tipoAcao,
+                } as Tarefa),
                 ...(extraContextFiles.some(f => f.status === 'ready') ? { 
                   extra_context_id: extraContextId,
                   knowledge_item_ids: extraContextFiles.filter(f => f.status === 'ready').map(f => f.id)

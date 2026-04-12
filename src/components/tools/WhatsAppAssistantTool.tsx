@@ -1,9 +1,14 @@
-import React, { startTransition, useEffect, useEffectEvent, useReducer, useRef } from 'react';
+import React, { startTransition, useEffect, useEffectEvent, useMemo, useReducer, useRef, useState } from 'react';
 import {
   askWhatsAppAssistant,
+  normalizeAssistantResponse,
   type WhatsAppAttachmentRef,
   type WhatsAppChatCandidate,
 } from '../../utils/whatsappAssistant';
+import { db, functions } from '@/firebase';
+import { assessTaskRouting } from '../../utils/routing';
+import { logRoutingEvent } from '../../utils/routingLog';
+import { callRegisteredTool } from '../../utils/callRegisteredTool';
 import { AutoExpandingTextarea } from '../ui/UIComponents';
 import { WhatsAppAssistantMarkdown } from './whatsappAssistantMarkdown';
 import {
@@ -139,6 +144,26 @@ export const WhatsAppAssistantTool: React.FC<WhatsAppAssistantToolProps> = ({ on
   const [state, dispatch] = useReducer(whatsappAssistantReducer, undefined, createAssistantToolInitialState);
   const activeSession = getActiveAssistantSession(state);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const [approvalGranted, setApprovalGranted] = useState(false);
+
+  const routingAssessment = useMemo(() => assessTaskRouting({
+    tipoAcao: 'fast',
+    origin: 'manual',
+    inputText: activeSession.draft,
+  }), [activeSession.draft]);
+
+  const canUseAssistedExecution = routingAssessment.approval_mode === 'automatic' || approvalGranted;
+
+  const guardAssistedExecution = (): boolean => {
+    if (canUseAssistedExecution) return true;
+    showToast(
+      routingAssessment.approval_mode === 'required'
+        ? 'Esta ação exige liberação explícita antes de usar o copiloto.'
+        : 'Confirme a execução assistida desta sessão antes de usar o copiloto.',
+      'info',
+    );
+    return false;
+  };
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(prepareSessionsForStorage(state.sessions)));
@@ -161,6 +186,7 @@ export const WhatsAppAssistantTool: React.FC<WhatsAppAssistantToolProps> = ({ on
     if (!draft || activeSession.status === 'loading') {
       return;
     }
+    if (!guardAssistedExecution()) return;
 
     const sessionId = activeSession.id;
     const now = new Date().toISOString();
@@ -174,15 +200,40 @@ export const WhatsAppAssistantTool: React.FC<WhatsAppAssistantToolProps> = ({ on
       },
     ]);
 
-    dispatch({
-      type: 'submitPrompt',
-      sessionId,
-      text: draft,
-      now,
-    });
+    dispatch({ type: 'submitPrompt', sessionId, text: draft, now });
 
     try {
-      const response = await askWhatsAppAssistant(draft, activeSession.context, optimisticHistory);
+      let response;
+      if (import.meta.env.DEV) {
+        // DEV: usa o proxy local com auth token — mantém o fluxo original.
+        logRoutingEvent(db, {
+          context_kind: 'tool',
+          context_id: 'whatsapp_assistant',
+          context_label: 'Assistente WhatsApp',
+          assessment: routingAssessment,
+        });
+        response = await askWhatsAppAssistant(draft, activeSession.context, optimisticHistory);
+      } else {
+        // Prod: passa pelo registry + log de auditoria antes de disparar.
+        const payload = {
+          command: draft,
+          context: activeSession.context,
+          conversationHistory: optimisticHistory,
+        };
+        const raw = await callRegisteredTool<unknown>('whatsapp_assistant', payload, {
+          db,
+          functions,
+          routingAssessment,
+          approvalGranted,
+          onBlocked: (reason) => {
+            dispatch({ type: 'rejectPrompt', sessionId, error: reason === 'not_registered' ? 'Ferramenta não homologada.' : 'Liberação necessária.' });
+          },
+          context: { kind: 'tool', id: 'whatsapp_assistant', label: 'Assistente WhatsApp' },
+        });
+        if (raw === null) return;
+        response = normalizeAssistantResponse(raw);
+      }
+
       startTransition(() => {
         dispatch({
           type: 'resolvePrompt',
@@ -193,11 +244,7 @@ export const WhatsAppAssistantTool: React.FC<WhatsAppAssistantToolProps> = ({ on
       });
     } catch (error) {
       console.error(error);
-      dispatch({
-        type: 'rejectPrompt',
-        sessionId,
-        error: 'Falha ao consultar mensagens do WhatsApp.',
-      });
+      dispatch({ type: 'rejectPrompt', sessionId, error: 'Falha ao consultar mensagens do WhatsApp.' });
       showToast('Falha ao consultar mensagens do WhatsApp.', 'error');
     }
   };
@@ -430,6 +477,36 @@ export const WhatsAppAssistantTool: React.FC<WhatsAppAssistantToolProps> = ({ on
           </div>
 
           <div className="border-t border-slate-200 bg-white px-4 py-4 md:px-6">
+            {!canUseAssistedExecution && (
+              <div className={`mb-3 flex items-start justify-between gap-3 rounded-2xl border p-4 ${routingAssessment.approval_mode === 'required' ? 'bg-rose-50 border-rose-200' : 'bg-amber-50 border-amber-200'}`}>
+                <div className="flex-1 min-w-0">
+                  <p className={`text-[10px] font-black uppercase tracking-widest mb-1 ${routingAssessment.approval_mode === 'required' ? 'text-rose-600' : 'text-amber-600'}`}>
+                    {routingAssessment.approval_mode === 'required' ? 'Liberação obrigatória' : 'Confirmação necessária'}
+                  </p>
+                  <p className="text-xs text-slate-600">
+                    {routingAssessment.approval_mode === 'required'
+                      ? 'Esta ação exige liberação explícita antes de usar o copiloto e gerar artefatos.'
+                      : 'Esta ação pede confirmação curta antes de usar o copiloto nesta sessão.'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setApprovalGranted(true);
+                    logRoutingEvent(db, {
+                      context_kind: 'tool',
+                      context_id: 'whatsapp_assistant',
+                      context_label: 'Assistente WhatsApp',
+                      assessment: routingAssessment,
+                      session_released: true,
+                    });
+                  }}
+                  disabled={approvalGranted}
+                  className={`shrink-0 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${approvalGranted ? 'bg-emerald-500 text-white opacity-80' : routingAssessment.approval_mode === 'required' ? 'bg-rose-600 hover:bg-rose-700 text-white' : 'bg-amber-500 hover:bg-amber-600 text-white'}`}
+                >
+                  {approvalGranted ? 'Liberado' : 'Liberar sessão'}
+                </button>
+              </div>
+            )}
             {activeSession.lastError && (
               <div className="mb-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
                 {activeSession.lastError}

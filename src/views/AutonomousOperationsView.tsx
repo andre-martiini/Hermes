@@ -2,7 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import mammoth from 'mammoth';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
-import { functions } from '@/firebase';
+import { db, functions } from '@/firebase';
+import type { RoutingAssessment, TranscriptionResponse } from '../../types';
+import { assessTaskRouting } from '../utils/routing';
+import { logRoutingEvent } from '../utils/routingLog';
 
 GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
 
@@ -30,6 +33,7 @@ interface ProspectDraft {
   status: 'processing';
   urgent: boolean;
   sourceSummary: string;
+  routing_assessment: RoutingAssessment;
 }
 
 interface UploadedTranscriptFile {
@@ -113,6 +117,7 @@ export function AutonomousOperationsView({ showToast }: AutonomousOperationsView
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedTranscriptFile[]>([]);
   const [isSending, setIsSending] = useState(false);
+  const [approvalGranted, setApprovalGranted] = useState(false);
   const [prospects, setProspects] = useState<ProspectDraft[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribingAudio, setIsTranscribingAudio] = useState(false);
@@ -130,6 +135,18 @@ export function AutonomousOperationsView({ showToast }: AutonomousOperationsView
   const totalExtractedCharacters = useMemo(
     () => uploadedFiles.reduce((acc, item) => acc + item.extractedText.length, 0),
     [uploadedFiles]
+  );
+  const routingAssessment = useMemo(
+    () => assessTaskRouting({
+      tipoAcao: 'deep',
+      origin: uploadedFiles.length > 0 ? 'google' : 'manual',
+      inputText: brainDump,
+      extraContext: uploadedFiles.map(item => item.extractedText.slice(0, 1200)).join('\n\n'),
+      hasRagContext: false,
+      extraContextFileCount: uploadedFiles.length,
+      hasMeetingContext: false,
+    }),
+    [brainDump, uploadedFiles]
   );
 
   useEffect(() => {
@@ -233,8 +250,12 @@ export function AutonomousOperationsView({ showToast }: AutonomousOperationsView
         try {
           const base64String = (reader.result as string).split(',')[1];
           const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
-          const response = await transcribeFunc({ audioBase64: base64String, extension: '.webm' });
-          const data = response.data as { raw?: string; refined?: string };
+          const response = await transcribeFunc({
+            audioBase64: base64String,
+            extension: '.webm',
+            sourceRef: { kind: 'unknown', label: 'autonomous_operations_briefing' },
+          });
+          const data = response.data as TranscriptionResponse;
           const transcript = data.refined?.trim() || data.raw?.trim() || '';
 
           if (!transcript) {
@@ -409,11 +430,29 @@ export function AutonomousOperationsView({ showToast }: AutonomousOperationsView
     }
   };
 
+  const canSubmit = routingAssessment.approval_mode === 'automatic' || approvalGranted;
+
   const handleSubmit = async () => {
     if (!brainDump.trim() && uploadedFiles.length === 0) {
       showToast?.('Adicione um briefing ou anexo antes de enviar.', 'info');
       return;
     }
+    if (!canSubmit) {
+      showToast?.(
+        routingAssessment.approval_mode === 'required'
+          ? 'Esta prospecção exige liberação explícita antes de entrar no pipeline.'
+          : 'Confirme o envio desta prospecção antes de prosseguir.',
+        'info',
+      );
+      return;
+    }
+    logRoutingEvent(db, {
+      context_kind: 'tool',
+      context_id: 'autonomous_operations',
+      context_label: 'Operações Autônomas',
+      assessment: routingAssessment,
+      session_released: approvalGranted,
+    });
 
     setIsSending(true);
 
@@ -432,6 +471,7 @@ export function AutonomousOperationsView({ showToast }: AutonomousOperationsView
         status: 'processing',
         urgent: isUrgent,
         sourceSummary,
+        routing_assessment: routingAssessment,
       },
       ...current,
     ]);
@@ -439,7 +479,11 @@ export function AutonomousOperationsView({ showToast }: AutonomousOperationsView
     setIsSending(false);
     closeDrawer();
     showToast?.(
-      'O Analista está mapeando os requisitos e gerando a Ficha de Etapa 01.',
+      routingAssessment.approval_mode === 'required'
+        ? 'A prospecção entrou no pipeline com aprovação obrigatória antes de qualquer execução assistida.'
+        : routingAssessment.approval_mode === 'confirm'
+          ? 'A prospecção entrou no pipeline com confirmação curta antes de execução assistida.'
+          : 'O Analista está mapeando os requisitos e gerando a Ficha de Etapa 01.',
       'info'
     );
   };
@@ -525,10 +569,18 @@ export function AutonomousOperationsView({ showToast }: AutonomousOperationsView
                       )}
                     </div>
                     <div className="mt-4 flex items-center justify-between gap-4">
-                      <span className="inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-2 text-[10px] font-black uppercase tracking-[0.24em] text-amber-700">
-                        <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
-                        Agente Analista Processando...
-                      </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-2 text-[10px] font-black uppercase tracking-[0.24em] text-amber-700">
+                          <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                          Agente Analista Processando...
+                        </span>
+                        <span className="inline-flex items-center rounded-full bg-white px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-700">
+                          {item.routing_assessment.route === 'deterministic' ? 'Rota direta' : 'Rota orquestrada'}
+                        </span>
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-700">
+                          {item.routing_assessment.approval_mode}
+                        </span>
+                      </div>
                       <span className="text-xs font-bold text-slate-400">
                         {new Date(item.createdAt).toLocaleString('pt-BR')}
                       </span>
@@ -737,6 +789,28 @@ export function AutonomousOperationsView({ showToast }: AutonomousOperationsView
               </div>
             </section>
 
+            <section className="rounded-[2rem] border border-amber-200 bg-amber-50/70 px-5 py-5 shadow-sm">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.24em] text-amber-700">Roteamento Operacional</p>
+                  <h3 className="mt-1 text-lg font-black text-slate-900">
+                    {routingAssessment.route === 'deterministic' ? 'Rota direta' : 'Rota orquestrada'}
+                  </h3>
+                  <p className="mt-2 text-sm font-medium leading-relaxed text-slate-600">
+                    {routingAssessment.rationale.join(' ')}
+                  </p>
+                </div>
+                <span className="rounded-full bg-white px-4 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-700">
+                  {routingAssessment.approval_mode}
+                </span>
+              </div>
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-2 text-[10px] font-black uppercase tracking-wide text-slate-700">
+                <span>Risco: {routingAssessment.risk_level}</span>
+                <span>Clareza: {Math.round(routingAssessment.clarity_score * 100)}%</span>
+                <span>Contexto: {Math.round(routingAssessment.context_score * 100)}%</span>
+              </div>
+            </section>
+
             <section className="rounded-[2rem] border border-slate-200 bg-white px-5 py-5 shadow-sm">
               <div className="flex items-center justify-between gap-4">
                 <div>
@@ -766,6 +840,36 @@ export function AutonomousOperationsView({ showToast }: AutonomousOperationsView
             <div className="text-xs font-medium text-slate-500">
               O agente e o JSON ainda serão modelados. Esta etapa cobre a entrada e o preparo do material bruto.
             </div>
+            {!canSubmit && (
+              <div className={`flex items-start justify-between gap-3 rounded-2xl border p-4 mb-3 ${routingAssessment.approval_mode === 'required' ? 'bg-rose-50 border-rose-200' : 'bg-amber-50 border-amber-200'}`}>
+                <div className="flex-1 min-w-0">
+                  <p className={`text-[10px] font-black uppercase tracking-widest mb-1 ${routingAssessment.approval_mode === 'required' ? 'text-rose-600' : 'text-amber-600'}`}>
+                    {routingAssessment.approval_mode === 'required' ? 'Liberação obrigatória' : 'Confirmação necessária'}
+                  </p>
+                  <p className="text-xs text-slate-600">
+                    {routingAssessment.approval_mode === 'required'
+                      ? 'Esta prospecção exige liberação explícita antes de entrar no pipeline assistido.'
+                      : 'Esta prospecção pede confirmação antes de iniciar o processamento assistido.'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setApprovalGranted(true);
+                    logRoutingEvent(db, {
+                      context_kind: 'tool',
+                      context_id: 'autonomous_operations',
+                      context_label: 'Operações Autônomas',
+                      assessment: routingAssessment,
+                      session_released: true,
+                    });
+                  }}
+                  disabled={approvalGranted}
+                  className={`shrink-0 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${approvalGranted ? 'bg-emerald-500 text-white opacity-80' : routingAssessment.approval_mode === 'required' ? 'bg-rose-600 hover:bg-rose-700 text-white' : 'bg-amber-500 hover:bg-amber-600 text-white'}`}
+                >
+                  {approvalGranted ? 'Liberado' : 'Liberar'}
+                </button>
+              </div>
+            )}
             <div className="flex gap-3">
               <button
                 onClick={closeDrawer}
@@ -775,7 +879,7 @@ export function AutonomousOperationsView({ showToast }: AutonomousOperationsView
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={isSending || isTranscribingAudio}
+                disabled={isSending || isTranscribingAudio || !canSubmit}
                 className="inline-flex min-w-[220px] items-center justify-center gap-3 rounded-full bg-slate-950 px-6 py-3 text-[11px] font-black uppercase tracking-[0.24em] text-white shadow-[0_18px_40px_rgba(15,23,42,0.16)] transition-all hover:bg-blue-700 disabled:cursor-wait disabled:opacity-70"
               >
                 {isSending ? (

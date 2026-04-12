@@ -1,14 +1,20 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '../../firebase';
+import { db, functions } from '../../firebase';
 import {
   Sistema, WorkItem, Tarefa, BaseConhecimento, ConhecimentoItem,
-  PoolItem, ChatMessage, SistemaStatus,
+  PoolItem, ChatMessage, SistemaStatus, TranscriptionResponse, RoutingAssessment,
 } from '../../types';
 import { normalizeStatus } from '../utils/helpers';
 import { STATUS_COLORS } from '../../constants';
+import { assessTaskRouting } from '../utils/routing';
+import { logRoutingEvent } from '../utils/routingLog';
+import { logContextUsageEvent } from '../utils/contextUsageLog';
+import { callRegisteredTool, evaluateRegisteredToolExecution } from '../utils/callRegisteredTool';
+import { createIssuePacket } from '../utils/issuePacket';
+import { buildContextLayers } from '../utils/contextLayers';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -102,6 +108,54 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
     t.sistema === systemName
   );
 
+  // ─── Routing assessment (governança do copiloto) ────────────────
+  const routingAssessment: RoutingAssessment = useMemo(() => assessTaskRouting({
+    tipoAcao: (sysDetails.status === 'producao' || sysDetails.status === 'testes') ? 'deep' : 'fast',
+    origin: 'manual',
+    inputText: sysDetails.objetivo_negocio || systemName,
+    hasRagContext: !!sysDetails.github_rag_synced_at,
+    extraContextFileCount: activeWorkItems.length,
+  }), [sysDetails.status, sysDetails.objetivo_negocio, sysDetails.github_rag_synced_at, systemName, activeWorkItems.length]);
+
+  const [approvalGranted, setApprovalGranted] = useState(false);
+
+  // ─── Routing audit log ────────────────────────────────────────
+  useEffect(() => {
+    if (routingAssessment.approval_mode !== 'automatic') {
+      logRoutingEvent(db, {
+        context_kind: 'system',
+        context_id: unit.id,
+        context_label: systemName,
+        assessment: routingAssessment,
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routingAssessment.approval_mode, routingAssessment.risk_level]);
+
+  const canUseAssistedExecution = routingAssessment.approval_mode === 'automatic' || approvalGranted;
+  const buildContextPromptBlock = () => {
+    const layers = [
+      ['L0', layerContext.identity],
+      ['L1', layerContext.session],
+      ['L2', layerContext.scoped],
+      ['L3', layerContext.deep],
+    ] as const;
+    return `CONTEXTO ESTRUTURADO DO SISTEMA\n${layers
+      .map(([level, entries]) => `${level}: ${entries.slice(0, 3).map(entry => `${entry.label} (${entry.rationale})`).join(' | ') || 'sem contexto'}`)
+      .join('\n')}`;
+  };
+
+  const guardAssistedExecution = (): boolean => {
+    if (canUseAssistedExecution) return true;
+    showToast(
+      routingAssessment.approval_mode === 'required'
+        ? 'Esta ação exige liberação explícita antes de usar o copiloto.'
+        : 'Confirme a execução assistida desta sessão antes de usar o copiloto.',
+      'info'
+    );
+    return false;
+  };
+
   // ─── Local state ────────────────────────────────────────────────
   const [mobileTab, setMobileTab] = useState<MobileTab>('visao-geral');
   const [editingResource, setEditingResource] = useState<EditingResource | null>(null);
@@ -130,6 +184,41 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [showArtifacts, setShowArtifacts] = useState(false);
   const [copiedArtifactId, setCopiedArtifactId] = useState<string | null>(null);
+  const [isRunningRegisteredSync, setIsRunningRegisteredSync] = useState(false);
+
+  const layerContext = useMemo(() => {
+    const scopedKnowledge = knowledgeItems.filter(item =>
+      (item.base_id && systemBaseIds.includes(item.base_id)) ||
+      item.origem?.id_origem === unit.id ||
+      item.origem?.id_origem === systemName,
+    );
+    const pseudoTask: Tarefa = {
+      id: `system:${unit.id}`,
+      titulo: systemName,
+      projeto: 'sistemas',
+      data_inicio: sysDetails.data_criacao,
+      data_limite: sysDetails.data_atualizacao,
+      status: 'em andamento',
+      categoria: 'Sistemas',
+      contabilizar_meta: false,
+      data_criacao: sysDetails.data_criacao,
+      descricao: sysDetails.objetivo_negocio,
+      sistema: systemName,
+      knowledge_item_ids: scopedKnowledge.map(item => item.id),
+      chat_history: chatMessages,
+    };
+    return buildContextLayers({
+      task: pseudoTask,
+      systemName,
+      knowledgeItems: scopedKnowledge,
+      sessionMessages: chatMessages.slice(-6).map(msg => ({ role: msg.role, content: msg.content })),
+    });
+  }, [knowledgeItems, systemBaseIds, unit.id, systemName, sysDetails.data_criacao, sysDetails.data_atualizacao, sysDetails.objetivo_negocio, chatMessages]);
+  const repoSyncDecision = useMemo(() => evaluateRegisteredToolExecution('github_repo_sync', {
+    routingAssessment,
+    approvalGranted,
+    domainHint: 'sistemas_e_codigo',
+  }), [routingAssessment, approvalGranted]);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -189,8 +278,11 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
         try {
           const b64 = (reader.result as string).split(',')[1];
           const fn = httpsCallable(functions, 'transcreverAudio');
-          const res = await fn({ audioBase64: b64 });
-          const data = res.data as { raw: string; refined: string };
+          const res = await fn({
+            audioBase64: b64,
+            sourceRef: { kind: 'system', id: system.id, label: system.nome },
+          });
+          const data = res.data as TranscriptionResponse;
           if (data.refined) setNewLogText(prev => prev + (prev ? '\n' : '') + data.refined);
         } catch {
           showToast('Erro ao processar áudio.', 'error');
@@ -217,15 +309,39 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
     setChatMessages(historyWithUser);
     setIsChatLoading(true);
     try {
-      const fn = httpsCallable(functions, 'askTaskAssistant');
-      const customPrompt = `Contexto: Sistema de software chamado "${systemName}" (status: ${STEP_LABELS[sysDetails.status]}).\n\nComando: ${messageText}`;
-      const res = await fn({
+      const customPrompt = `Contexto: Sistema de software chamado "${systemName}" (status: ${STEP_LABELS[sysDetails.status]}).\n\n${buildContextPromptBlock()}\n\nComando: ${messageText}`;
+      const res = await callRegisteredTool<{ result: string }>('system_copilot', {
         prompt: customPrompt,
         historyContext: buildHistoryContext(),
         categoria: 'SISTEMA',
         ragContext: unit.id,
+        contextBundle: layerContext,
+      }, {
+        db,
+        functions,
+        routingAssessment,
+        approvalGranted,
+        domainHint: 'sistemas_e_codigo',
+        onBlocked: (reason) => {
+          setIsChatLoading(false);
+          showToast(
+            reason === 'not_registered'
+              ? 'Copiloto não homologado — chamada bloqueada.'
+              : 'Libere a sessão antes de usar o copiloto de sistema.',
+            'info',
+          );
+        },
+        context: { kind: 'system', id: unit.id, label: systemName },
       });
-      const result = (res.data as any).result || '';
+      if (res === null) return;
+      logContextUsageEvent(db, {
+        context_kind: 'system',
+        context_id: unit.id,
+        context_label: systemName,
+        usage_kind: 'system_copilot',
+        context_bundle: layerContext,
+      });
+      const result = res.result || '';
       const assistantMsg: ChatMessage = {
         role: 'assistant',
         content: asArtifact
@@ -251,9 +367,43 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
     }
   };
 
+  const handleRunRegisteredRepoSync = async () => {
+    if (!sysDetails.repositorio_principal) return;
+    setIsRunningRegisteredSync(true);
+    try {
+      const res = await callRegisteredTool<{ success: boolean; repo_name?: string }>('github_repo_sync', {
+        sistema_id: unit.id,
+        repo_url: sysDetails.repositorio_principal,
+      }, {
+        db,
+        functions,
+        routingAssessment,
+        approvalGranted,
+        domainHint: 'sistemas_e_codigo',
+        onBlocked: (reason) => {
+          showToast(
+            reason === 'not_registered'
+              ? 'Ferramenta não homologada.'
+              : 'Libere a sessão antes de sincronizar o repositório.',
+            'info',
+          );
+        },
+        context: { kind: 'system', id: unit.id, label: systemName },
+      });
+      if (res?.success) {
+        showToast(`Sync concluído para ${res.repo_name || systemName}.`, 'success');
+      }
+    } catch {
+      showToast('Erro ao sincronizar repositório.', 'error');
+    } finally {
+      setIsRunningRegisteredSync(false);
+    }
+  };
+
   const handleSendMessage = () => {
     const msg = chatInput.trim();
     if (!msg) return;
+    if (!guardAssistedExecution()) return;
     setChatInput('');
     sendChatMessage(msg);
   };
@@ -262,6 +412,27 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
     navigator.clipboard.writeText(artifact.content);
     setCopiedArtifactId(artifact.id);
     setTimeout(() => setCopiedArtifactId(null), 2000);
+  };
+
+  const handleConvertToIssuePacket = async (artifact: Artifact) => {
+    try {
+      await createIssuePacket(db, {
+        sistema_id: unit.id,
+        titulo: artifact.title,
+        descricao: `Proposta gerada pelo copiloto em ${artifact.createdAt}`,
+        tipo: 'melhoria',
+        severidade: 'media',
+        status: 'draft',
+        affected_files: [],
+        proposed_changes: artifact.content,
+        rationale: '',
+        created_by: 'system_copilot',
+        routing_assessment: routingAssessment,
+      });
+      showToast('Proposta técnica criada em rascunho.', 'success');
+    } catch {
+      showToast('Erro ao converter artifact em proposta.', 'error');
+    }
   };
 
   // ─── Derived ───────────────────────────────────────────────────
@@ -422,13 +593,13 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
         {/* GitHub RAG Sync */}
         {sysDetails.repositorio_principal && (
           <button
-            onClick={() => onSyncGithubRepo(unit.id, sysDetails.repositorio_principal!)}
-            disabled={isSyncingGithub}
+            onClick={handleRunRegisteredRepoSync}
+            disabled={isSyncingGithub || isRunningRegisteredSync || !repoSyncDecision.allowed}
             className="w-full flex items-center justify-between gap-3 p-3 rounded-xl border border-dashed border-violet-300 hover:border-violet-500 hover:bg-violet-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed group"
           >
             <div className="flex items-center gap-3">
               <div className="w-7 h-7 bg-violet-100 text-violet-600 rounded-lg flex items-center justify-center shrink-0">
-                {isSyncingGithub ? (
+                {isSyncingGithub || isRunningRegisteredSync ? (
                   <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
@@ -441,13 +612,18 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
               </div>
               <div className="text-left">
                 <p className="text-[10px] font-black text-violet-700 uppercase tracking-widest leading-none">
-                  {isSyncingGithub ? 'Sincronizando...' : 'Sincronizar RAG'}
+                  {isSyncingGithub || isRunningRegisteredSync ? 'Sincronizando...' : 'Sincronizar RAG'}
                 </p>
                 <p className="text-[9px] text-slate-400 mt-0.5">
                   {sysDetails.github_rag_synced_at
                     ? `Última sync: ${new Date(sysDetails.github_rag_synced_at).toLocaleDateString('pt-BR')}`
                     : 'Nunca sincronizado'}
                 </p>
+                {!repoSyncDecision.allowed && (
+                  <p className="text-[9px] text-amber-700 mt-1 font-semibold">
+                    {repoSyncDecision.reason === 'approval_required' ? 'Requer liberação.' : 'Bloqueado pela política.'}
+                  </p>
+                )}
               </div>
             </div>
             <svg className="w-3.5 h-3.5 text-violet-400 group-hover:text-violet-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -458,6 +634,42 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
       </div>
 
       {/* Linked Tasks */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-blue-500 pl-3">Contexto em camadas</h5>
+          <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+            {layerContext.identity.length + layerContext.session.length + layerContext.scoped.length + layerContext.deep.length} itens
+          </span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {([
+            ['L0', layerContext.identity],
+            ['L1', layerContext.session],
+            ['L2', layerContext.scoped],
+            ['L3', layerContext.deep],
+          ] as const).map(([level, entries]) => (
+            <div key={level} className="rounded-xl border border-slate-200 bg-white p-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] font-black uppercase tracking-widest text-blue-700">{level}</p>
+                <span className="text-[10px] font-bold text-slate-400">{entries.length} item(ns)</span>
+              </div>
+              {entries.length === 0 ? (
+                <p className="mt-2 text-[11px] text-slate-400">Sem contexto carregado nesta camada.</p>
+              ) : (
+                <div className="mt-2 space-y-2">
+                  {entries.slice(0, 3).map(entry => (
+                    <div key={entry.id} className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2">
+                      <p className="text-xs font-black text-slate-900">{entry.label}</p>
+                      <p className="mt-1 text-[11px] leading-relaxed text-slate-600">{entry.rationale}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-violet-500 pl-3">Ações vinculadas</h5>
@@ -804,13 +1016,61 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
           <p className="text-[8px] text-slate-400">RAG · Repositório</p>
         </div>
         <button
-          onClick={() => sendChatMessage(`Analise o sistema "${systemName}" (status: ${STEP_LABELS[sysDetails.status]}) e sugira os próximos passos com base no contexto do repositório e das demandas abertas.`)}
+          onClick={() => {
+            if (!guardAssistedExecution()) return;
+            sendChatMessage(`Analise o sistema "${systemName}" (status: ${STEP_LABELS[sysDetails.status]}) e sugira os próximos passos com base no contexto do repositório e das demandas abertas.`);
+          }}
           disabled={isChatLoading}
           className="shrink-0 px-2.5 py-1.5 rounded-xl text-[8px] font-black uppercase tracking-widest bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all disabled:opacity-40"
         >
           Próx. passos
         </button>
       </div>
+
+      {/* Governança do copiloto */}
+      {routingAssessment.approval_mode !== 'automatic' && (
+        <div className={`shrink-0 mx-3 mt-2 rounded-xl border px-3 py-2.5 flex flex-col gap-1.5 ${routingAssessment.approval_mode === 'required'
+          ? 'bg-rose-50 border-rose-200'
+          : 'bg-amber-50 border-amber-200'
+        }`}>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <p className={`text-[9px] font-black uppercase tracking-widest ${routingAssessment.approval_mode === 'required' ? 'text-rose-700' : 'text-amber-700'}`}>
+                Governança de Execução
+              </p>
+              <p className="text-[10px] font-medium text-slate-600 mt-0.5 leading-relaxed">
+                {routingAssessment.approval_mode === 'required'
+                  ? 'Esta ação exige liberação explícita antes de usar o copiloto e gerar artefatos.'
+                  : 'Esta ação pede confirmação curta antes de usar o copiloto nesta sessão.'}
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setApprovalGranted(true);
+                logRoutingEvent(db, {
+                  context_kind: 'system',
+                  context_id: unit.id,
+                  context_label: systemName,
+                  assessment: routingAssessment,
+                  session_released: true,
+                });
+              }}
+              disabled={approvalGranted}
+              className={`shrink-0 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${approvalGranted
+                ? 'bg-emerald-500 text-white opacity-80'
+                : routingAssessment.approval_mode === 'required'
+                  ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                  : 'bg-amber-500 hover:bg-amber-600 text-white'
+              }`}
+            >
+              {approvalGranted ? 'Liberado' : 'Liberar sessão'}
+            </button>
+          </div>
+          <p className="text-[8px] font-bold uppercase tracking-widest text-slate-400">
+            {routingAssessment.route === 'orchestrated' ? 'Rota orquestrada' : 'Rota direta'} · risco {routingAssessment.risk_level}
+          </p>
+        </div>
+      )}
 
       {/* Artifacts toggle */}
       {artifacts.length > 0 && (
@@ -836,16 +1096,26 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
                       <p className="text-[10px] font-black truncate text-slate-800">{artifact.title}</p>
                       <p className="text-[8px] text-slate-400">{artifact.createdAt}</p>
                     </div>
-                    <button
-                      onClick={() => handleCopyArtifact(artifact)}
-                      className={`shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black transition-all ${copiedArtifactId === artifact.id ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                    >
-                      {copiedArtifactId === artifact.id ? (
-                        <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> Copiado</>
-                      ) : (
-                        <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" /></svg> Copiar</>
-                      )}
-                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => handleCopyArtifact(artifact)}
+                        className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black transition-all ${copiedArtifactId === artifact.id ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      >
+                        {copiedArtifactId === artifact.id ? (
+                          <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> Copiado</>
+                        ) : (
+                          <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" /></svg> Copiar</>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => handleConvertToIssuePacket(artifact)}
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black bg-violet-50 text-violet-600 hover:bg-violet-100 transition-all"
+                        title="Converter em Proposta Técnica"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                        Proposta
+                      </button>
+                    </div>
                   </div>
                   <p className="text-[10px] leading-relaxed line-clamp-3 text-slate-500">{artifact.content}</p>
                 </div>
@@ -938,7 +1208,13 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
           </button>
         </div>
         <button
-          onClick={() => { if (chatInput.trim()) { const msg = chatInput; setChatInput(''); sendChatMessage(msg, true); } }}
+          onClick={() => {
+            if (!chatInput.trim()) return;
+            if (!guardAssistedExecution()) return;
+            const msg = chatInput;
+            setChatInput('');
+            sendChatMessage(msg, true);
+          }}
           disabled={!chatInput.trim() || isChatLoading}
           className="mt-2 w-full py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest border border-indigo-200 text-indigo-500 hover:bg-indigo-50 transition-all disabled:opacity-30"
         >

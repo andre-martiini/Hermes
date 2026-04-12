@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/firebase';
+import type { TranscriptionResponse } from '../../../types';
 
 interface QuickNoteModalProps {
   isOpen: boolean;
@@ -73,8 +74,11 @@ export const QuickNoteModal: React.FC<QuickNoteModalProps> = ({ isOpen, onClose,
         try {
           const base64String = (reader.result as string).split(',')[1];
           const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
-          const response = await transcribeFunc({ audioBase64: base64String });
-          const data = response.data as { raw: string, refined: string };
+          const response = await transcribeFunc({
+            audioBase64: base64String,
+            sourceRef: { kind: 'unknown', label: 'quick_note_modal' },
+          });
+          const data = response.data as TranscriptionResponse;
           if (data.refined) onAddIdea(data.refined);
         } catch (error) {
           console.error("Erro ao transcrever:", error);

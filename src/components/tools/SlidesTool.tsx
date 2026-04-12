@@ -1,9 +1,11 @@
-﻿import React, { useState } from 'react';
-import { httpsCallable } from 'firebase/functions';
-import { functions } from '@/firebase';
+﻿import React, { useState, useMemo } from 'react';
+import { db, functions } from '@/firebase';
 import { SlideHistoryEntry } from '@/types';
 import { SLIDES_HISTORY_KEY } from '@/constants';
 import { AutoExpandingTextarea } from '../ui/UIComponents';
+import { assessTaskRouting } from '../../utils/routing';
+import { logRoutingEvent } from '../../utils/routingLog';
+import { callRegisteredTool } from '../../utils/callRegisteredTool';
 
 interface SlidesToolProps {
   onBack: () => void;
@@ -14,6 +16,26 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast }) => 
   const [rascunho, setRascunho] = useState('');
   const [qtdSlides, setQtdSlides] = useState(5);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [approvalGranted, setApprovalGranted] = useState(false);
+
+  const routingAssessment = useMemo(() => assessTaskRouting({
+    tipoAcao: 'fast',
+    origin: 'manual',
+    inputText: rascunho,
+  }), [rascunho]);
+
+  const canUseAssistedExecution = routingAssessment.approval_mode === 'automatic' || approvalGranted;
+
+  const guardAssistedExecution = (): boolean => {
+    if (canUseAssistedExecution) return true;
+    showToast(
+      routingAssessment.approval_mode === 'required'
+        ? 'Esta ação exige liberação explícita antes de usar o copiloto.'
+        : 'Confirme a execução assistida desta sessão antes de usar o copiloto.',
+      'info',
+    );
+    return false;
+  };
   const [presentation, setPresentation] = useState<any>(null);
   const [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ slideIdx: number; topicoIdx: number } | null>(null);
@@ -52,22 +74,43 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast }) => 
   };
 
   const handleGenerate = async () => {
-    if (!rascunho.trim()) { showToast("Insira o texto bruto para comeÃ§ar.", "info"); return; }
+    if (!rascunho.trim()) { showToast("Insira o texto bruto para começar.", "info"); return; }
+    if (!guardAssistedExecution()) return;
     setIsGenerating(true); setPresentation(null); setEditing(null); setCurrentHistoryId(null);
     try {
       let data: any;
       if (import.meta.env.DEV) {
-        const response = await fetch('/proxy-functions/gerarSlidesIA', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: { rascunho, qtdSlides } }) });
+        // Em dev, o proxy local não passa pelo registry — contorna apenas para hot-reload.
+        // O guardAssistedExecution() acima já garante a governance mesmo neste path.
+        const response = await fetch('/proxy-functions/gerarSlidesIA', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: { rascunho, qtdSlides } }),
+        });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const result = await response.json();
         data = result.result || result.data;
       } else {
-        const gerarSlidesFn = httpsCallable(functions, 'gerarSlidesIA');
-        data = (await gerarSlidesFn({ rascunho, qtdSlides })).data;
+        data = await callRegisteredTool<any>('slides', { rascunho, qtdSlides }, {
+          db,
+          functions,
+          routingAssessment,
+          approvalGranted,
+          onBlocked: (reason) => {
+            showToast(
+              reason === 'not_registered'
+                ? 'Esta ferramenta não está homologada e não pode ser executada.'
+                : 'Esta ação exige liberação antes de gerar slides.',
+              'info',
+            );
+          },
+          context: { kind: 'tool', id: 'slides', label: 'Gerador de Slides' },
+        });
+        if (data === null) return; // bloqueado
       }
       setPresentation(data);
       setCurrentHistoryId(saveToHistory(data, rascunho));
-      showToast("ApresentaÃ§ão gerada com sucesso!", "success");
+      showToast("Apresentação gerada com sucesso!", "success");
     } catch (err) { console.error(err); showToast("Erro ao gerar slides.", "error"); }
     finally { setIsGenerating(false); }
   };
@@ -275,13 +318,43 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast }) => 
                   placeholder="Cole aqui o texto, atas de reunião, artigos ou tópicosque deseja transformar em slides..."
                   value={rascunho} onChange={e => setRascunho(e.target.value)} />
               </div>
+              {!canUseAssistedExecution && (
+                <div className={`flex items-start justify-between gap-3 rounded-2xl border p-4 ${routingAssessment.approval_mode === 'required' ? 'bg-rose-50 border-rose-200' : 'bg-amber-50 border-amber-200'}`}>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-[10px] font-black uppercase tracking-widest mb-1 ${routingAssessment.approval_mode === 'required' ? 'text-rose-600' : 'text-amber-600'}`}>
+                      {routingAssessment.approval_mode === 'required' ? 'Liberação obrigatória' : 'Confirmação necessária'}
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      {routingAssessment.approval_mode === 'required'
+                        ? 'Esta ação exige liberação explícita antes de usar o copiloto e gerar artefatos.'
+                        : 'Esta ação pede confirmação curta antes de usar o copiloto nesta sessão.'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setApprovalGranted(true);
+                      logRoutingEvent(db, {
+                        context_kind: 'tool',
+                        context_id: 'slides',
+                        context_label: 'Gerador de Slides',
+                        assessment: routingAssessment,
+                        session_released: true,
+                      });
+                    }}
+                    disabled={approvalGranted}
+                    className={`shrink-0 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${approvalGranted ? 'bg-emerald-500 text-white opacity-80' : routingAssessment.approval_mode === 'required' ? 'bg-rose-600 hover:bg-rose-700 text-white' : 'bg-amber-500 hover:bg-amber-600 text-white'}`}
+                  >
+                    {approvalGranted ? 'Liberado' : 'Liberar sessão'}
+                  </button>
+                </div>
+              )}
               <div className="flex items-end gap-6">
                 <div className="flex-1">
                   <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 ml-1">Quantidade de Slides</label>
                   <input type="number" min="1" max="20" className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-slate-800 font-black outline-none focus:ring-4 focus:ring-orange-100 transition-all" value={qtdSlides} onChange={e => setQtdSlides(parseInt(e.target.value))} />
                 </div>
                 <button onClick={handleGenerate} disabled={isGenerating} className={`flex-[2] h-14 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-3 shadow-xl transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:grayscale ${isGenerating ? 'animate-pulse' : ''}`}>
-                  {isGenerating ? (<><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>Processando...</>) : (<><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>Gerar ApresentaÃ§ão</>)}
+                  {isGenerating ? (<><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>Processando...</>) : (<><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>Gerar Apresentação</>)}
                 </button>
               </div>
             </div>

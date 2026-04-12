@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/firebase';
-import { BrainstormIdea, formatDate, ConhecimentoItem } from '@/types';
+import { BrainstormIdea, formatDate, ConhecimentoItem, TranscriptionResponse } from '@/types';
 import { AutoExpandingTextarea } from '../ui/UIComponents';
 import { SlidesTool } from './SlidesTool';
 import { ShoppingListTool } from './ShoppingListTool';
@@ -170,8 +170,11 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
         try {
           const base64String = (reader.result as string).split(',')[1];
           const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
-          const response = await transcribeFunc({ audioBase64: base64String });
-          const data = response.data as { raw: string, refined: string };
+          const response = await transcribeFunc({
+            audioBase64: base64String,
+            sourceRef: { kind: 'unknown', label: 'brainstorming_voice_capture' },
+          });
+          const data = response.data as TranscriptionResponse;
           if (data.refined) onAddTextIdea(data.refined);
         } catch (error) {
           console.error("Erro ao transcrever:", error);

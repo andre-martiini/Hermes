@@ -1,0 +1,616 @@
+import React from 'react';
+import type { Tarefa, PlanoTrabalho, PlanoTrabalhoItem, EntregaInstitucional, AtividadeRealizada } from '../../types';
+import { PgcMiniTaskCard } from '../../src/components/ui';
+import { PgdAuditRow } from '../components/ui/PgdAuditRow';
+
+interface PgdVolumeDay {
+  dayStr: string;
+  label: string;
+  volume: number;
+}
+
+interface PgdEntregaStatus {
+  key: string;
+  entrega: string;
+  unidade: string;
+  percentual: number;
+  entregaId: string | undefined;
+  tarefasCount: number;
+  registrosCount: number;
+}
+
+export interface PgdStatusData {
+  hasPlan: boolean;
+  planItemsCount: number;
+  totalWorkDaysInMonth: number;
+  expectedDaysCount: number;
+  workedDaysCount: number;
+  notWorkedDaysCount: number;
+  coveragePct: number;
+  maxVolume: number;
+  volumeByDay: PgdVolumeDay[];
+  notWorkedDays: PgdVolumeDay[];
+  entregasSemVinculo: PgdEntregaStatus[];
+  entregasSemRegistros: PgdEntregaStatus[];
+  entregasSemCadastro: PgdEntregaStatus[];
+}
+
+interface PGDViewProps {
+  currentYear: number;
+  currentMonth: number;
+  setCurrentMonth: (v: number) => void;
+  pgcSubView: 'audit' | 'heatmap' | 'config' | 'plano' | 'status' | 'automatizadas';
+  setPgcSubView: (v: 'audit' | 'heatmap' | 'config' | 'plano' | 'status' | 'automatizadas') => void;
+  setIsImportPlanOpen: (v: boolean) => void;
+  pgcTasksAguardando: Tarefa[];
+  setSelectedTask: (t: Tarefa | null) => void;
+  planosTrabalho: PlanoTrabalho[];
+  pgcEntregas: EntregaInstitucional[];
+  atividadesPGC: AtividadeRealizada[];
+  pgcTasks: Tarefa[];
+  handleCreateEntregaFromPlan: (item: PlanoTrabalhoItem) => Promise<string | null>;
+  handleLinkTarefa: (tarefaId: string, entregaId: string) => void;
+  handleUnlinkTarefa: (tarefaId: string, entregaId: string) => void;
+  handleCreatePgdActivity: (entregaId: string, draft: Partial<AtividadeRealizada>) => void;
+  handleUpdatePgdActivity: (id: string, updates: Partial<AtividadeRealizada>) => void;
+  handleDeletePgdActivity: (id: string) => void;
+  handleGeneratePgdFromDiaries: (entregaId: string, item: PlanoTrabalhoItem, tarefasRelacionadas: Tarefa[]) => void;
+  handleGeneratePgdFromRawText: (entregaId: string, item: PlanoTrabalhoItem, rawText: string) => void;
+  pgdGeneratingByEntrega: Record<string, boolean>;
+  pgdRawTextProcessingByEntrega: Record<string, boolean>;
+  pgdStatus: PgdStatusData;
+  showToast: (message: string, type?: string) => void;
+  isPgdTerminalOpen: boolean;
+  setIsPgdTerminalOpen: (v: boolean) => void;
+  pgdTerminalLogs: string[];
+  setPgdTerminalLogs: React.Dispatch<React.SetStateAction<string[]>>;
+}
+
+export function PGDView({
+  currentYear,
+  currentMonth,
+  setCurrentMonth,
+  pgcSubView,
+  setPgcSubView,
+  setIsImportPlanOpen,
+  pgcTasksAguardando,
+  setSelectedTask,
+  planosTrabalho,
+  pgcEntregas,
+  atividadesPGC,
+  pgcTasks,
+  handleCreateEntregaFromPlan,
+  handleLinkTarefa,
+  handleUnlinkTarefa,
+  handleCreatePgdActivity,
+  handleUpdatePgdActivity,
+  handleDeletePgdActivity,
+  handleGeneratePgdFromDiaries,
+  handleGeneratePgdFromRawText,
+  pgdGeneratingByEntrega,
+  pgdRawTextProcessingByEntrega,
+  pgdStatus,
+  showToast,
+  isPgdTerminalOpen,
+  setIsPgdTerminalOpen,
+  pgdTerminalLogs,
+  setPgdTerminalLogs,
+}: PGDViewProps) {
+  return (
+                  <div className="space-y-3 md:space-y-10">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 md:gap-6 bg-white p-3 md:p-8 rounded-none md:rounded-[2rem] border border-slate-200 shadow-xl">
+                      <div className="hidden md:block">
+                        <h3 className="text-4xl font-black text-slate-900 tracking-tighter">Gestão PGD</h3>
+                        <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(new Date(currentYear, currentMonth))}</p>
+                      </div>
+                      <div className="flex items-center gap-3 md:gap-4">
+                        {pgcSubView === 'plano' && (
+                          <button
+                            onClick={() => setIsImportPlanOpen(true)}
+                            className="bg-slate-900 text-white px-4 md:px-6 py-2 md:py-3 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center gap-2 md:gap-3"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+                            Importar <span className="hidden md:inline">Planilha</span>
+                          </button>
+                        )}
+
+                        <select
+                          value={currentMonth}
+                          onChange={(e) => setCurrentMonth(Number(e.target.value))}
+                          className="flex-1 md:flex-none text-[10px] font-black uppercase bg-slate-100 px-4 py-2 rounded-lg md:rounded-xl border-none outline-none focus:ring-2 focus:ring-slate-900"
+                        >
+                          {['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'].map((m, i) => (
+                            <option key={i} value={i}>{m}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex border-b border-slate-200 gap-4 md:gap-8">
+                      <button
+                        onClick={() => setPgcSubView('audit')}
+                        className={`px-2 py-3 md:py-4 text-[10px] font-black uppercase tracking-[0.2em] transition-all border-b-4 ${pgcSubView === 'audit' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                      >
+                        Resumo
+                      </button>
+                      <button
+                        onClick={() => setPgcSubView('plano')}
+                        className={`px-2 py-3 md:py-4 text-[10px] font-black uppercase tracking-[0.2em] transition-all border-b-4 ${pgcSubView === 'plano' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                      >
+                        Plano
+                      </button>
+                      <button
+                        onClick={() => setPgcSubView('status')}
+                        className={`px-2 py-3 md:py-4 text-[10px] font-black uppercase tracking-[0.2em] transition-all border-b-4 ${pgcSubView === 'status' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                      >
+                        Status PGD
+                      </button>
+                      <button
+                        onClick={() => setPgcSubView('automatizadas')}
+                        className={`px-2 py-3 md:py-4 text-[10px] font-black uppercase tracking-[0.2em] transition-all border-b-4 ${pgcSubView === 'automatizadas' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                      >
+                        Ações Automatizadas
+                      </button>
+                    </div>
+
+                    {pgcSubView === 'audit' && (
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6 h-[calc(100vh-180px)] pb-4">
+                        <div className="lg:col-span-3 bg-white rounded-none md:rounded-[2rem] border border-slate-200 shadow-xl flex flex-col overflow-hidden h-full">
+                          <div className="p-4 md:p-6 border-b border-slate-100 flex-shrink-0 bg-slate-50/50">
+                            <div className="flex items-center justify-between">
+                              <h4 className="text-sm font-black text-slate-900 tracking-tight">Pendentes</h4>
+                              <span className="bg-slate-900 text-white text-[9px] font-black px-2 py-1 rounded-full">{pgcTasksAguardando.length}</span>
+                            </div>
+                            <p className="text-slate-400 text-[9px] font-black uppercase tracking-widest mt-1">Arraste p/ vincular</p>
+                          </div>
+
+                          <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+                            {pgcTasksAguardando.map(task => (
+                              <PgcMiniTaskCard key={task.id} task={task} onClick={() => setSelectedTask(task)} />
+                            ))}
+                            {pgcTasksAguardando.length === 0 && (
+                              <div className="py-10 text-center">
+                                <p className="text-slate-300 font-black text-[9px] uppercase tracking-widest italic">Tudo limpo!</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="lg:col-span-9 bg-white rounded-none md:rounded-[2rem] border border-slate-200 overflow-hidden shadow-xl flex flex-col h-full">
+                          <div className="flex-1 overflow-y-auto divide-y divide-slate-100 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+                            {(() => {
+                              const currentPlan = planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`);
+
+                              if (!currentPlan) return <div className="p-12 text-center h-full flex items-center justify-center"><p className="text-slate-300 font-black text-sm uppercase tracking-widest italic">Nenhum plano definido.</p></div>;
+
+                              return currentPlan.itens.map((item, index) => {
+                                const entregaEntity = pgcEntregas.find(e => e.entrega === item.entrega);
+                                const entregaId = entregaEntity?.id;
+
+                                const atividadesRelacionadas: AtividadeRealizada[] = entregaId ? atividadesPGC.filter(a => a.entrega_id === entregaId) : [];
+                                const tarefasRelacionadas: Tarefa[] = entregaId ? pgcTasks.filter(t => t.entregas_relacionadas?.includes(entregaId)) : [];
+
+                                return (
+                                  <React.Fragment key={String(index)}>
+                                    <PgdAuditRow
+                                      item={item}
+                                      entregaEntity={entregaEntity}
+                                      atividadesRelacionadas={atividadesRelacionadas}
+                                      tarefasRelacionadas={tarefasRelacionadas}
+                                      onDrop={async (tarefaId) => {
+                                        let targetId = entregaId;
+                                        if (!targetId) {
+                                          const newId = await handleCreateEntregaFromPlan(item);
+                                          if (newId) targetId = newId;
+                                        }
+                                        if (targetId) handleLinkTarefa(tarefaId, targetId);
+                                      }}
+                                      onUnlinkTarefa={handleUnlinkTarefa}
+                                      onSelectTask={setSelectedTask}
+                                      onCreateActivity={async (draft) => {
+                                        let targetId = entregaId;
+                                        if (!targetId) {
+                                          targetId = await handleCreateEntregaFromPlan(item);
+                                        }
+                                        if (targetId) handleCreatePgdActivity(targetId, draft);
+                                      }}
+                                      onUpdateActivity={handleUpdatePgdActivity}
+                                      onDeleteActivity={handleDeletePgdActivity}
+                                      onGenerateWithAI={() => {
+                                        if (!entregaId) return;
+                                        handleGeneratePgdFromDiaries(entregaId, item, tarefasRelacionadas);
+                                      }}
+                                      onProcessRawText={async (rawText) => {
+                                        let targetId = entregaId;
+                                        if (!targetId) {
+                                          targetId = await handleCreateEntregaFromPlan(item);
+                                        }
+                                        if (targetId) handleGeneratePgdFromRawText(targetId, item, rawText);
+                                      }}
+                                      isGeneratingAI={entregaId ? !!pgdGeneratingByEntrega[entregaId] : false}
+                                      isProcessingRawText={entregaId ? !!pgdRawTextProcessingByEntrega[entregaId] : false}
+                                    />
+                                  </React.Fragment>
+                                );
+                              });
+                            })()}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {pgcSubView === 'status' && (
+                      <div className="animate-in space-y-6">
+                        {!pgdStatus.hasPlan ? (
+                          <div className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] p-10 text-center shadow-xl">
+                            <p className="text-slate-300 font-black text-sm uppercase tracking-widest italic">
+                              Nenhum plano de trabalho encontrado para este período.
+                            </p>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Dias úteis (mês)</p>
+                                <p className="mt-2 text-2xl font-black text-slate-900">{pgdStatus.totalWorkDaysInMonth}</p>
+                                <p className="text-[10px] text-slate-500">Previstos para prestação</p>
+                              </div>
+                              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Dias esperados</p>
+                                <p className="mt-2 text-2xl font-black text-slate-900">{pgdStatus.expectedDaysCount}</p>
+                                <p className="text-[10px] text-slate-500">Descontando afastamentos</p>
+                              </div>
+                              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Dias com registro</p>
+                                <p className="mt-2 text-2xl font-black text-emerald-600">{pgdStatus.workedDaysCount}</p>
+                                <p className="text-[10px] text-slate-500">Com atividade PGD registrada</p>
+                              </div>
+                              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Cobertura</p>
+                                <p className="mt-2 text-2xl font-black text-blue-600">{pgdStatus.coveragePct}%</p>
+                                <p className="text-[10px] text-slate-500">{pgdStatus.notWorkedDaysCount} dia(s) sem registro</p>
+                              </div>
+                            </div>
+
+                            <div className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] p-5 md:p-7 shadow-xl">
+                              <div className="flex items-center justify-between mb-4">
+                                <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Volume de trabalho por dia</h4>
+                                <span className="text-[10px] font-black text-slate-400 uppercase">
+                                  {pgdStatus.volumeByDay.length} dia(s) monitorados
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 xl:grid-cols-9 gap-2">
+                                {pgdStatus.volumeByDay.map((d) => {
+                                  const widthPct = Math.round((d.volume / pgdStatus.maxVolume) * 100);
+                                  return (
+                                    <div key={d.dayStr} className="border border-slate-200 rounded-xl p-2 bg-slate-50/50">
+                                      <p className="text-[10px] font-black text-slate-600">{d.label}</p>
+                                      <div className="mt-2 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                                        <div
+                                          className={`h-full rounded-full ${d.volume > 0 ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                                          style={{ width: `${widthPct}%` }}
+                                        />
+                                      </div>
+                                      <p className="mt-1 text-[10px] font-bold text-slate-500">{d.volume} registro(s)</p>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                                <h5 className="text-[10px] font-black uppercase tracking-widest text-rose-600">Entregas sem vínculo</h5>
+                                <p className="text-[10px] text-slate-400 mt-1">Sem ações vinculadas</p>
+                                <div className="mt-3 space-y-2 max-h-64 overflow-y-auto pr-1">
+                                  {pgdStatus.entregasSemVinculo.length === 0 ? (
+                                    <p className="text-[11px] text-slate-400">Nenhuma pendência.</p>
+                                  ) : pgdStatus.entregasSemVinculo.map((e) => (
+                                    <div key={`v-${e.key}`} className="p-2 rounded-lg border border-slate-200 bg-slate-50">
+                                      <p className="text-[11px] font-bold text-slate-700">{e.entrega}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                                <h5 className="text-[10px] font-black uppercase tracking-widest text-amber-600">Entregas sem registro</h5>
+                                <p className="text-[10px] text-slate-400 mt-1">Sem execução PGD registrada</p>
+                                <div className="mt-3 space-y-2 max-h-64 overflow-y-auto pr-1">
+                                  {pgdStatus.entregasSemRegistros.length === 0 ? (
+                                    <p className="text-[11px] text-slate-400">Nenhuma pendência.</p>
+                                  ) : pgdStatus.entregasSemRegistros.map((e) => (
+                                    <div key={`r-${e.key}`} className="p-2 rounded-lg border border-slate-200 bg-slate-50">
+                                      <p className="text-[11px] font-bold text-slate-700">{e.entrega}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                                <h5 className="text-[10px] font-black uppercase tracking-widest text-blue-600">Dias úteis sem registro</h5>
+                                <p className="text-[10px] text-slate-400 mt-1">Até o dia atual</p>
+                                <div className="mt-3 flex flex-wrap gap-2 max-h-64 overflow-y-auto pr-1">
+                                  {pgdStatus.notWorkedDays.length === 0 ? (
+                                    <p className="text-[11px] text-slate-400">Nenhum dia pendente.</p>
+                                  ) : pgdStatus.notWorkedDays.map((d) => (
+                                    <span key={d.dayStr} className="px-2 py-1 rounded-lg border border-slate-200 bg-slate-50 text-[10px] font-black text-slate-600">
+                                      {d.label}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {pgcSubView === 'plano' && (
+                      <div className="animate-in space-y-8">
+                        <div className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl">
+                          {/* Desktop Table */}
+                          <table className="w-full text-left min-w-[800px] hidden md:table">
+                            <thead className="bg-slate-50 border-b border-slate-200">
+                              <tr>
+                                <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Origem / Unidade</th>
+                                <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Entrega Institucional</th>
+                                <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Descrição</th>
+                                <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-[200px]">% Carga Horária</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)?.itens.map((item, i) => (
+                                <tr key={i} className="hover:bg-slate-50 transition-colors">
+                                  <td className="px-8 py-6">
+                                    <div className="text-[10px] font-black text-slate-400 uppercase mb-1">{item.origem}</div>
+                                    <div className="text-xs font-black text-slate-900">{item.unidade}</div>
+                                  </td>
+                                  <td className="px-8 py-6 text-sm font-black text-slate-900">{item.entrega}</td>
+                                  <td className="px-8 py-6 text-xs font-medium text-slate-600 leading-relaxed max-w-xs">{item.descricao}</td>
+                                  <td className="px-8 py-6">
+                                    <div className="flex items-center gap-4">
+                                      <div className="flex-1 h-3 bg-slate-100 rounded-full overflow-hidden">
+                                        <div className="h-full bg-indigo-500 rounded-full transition-all duration-1000" style={{ width: `${item.percentual}%` }}></div>
+                                      </div>
+                                      <span className="text-[10px] font-black text-slate-900 w-10">{item.percentual}%</span>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+
+                          {/* Mobile Card View */}
+                          <div className="md:hidden divide-y divide-slate-100">
+                            {planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)?.itens.map((item, i) => (
+                              <div key={i} className="p-6 space-y-4">
+                                <div className="flex justify-between items-start gap-4">
+                                  <div className="flex-1">
+                                    <div className="text-[8px] font-black text-slate-400 uppercase mb-1">{item.origem} • {item.unidade}</div>
+                                    <div className="text-sm font-black text-slate-900 leading-tight">{item.entrega}</div>
+                                  </div>
+                                  <div className="bg-indigo-50 text-indigo-600 px-2 py-1 rounded text-[10px] font-black">{item.percentual}%</div>
+                                </div>
+                                <p className="text-xs text-slate-500 leading-relaxed">{item.descricao}</p>
+                                <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                  <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${item.percentual}%` }}></div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          {(!planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)) && (
+                            <div className="px-8 py-20 text-center">
+                              <p className="text-slate-300 font-black text-sm uppercase tracking-widest italic">Nenhum plano de trabalho configurado para este período.</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {pgcSubView === 'automatizadas' && (
+                      <div className="animate-in space-y-8">
+                        <div className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl p-6 md:p-10">
+                          <div className="flex items-center justify-between mb-8 pb-6 border-b border-slate-100">
+                            <div>
+                              <h3 className="text-xl font-black text-slate-900 tracking-tight">Painel de Automações</h3>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Scripts e Robôs Auxiliares</p>
+                            </div>
+                            <div className="bg-violet-100 text-violet-600 p-3 rounded-2xl">
+                              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                            {/* Card: Ponto Eletrônico */}
+                            <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50 hover:bg-white hover:shadow-xl transition-all group flex flex-col justify-between h-full relative overflow-hidden">
+                              <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-500 opacity-20 group-hover:opacity-100 transition-opacity"></div>
+                              <div>
+                                <div className="flex items-center gap-3 mb-4">
+                                  <div className="p-2.5 bg-emerald-100 text-emerald-600 rounded-xl">
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                  </div>
+                                  <h4 className="text-sm font-black text-slate-800 uppercase tracking-tight">Ponto Eletrônico</h4>
+                                </div>
+                                <p className="text-xs text-slate-500 font-medium leading-relaxed mb-6">
+                                  Automação que acessa o SIGRH e preenche automaticamente o relógio de ponto do mês logado com a opção de PGD.
+                                </p>
+                              </div>
+                              <button
+                                onClick={async () => {
+                                  showToast('Iniciando automação do ponto eletrônico...', 'info');
+                                  try {
+                                    const response = await fetch('http://127.0.0.1:8000/api/automations/ponto-eletronico', {
+                                      method: 'POST',
+                                    });
+                                    if (response.ok) {
+                                      showToast('Script do Ponto Eletrônico acionado com sucesso!', 'success');
+                                    } else {
+                                      showToast('Erro ao contatar o servidor local de automação.', 'error');
+                                    }
+                                  } catch (e) {
+                                    showToast('O servidor Python de automação (server.py) não está rodando.', 'error');
+                                  }
+                                }}
+                                className="w-full bg-slate-900 text-white py-3.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-md active:scale-95"
+                              >
+                                Preencher Ponto
+                              </button>
+                            </div>
+
+                            {/* Card: Execução PGD (Petrvs) */}
+                            <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50 hover:bg-white hover:shadow-xl transition-all group flex flex-col justify-between h-full relative overflow-hidden">
+                              <div className="absolute top-0 left-0 w-1.5 h-full bg-blue-500 opacity-20 group-hover:opacity-100 transition-opacity"></div>
+                              <div>
+                                <div className="flex items-center gap-3 mb-4">
+                                  <div className="p-2.5 bg-blue-100 text-blue-600 rounded-xl">
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                  </div>
+                                  <h4 className="text-sm font-black text-slate-800 uppercase tracking-tight">Execução PGD</h4>
+                                </div>
+                                <p className="text-xs text-slate-500 font-medium leading-relaxed mb-6">
+                                  Envia os registros de execução salvos diretamente para o Petrvs, preenchendo as entregas institucionais.
+                                </p>
+                                {(() => {
+                                  const currentPlan = planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`);
+                                  if (!currentPlan) return null;
+
+                                  const totalEntregas = currentPlan.itens.length;
+                                  const entregasComRegistro = currentPlan.itens.filter(item => {
+                                    const entregaEntity = pgcEntregas.find(e => e.entrega === item.entrega);
+                                    const registros = entregaEntity ? atividadesPGC.filter(a => a.entrega_id === entregaEntity.id) : [];
+                                    return registros.length > 0;
+                                  }).length;
+
+                                  const faltaRegistros = entregasComRegistro < totalEntregas;
+
+                                  if (faltaRegistros) {
+                                    return (
+                                      <div className="mb-6 p-3 bg-amber-50 border border-amber-100 rounded-xl flex items-start gap-3 animate-pulse">
+                                        <svg className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                                        <p className="text-[10px] font-bold text-amber-700 leading-tight">
+                                          Pendente: {totalEntregas - entregasComRegistro} entrega(s) sem nenhum registro de execução. Complete o resumo para liberar.
+                                        </p>
+                                      </div>
+                                    );
+                                  }
+                                  return (
+                                    <div className="mb-6 p-3 bg-emerald-50 border border-emerald-100 rounded-xl flex items-start gap-3">
+                                      <svg className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                                      <p className="text-[10px] font-bold text-emerald-700 leading-tight">
+                                        Tudo pronto! Todas as entregas possuem registros vinculados.
+                                      </p>
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                              <button
+                                onClick={async () => {
+                                  const currentPlan = planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`);
+                                  if (!currentPlan) {
+                                    showToast('Nenhum plano de trabalho encontrado para este mês.', 'error');
+                                    return;
+                                  }
+
+                                  const allDeliveries = currentPlan.itens.map(item => {
+                                    const entregaEntity = pgcEntregas.find(e => e.entrega === item.entrega);
+                                    const registros = entregaEntity ? atividadesPGC.filter(a => a.entrega_id === entregaEntity.id) : [];
+                                    return {
+                                      nome_entrega: item.entrega,
+                                      registros: registros.map(r => ({
+                                        descricao_atividade: r.descricao_atividade,
+                                        data_inicio: r.data_inicio,
+                                        data_fim: r.data_fim
+                                      }))
+                                    };
+                                  });
+
+                                  const missingAny = allDeliveries.some(e => e.registros.length === 0);
+                                  if (missingAny) {
+                                    showToast('Não é possível executar: existem entregas sem registros.', 'error');
+                                    return;
+                                  }
+
+                                  const payload = {
+                                    mes_ano: currentPlan.mes_ano,
+                                    entregas: allDeliveries
+                                  };
+
+                                  showToast('Iniciando automação do PGD no Petrvs...', 'info');
+                                  try {
+                                    const response = await fetch('http://127.0.0.1:8000/api/automations/executar-pgd', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify(payload),
+                                    });
+                                    if (response.ok) {
+                                      showToast('Pacote de dados enviado! Iniciando monitoramento...', 'success');
+                                      setPgdTerminalLogs([]);
+                                      setIsPgdTerminalOpen(true);
+                                    } else {
+                                      showToast('Erro no processamento do servidor de automação.', 'error');
+                                    }
+                                  } catch (e) {
+                                    showToast('Servidor de automação não está respondendo.', 'error');
+                                  }
+                                }}
+                                className={`w-full py-3.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-md active:scale-95 ${
+                                  (() => {
+                                    const currentPlan = planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`);
+                                    const missing = currentPlan?.itens.some(item => {
+                                      const entregaEntity = pgcEntregas.find(e => e.entrega === item.entrega);
+                                      const registros = entregaEntity ? atividadesPGC.filter(a => a.entrega_id === entregaEntity.id) : [];
+                                      return registros.length === 0;
+                                    });
+                                    return missing ? 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-60' : 'bg-slate-900 text-white hover:bg-blue-600';
+                                  })()
+                                }`}
+                              >
+                              </button>
+
+                              {isPgdTerminalOpen && (
+                                <div className="mt-6 border border-slate-300 rounded-xl overflow-hidden shadow-2xl relative animate-in zoom-in-95 duration-300">
+                                  <div className="bg-slate-900 border-b border-slate-800 p-3 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <div className="flex gap-1.5 group">
+                                        <div onClick={() => setIsPgdTerminalOpen(false)} className="w-3 h-3 rounded-full bg-red-500 cursor-pointer flex items-center justify-center transition-all hover:bg-red-600">
+                                          <svg className="w-2 h-2 text-red-900 opacity-0 group-hover:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                        </div>
+                                        <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+                                        <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                                      </div>
+                                      <span className="ml-2 text-slate-400 font-mono text-[10px] tracking-wide">petrvs-automation@hermes:~</span>
+                                    </div>
+                                    <button onClick={() => setPgdTerminalLogs([])} className="text-slate-400 hover:text-white transition-colors" title="Limpar Terminal">
+                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                    </button>
+                                  </div>
+                                  <div className="bg-slate-950 p-4 h-[300px] overflow-y-auto font-mono text-[11px] leading-relaxed text-emerald-400 flex flex-col justify-end">
+                                    <div className="flex-1"></div>
+                                    <div className="flex flex-col justify-end">
+                                      {pgdTerminalLogs.length === 0 ? (
+                                        <div className="text-slate-500 flex items-center gap-2">
+                                          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                                          Aguardando boot do motor Python...
+                                        </div>
+                                      ) : (
+                                        pgdTerminalLogs.map((log, i) => (
+                                          <div key={i} className="whitespace-pre-wrap">{log}</div>
+                                        ))
+                                      )}
+                                      <div className="mt-1 text-emerald-400 animate-pulse">_</div>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                          </div>
+
+                        </div>
+                      </div>
+                    )}
+                  </div>
+  );
+}

@@ -1,6 +1,7 @@
 ﻿import React, { useState, useRef, useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/firebase';
+import type { TranscriptionResponse } from '../../../types';
 
 interface TranscriptionToolProps {
   onBack: () => void;
@@ -16,13 +17,14 @@ interface TranscriptionHistoryEntry {
   date: string;
   raw: string;
   refined: string;
+  intake_record?: TranscriptionResponse['intake_record'];
 }
 
 export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, showToast }) => {
   const [file, setFile] = useState<File | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [transcription, setTranscription] = useState<{ raw: string, refined: string } | null>(null);
+  const [transcription, setTranscription] = useState<TranscriptionResponse | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [history, setHistory] = useState<TranscriptionHistoryEntry[]>([]);
   const [pendingDeleteHistoryId, setPendingDeleteHistoryId] = useState<string | null>(null);
@@ -54,14 +56,15 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
     return () => window.removeEventListener('paste', handlePaste);
   }, []);
 
-  const saveToHistory = (data: { raw: string, refined: string }, fileName: string, fileSize: number) => {
+  const saveToHistory = (data: TranscriptionResponse, fileName: string, fileSize: number) => {
     const newEntry: TranscriptionHistoryEntry = {
       id: Date.now().toString(),
       fileName,
       fileSize,
       date: new Date().toISOString(),
       raw: data.raw,
-      refined: data.refined
+      refined: data.refined,
+      intake_record: data.intake_record
     };
     const updatedHistory = [newEntry, ...history].slice(0, 50); // Keep last 50
     setHistory(updatedHistory);
@@ -76,7 +79,7 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
   };
 
   const loadFromHistory = (entry: TranscriptionHistoryEntry) => {
-    setTranscription({ raw: entry.raw, refined: entry.refined });
+    setTranscription({ raw: entry.raw, refined: entry.refined, intake_record: entry.intake_record });
     setFile(null);
     setAudioUrl(null);
     showToast("TranscriÃ§ão carregada do histórico.", "success");
@@ -121,7 +124,7 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
             extension: extension
           });
 
-          const data = response.data as { raw: string, refined: string };
+          const data = response.data as TranscriptionResponse;
           setTranscription(data);
           saveToHistory(data, file.name, file.size);
           showToast("TranscriÃ§ão concluÃ­da!", "success");

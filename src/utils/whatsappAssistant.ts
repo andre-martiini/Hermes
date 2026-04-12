@@ -41,7 +41,7 @@ export interface WhatsAppAssistantResponse {
   context: WhatsAppAssistantContext;
 }
 
-const normalizeAssistantResponse = (payload: unknown): WhatsAppAssistantResponse => {
+export const normalizeAssistantResponse = (payload: unknown): WhatsAppAssistantResponse => {
   const data = (payload ?? {}) as Partial<WhatsAppAssistantResponse>;
   return {
     markdown: data.markdown || '',

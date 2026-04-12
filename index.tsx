@@ -10,14 +10,14 @@ import {
   formatDate, formatDateLocalISO, Sistema, SistemaStatus, WorkItem, WorkItemPhase,
   WorkItemPriority, QualityLog, WorkItemAudit, GoogleCalendarEvent,
   PoolItem, CustomNotification, HealthExam, ConhecimentoItem, UndoAction, HermesModalProps,
-  ShoppingItem, Projeto, SlideHistoryEntry, BaseConhecimento, TipoAcao, Servico
+  ShoppingItem, Projeto, SlideHistoryEntry, BaseConhecimento, TipoAcao, Servico, TranscriptionResponse
 } from './types';
 import HealthView from './HealthView';
 import { MeetingTranscriptionTool } from './src/components/tools/MeetingTranscriptionTool';
 import { STATUS_COLORS, PROJECT_COLORS, SLIDES_HISTORY_KEY } from './constants';
 import { db, functions, messaging, auth, googleProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, onSnapshot, query, orderBy, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, writeBatch, getDoc, getDocs, where } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, writeBatch, getDocs, where } from 'firebase/firestore';
 import { getToken, onMessage, isSupported } from 'firebase/messaging';
 import { httpsCallable } from 'firebase/functions';
 import FinanceView from './FinanceView';
@@ -26,6 +26,9 @@ import KnowledgeView from './KnowledgeView';
 import ProjectsView from './ProjectsView';
 import RAGBasesView from './src/views/RAGBasesView';
 import { AutonomousOperationsView } from './src/views/AutonomousOperationsView';
+import { AuditView } from './src/views/AuditView';
+import { IssuePacketView } from './src/views/IssuePacketView';
+import { POPView } from './src/views/POPView';
 import { ServicesView } from './src/views/ServicesView';
 
 // Importações dos módulos extraídos pelo split.js
@@ -65,6 +68,19 @@ import {
   getTaskIdFromActionFolderId
 } from './src/utils/knowledgeLogic';
 import { parseDiaryRichNote } from './src/utils/diaryEntries';
+import { buildKnowledgeItemFromPoolItem, buildKnowledgeLinkItem, createIntakeRecord } from './src/utils/intake';
+import { buildContextLayers } from './src/utils/contextLayers';
+import { deriveTaskMemoryRoom } from './src/utils/memoryPalace';
+import { upsertKnowledgeItem } from './src/utils/knowledgeWrite';
+import { QuickLogModal } from './src/components/modals/QuickLogModal';
+import { TranscriptionAIModal } from './src/components/modals/TranscriptionAIModal';
+import { ShoppingAIModal } from './src/components/modals/ShoppingAIModal';
+import { useSystemsData } from './src/hooks/useSystemsData';
+import { useFinanceData } from './src/hooks/useFinanceData';
+import { useHealthData } from './src/hooks/useHealthData';
+import { useTasksData } from './src/hooks/useTasksData';
+import { useKnowledgeData } from './src/hooks/useKnowledgeData';
+import { GalleryView } from './src/views/GalleryView';
 
 
 type SortOption = 'date-asc' | 'date-desc' | 'priority-high' | 'priority-low';
@@ -133,748 +149,6 @@ const getBucketStartDate = (label: string): string => {
   return '';
 };
 
-// -----------------------------------------------------------------------------
-
-
-const QuickLogModal = ({ isOpen, onClose, onAddLog, unidades }: { isOpen: boolean, onClose: () => void, onAddLog: (text: string, systemId: string) => void, unidades: { id: string, nome: string }[] }) => {
-  const [textInput, setTextInput] = useState('');
-  const [selectedSystem, setSelectedSystem] = useState('');
-  const [isRecording, setIsRecording] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-
-  const systems = useMemo(() => unidades.filter(u => u.nome.startsWith('SISTEMA:')), [unidades]);
-
-  const streamRef = useRef<MediaStream | null>(null);
-
-  useEffect(() => {
-    if (systems.length > 0 && !selectedSystem) {
-      setSelectedSystem(systems[0].id);
-    }
-  }, [systems, selectedSystem]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        mediaRecorderRef.current.stop();
-      }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, []);
-
-  if (!isOpen) return null;
-
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) audioChunksRef.current.push(event.data);
-      };
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/m4a' });
-        await handleProcessAudio(audioBlob);
-        stream.getTracks().forEach(track => track.stop());
-      };
-      streamRef.current = stream;
-      mediaRecorder.start();
-      setIsRecording(true);
-    } catch (err) {
-      console.error("Erro ao acessar microfone:", err);
-      alert("Permissão de microfone negada ou não disponível.");
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-  };
-
-  const handleProcessAudio = async (audioBlob: Blob) => {
-    setIsProcessing(true);
-    try {
-      const reader = new FileReader();
-      reader.readAsDataURL(audioBlob);
-      reader.onloadend = async () => {
-        try {
-          const base64String = (reader.result as string).split(',')[1];
-          const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
-          const response = await transcribeFunc({ audioBase64: base64String });
-          const data = response.data as { raw: string, refined: string };
-          if (data.refined) {
-            const newText = textInput ? textInput + '\n' + data.refined : data.refined;
-            setTextInput(newText);
-            if (selectedSystem) {
-              onAddLog(newText, selectedSystem);
-              setTextInput('');
-              onClose();
-            }
-          }
-        } catch (error) {
-          console.error("Erro ao transcrever:", error);
-          alert("Erro ao processar áudio via Hermes AI.");
-        } finally {
-          setIsProcessing(false);
-        }
-      };
-    } catch (error) {
-      console.error("Erro ao ler áudio:", error);
-      setIsProcessing(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white w-full max-w-2xl rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95">
-        <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
-          <div>
-            <h3 className="text-2xl font-black text-slate-900 tracking-tight">Log Rápido</h3>
-            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">Registro de Sistema</p>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
-            <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-        <div className="p-8 space-y-6">
-          <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Sistema</label>
-            <select
-              value={selectedSystem}
-              onChange={(e) => setSelectedSystem(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-lg md:rounded-xl px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-violet-500"
-            >
-              <option value="" disabled>Selecione um sistema</option>
-              {systems.map(s => (
-                <option key={s.id} value={s.id}>{s.nome.replace('SISTEMA:', '').trim()}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="bg-slate-50 p-2 rounded-none md:rounded-2xl border-2 border-slate-100 flex items-center gap-4 focus-within:border-violet-500 transition-all">
-            <button
-              onClick={isRecording ? stopRecording : startRecording}
-              disabled={isProcessing}
-              className={`p-4 rounded-none md:rounded-xl transition-all flex-shrink-0 ${isRecording
-                ? 'bg-rose-600 text-white animate-pulse shadow-lg'
-                : isProcessing
-                  ? 'bg-violet-100 text-violet-600 cursor-wait'
-                  : 'bg-white border border-slate-200 text-slate-400 hover:text-violet-600'
-                }`}
-            >
-              {isProcessing ? (
-                <div className="w-5 h-5 border-2 border-violet-600 border-t-transparent rounded-full animate-spin"></div>
-              ) : isRecording ? (
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
-              ) : (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-              )}
-            </button>
-            <input
-              autoFocus
-              type="text"
-              disabled={isRecording || isProcessing}
-              placeholder={isRecording ? "Gravando..." : isProcessing ? "Processando..." : "Descreva o ajuste..."}
-              className="flex-1 bg-transparent border-none outline-none py-4 text-base font-bold text-slate-800 placeholder:text-slate-300"
-              value={textInput}
-              onChange={e => setTextInput(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && textInput.trim() && selectedSystem) {
-                  onAddLog(textInput, selectedSystem);
-                  setTextInput('');
-                  onClose();
-                }
-              }}
-            />
-          </div>
-          <div className="flex gap-4">
-            <button onClick={onClose} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-none md:rounded-2xl transition-all">Cancelar</button>
-            <button
-              onClick={() => {
-                if (textInput.trim() && selectedSystem) {
-                  onAddLog(textInput, selectedSystem);
-                  setTextInput('');
-                  onClose();
-                }
-              }}
-              disabled={!textInput.trim() || !selectedSystem}
-              className="flex-none w-16 md:w-auto md:flex-1 bg-slate-900 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              <svg className="w-5 h-5 md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-              <span className="hidden md:inline">Registrar Log</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean, onClose: () => void, showToast: (m: string, t: 'success' | 'error' | 'info') => void }) => {
-  const [file, setFile] = useState<File | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [transcription, setTranscription] = useState<{ raw: string, refined: string } | null>(null);
-  const [dragOver, setDragOver] = useState(false);
-
-  useEffect(() => {
-    if (!isOpen) {
-      setFile(null);
-      setTranscription(null);
-      return;
-    }
-
-    const handlePaste = (e: ClipboardEvent) => {
-      if (e.clipboardData && e.clipboardData.files.length > 0) {
-        const pastedFile = e.clipboardData.files[0];
-        if (pastedFile.type.startsWith('audio/') || pastedFile.type.startsWith('video/')) {
-          handleFileSelection(pastedFile);
-        }
-      }
-    };
-    window.addEventListener('paste', handlePaste);
-    return () => window.removeEventListener('paste', handlePaste);
-  }, [isOpen]);
-
-  const handleFileSelection = (f: File) => {
-    if (f.size > 25 * 1024 * 1024) {
-      if (f.size > 6 * 1024 * 1024) {
-        showToast("Arquivo muito grande. Limite: 6MB.", "error");
-        return;
-      }
-    }
-    setFile(f);
-    setTranscription(null);
-  };
-
-  useEffect(() => {
-    const handleSharedAudio = (e: any) => {
-      if (e.detail && e.detail instanceof File) {
-        handleFileSelection(e.detail);
-        // Pequeno delay para garantir que o estado file seja atualizado e renderizado
-        setTimeout(() => document.getElementById('btn-transcribe-now')?.click(), 300);
-      }
-    };
-    window.addEventListener('hermes-shared-audio', handleSharedAudio);
-    return () => window.removeEventListener('hermes-shared-audio', handleSharedAudio);
-  }, []);
-
-  const handleTranscribe = async () => {
-    if (!file) return;
-    setIsProcessing(true);
-    try {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onloadend = async () => {
-        try {
-          const base64String = (reader.result as string).split(',')[1];
-          const extension = `.${file.name.split('.').pop()?.toLowerCase() || 'm4a'}`;
-          const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
-          const response = await transcribeFunc({ audioBase64: base64String, extension });
-          const data = response.data as { raw: string, refined: string };
-          setTranscription(data);
-          
-          // Also save to history for compatibility with the tool
-          const saved = localStorage.getItem('hermes_transcription_history');
-          const history = saved ? JSON.parse(saved) : [];
-          const newEntry = {
-            id: Date.now().toString(),
-            fileName: file.name,
-            fileSize: file.size,
-            date: new Date().toISOString(),
-            raw: data.raw,
-            refined: data.refined
-          };
-          localStorage.setItem('hermes_transcription_history', JSON.stringify([newEntry, ...history].slice(0, 50)));
-
-          showToast("Transcrição concluída!", "success");
-        } catch (error) {
-          console.error(error);
-          showToast("Erro ao processar áudio.", "error");
-        } finally {
-          setIsProcessing(false);
-        }
-      };
-    } catch (e) {
-      setIsProcessing(false);
-    }
-  };
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white w-full max-w-2xl rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95">
-        <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
-          <div>
-            <h3 className="text-2xl font-black text-slate-900 tracking-tight">Transcrição Rápida</h3>
-            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">IA Audio Processing</p>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
-            <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-
-        <div className="p-8 space-y-6">
-          {!transcription ? (
-            <div
-              onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files.length) handleFileSelection(e.dataTransfer.files[0]); }}
-              className={`border-4 border-dashed rounded-none md:rounded-[2rem] p-10 flex flex-col items-center justify-center text-center gap-4 transition-all ${dragOver ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-slate-50'}`}
-            >
-              {isProcessing ? (
-                <div className="flex flex-col items-center gap-4 py-10">
-                  <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-                  <p className="text-indigo-600 font-black uppercase tracking-widest text-[10px]">Processando seu áudio...</p>
-                </div>
-              ) : file ? (
-                <div className="space-y-4 py-4 w-full">
-                  <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
-                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
-                  </div>
-                  <p className="text-lg font-black text-slate-900 truncate px-4">{file.name}</p>
-                  <button id="btn-transcribe-now" onClick={handleTranscribe} className="bg-indigo-600 text-white px-8 py-3 rounded-none md:rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg hover:bg-indigo-700 transition-all">Transcrever Agora</button>
-                </div>
-              ) : (
-                <div className="py-10">
-                  <div className="w-16 h-16 bg-slate-200 text-slate-400 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="font-black text-slate-900">Cole seu áudio aqui (Ctrl+V)</p>
-                    <p className="text-slate-400 text-xs font-medium">Ou arraste o arquivo aqui</p>
-                  </div>
-                  <div className="mt-6 md:hidden">
-                    <button
-                      onClick={() => document.getElementById('mobile-transcription-upload')?.click()}
-                      className="bg-indigo-100 text-indigo-700 px-6 py-3 rounded-xl font-black uppercase tracking-widest text-[10px] shadow-sm hover:bg-indigo-200 transition-all flex items-center gap-2 mx-auto"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-                      Selecionar Arquivo
-                    </button>
-                    <input
-                      id="mobile-transcription-upload"
-                      type="file"
-                      className="hidden"
-                      accept="audio/*,video/*"
-                      onChange={(e: any) => {
-                        if (e.target.files && e.target.files.length > 0) {
-                          handleFileSelection(e.target.files[0]);
-                        }
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-6 animate-in slide-in-from-bottom-4">
-              <div className="bg-slate-50 p-6 rounded-none md:rounded-[2rem] border border-slate-100 max-h-[300px] overflow-y-auto custom-scrollbar">
-                <label className="text-[10px] font-black text-indigo-500 uppercase tracking-widest block mb-2">Resultado Final</label>
-                <p className="text-slate-800 text-base font-bold leading-relaxed whitespace-pre-wrap">{transcription.refined}</p>
-              </div>
-              <div className="flex gap-4">
-                <button
-                  onClick={() => { navigator.clipboard.writeText(transcription.refined); showToast("Texto copiado!", "success"); }}
-                  className="flex-1 bg-slate-900 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-indigo-600 transition-all flex items-center justify-center gap-2"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                  Copiar Texto
-                </button>
-                <button onClick={() => setTranscription(null)} className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-none md:rounded-2xl transition-all">Novo</button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-interface AIMatchedItem {
-  id: string;
-  nome: string;
-  categoria: string;
-  quantidade: string;
-  unit: string;
-  confirmed: boolean; // user can uncheck
-  isNew?: boolean;    // not in catalog yet
-}
-
-const ShoppingAIModal = ({
-  isOpen, onClose, catalogItems, onConfirmItems, onViewList
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-  catalogItems: ShoppingItem[];
-  onConfirmItems: (items: { id: string; quantidade: string }[]) => void;
-  onViewList: () => void;
-}) => {
-  const [step, setStep] = useState<'input' | 'processing' | 'validation'>('input');
-  const [textInput, setTextInput] = useState('');
-  const [isRecording, setIsRecording] = useState(false);
-  const [matchedItems, setMatchedItems] = useState<AIMatchedItem[]>([]);
-  const [errorMsg, setErrorMsg] = useState('');
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-
-  const streamRef = useRef<MediaStream | null>(null);
-
-  const resetToInput = () => { setStep('input'); setMatchedItems([]); setErrorMsg(''); };
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        mediaRecorderRef.current.stop();
-      }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, []);
-
-  if (!isOpen) return null;
-
-  // --- Recording ---
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream);
-      mediaRecorderRef.current = mr;
-      audioChunksRef.current = [];
-      mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
-      mr.onstop = async () => {
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/m4a' });
-        stream.getTracks().forEach(t => t.stop());
-        // Transcribe then process
-        setStep('processing');
-        try {
-          const reader = new FileReader();
-          reader.readAsDataURL(blob);
-          reader.onloadend = async () => {
-            try {
-              const base64 = (reader.result as string).split(',')[1];
-              const fn = httpsCallable(functions, 'transcreverAudio');
-              const res = await fn({ audioBase64: base64 });
-              const data = res.data as { refined: string };
-              const transcript = data.refined || '';
-              if (transcript) {
-                await processWithGemini(transcript);
-              } else {
-                setErrorMsg('Não consegui transcrever o áudio. Tente digitar.');
-                setStep('input');
-              }
-            } catch {
-              setErrorMsg('Erro ao transcrever áudio.');
-              setStep('input');
-            }
-          };
-        } catch {
-          setErrorMsg('Erro ao ler áudio.');
-          setStep('input');
-        }
-      };
-      streamRef.current = stream;
-      mr.start();
-      setIsRecording(true);
-    } catch {
-      alert('Permissão de microfone negada.');
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-  };
-
-  // --- Gemini matching ---
-  const processWithGemini = async (text: string) => {
-    setStep('processing');
-    setErrorMsg('');
-    try {
-      const catalog = catalogItems.map(i => `ID:${i.id}|NOME:${i.nome}|CAT:${i.categoria}`).join('\n');
-      const prompt = `Você é um assistente de lista de compras. O usuário descreveu itens que deseja comprar.
-
-CATÁLOGO DISPONÍVEL (id|nome|categoria):
-${catalog || '(vazio)'}
-
-PEDIDO DO USUÁRIO:
-"${text}"
-
-Sua tarefa:
-1. Para cada item mencionado pelo usuário, encontre o item mais próximo no catálogo (matching fuzzy/semântico tolerante a abreviações, sinônimos e erros). Ex: "ricota" pode corresponder a "Queijo Ricota".
-2. Identifique a quantidade mencionada (número + unidade se houver). Se não mencionado, use "1 un".
-3. Se não houver correspondência razoável no catálogo, marque isNew=true com o nome como o usuário falou.
-
-Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicações:
-{
-  "itens": [
-    { "catalogId": "ID_DO_ITEM_OU_null_SE_NOVO", "nomeExibido": "Nome para exibir", "quantidade": "2", "unit": "kg", "isNew": false }
-  ]
-}`;
-
-      const fn = httpsCallable(functions, 'matchShoppingItemsAI');
-      const result = await fn({
-        text,
-        catalogItems: catalogItems.map((item) => ({
-          id: item.id,
-          nome: item.nome,
-          categoria: item.categoria,
-        })),
-      });
-      const parsed = result.data as { itens?: any[] };
-
-      const resolved: AIMatchedItem[] = (parsed.itens || []).map((it: any) => {
-        const catalogItem = it.catalogId ? catalogItems.find(c => c.id === it.catalogId) : null;
-        return {
-          id: catalogItem?.id || `new_${Date.now()}_${Math.random()}`,
-          nome: it.nomeExibido || catalogItem?.nome || 'Item desconhecido',
-          categoria: catalogItem?.categoria || 'Geral',
-          quantidade: String(it.quantidade || '1'),
-          unit: it.unit || 'un',
-          confirmed: true,
-          isNew: !!it.isNew || !catalogItem,
-        };
-      });
-
-      if (resolved.length === 0) {
-        setErrorMsg('Não identifiquei itens no pedido. Tente descrever de forma diferente.');
-        setStep('input');
-        return;
-      }
-
-      setMatchedItems(resolved);
-      setStep('validation');
-    } catch (e) {
-      console.error(e);
-      setErrorMsg('Erro ao processar com IA. Verifique a conexão.');
-      setStep('input');
-    }
-  };
-
-  const handleSubmitText = async () => {
-    if (!textInput.trim()) return;
-    await processWithGemini(textInput.trim());
-  };
-
-  const toggleItem = (id: string) => {
-    setMatchedItems(prev => prev.map(i => i.id === id ? { ...i, confirmed: !i.confirmed } : i));
-  };
-
-  const updateQtd = (id: string, val: string) => {
-    setMatchedItems(prev => prev.map(i => i.id === id ? { ...i, quantidade: val } : i));
-  };
-
-  const handleConfirm = () => {
-    const toAdd = matchedItems.filter(i => i.confirmed && !i.isNew);
-    if (toAdd.length === 0) { onClose(); return; }
-    onConfirmItems(toAdd.map(i => ({ id: i.id, quantidade: i.quantidade })));
-    setTextInput('');
-    setMatchedItems([]);
-    setStep('input');
-    onClose();
-  };
-
-  const confirmedCount = matchedItems.filter(i => i.confirmed && !i.isNew).length;
-  const newCount = matchedItems.filter(i => i.isNew).length;
-
-  return (
-    <div className="fixed inset-0 z-[250] flex items-center justify-center p-0 md:p-4 bg-slate-900/70 backdrop-blur-md animate-in fade-in">
-      <div className="bg-white w-full max-w-2xl h-full md:h-auto md:max-h-[92vh] rounded-none md:rounded-[2.5rem] shadow-[0_40px_80px_-20px_rgba(0,0,0,0.35)] flex flex-col overflow-hidden animate-in zoom-in-95 duration-300">
-
-        {/* Header */}
-        <div className="p-7 md:p-8 border-b border-slate-100 bg-gradient-to-br from-emerald-50/80 to-white flex items-center gap-4 flex-shrink-0">
-          <div className="w-12 h-12 bg-emerald-600 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-200 flex-shrink-0">
-            <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-          </div>
-          <div className="flex-1 min-w-0">
-            <h3 className="text-xl font-black text-slate-900 tracking-tight">Assistente de Compras IA</h3>
-            <p className="text-emerald-600 text-[10px] font-black uppercase tracking-[0.2em] mt-0.5">
-              {step === 'input' ? 'Diga o que você quer comprar' : step === 'processing' ? 'Buscando no catálogo...' : 'Valide os itens identificados'}
-            </p>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-2xl transition-all flex-shrink-0">
-            <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto p-7 md:p-8 space-y-5">
-
-          {/* === INPUT STEP === */}
-          {step === 'input' && (
-            <>
-              {errorMsg && (
-                <div className="bg-rose-50 border border-rose-100 rounded-2xl px-5 py-3 flex items-center gap-3">
-                  <svg className="w-4 h-4 text-rose-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                  <p className="text-rose-700 text-sm font-bold">{errorMsg}</p>
-                </div>
-              )}
-
-              <div className="bg-slate-50 rounded-[2rem] border-2 border-slate-100 focus-within:border-emerald-400 transition-all shadow-inner overflow-hidden">
-                <div className="flex items-start gap-3 p-4">
-                  <button
-                    onClick={isRecording ? stopRecording : startRecording}
-                    className={`mt-1 w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all ${isRecording ? 'bg-rose-500 text-white animate-pulse shadow-lg shadow-rose-200' : 'bg-white border border-slate-200 text-slate-400 hover:text-emerald-600 hover:border-emerald-200 hover:shadow-md'}`}
-                    title={isRecording ? 'Parar gravação' : 'Gravar áudio'}
-                  >
-                    {isRecording
-                      ? <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
-                      : <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>}
-                  </button>
-                  <textarea
-                    autoFocus
-                    className="flex-1 bg-transparent border-none outline-none py-3 text-base font-bold text-slate-800 placeholder:text-slate-300 resize-none min-h-[120px]"
-                    placeholder={isRecording ? 'Gravando... Fale os itens que deseja comprar...' : 'Ex: "2 kg de arroz, 1 caixa de leite, ricota, sabão em pó e 3 iogurtes"'}
-                    value={textInput}
-                    disabled={isRecording}
-                    onChange={e => setTextInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) handleSubmitText(); }}
-                  />
-                </div>
-                {isRecording && (
-                  <div className="px-5 pb-4 flex items-center gap-2">
-                    <div className="flex gap-0.5">
-                      {[...Array(8)].map((_, i) => (
-                        <div key={i} className="w-1 bg-rose-500 rounded-full animate-pulse" style={{ height: `${8 + Math.random() * 16}px`, animationDelay: `${i * 100}ms` }} />
-                      ))}
-                    </div>
-                    <span className="text-rose-600 text-[11px] font-black uppercase tracking-widest">Gravando</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="bg-emerald-50/60 rounded-2xl border border-emerald-100/60 px-5 py-4 flex gap-3">
-                <svg className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                <p className="text-[11px] font-bold text-emerald-800 leading-relaxed">
-                  O Hermes vai buscar os itens no seu catálogo usando IA. "Ricota" pode corresponder a "Queijo Ricota", "Bombril" a "Palha de Aço", etc.
-                </p>
-              </div>
-            </>
-          )}
-
-          {/* === PROCESSING STEP === */}
-          {step === 'processing' && (
-            <div className="py-20 flex flex-col items-center justify-center gap-6 text-center">
-              <div className="relative w-20 h-20">
-                <div className="w-20 h-20 rounded-full border-4 border-emerald-100 animate-spin border-t-emerald-500" />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <svg className="w-8 h-8 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-                </div>
-              </div>
-              <div>
-                <p className="font-black text-slate-800 text-lg">Hermes está pensando...</p>
-                <p className="text-slate-400 text-sm font-medium mt-1">Buscando correspondências no catálogo</p>
-              </div>
-            </div>
-          )}
-
-          {/* === VALIDATION STEP === */}
-          {step === 'validation' && (
-            <div className="space-y-4 animate-in fade-in duration-300">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-black text-slate-800">{matchedItems.filter(i => !i.isNew).length} itens identificados</p>
-                  {newCount > 0 && <p className="text-[10px] text-amber-600 font-black uppercase tracking-widest mt-0.5">{newCount} não encontrado{newCount > 1 ? 's' : ''} no catálogo</p>}
-                </div>
-                <button onClick={resetToInput} className="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-700 transition-colors">
-                  ? Refazer
-                </button>
-              </div>
-
-              <div className="space-y-2">
-                {matchedItems.map(item => (
-                  <div
-                    key={item.id}
-                    onClick={() => !item.isNew && toggleItem(item.id)}
-                    className={`rounded-2xl border px-5 py-4 flex items-center gap-4 transition-all ${item.isNew ? 'bg-amber-50/50 border-amber-100 opacity-60 cursor-not-allowed' : item.confirmed ? 'bg-emerald-50/40 border-emerald-200 cursor-pointer hover:bg-emerald-50' : 'bg-slate-50 border-slate-100 cursor-pointer opacity-50 hover:opacity-70'}`}
-                  >
-                    {/* Checkbox */}
-                    <div className={`w-7 h-7 rounded-xl border-2 flex items-center justify-center flex-shrink-0 transition-all ${item.isNew ? 'border-amber-300 bg-amber-100' : item.confirmed ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 bg-white'}`}>
-                      {item.isNew
-                        ? <svg className="w-3.5 h-3.5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01" /></svg>
-                        : item.confirmed ? <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                          : null}
-                    </div>
-
-                    {/* Item info */}
-                    <div className="flex-1 min-w-0">
-                      <p className={`font-black text-sm truncate ${item.isNew ? 'text-amber-700' : 'text-slate-900'}`}>{item.nome}</p>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
-                        {item.isNew ? '? Não no catálogo' : item.categoria}
-                      </p>
-                    </div>
-
-                    {/* Quantity editor */}
-                    {!item.isNew && (
-                      <div onClick={e => e.stopPropagation()} className="flex items-center gap-2 bg-white border border-slate-100 rounded-xl px-3 py-2 shadow-sm">
-                        <button onClick={() => updateQtd(item.id, String(Math.max(0.5, parseFloat(item.quantidade) - 1)))} className="w-5 h-5 rounded-lg bg-slate-100 font-black flex items-center justify-center text-slate-600 hover:bg-emerald-100 transition-all text-sm leading-none">-</button>
-                        <span className="w-12 text-center font-black text-slate-800 text-sm">
-                          {item.quantidade} <span className="text-slate-400 font-medium text-[10px]">{item.unit}</span>
-                        </span>
-                        <button onClick={() => updateQtd(item.id, String(parseFloat(item.quantidade) + 1))} className="w-5 h-5 rounded-lg bg-slate-100 font-black flex items-center justify-center text-slate-600 hover:bg-emerald-100 transition-all text-sm leading-none">+</button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              {newCount > 0 && (
-                <div className="bg-amber-50 border border-amber-100 rounded-2xl px-5 py-3 flex gap-3">
-                  <svg className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                  <p className="text-[11px] font-bold text-amber-800 leading-relaxed">
-                    {newCount} item(ns) não foram encontrados no catálogo. Cadastre-os primeiro na aba "Cadastro" e o assistente os reconhecerá na próxima vez.
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex-shrink-0 p-6 md:p-8 pt-0 space-y-3">
-          {step === 'input' && (
-            <div className="flex gap-4">
-              <button onClick={onClose} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-2xl transition-all">Fechar</button>
-              <button
-                onClick={handleSubmitText}
-                disabled={!textInput.trim() || isRecording}
-                className="flex-[2] bg-emerald-600 text-white py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all disabled:opacity-50 disabled:grayscale flex items-center justify-center gap-2 active:scale-[0.98]"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-                Processar com IA
-              </button>
-            </div>
-          )}
-
-          {step === 'validation' && (
-            <div className="flex gap-4">
-              <button onClick={resetToInput} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-2xl transition-all">Voltar</button>
-              <button
-                onClick={handleConfirm}
-                disabled={confirmedCount === 0}
-                className="flex-[2] bg-slate-900 text-white py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:bg-emerald-600 transition-all disabled:opacity-50 disabled:grayscale flex items-center justify-center gap-2 active:scale-[0.98]"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                Confirmar {confirmedCount} iten{confirmedCount !== 1 ? 's' : ''}
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
 
 const App: React.FC = () => {
   // Public Route Interception
@@ -891,7 +165,6 @@ const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [rememberMe, setRememberMe] = useState(true);
-  const [tarefas, setTarefas] = useState<Tarefa[]>([]);
   const [undoStack, setUndoStack] = useState<UndoAction[]>([]);
   const [modalState, setModalState] = useState<HermesModalProps>({
     isOpen: false,
@@ -900,8 +173,13 @@ const App: React.FC = () => {
     type: 'alert',
     onConfirm: () => { }
   });
-  const [googleCalendarEvents, setGoogleCalendarEvents] = useState<GoogleCalendarEvent[]>([]);
-  const [entregas, setEntregas] = useState<EntregaInstitucional[]>([]);
+
+  // ── Domain data hooks ─��──────────────────────────────────────────────────────
+  const { sistemasDetalhes, workItems, googleCalendarEvents, sistemasAtivos } = useSystemsData(db, user);
+  const { financeTransactions, financeGoals, financeSettings, fixedBills, billRubrics, incomeEntries, incomeRubrics, shoppingItems, services } = useFinanceData(db, user);
+  const { healthWeights, healthDailyHabits, healthSettings, exams } = useHealthData(db, user);
+  const { tarefas, entregas, atividadesPGC, afastamentos, unidades, planosTrabalho, brainstormIdeas } = useTasksData(db, user);
+  const { knowledgeItems, masterKnowledge, knowledgeBases } = useKnowledgeData(db, user);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [isCompletedLogsOpen, setIsCompletedLogsOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -927,34 +205,10 @@ const App: React.FC = () => {
     }
   };
 
-  // Finance State
-  const [financeTransactions, setFinanceTransactions] = useState<FinanceTransaction[]>([]);
-  const [financeGoals, setFinanceGoals] = useState<FinanceGoal[]>([]);
-  const [fixedBills, setFixedBills] = useState<FixedBill[]>([]);
-  const [billRubrics, setBillRubrics] = useState<BillRubric[]>([]);
-  const [incomeEntries, setIncomeEntries] = useState<IncomeEntry[]>([]);
-  const [incomeRubrics, setIncomeRubrics] = useState<IncomeRubric[]>([]);
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
-  const [financeSettings, setFinanceSettings] = useState<FinanceSettings>({
-    monthlyBudget: 5000,
-    monthlyBudgets: {},
-    sprintDates: { 1: "08", 2: "15", 3: "22", 4: "01" },
-    emergencyReserveTarget: 0,
-    emergencyReserveCurrent: 0,
-    billCategories: ['Conta Fixa', 'Poupança', 'Investimento'],
-    incomeCategories: ['Renda Principal', 'Renda Extra', 'Dividendos', 'Outros']
-  });
-
-
-  // Health State
-  const [healthWeights, setHealthWeights] = useState<HealthWeight[]>([]);
-  const [healthDailyHabits, setHealthDailyHabits] = useState<DailyHabits[]>([]);
-  const [healthSettings, setHealthSettings] = useState<HealthSettings>({ targetWeight: 0 });
 
   // Systems State
-  const [sistemasDetalhes, setSistemasDetalhes] = useState<Sistema[]>([]);
-  const [workItems, setWorkItems] = useState<WorkItem[]>([]);
   const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
   const [selectedWorkItem, setSelectedWorkItem] = useState<WorkItem | null>(null);
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
@@ -983,29 +237,13 @@ const App: React.FC = () => {
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isQuickNoteModalOpen, setIsQuickNoteModalOpen] = useState(false);
-  const [hasAutoExpanded, setHasAutoExpanded] = useState(false);
-
   // Estados PGC
-  const [atividadesPGC, setAtividadesPGC] = useState<AtividadeRealizada[]>([]);
-  const [afastamentos, setAfastamentos] = useState<Afastamento[]>([]);
   const [pgcSubView, setPgcSubView] = useState<'audit' | 'heatmap' | 'config' | 'plano' | 'status' | 'automatizadas'>('audit');
   const [pgdGeneratingByEntrega, setPgdGeneratingByEntrega] = useState<Record<string, boolean>>({});
   const [pgdRawTextProcessingByEntrega, setPgdRawTextProcessingByEntrega] = useState<Record<string, boolean>>({});
-  const [unidades, setUnidades] = useState<{ id: string, nome: string }[]>([]);
-  const [sistemasAtivos, setSistemasAtivos] = useState<string[]>([]);
-
-  // Knowledge State
-  const [knowledgeItems, setKnowledgeItems] = useState<ConhecimentoItem[]>([]);
-  const [knowledgeBases, setKnowledgeBases] = useState<BaseConhecimento[]>([]);
-  const [masterKnowledge, setMasterKnowledge] = useState<any[]>([]);
-  // Shopping State
-  const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>([]);
-  // Services State
-  const [services, setServices] = useState<Servico[]>([]);
 
   const [isImportPlanOpen, setIsImportPlanOpen] = useState(false);
   const [isCompletedTasksOpen, setIsCompletedTasksOpen] = useState(false);
-  const [brainstormIdeas, setBrainstormIdeas] = useState<BrainstormIdea[]>([]);
   const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'whatsapp_assistant' | null>(null);
   const [isBrainstormingAddingText, setIsBrainstormingAddingText] = useState(false);
   const [confirmDeleteLogId, setConfirmDeleteLogId] = useState<string | null>(null);
@@ -1165,8 +403,13 @@ const App: React.FC = () => {
         try {
           const base64String = (reader.result as string).split(',')[1];
           const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
-          const response = await transcribeFunc({ audioBase64: base64String });
-          const data = response.data as { raw: string, refined: string };
+          const response = await transcribeFunc({
+            audioBase64: base64String,
+            sourceRef: selectedSystemId
+              ? { kind: 'system', id: selectedSystemId, label: 'new_system_log' }
+              : { kind: 'unknown', label: 'new_system_log' },
+          });
+          const data = response.data as TranscriptionResponse;
           if (data.refined) {
             if (viewMode === 'sistemas-dev' && selectedSystemId) {
               await handleCreateWorkItem(selectedSystemId, 'geral', data.refined, newLogAttachments);
@@ -1191,118 +434,10 @@ const App: React.FC = () => {
   };
 
 
-  // Finance Sync
-  useEffect(() => {
-    if (!user) return;
-    const unsubSistemas = onSnapshot(collection(db, 'sistemas_detalhes'), (snapshot) => {
-      setSistemasDetalhes(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Sistema)));
-    });
+  // ── Subscriptions moved to domain hooks ──────────────────────────────────────
+  // useSystemsData, useFinanceData, useHealthData, useTasksData, useKnowledgeData
+  // ─────────────────────────────────────────────────────────────────────────────
 
-    const unsubGoogleCalendar = onSnapshot(collection(db, 'google_calendar_events'), (snapshot) => {
-      setGoogleCalendarEvents(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as GoogleCalendarEvent)));
-    });
-
-    const unsubWorkItems = onSnapshot(collection(db, 'sistemas_work_items'), (snapshot) => {
-      setWorkItems(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as WorkItem)));
-    });
-
-    const unsubTransactions = onSnapshot(collection(db, 'finance_transactions'), (snapshot) => {
-      setFinanceTransactions(snapshot.docs
-        .map(d => ({ id: d.id, ...d.data() } as FinanceTransaction))
-        .filter(t => t.status !== 'deleted')
-      );
-    });
-    const unsubGoals = onSnapshot(collection(db, 'finance_goals'), (snapshot) => {
-      setFinanceGoals(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as FinanceGoal)));
-    });
-    const unsubSettings = onSnapshot(doc(db, 'finance_settings', 'config'), (doc) => {
-      if (doc.exists()) {
-        setFinanceSettings(doc.data() as FinanceSettings);
-      }
-    });
-
-    const qFixedBills = query(collection(db, 'fixed_bills'));
-    const unsubFixedBills = onSnapshot(qFixedBills, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FixedBill));
-      setFixedBills(data);
-    });
-
-    const unsubRubrics = onSnapshot(collection(db, 'bill_rubrics'), (snapshot) => {
-      setBillRubrics(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as BillRubric)));
-    });
-
-    const unsubIncomeEntries = onSnapshot(collection(db, 'income_entries'), (snapshot) => {
-      setIncomeEntries(snapshot.docs
-        .map(d => ({ id: d.id, ...d.data() } as IncomeEntry))
-        .filter(e => e.status !== 'deleted')
-      );
-    });
-
-    const unsubIncomeRubrics = onSnapshot(collection(db, 'income_rubrics'), (snapshot) => {
-      setIncomeRubrics(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as IncomeRubric)));
-    });
-
-    const unsubShopping = onSnapshot(collection(db, 'shopping_items'), (snapshot) => {
-      setShoppingItems(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ShoppingItem)));
-    });
-
-    // Services Sync
-    const qServices = query(collection(db, 'servicos'), orderBy('data_criacao', 'desc'));
-    const unsubProjects = onSnapshot(qServices, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Servico[];
-      setServices(data);
-    });
-
-    // Health Sync
-    const unsubHealthWeights = onSnapshot(collection(db, 'health_weights'), (snapshot) => {
-      setHealthWeights(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as HealthWeight)));
-    });
-    const unsubHealthHabits = onSnapshot(collection(db, 'health_daily_habits'), (snapshot) => {
-      setHealthDailyHabits(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DailyHabits)));
-    });
-    const unsubHealthSettings = onSnapshot(doc(db, 'health_settings', 'config'), (doc) => {
-      if (doc.exists()) setHealthSettings(doc.data() as HealthSettings);
-    });
-    const unsubKnowledge = onSnapshot(collection(db, 'conhecimento'), (snapshot) => {
-      setKnowledgeItems(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ConhecimentoItem)));
-    });
-
-    const unsubMasterKnowledge = onSnapshot(collection(db, 'conhecimento_mestre'), (snapshot) => {
-      setMasterKnowledge(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
-
-    const unsubKnowledgeBases = onSnapshot(collection(db, 'knowledge_bases'), (snapshot) => {
-      setKnowledgeBases(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as BaseConhecimento)));
-    });
-
-    const unsubscribeSistemasAtivos = onSnapshot(doc(db, 'configuracoes', 'sistemas'), (docSnap) => {
-      if (docSnap.exists()) {
-        setSistemasAtivos(docSnap.data().lista || []);
-      }
-    });
-
-    return () => {
-      unsubSistemas();
-      unsubGoogleCalendar();
-      unsubWorkItems();
-      unsubTransactions();
-      unsubGoals();
-      unsubSettings();
-      unsubFixedBills();
-      unsubRubrics();
-      unsubIncomeEntries();
-      unsubIncomeRubrics();
-      unsubShopping();
-      unsubProjects();
-      unsubHealthWeights();
-      unsubHealthHabits();
-      unsubHealthSettings();
-      unsubKnowledge();
-      unsubMasterKnowledge();
-      unsubKnowledgeBases();
-      unsubscribeSistemasAtivos();
-    };
-  }, [user]);
 
 
   // Finance Processing Logic (The Listener)
@@ -1717,7 +852,7 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeModule, setActiveModule] = useState<'home' | 'dashboard' | 'acoes' | 'financeiro' | 'saude' | 'servicos' | 'operacoes-autonomas'>('dashboard');
-  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'finance' | 'saude' | 'ferramentas' | 'sistemas-dev' | 'knowledge' | 'services' | 'rag-bases' | 'autonomous-operations'>('dashboard');
+  const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'finance' | 'saude' | 'ferramentas' | 'sistemas-dev' | 'knowledge' | 'services' | 'rag-bases' | 'autonomous-operations' | 'audit' | 'issue-packets' | 'pops'>('dashboard');
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
   const [isSidebarRetracted, setIsSidebarRetracted] = useState(false);
   const [financeActiveTab, setFinanceActiveTab] = useState<'dashboard' | 'fixed'>('dashboard');
@@ -1742,11 +877,9 @@ const App: React.FC = () => {
       }
     }
   }, [tarefas, selectedTask]);
-  const [planosTrabalho, setPlanosTrabalho] = useState<PlanoTrabalho[]>([]);
   const [statusFilter, setStatusFilter] = useState<Status[]>(['em andamento', 'stand-by', 'cgby' as any]);
   const [areaFilter, setAreaFilter] = useState<string>('TODAS');
   const [sortOption, setSortOption] = useState<SortOption>('date-asc');
-  const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   const [notifications, setNotifications] = useState<HermesNotification[]>([]);
@@ -1755,7 +888,6 @@ const App: React.FC = () => {
   const [syncData, setSyncData] = useState<any>(null);
   const [activePopup, setActivePopup] = useState<HermesNotification | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [exams, setExams] = useState<HealthExam[]>([]);
   const [lastBackPress, setLastBackPress] = useState(0);
 
   // Escuta o redirecionamento do Share Target (Android Share Intent PWA)
@@ -2640,16 +1772,13 @@ const App: React.FC = () => {
 
       if (updates.pool_dados && updates.pool_dados.length > 0) {
         for (const item of updates.pool_dados) {
-          const knowledgeItem: ConhecimentoItem = {
-            id: item.id,
-            titulo: item.nome || 'Sem título',
-            tipo_arquivo: item.tipo === 'link' ? 'link' : (item.nome?.split('.').pop()?.toLowerCase() || 'unknown'),
-            url_drive: item.valor,
-            tamanho: 0,
-            data_criacao: item.data_criacao,
+          const knowledgeItem = buildKnowledgeItemFromPoolItem({
+            item,
             origem: { modulo: 'tarefas', id_origem: id },
-            categoria: 'Ações'
-          };
+            categoria: 'Ações',
+            domainHint: 'operacoes_administrativas',
+            intakeChannel: item.tipo === 'link' ? 'shared_link' : 'uploaded_file',
+          });
           setDoc(doc(db, 'conhecimento', item.id), knowledgeItem).catch(console.error);
         }
       }
@@ -2826,17 +1955,15 @@ const App: React.FC = () => {
     const item = await handleFileUploadToDrive(file);
     if (item) {
       const destinationMetadata = resolveKnowledgeDestinationMetadata(destinationFolderId);
-      const knowledgeItem: ConhecimentoItem = {
-        id: item.id,
-        titulo: item.nome || 'Sem título',
-        tipo_arquivo: (file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() : 'unknown') || 'unknown',
-        url_drive: item.valor,
-        tamanho: 0,
-        data_criacao: item.data_criacao,
+      const knowledgeItem = buildKnowledgeItemFromPoolItem({
+        item,
+        fileName: file.name,
         origem: destinationMetadata.origem || null,
         parent_id: destinationMetadata.parent_id,
-        ...(destinationMetadata.categoria ? { categoria: destinationMetadata.categoria } : {})
-      };
+        ...(destinationMetadata.categoria ? { categoria: destinationMetadata.categoria } : {}),
+        intakeChannel: 'uploaded_file',
+        domainHint: destinationMetadata.categoria || 'captura_e_conhecimento'
+      });
       await setDoc(doc(db, 'conhecimento', item.id), knowledgeItem);
       showToast("Arquivo enviado e indexação iniciada.", "success");
       return knowledgeItem;
@@ -3007,15 +2134,13 @@ const App: React.FC = () => {
       // Mirror to Knowledge base
       if (attachments.length > 0) {
         for (const item of attachments) {
-          const knowledgeItem: ConhecimentoItem = {
-            id: item.id,
-            titulo: item.nome || 'Sem título',
-            tipo_arquivo: item.tipo === 'link' ? 'link' : (item.nome?.split('.').pop()?.toLowerCase() || 'unknown'),
-            url_drive: item.valor,
-            tamanho: 0,
-            data_criacao: item.data_criacao,
-            origem: { modulo: 'sistemas', id_origem: docRef.id }
-          };
+          const knowledgeItem = buildKnowledgeItemFromPoolItem({
+            item,
+            origem: { modulo: 'sistemas', id_origem: docRef.id },
+            categoria: 'Sistemas',
+            intakeChannel: item.tipo === 'link' ? 'shared_link' : 'uploaded_file',
+            domainHint: 'sistemas_e_codigo'
+          });
           setDoc(doc(db, 'conhecimento', item.id), knowledgeItem).catch(console.error);
         }
       }
@@ -3071,16 +2196,13 @@ const App: React.FC = () => {
       // Mirror to Knowledge base
       if (updates.pool_dados && updates.pool_dados.length > 0) {
         for (const item of updates.pool_dados) {
-          const knowledgeItem: ConhecimentoItem = {
-            id: item.id,
-            titulo: item.nome || 'Sem título',
-            tipo_arquivo: item.tipo === 'link' ? 'link' : (item.nome?.split('.').pop()?.toLowerCase() || 'unknown'),
-            url_drive: item.valor,
-            tamanho: 0,
-            data_criacao: item.data_criacao,
+          const knowledgeItem = buildKnowledgeItemFromPoolItem({
+            item,
             origem: { modulo: 'sistemas', id_origem: id },
-            categoria: 'Sistemas'
-          };
+            categoria: 'Sistemas',
+            intakeChannel: item.tipo === 'link' ? 'shared_link' : 'uploaded_file',
+            domainHint: 'sistemas_e_codigo'
+          });
           setDoc(doc(db, 'conhecimento', item.id), knowledgeItem).catch(console.error);
         }
       }
@@ -3131,14 +2253,6 @@ const App: React.FC = () => {
       setIsUploading(false);
     }
   };
-
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'exames'), (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as HealthExam));
-      setExams(data);
-    });
-    return () => unsub();
-  }, []);
 
   const handleDeleteWorkItem = async (id: string) => {
     const item = workItems.find(w => w.id === id);
@@ -3210,17 +2324,15 @@ const App: React.FC = () => {
   const handleUploadToRAGBase = async (file: File, baseId: string): Promise<void> => {
     const item = await handleFileUploadToDrive(file);
     if (item) {
-      const knowledgeItem: ConhecimentoItem = {
-        id: item.id,
-        titulo: item.nome || 'Sem título',
-        tipo_arquivo: (file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() : 'unknown') || 'unknown',
-        url_drive: item.valor,
-        tamanho: 0,
-        data_criacao: item.data_criacao,
+      const knowledgeItem = buildKnowledgeItemFromPoolItem({
+        item,
+        fileName: file.name,
         origem: null,
         parent_id: null,
         base_id: baseId,
-      };
+        intakeChannel: 'uploaded_file',
+        domainHint: 'captura_e_conhecimento'
+      });
       await setDoc(doc(db, 'conhecimento', item.id), knowledgeItem);
       showToast("Arquivo enviado — extraindo texto e vetorizando…", "info");
 
@@ -3248,16 +2360,14 @@ const App: React.FC = () => {
 
   const handleAddRAGBaseLink = async (url: string, title: string, baseId: string): Promise<void> => {
     try {
-      await addDoc(collection(db, 'conhecimento'), {
-        titulo: title,
-        tipo_arquivo: 'link',
-        url_drive: url,
-        tamanho: 0,
-        data_criacao: new Date().toISOString(),
+      await addDoc(collection(db, 'conhecimento'), buildKnowledgeLinkItem({
+        title,
+        url,
         origem: null,
         parent_id: null,
         base_id: baseId,
-      });
+        domainHint: 'captura_e_conhecimento'
+      }));
       showToast("Link salvo na base RAG.", "success");
     } catch (e) {
       console.error(e);
@@ -3268,16 +2378,14 @@ const App: React.FC = () => {
   const handleAddKnowledgeLink = async (url: string, title: string, destinationFolderId?: string | null) => {
     try {
       const destinationMetadata = resolveKnowledgeDestinationMetadata(destinationFolderId);
-      await addDoc(collection(db, 'conhecimento'), {
-        titulo: title,
-        tipo_arquivo: 'link',
-        url_drive: url,
-        tamanho: 0,
-        data_criacao: new Date().toISOString(),
+      await addDoc(collection(db, 'conhecimento'), buildKnowledgeLinkItem({
+        title,
+        url,
         origem: destinationMetadata.origem || null,
         parent_id: destinationMetadata.parent_id,
-        ...(destinationMetadata.categoria ? { categoria: destinationMetadata.categoria } : {})
-      });
+        ...(destinationMetadata.categoria ? { categoria: destinationMetadata.categoria } : {}),
+        domainHint: destinationMetadata.categoria || 'captura_e_conhecimento'
+      }));
       showToast("Link salvo com sucesso.", "success");
     } catch (e) {
       console.error(e);
@@ -3287,17 +2395,8 @@ const App: React.FC = () => {
 
   const handleSaveKnowledgeItem = async (item: Partial<ConhecimentoItem>) => {
     try {
-      const cleanItem = JSON.parse(JSON.stringify(item));
-      if (item.id) {
-        await setDoc(doc(db, 'conhecimento', item.id), cleanItem, { merge: true });
-        showToast("Item salvo.", "success");
-      } else {
-        await addDoc(collection(db, 'conhecimento'), {
-          ...cleanItem,
-          data_criacao: new Date().toISOString()
-        });
-        showToast("Item salvo.", "success");
-      }
+      await upsertKnowledgeItem(db, item);
+      showToast("Item salvo.", "success");
     } catch (e) {
       console.error(e);
       showToast("Erro ao salvar item.", "error");
@@ -3453,6 +2552,34 @@ const App: React.FC = () => {
       const isStandByTask = normalizeStatus(inputData.status || 'em andamento') === 'stand-by';
       const singleDate = inputData.data_limite || inputData.data_inicio || (isStandByTask ? '' : formatDateLocalISO(new Date()));
       const normalizedTitle = normalizeTaskTitle(inputData.titulo || '');
+      const resolvedKnowledgeIds = inputData.resolved_knowledge_ids || Array.from(new Set([
+        ...(inputData.knowledge_item_ids || []),
+        ...knowledgeItems
+          .filter(item => inputData.base_conhecimento && item.base_id === inputData.base_conhecimento)
+          .slice(0, 12)
+          .map(item => item.id),
+      ]));
+      const linkedKnowledge = knowledgeItems.filter(item => resolvedKnowledgeIds.includes(item.id));
+      const fallbackContextBundle = inputData.context_bundle_snapshot || buildContextLayers({
+        task: {
+          id: 'pending',
+          titulo: normalizedTitle,
+          projeto: 'Google Tasks',
+          data_inicio: singleDate,
+          data_limite: singleDate,
+          status: (inputData.status || 'em andamento') as Status,
+          categoria: inputData.categoria || 'GERAL',
+          contabilizar_meta: false,
+          data_criacao: new Date().toISOString(),
+          descricao: inputData.descricao,
+          notas: inputData.notas,
+          sistema: inputData.sistema || inputData.categoria,
+          knowledge_item_ids: resolvedKnowledgeIds,
+          chat_history: [],
+        },
+        systemName: inputData.sistema || inputData.categoria,
+        knowledgeItems: linkedKnowledge,
+      });
       const taskPayload: Record<string, any> = {
         ...inputData,
         titulo: normalizedTitle,
@@ -3463,7 +2590,15 @@ const App: React.FC = () => {
         projeto: 'Google Tasks',
         contabilizar_meta: inputData.categoria === 'CLC' || inputData.categoria === 'ASSISTÊNCIA',
         acompanhamento: [],
-        entregas_relacionadas: []
+        entregas_relacionadas: [],
+        resolved_knowledge_ids: resolvedKnowledgeIds,
+        context_bundle_snapshot: fallbackContextBundle,
+        memory_room_hint: inputData.memory_room_hint || deriveTaskMemoryRoom({
+          id: 'pending',
+          sistema: inputData.sistema || inputData.categoria,
+          categoria: inputData.categoria,
+          tipo_acao: inputData.tipo_acao,
+        } as Tarefa),
       };
 
       const docRef = await addDoc(collection(db, 'tarefas'), {
@@ -3496,140 +2631,54 @@ const App: React.FC = () => {
 
 
 
+  // Migrations and automation that run when tarefas list changes
   useEffect(() => {
-    if (!user) return;
-    setLoading(true);
-    setError(null);
+    if (!user || tarefas.length === 0) return;
 
-    // Listener para Tarefas
-    const qTarefas = query(collection(db, 'tarefas'));
-    const unsubscribeTarefas = onSnapshot(qTarefas, (snapshot) => {
-      const normalized: Tarefa[] = snapshot.docs.map(taskDoc => {
-        const raw = { id: taskDoc.id, ...taskDoc.data() } as Tarefa;
-        const singleDate = raw.data_limite || raw.data_inicio || '';
-        return {
-          ...raw,
-          data_limite: singleDate,
-          data_inicio: singleDate
-        };
+    // Normalize legacy date ranges to single date
+    const legacyWithRange = tarefas.filter(task =>
+      !!task.data_limite && task.data_limite !== '-' && task.data_limite !== '0000-00-00' &&
+      task.data_limite !== task.data_inicio,
+    );
+    if (legacyWithRange.length > 0) {
+      const batch = writeBatch(db);
+      const now = new Date().toISOString();
+      legacyWithRange.forEach(task => {
+        batch.update(doc(db, 'tarefas', task.id), {
+          data_inicio: task.data_limite,
+          data_limite: task.data_limite,
+          data_atualizacao: now,
+        });
       });
-      setTarefas(normalized);
+      batch.commit().catch(err => console.error('Erro ao normalizar tarefas legadas:', err));
+    }
 
-      // Migração leve: força dados legados de intervalo para data única (usa término como fonte da verdade)
-      const legacyWithRange = snapshot.docs
-        .map(taskDoc => ({ id: taskDoc.id, ...taskDoc.data() } as Tarefa))
-        .filter(task => !!task.data_limite && task.data_limite !== '-' && task.data_limite !== '0000-00-00' && task.data_limite !== task.data_inicio);
-      if (legacyWithRange.length > 0) {
-        const batch = writeBatch(db);
-        const now = new Date().toISOString();
-        legacyWithRange.forEach(task => {
-          batch.update(doc(db, 'tarefas', task.id), {
-            data_inicio: task.data_limite,
-            data_limite: task.data_limite,
-            data_atualizacao: now
-          });
-        });
-        batch.commit().catch((migrationErr) => console.error('Erro ao normalizar tarefas legadas:', migrationErr));
-      }
-
-      // Automação: Atualizar tarefas atrasadas para o dia de hoje
-      const today = formatDateLocalISO(new Date());
+    // Move overdue tasks to today
+    const today = formatDateLocalISO(new Date());
+    const overdueTasks = tarefas.filter(task => {
+      const status = normalizeStatus(task.status);
+      const isPending = status !== 'concluido' && task.status !== 'excluído' as any;
+      const hasPastDeadline = task.data_limite &&
+        task.data_limite !== '-' &&
+        task.data_limite !== '0000-00-00' &&
+        task.data_limite < today;
+      return isPending && hasPastDeadline;
+    });
+    if (overdueTasks.length > 0) {
+      const batch = writeBatch(db);
       const nowISO = new Date().toISOString();
-      const overdueTasks = snapshot.docs
-        .map(taskDoc => ({ id: taskDoc.id, ...taskDoc.data() } as Tarefa))
-        .filter(task => {
-          const status = normalizeStatus(task.status);
-          const isPending = status !== 'concluido' && task.status !== 'excluído' as any;
-          const hasPastDeadline = task.data_limite && 
-                                 task.data_limite !== '-' && 
-                                 task.data_limite !== '0000-00-00' && 
-                                 task.data_limite < today;
-          return isPending && hasPastDeadline;
+      overdueTasks.forEach(task => {
+        batch.update(doc(db, 'tarefas', task.id), {
+          data_inicio: today,
+          data_limite: today,
+          data_atualizacao: nowISO,
         });
-
-      if (overdueTasks.length > 0) {
-        const batch = writeBatch(db);
-        overdueTasks.forEach(task => {
-          batch.update(doc(db, 'tarefas', task.id), {
-            data_inicio: today,
-            data_limite: today,
-            data_atualizacao: nowISO
-          });
-        });
-        batch.commit()
-          .then(() => {
-            showToast(`${overdueTasks.length} ação(ões) atrasada(s) atualizada(s) para hoje!`, 'info');
-          })
-          .catch((err) => console.error('Erro ao atualizar tarefas atrasadas:', err));
-      }
-
-      setLoading(false);
-    }, (err) => {
-      console.error(err);
-      setError("Erro ao conectar com o banco de dados (Tarefas).");
-      setLoading(false);
-    });
-
-    // Listener para Atividades PGC
-    const qAtividadesPGC = query(collection(db, 'atividades_pgc'));
-    const unsubscribeAtividadesPGC = onSnapshot(qAtividadesPGC, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AtividadeRealizada));
-      setAtividadesPGC(data);
-    });
-
-    // Listener para Afastamentos
-    const qAfastamentos = query(collection(db, 'afastamentos'));
-    const unsubscribeAfastamentos = onSnapshot(qAfastamentos, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Afastamento));
-      setAfastamentos(data);
-    });
-
-    // Listeners para Entregas (coleção atual + legado)
-    let entregasMain: EntregaInstitucional[] = [];
-    let entregasLegacy: EntregaInstitucional[] = [];
-    const syncEntregas = () => {
-      const merged = [...entregasMain, ...entregasLegacy];
-      const dedup = new Map<string, EntregaInstitucional>();
-      merged.forEach((e) => dedup.set(e.id, e));
-      setEntregas(Array.from(dedup.values()));
-    };
-
-    const qEntregas = query(collection(db, 'entregas'));
-    const unsubscribeEntregas = onSnapshot(qEntregas, (snapshot) => {
-      entregasMain = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EntregaInstitucional));
-      syncEntregas();
-    }, (err) => {
-      console.error(err);
-      setError("Erro ao conectar com o banco de dados (Entregas).");
-    });
-
-    const qAtividadesLegacy = query(collection(db, 'atividades'));
-    const unsubscribeAtividadesLegacy = onSnapshot(qAtividadesLegacy, (snapshot) => {
-      entregasLegacy = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EntregaInstitucional));
-      syncEntregas();
-    }, (err) => {
-      console.error(err);
-      setError("Erro ao conectar com o banco de dados (Entregas Legado).");
-    });
-
-
-    const qUnidades = query(collection(db, 'unidades'));
-    const unsubscribeUnidades = onSnapshot(qUnidades, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as { id: string, nome: string, palavras_chave?: string[] }));
-      setUnidades(data);
-    });
-
-
-
-    return () => {
-      unsubscribeTarefas();
-      unsubscribeEntregas();
-      unsubscribeAtividadesLegacy();
-      unsubscribeAtividadesPGC();
-      unsubscribeAfastamentos();
-      unsubscribeUnidades();
-    };
-  }, [user]);
+      });
+      batch.commit()
+        .then(() => showToast(`${overdueTasks.length} ação(ões) atrasada(s) atualizada(s) para hoje!`, 'info'))
+        .catch(err => console.error('Erro ao atualizar tarefas atrasadas:', err));
+    }
+  }, [tarefas, user]);
 
   const handleAddUnidade = async (nome: string) => {
     try {
@@ -3664,34 +2713,7 @@ const App: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    if (!user) return;
-    const qPlanos = query(collection(db, 'planos_trabalho'));
-    const unsubscribePlanos = onSnapshot(qPlanos, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlanoTrabalho));
-      setPlanosTrabalho(data);
-    });
-    return () => unsubscribePlanos();
-  }, [user]);
-
-  useEffect(() => {
-    if (!user) return;
-    const qBrainstorm = query(collection(db, 'brainstorm_ideas'));
-    const unsubscribeBrainstorm = onSnapshot(qBrainstorm, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BrainstormIdea));
-      setBrainstormIdeas(data.sort((a, b) => b.timestamp.localeCompare(a.timestamp)));
-    });
-
-    const unsubscribeKnowledge = onSnapshot(collection(db, 'conhecimento'), (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ConhecimentoItem));
-      setKnowledgeItems(data);
-    });
-
-    return () => {
-      unsubscribeBrainstorm();
-      unsubscribeKnowledge();
-    };
-  }, [user]);
+  // planos_trabalho, brainstorm_ideas, conhecimento → handled by useTasksData / useKnowledgeData
 
 
   const handleLinkTarefa = async (tarefaId: string, entregaId: string) => {
@@ -4315,28 +3337,6 @@ const App: React.FC = () => {
     return finalGroups;
   }, [filteredAndSortedTarefas]);
 
-  useEffect(() => {
-    if (!hasAutoExpanded && Object.keys(tarefasAgrupadas).length > 0) {
-        const keys = Object.keys(tarefasAgrupadas);
-      let sectionsToExpand: string[] = [];
-      if (keys.includes("Atrasadas")) sectionsToExpand.push("Atrasadas");
-      if (keys.includes("Hoje")) sectionsToExpand.push("Hoje");
-      if (sectionsToExpand.length === 0) {
-        const fallback = keys.find(k => k !== "Ações em Stand-by" && k !== "Concluídas");
-        if (fallback) sectionsToExpand = [fallback];
-      }
-      setExpandedSections(sectionsToExpand);
-      setHasAutoExpanded(true);
-    }
-  }, [tarefasAgrupadas, hasAutoExpanded]);
-
-  const toggleSection = (label: string) => {
-    setExpandedSections(prev =>
-      prev.includes(label) ? prev.filter(s => s !== label) : [...prev, label]
-    );
-  };
-
-  // No PGC, filtramos as tarefas pelo período selecionado (mês/ano)
   // No PGC, filtramos as tarefas pelo período selecionado (mês/ano)
   const pgcTasks: Tarefa[] = useMemo(() => {
     // Normalização agressiva para comparação de texto
@@ -4689,6 +3689,9 @@ const App: React.FC = () => {
                 { id: 'conhecimento', label: 'Conhecimento', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>, active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
                 { id: 'rag-bases', label: 'Bases RAG', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>, active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
                 { id: 'ferramentas', label: 'Ferramentas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>, active: viewMode === 'ferramentas', onClick: () => { setActiveModule('acoes'); setViewMode('ferramentas'); setActiveFerramenta(null); } },
+                { id: 'audit', label: 'Auditoria', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>, active: viewMode === 'audit', onClick: () => { setViewMode('audit'); } },
+                { id: 'issue-packets', label: 'Propostas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>, active: viewMode === 'issue-packets', onClick: () => { setViewMode('issue-packets'); } },
+                { id: 'pops', label: 'POPs', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 9h8M8 13h5m-7 8h12a2 2 0 002-2V7.414a2 2 0 00-.586-1.414l-2.414-2.414A2 2 0 0015.586 3H6a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>, active: viewMode === 'pops', onClick: () => { setViewMode('pops'); } },
               ].map(item => (
                 <button
                   key={item.id}
@@ -4930,6 +3933,7 @@ const App: React.FC = () => {
                         <h1 className="text-xl font-black tracking-tighter text-slate-900 uppercase">
                           {viewMode === 'services' ? 'Serviços' :
                             viewMode === 'autonomous-operations' ? 'Operações Autônomas' :
+                            viewMode === 'pops' ? 'POPs' :
                             viewMode === 'rag-bases' ? 'Bases RAG' :
                             viewMode === 'knowledge' ? 'Conhecimento' :
                               viewMode === 'sistemas-dev' ? 'Sistemas' :
@@ -5166,6 +4170,7 @@ const App: React.FC = () => {
                       { label: 'Conhecimento', active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
                       { label: 'Bases RAG', active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
                       { label: 'Ferramentas', active: viewMode === 'ferramentas', onClick: () => { setActiveModule('acoes'); setViewMode('ferramentas'); setActiveFerramenta(null); } },
+                      { label: 'POPs', active: viewMode === 'pops', onClick: () => { setViewMode('pops'); } },
                     ].map((item, idx) => (
                       <button
                         key={idx}
@@ -5213,9 +4218,9 @@ const App: React.FC = () => {
               )}
             </header>
 
-            <div className={`mx-auto w-full ${viewMode === 'dashboard' ? 'max-w-[1600px] px-0 py-0' : 'max-w-[1400px] px-0 md:px-8 py-6'}`}>
+            <div className={`mx-auto w-full ${viewMode === 'dashboard' ? 'max-w-[1600px] px-0 py-0' : viewMode === 'knowledge' ? 'max-w-none px-0 py-0' : 'max-w-[1400px] px-0 md:px-8 py-6'}`}>
               {/* Painel de Estatísticas e Filtros - APENAS NA VISÃO GERAL */}
-              <main className={viewMode === 'dashboard' ? '' : 'mb-20'}>
+              <main className={viewMode === 'dashboard' || viewMode === 'knowledge' ? '' : 'mb-20'}>
                 {viewMode === 'dashboard' ? (
                   <DashboardView
                     tarefas={tarefas}
@@ -5235,365 +4240,36 @@ const App: React.FC = () => {
                     onOpenBacklog={handleCopyBacklog}
                   />
                 ) : viewMode === 'gallery' ? (
-                  <>
-                    {/* Mobile Search Bar */}
-                    <div className="lg:hidden px-4 mb-6">
-                      <div className="flex items-center bg-white border border-slate-200 rounded-2xl px-4 py-3 shadow-sm focus-within:ring-2 focus-within:ring-blue-500 transition-all">
-                        <svg className="w-5 h-5 text-slate-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                        <input
-                          type="text"
-                          placeholder="Pesquisar ações..."
-                          className="bg-transparent border-none outline-none text-sm font-bold text-slate-900 w-full placeholder:text-slate-400"
-                          value={searchTerm === 'filter:unclassified' ? '' : searchTerm}
-                          onChange={(e) => setSearchTerm(e.target.value)}
-                        />
-                        {searchTerm && searchTerm !== 'filter:unclassified' && (
-                          <button onClick={() => setSearchTerm('')} className="ml-2 text-slate-400 hover:text-slate-600">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col md:flex-row items-center justify-between mb-8 gap-4 px-4 md:px-0">
-                      {/* Linha de Filtros e Ações Globais */}
-                      <div className="flex items-center justify-between w-full gap-2">
-                        {/* Lado Esquerdo: Filtro de Área */}
-                        <div className="relative group flex-shrink-1 min-w-0 max-w-[140px] md:max-w-none md:min-w-[180px]">
-                          <select
-                            value={areaFilter}
-                            onChange={(e) => setAreaFilter(e.target.value)}
-                            className="h-11 w-full appearance-none bg-white pl-3 md:pl-4 pr-8 md:pr-10 rounded-xl border border-slate-200 text-[10px] font-black uppercase tracking-tight md:tracking-widest text-slate-700 outline-none focus:ring-2 focus:ring-slate-900 shadow-sm hover:border-slate-300 transition-all cursor-pointer truncate"
-                          >
-                            <option value="TODAS">TODAS</option>
-                            <option value="CLC">CLC</option>
-                            <option value="ASSISTÊNCIA">ASSISTÊNCIA</option>
-                            <option value="GERAL">GERAL</option>
-                            <option value="NÃO CLASSIFICADA">PENDENTES</option>
-                            {unidades.filter(u => !['CLC', 'ASSISTÊNCIA', 'ASSISTÊNCIA ESTUDANTIL'].includes(u.nome.toUpperCase())).map(u => (
-                              <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
-                            ))}
-                          </select>
-                          <div className="absolute inset-y-0 right-0 flex items-center px-2 md:px-3 pointer-events-none text-slate-400">
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
-                          </div>
-                        </div>
-
-                        {/* Lado Direito: Modos de Visualização e Organizar Dia */}
-                        <div className="flex items-center gap-1 md:gap-2 flex-shrink-0">
-                          {searchTerm !== 'filter:unclassified' && (
-                            <div className="h-11 bg-slate-100 p-1 rounded-xl shadow-inner inline-flex border border-slate-200">
-                              <button
-                                onClick={() => setDashboardViewMode('list')}
-                                className={`px-2 md:px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${dashboardViewMode === 'list' ? 'bg-white shadow-md text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
-                                <span className="hidden lg:inline">Lista</span>
-                              </button>
-                              <button
-                                onClick={() => setDashboardViewMode('calendar')}
-                                className={`px-2 md:px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${dashboardViewMode === 'calendar' ? 'bg-white shadow-md text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2-2v12a2 2 0 002 2z" /></svg>
-                                <span className="hidden lg:inline">Calendário</span>
-                              </button>
-                            </div>
-                          )}
-
-                          <button
-                            onClick={() => {
-                              setDashboardViewMode('calendar');
-                              setCalendarViewMode('day');
-                              setCalendarDate(new Date());
-                            }}
-                            className="h-11 bg-slate-900 text-white px-3 md:px-6 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center justify-center gap-2 active:scale-95"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                            <span className="hidden sm:inline">Organizar</span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {dashboardViewMode === 'calendar' ? (
-                      <CalendarView
-                        tasks={filteredAndSortedTarefas}
-                        googleEvents={primaryCalendarEvents}
-                        viewMode={calendarViewMode}
-                        currentDate={calendarDate}
-                        onDateChange={setCalendarDate}
-                        onTaskClick={setSelectedTask}
-                        onViewModeChange={setCalendarViewMode}
-                        onTaskUpdate={handleUpdateTarefa}
-                        onExecuteTask={(t) => { setSelectedTask(t); setTaskModalMode('execute'); }}
-                        onReorderTasks={handleReorderTasks}
-                        showToast={showToast}
-                      />
-                    ) : (
-                      <>
-                        {searchTerm === 'filter:unclassified' ? (
-                          <div className="animate-in bg-white border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl">
-                            <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                              <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3">
-                                <span className="w-2 h-8 bg-rose-600 rounded-full"></span>
-                                Organização Rápida
-                              </h3>
-
-                              {selectedTaskIds.length > 0 && (
-                                <div className="flex items-center gap-2 bg-slate-900 p-2 rounded-none md:rounded-2xl animate-in slide-in-from-top-4">
-                                  <span className="text-[9px] font-black text-white uppercase tracking-widest px-4">Classificar ({selectedTaskIds.length}):</span>
-                                  <button onClick={() => handleBatchTag('CLC')} className="bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-black uppercase px-4 py-1.5 rounded-lg md:rounded-xl transition-all">CLC</button>
-                                  <button onClick={() => handleBatchTag('ASSISTÊNCIA')} className="bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-black uppercase px-4 py-1.5 rounded-lg md:rounded-xl transition-all">Assistência</button>
-                                  <button onClick={() => handleBatchTag('GERAL')} className="bg-slate-500 hover:bg-slate-600 text-white text-[9px] font-black uppercase px-4 py-1.5 rounded-lg md:rounded-xl transition-all">Geral</button>
-                                </div>
-                              )}
-                            </div>
-
-                            <div className="overflow-x-auto">
-                              {/* Desktop Table */}
-                              <table className="w-full text-left hidden md:table">
-                                <thead className="bg-slate-50 border-b border-slate-200">
-                                  <tr>
-                                    <th className="px-8 py-4 w-12 text-center text-[10px] font-black text-slate-400 uppercase tracking-widest italic">#</th>
-                                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Descrição da Tarefa</th>
-                                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-40 text-center">Data Limite</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-50">
-                                  {filteredAndSortedTarefas.map((task) => (
-                                    <tr
-                                      key={task.id}
-                                      onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
-                                      className={`hover:bg-slate-50 transition-colors cursor-pointer ${selectedTaskIds.includes(task.id) ? 'bg-blue-50/30' : ''}`}
-                                    >
-                                      <td className="px-8 py-4 text-center">
-                                        <input
-                                          type="checkbox"
-                                          checked={selectedTaskIds.includes(task.id)}
-                                          onChange={(e) => {
-                                            e.stopPropagation();
-                                            setSelectedTaskIds(prev => prev.includes(task.id) ? prev.filter(id => id !== task.id) : [...prev, task.id]);
-                                          }}
-                                          className="w-5 h-5 rounded-lg border-slate-300 text-slate-900 focus:ring-slate-900 cursor-pointer"
-                                        />
-                                      </td>
-                                      <td className="px-8 py-4">
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                          <div className="text-[13px] font-bold text-slate-800 hover:text-blue-600 transition-colors leading-snug">
-                                            {task.titulo}
-                                          </div>
-                                          {task.sync_status === 'new' && (
-                                            <span className="text-[8px] font-black px-1.5 py-0.5 rounded uppercase bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-sm animate-pulse">
-                                              Novo
-                                            </span>
-                                          )}
-                                          {task.sync_status === 'updated' && (
-                                            <span className="text-[8px] font-black px-1.5 py-0.5 rounded uppercase bg-gradient-to-r from-amber-400 to-orange-500 text-white shadow-sm">
-                                              Atualizada
-                                            </span>
-                                          )}
-                                        </div>
-                                      </td>
-                                      <td className="px-8 py-4 text-center text-[10px] font-black text-slate-400 uppercase">
-                                        {formatDate(task.data_limite)}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-
-                              {/* Mobile Card View */}
-                              <div className="md:hidden divide-y divide-slate-50">
-                                {filteredAndSortedTarefas.map((task) => (
-                                  <div
-                                    key={task.id}
-                                    onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
-                                    className={`p-6 space-y-4 hover:bg-slate-50 transition-colors cursor-pointer ${selectedTaskIds.includes(task.id) ? 'bg-blue-50/30' : ''}`}
-                                  >
-                                    <div className="flex items-start gap-4">
-                                      <input
-                                        type="checkbox"
-                                        checked={selectedTaskIds.includes(task.id)}
-                                        onChange={(e) => {
-                                          e.stopPropagation();
-                                          setSelectedTaskIds(prev => prev.includes(task.id) ? prev.filter(id => id !== task.id) : [...prev, task.id]);
-                                        }}
-                                        className="w-6 h-6 rounded-lg border-slate-300 text-slate-900 focus:ring-slate-900 cursor-pointer shrink-0 mt-1"
-                                      />
-                                      <div className="flex-1 space-y-2">
-                                        <div className="text-sm font-bold text-slate-800 leading-snug">
-                                          {task.titulo}
-                                        </div>
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                          <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest bg-slate-100 px-2 py-0.5 rounded">
-                                            {formatDate(task.data_limite)}
-                                          </div>
-                                          {task.sync_status === 'new' && (
-                                            <span className="text-[7px] font-black px-1.5 py-0.5 rounded uppercase bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-sm animate-pulse">
-                                              Novo
-                                            </span>
-                                          )}
-                                          {task.sync_status === 'updated' && (
-                                            <span className="text-[7px] font-black px-1.5 py-0.5 rounded uppercase bg-gradient-to-r from-amber-400 to-orange-500 text-white shadow-sm">
-                                              Atualizada
-                                            </span>
-                                          )}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-
-                              {filteredAndSortedTarefas.length === 0 && (
-                                <div className="py-20 text-center text-slate-300 font-black uppercase tracking-widest italic border-t border-slate-50">
-                                  Tudo classificado! Bom trabalho.
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                        ) : (
-                          <div className="animate-in border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl bg-white">
-                            {Object.keys(tarefasAgrupadas).length > 0 ? (
-                              Object.entries(tarefasAgrupadas).map(([label, tasks]: [string, Tarefa[]]) => (
-                                <div
-                                  key={label}
-                                  className="border-b last:border-b-0 border-slate-200 transition-colors"
-                                  onDragOver={(e) => {
-                                    e.preventDefault();
-                                    e.currentTarget.style.backgroundColor = 'rgba(59, 130, 246, 0.05)';
-                                  }}
-                                  onDragLeave={(e) => {
-                                    e.currentTarget.style.backgroundColor = '';
-                                  }}
-                                  onDrop={(e) => {
-                                    e.preventDefault();
-                                    e.currentTarget.style.backgroundColor = '';
-                                     const taskId = e.dataTransfer.getData('task-id');
-                                     if (taskId) {
-                                       if (label === 'Ações em Stand-by') {
-                                         handleUpdateTarefa(taskId, { status: 'stand-by' as any });
-                                         return;
-                                       }
-                                       const date = getBucketStartDate(label);
-                                       if (date) {
-                                         handleUpdateTarefa(taskId, { data_limite: date });
-                                       }
-                                     }
-                                  }}
-                                >
-                                  <button
-                                    onClick={() => toggleSection(label)}
-                                    className="w-full px-6 py-3 bg-transparent border-b border-slate-100 flex items-center justify-between hover:bg-slate-50 transition-colors group"
-                                  >
-                                    <div className="flex items-center gap-3">
-                                      <span className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">{label}</span>
-                                      <span className="text-[10px] font-bold text-slate-300">({tasks.length})</span>
-                                    </div>
-                                    <svg className={`w-4 h-4 text-slate-300 transition-transform duration-300 ${expandedSections.includes(label) ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
-                                    </svg>
-                                  </button>
-
-                                  {expandedSections.includes(label) && (
-                                    <div className="animate-in origin-top">
-                                       {tasks.map(task => (
-                                         <div
-                                           key={task.id}
-                                           draggable
-                                           onDragStart={(e) => {
-                                             e.dataTransfer.setData('task-id', task.id);
-                                             e.currentTarget.style.opacity = '0.5';
-                                           }}
-                                           onDragEnd={(e) => {
-                                             e.currentTarget.style.opacity = '1';
-                                           }}
-                                           onDragOver={(e) => e.preventDefault()}
-                                           onDrop={(e) => {
-                                             e.preventDefault();
-                                             e.stopPropagation();
-                                             const draggedId = e.dataTransfer.getData('task-id');
-                                             if (draggedId && draggedId !== task.id) {
-                                               handleReorderTasks(draggedId, task.id, label);
-                                             }
-                                           }}
-                                         >
-                                           <RowCard
-                                             task={task}
-                                             highlighted={label === 'Hoje' && tasks.filter(t => normalizeStatus(t.status) !== 'concluido')[0]?.id === task.id}
-                                             onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
-                                             onToggle={handleToggleTarefaStatus}
-                                             onDelete={handleDeleteTarefa}
-                                             onEdit={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
-                                             onUpdateToToday={handleUpdateToToday}
-                                             onUpdateTask={handleUpdateTarefa}
-                                           />
-                                         </div>
-                                       ))}
-                                       {tasks.length === 0 && (
-                                         <div className="p-8 text-center border-t border-slate-50 bg-slate-50/30">
-                                            <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest italic">
-                                              {label === 'Ações em Stand-by' ? 'Arraste ações aqui para pausar' : 'Nenhuma ação nesta seção'}
-                                            </p>
-                                         </div>
-                                       )}
-                                    </div>
-                                  )}
-                                </div>
-                              ))
-                            ) : (
-                              <div className="py-24 text-center bg-white">
-                                <p className="text-slate-300 font-black text-xl uppercase tracking-widest">Sem demandas encontradas</p>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        <div className="mt-12 space-y-6">
-                          <button
-                            onClick={() => setIsCompletedTasksOpen(!isCompletedTasksOpen)}
-                            className="w-full flex items-center gap-4 group cursor-pointer"
-                          >
-                            <div className="h-0.5 flex-1 bg-slate-100 group-hover:bg-slate-200 transition-colors"></div>
-                            <div className="flex items-center gap-2 text-slate-400 group-hover:text-slate-600 transition-colors">
-                              <h3 className="text-[10px] font-black uppercase tracking-[0.3em]">Concluídas Recentemente</h3>
-                              <svg className={`w-4 h-4 transition-transform duration-300 ${isCompletedTasksOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
-                              </svg>
-                            </div>
-                            <div className="h-0.5 flex-1 bg-slate-100 group-hover:bg-slate-200 transition-colors"></div>
-                          </button>
-
-                          {isCompletedTasksOpen && (
-                            <div className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-sm opacity-60 hover:opacity-100 transition-opacity animate-in slide-in-from-top-4 duration-300">
-                              {tarefas.filter(t => normalizeStatus(t.status) === 'concluido' && t.status !== 'excluído' as any).length > 0 ? (
-                                tarefas
-                                  .filter(t => normalizeStatus(t.status) === 'concluido' && t.status !== 'excluído' as any)
-                                  .sort((a, b) => (b.data_conclusao || '').localeCompare(a.data_conclusao || ''))
-                                  .slice(0, 10)
-                                  .map(t => (
-                                    <RowCard
-                                      key={t.id}
-                                      task={t}
-                                      onClick={() => { setSelectedTask(t); setTaskModalMode('execute'); }}
-                                      onToggle={handleToggleTarefaStatus}
-                                      onDelete={handleDeleteTarefa}
-                                      onEdit={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
-                                      onUpdateToToday={handleUpdateToToday}
-                                    />
-                                  ))
-                              ) : (
-                                <div className="py-12 text-center">
-                                  <p className="text-slate-300 font-black text-[10px] uppercase tracking-widest italic">Nenhuma tarefa concluída</p>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </>
+                  <GalleryView
+                    searchTerm={searchTerm}
+                    setSearchTerm={setSearchTerm}
+                    areaFilter={areaFilter}
+                    setAreaFilter={setAreaFilter}
+                    unidades={unidades}
+                    dashboardViewMode={dashboardViewMode}
+                    setDashboardViewMode={setDashboardViewMode}
+                    calendarViewMode={calendarViewMode}
+                    setCalendarViewMode={setCalendarViewMode}
+                    calendarDate={calendarDate}
+                    setCalendarDate={setCalendarDate}
+                    primaryCalendarEvents={primaryCalendarEvents}
+                    filteredAndSortedTarefas={filteredAndSortedTarefas}
+                    tarefasAgrupadas={tarefasAgrupadas}
+                    tarefas={tarefas}
+                    selectedTaskIds={selectedTaskIds}
+                    setSelectedTaskIds={setSelectedTaskIds}
+                    isCompletedTasksOpen={isCompletedTasksOpen}
+                    setIsCompletedTasksOpen={setIsCompletedTasksOpen}
+                    setSelectedTask={setSelectedTask}
+                    setTaskModalMode={setTaskModalMode}
+                    handleUpdateTarefa={handleUpdateTarefa}
+                    handleReorderTasks={handleReorderTasks}
+                    handleToggleTarefaStatus={handleToggleTarefaStatus}
+                    handleDeleteTarefa={handleDeleteTarefa}
+                    handleUpdateToToday={handleUpdateToToday}
+                    handleBatchTag={handleBatchTag}
+                    showToast={showToast}
+                  />
                 ) : (viewMode === 'licitacoes' || viewMode === 'assistencia') ? (
                   <CategoryView
                     tasks={filteredAndSortedTarefas}
@@ -5670,16 +4346,13 @@ const App: React.FC = () => {
                       // Mirror to Knowledge base
                       if (poolItems.length > 0) {
                         for (const item of poolItems) {
-                          const knowledgeItem: ConhecimentoItem = {
-                            id: item.id,
-                            titulo: item.nome || 'Sem título',
-                            tipo_arquivo: item.tipo === 'link' ? 'link' : (item.nome?.split('.').pop()?.toLowerCase() || 'unknown'),
-                            url_drive: item.valor,
-                            tamanho: 0,
-                            data_criacao: item.data_criacao,
+                          const knowledgeItem = buildKnowledgeItemFromPoolItem({
+                            item,
                             origem: { modulo: 'saude', id_origem: examDoc.id },
-                            categoria: 'Saúde'
-                          };
+                            categoria: 'Saúde',
+                            domainHint: 'saude_e_bem_estar',
+                            intakeChannel: item.tipo === 'link' ? 'shared_link' : 'uploaded_file',
+                          });
                           await setDoc(doc(db, 'conhecimento', item.id), knowledgeItem);
                         }
                       }
@@ -5725,6 +4398,12 @@ const App: React.FC = () => {
                     onUpdateService={handleUpdateService}
                     onDeleteService={handleDeleteService}
                   />
+                ) : viewMode === 'audit' ? (
+                  <AuditView onClose={() => setViewMode('dashboard')} />
+                ) : viewMode === 'issue-packets' ? (
+                  <IssuePacketView sistemas={sistemasDetalhes} showToast={showToast} />
+                ) : viewMode === 'pops' ? (
+                  <POPView showToast={showToast} />
                 ) : viewMode === 'autonomous-operations' ? (
                   <AutonomousOperationsView showToast={showToast} />
                 ) : viewMode === 'finance' ? (
@@ -5800,7 +4479,7 @@ const App: React.FC = () => {
                   />
 
                 ) : viewMode === 'knowledge' ? (
-                  <div className="fixed inset-0 z-[50] bg-slate-50 md:relative md:inset-auto md:z-0 md:bg-transparent">
+                  <>
                     <KnowledgeView
                       items={knowledgeItems}
                       knowledgeBases={knowledgeBases}
@@ -5826,7 +4505,7 @@ const App: React.FC = () => {
                     >
                       Voltar ao Painel
                     </button>
-                  </div>
+                  </>
 
                 ) : viewMode === 'rag-bases' ? (
                   <div className="fixed inset-0 z-[50] md:relative md:inset-auto md:z-0 h-full">
@@ -5985,908 +4664,8 @@ const App: React.FC = () => {
                           </div>
                         );
                       })()
-                    ) : (
-                      /* DETAIL VIEW — renderizado pelo SistemaExecutionView overlay */
-                      (() => {
-                        const unit = unidades.find(u => u.id === selectedSystemId);
-                        if (!unit) return null;
-                        return (
-                          <div className="animate-in fade-in duration-300 flex flex-col gap-4">
-                            <button
-                              onClick={() => setSelectedSystemId(null)}
-                              className="flex items-center gap-2 text-slate-500 hover:text-slate-800 font-bold text-xs uppercase tracking-widest transition-colors w-fit"
-                            >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
-                              Voltar para Lista
-                            </button>
-                            <div className="border border-slate-200 rounded-[2rem] overflow-hidden shadow-xl bg-white">
-                            {(
-                      /* VISÃO DETALHADA - SISTEMA SELECIONADO */
-                      (() => {
-                        const unit = unidades.find(u => u.id === selectedSystemId);
-                        if (!unit) return null;
-
-                        const sysDetails = sistemasDetalhes.find(s => s.id === unit.id) || {
-                          id: unit.id,
-                          nome: unit.nome.replace('SISTEMA:', '').trim(),
-                          status: 'ideia' as SistemaStatus,
-                          data_criacao: new Date().toISOString(),
-                          data_atualizacao: new Date().toISOString()
-                        };
-
-                        const systemName = unit.nome.replace('SISTEMA:', '').trim();
-                        const systemWorkItems = workItems.filter(w => w.sistema_id === unit.id);
-                        const activeWorkItems = systemWorkItems.filter(w => !w.concluido);
-                        const completedWorkItems = systemWorkItems.filter(w => w.concluido);
-                        const ajustesPendentesCount = activeWorkItems.length;
-                        const latestWorkItem = [...systemWorkItems].sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime())[0];
-                        const systemBaseIds = knowledgeBases.filter(base => base.sistema_id === unit.id).map(base => base.id);
-                        const systemKnowledgeIds = new Set(knowledgeItems.filter(item => item.base_id && systemBaseIds.includes(item.base_id)).map(item => item.id));
-                        const linkedTasks = tarefas.filter(task =>
-                          task.base_conhecimento && systemBaseIds.includes(task.base_conhecimento)
-                          || (task.knowledge_item_ids || []).some(id => systemKnowledgeIds.has(id))
-                          || task.sistema === systemName
-                        );
-
-                        const steps: SistemaStatus[] = ['ideia', 'prototipacao', 'desenvolvimento', 'testes', 'producao'];
-                        const stepLabels: Record<string, string> = { ideia: 'Ideia', prototipacao: 'Protótipo', desenvolvimento: 'Dev', testes: 'Testes', producao: 'Produção' };
-                        const resourceItems = [
-                          { field: 'repositorio_principal', label: 'Repositório', shortLabel: 'Repo', value: sysDetails.repositorio_principal || '', tone: 'slate', empty: 'Não configurado' },
-                          { field: 'link_documentacao', label: 'Documentação', shortLabel: 'Docs', value: sysDetails.link_documentacao || '', tone: 'violet', empty: 'Sem documentação' },
-                          { field: 'link_google_ai_studio', label: 'AI Studio', shortLabel: 'AI', value: sysDetails.link_google_ai_studio || '', tone: 'blue', empty: 'Sem workspace' },
-                          { field: 'link_hospedado', label: 'Hospedagem', shortLabel: 'App', value: sysDetails.link_hospedado || '', tone: 'emerald', empty: 'Sem link público' }
-                        ];
-                        const resourceToneClasses: Record<string, string> = {
-                          slate: 'border-slate-200 bg-white text-slate-600',
-                          violet: 'border-violet-200 bg-violet-50/60 text-violet-700',
-                          blue: 'border-blue-200 bg-blue-50/60 text-blue-700',
-                          emerald: 'border-emerald-200 bg-emerald-50/70 text-emerald-700'
-                        };
-                        const statusTheme: Record<SistemaStatus, { panel: string; pill: string; accent: string; helper: string }> = {
-                          ideia: { panel: 'bg-slate-50', pill: 'bg-slate-100 text-slate-700', accent: 'bg-slate-500', helper: 'Hipóteses, escopo inicial e definição do que vale perseguir.' },
-                          prototipacao: { panel: 'bg-amber-50', pill: 'bg-amber-100 text-amber-700', accent: 'bg-amber-500', helper: 'Experimentos rápidos, prova de conceito e validação inicial.' },
-                          desenvolvimento: { panel: 'bg-blue-50', pill: 'bg-blue-100 text-blue-700', accent: 'bg-blue-500', helper: 'Construção principal, ajustes técnicos e integração com base RAG.' },
-                          testes: { panel: 'bg-orange-50', pill: 'bg-orange-100 text-orange-700', accent: 'bg-orange-500', helper: 'Validação, correções finais e fechamento de pendências.' },
-                          producao: { panel: 'bg-emerald-50', pill: 'bg-emerald-100 text-emerald-700', accent: 'bg-emerald-500', helper: 'Operação estável, documentação e manutenção evolutiva.' }
-                        };
-                        const currentStatusTheme = statusTheme[sysDetails.status] ?? statusTheme['ideia'];
-                        const summaryItems = [
-                          { label: 'Ativos', value: String(activeWorkItems.length) },
-                          { label: 'Concluídos', value: String(completedWorkItems.length) },
-                          { label: 'Recursos', value: `${resourceItems.filter(item => item.value).length}/4` },
-                          { label: 'Ações', value: String(linkedTasks.length) }
-                        ];
-
-                        return (
-                          <div className="animate-in fade-in duration-300 flex flex-col h-full">
-
-                            <div className="flex-1 bg-white rounded-none overflow-hidden">
-
-                              {/* Status Stepper */}
-                              <div className={`${currentStatusTheme.panel} border-b border-slate-100 p-4 md:p-8 flex flex-col items-center gap-4 md:gap-6`}>
-                                <div className="w-full flex items-center justify-between">
-                                  <div>
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      <h2 className="text-lg md:text-2xl font-black text-slate-900 tracking-tight uppercase">{systemName}</h2>
-                                      <span className={`px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${currentStatusTheme.pill}`}>{stepLabels[sysDetails.status]}</span>
-                                    </div>
-                                    <p className="text-[10px] font-bold text-slate-500 mt-1">{currentStatusTheme.helper}</p>
-                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1.5">{ajustesPendentesCount} demanda{ajustesPendentesCount !== 1 ? 's' : ''} aberta{ajustesPendentesCount !== 1 ? 's' : ''}</p>
-                                  </div>
-                                </div>
-
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 w-full">
-                                  {summaryItems.map(item => (
-                                    <div key={item.label} className="bg-white border border-slate-200 rounded-xl px-3 py-2.5">
-                                      <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">{item.label}</div>
-                                      <div className="text-sm font-black text-slate-800 mt-1 truncate">{item.value}</div>
-                                    </div>
-                                  ))}
-                                </div>
-
-                                <div className="flex flex-wrap items-center justify-center bg-slate-200/50 p-1 rounded-xl md:rounded-2xl gap-1 w-full md:w-auto">
-                                  {steps.map((step, idx) => {
-                                    const isActive = sysDetails.status === step;
-                                    const stepLabels: Record<string, string> = {
-                                      ideia: 'Ideia',
-                                      prototipacao: 'Protótipo',
-                                      desenvolvimento: 'Dev',
-                                      testes: 'Testes',
-                                      producao: 'Produção'
-                                    };
-                                    return (
-                                      <React.Fragment key={step}>
-                                        <button
-                                          onClick={() => handleUpdateSistema(unit.id, { status: step })}
-                                          className={`flex-1 md:flex-none px-2 md:px-4 py-2 rounded-lg md:rounded-xl text-[8px] md:text-[9px] font-black uppercase tracking-widest transition-all ${isActive
-                                            ? `${currentStatusTheme.accent} text-white shadow-lg`
-                                            : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'
-                                            }`}
-                                        >
-                                          {stepLabels[step]}
-                                        </button>
-                                        {idx < steps.length - 1 && (
-                                          <div className="hidden md:flex items-center text-slate-300 px-1">
-                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
-                                          </div>
-                                        )}
-                                      </React.Fragment>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-
-                              <div className="p-0 md:p-6 grid grid-cols-1 lg:grid-cols-[320px,minmax(0,1fr)] gap-0 md:gap-6">
-                                {/* Coluna 2: Links e Recursos (Topo no mobile) */}
-                                <div className="order-1 md:order-1 space-y-0 md:space-y-4">
-                                  <div className="p-4 md:p-0">
-                                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                                      <span className="w-1 h-3 bg-violet-500 rounded-full"></span>
-                                      Recursos
-                                    </h4>
-                                  </div>
-
-                                  <div className="grid grid-cols-1 gap-2 px-4 md:px-0 mb-6 md:mb-0">
-                                    {/* Repositório */}
-                                    <button
-                                      onClick={() => setEditingResource({ field: 'repositorio_principal', label: 'Repositório', value: sysDetails.repositorio_principal || '' })}
-                                      className="group bg-slate-900 p-3 rounded-xl border border-slate-800 hover:border-slate-600 hover:shadow-md transition-all text-left flex items-center justify-between gap-3 relative overflow-hidden min-h-[72px]"
-                                    >
-                                      <div className="absolute top-0 right-0 w-24 h-24 bg-violet-500/10 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
-                                      <div className="relative z-10 flex items-center gap-3 min-w-0">
-                                        <div className="w-9 h-9 bg-white/10 text-white rounded-lg flex items-center justify-center shrink-0">
-                                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" /></svg>
-                                        </div>
-                                        <div className="min-w-0">
-                                          <h5 className="text-[10px] font-black text-white uppercase tracking-widest leading-none">Repo</h5>
-                                          <p className="text-[10px] text-slate-400 mt-1 truncate">{sysDetails.repositorio_principal || 'Nao configurado'}</p>
-                                        </div>
-                                      </div>
-                                      <div className="relative z-10 shrink-0">
-                                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{sysDetails.repositorio_principal ? 'Editar' : 'Configurar'}</span>
-                                      </div>
-                                    </button>
-
-                                    {/* Documentação */}
-                                    <button
-                                      onClick={() => setEditingResource({ field: 'link_documentacao', label: 'Documentação', value: sysDetails.link_documentacao || '' })}
-                                      className="group bg-white p-3 rounded-xl border border-slate-200 hover:border-violet-300 hover:shadow-md transition-all text-left flex items-center justify-between gap-3 relative overflow-hidden min-h-[72px]"
-                                    >
-                                      <div className="absolute top-0 right-0 w-24 h-24 bg-violet-500/5 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
-                                      <div className="relative z-10 flex items-center gap-3 min-w-0">
-                                        <div className="w-9 h-9 bg-violet-100 text-violet-600 rounded-lg flex items-center justify-center shrink-0">
-                                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                                        </div>
-                                        <div className="min-w-0">
-                                          <h5 className="text-[10px] font-black text-slate-900 uppercase tracking-widest leading-none">Docs</h5>
-                                          <p className="text-[10px] text-slate-500 mt-1 truncate">{sysDetails.link_documentacao || 'Sem documentacao'}</p>
-                                        </div>
-                                      </div>
-                                      <div className="relative z-10 shrink-0">
-                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{sysDetails.link_documentacao ? 'Editar' : 'Configurar'}</span>
-                                      </div>
-                                    </button>
-
-                                    {/* AI Studio */}
-                                    <button
-                                      onClick={() => setEditingResource({ field: 'link_google_ai_studio', label: 'AI Studio', value: sysDetails.link_google_ai_studio || '' })}
-                                      className="group bg-white p-3 rounded-xl border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all text-left flex items-center justify-between gap-3 relative overflow-hidden min-h-[72px]"
-                                    >
-                                      <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
-                                      <div className="relative z-10 flex items-center gap-3 min-w-0">
-                                        <div className="w-9 h-9 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center shrink-0">
-                                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                                        </div>
-                                        <div className="min-w-0">
-                                          <h5 className="text-[10px] font-black text-slate-900 uppercase tracking-widest leading-none">AI</h5>
-                                          <p className="text-[10px] text-slate-500 mt-1 truncate">{sysDetails.link_google_ai_studio || 'Sem workspace'}</p>
-                                        </div>
-                                      </div>
-                                      <div className="relative z-10 shrink-0">
-                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{sysDetails.link_google_ai_studio ? 'Editar' : 'Configurar'}</span>
-                                      </div>
-                                    </button>
-
-                                    {/* Link Hospedado */}
-                                    <button
-                                      onClick={() => setEditingResource({ field: 'link_hospedado', label: 'Hospedagem', value: sysDetails.link_hospedado || '' })}
-                                      className="group bg-emerald-50 p-3 rounded-xl border border-emerald-100 hover:border-emerald-300 hover:shadow-md transition-all text-left flex items-center justify-between gap-3 relative overflow-hidden min-h-[72px]"
-                                    >
-                                      <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-500"></div>
-                                      <div className="relative z-10 flex items-center gap-3 min-w-0">
-                                        <div className="w-9 h-9 bg-emerald-100 text-emerald-600 rounded-lg flex items-center justify-center shrink-0">
-                                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
-                                        </div>
-                                        <div className="min-w-0">
-                                          <h5 className="text-[10px] font-black text-emerald-900 uppercase tracking-widest leading-none">App</h5>
-                                          <p className="text-[10px] text-emerald-700/70 mt-1 truncate">{sysDetails.link_hospedado || 'Sem link publico'}</p>
-                                        </div>
-                                      </div>
-                                      <div className="relative z-10 shrink-0">
-                                        <span className="text-[10px] font-bold text-emerald-600/60 uppercase tracking-widest">{sysDetails.link_hospedado ? 'Editar' : 'Configurar'}</span>
-                                      </div>
-                                    </button>
-                                  </div>
-
-                                  {/* Sincronizar RAG do GitHub */}
-                                  {sysDetails.repositorio_principal && (
-                                    <div className="px-4 md:px-0 mt-4 md:mt-6">
-                                      <button
-                                        onClick={() => handleSyncGithubRepo(unit.id, sysDetails.repositorio_principal!)}
-                                        disabled={isSyncingGithub}
-                                        className="w-full flex items-center justify-between gap-3 p-3 md:p-4 rounded-2xl border border-dashed border-violet-300 hover:border-violet-500 hover:bg-violet-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed group"
-                                      >
-                                        <div className="flex items-center gap-3">
-                                          <div className="w-7 h-7 bg-violet-100 text-violet-600 rounded-lg flex items-center justify-center shrink-0">
-                                            {isSyncingGithub ? (
-                                              <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
-                                            ) : (
-                                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                                            )}
-                                          </div>
-                                          <div className="text-left">
-                                            <p className="text-[10px] font-black text-violet-700 uppercase tracking-widest leading-none">
-                                              {isSyncingGithub ? 'Sincronizando...' : 'Sincronizar RAG'}
-                                            </p>
-                                            <p className="text-[9px] text-slate-400 mt-0.5">
-                                              {sysDetails.github_rag_synced_at
-                                                ? `Última sync: ${new Date(sysDetails.github_rag_synced_at).toLocaleDateString('pt-BR')}`
-                                                : 'Nunca sincronizado'}
-                                            </p>
-                                          </div>
-                                        </div>
-                                        <svg className="w-3.5 h-3.5 text-violet-400 group-hover:text-violet-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* Coluna 1: Logs de Trabalho (Abaixo no mobile) */}
-                                <div className="order-2 md:order-2 space-y-0 md:space-y-4">
-                                  <div className="bg-white border-0 md:border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden flex flex-col min-h-[400px] md:min-h-[600px] shadow-none md:shadow-sm">
-                                    {/* Novo Log Input */}
-                                    <div className="p-4 md:p-5 border-b border-slate-100 bg-slate-50">
-                                      <div className="flex flex-col gap-4">
-                                        <div className="flex items-center justify-between gap-4">
-                                          <div className="flex items-center gap-2">
-                                            <div className="p-1.5 bg-violet-600 text-white rounded-lg">
-                                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                            </div>
-                                            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nova Demanda</h4>
-                                          </div>
-                                        </div>
-
-                                        <div className="flex flex-col gap-4">
-                                          <div className="relative">
-                                            <WysiwygEditor
-                                              value={newLogText}
-                                              onChange={setNewLogText}
-                                              placeholder="O que foi feito no sistema?"
-                                              className="bg-white min-h-[110px] pb-10"
-                                            />
-                                            <div className="absolute right-4 top-4 flex flex-col gap-2">
-                                              <button
-                                                onClick={isRecordingLog ? stopLogRecording : startLogRecording}
-                                                disabled={isProcessingLog}
-                                                className={`p-3 rounded-xl transition-all ${isRecordingLog
-                                                  ? 'bg-emerald-600 text-white animate-pulse shadow-lg'
-                                                  : isProcessingLog
-                                                    ? 'bg-violet-100 text-violet-600 cursor-wait'
-                                                    : 'bg-slate-100 text-slate-400 hover:text-violet-600'
-                                                  }`}
-                                                title="Transcrever áudio"
-                                              >
-                                                {isProcessingLog ? (
-                                                  <div className="w-5 h-5 border-2 border-violet-600 border-t-transparent rounded-full animate-spin"></div>
-                                                ) : isRecordingLog ? (
-                                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                                                ) : (
-                                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-                                                )}
-                                              </button>
-                                            </div>
-
-                                            <label className={`absolute left-3 bottom-2 p-2 rounded-xl transition-all ${isUploading ? 'bg-violet-100 animate-pulse pointer-events-none' : 'text-slate-400 hover:text-violet-600 hover:bg-violet-50'} cursor-pointer`}>
-                                              <input
-                                                type="file"
-                                                accept="image/*"
-                                                className="hidden"
-                                                onChange={async (e) => {
-                                                  const file = e.target.files?.[0];
-                                                  if (file) {
-                                                    const item = await handleFileUploadToDrive(file);
-                                                    if (item) setNewLogAttachments(prev => [...prev, item]);
-                                                  }
-                                                }}
-                                              />
-                                              {isUploading ? (
-                                                <div className="w-4 h-4 border-2 border-violet-600 border-t-transparent rounded-full animate-spin"></div>
-                                              ) : (
-                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-                                              )}
-                                            </label>
-                                          </div>
-                                          <div className="flex flex-wrap gap-2">
-                                            {newLogAttachments.map((at, i) => (
-                                              <div key={i} className="relative group/at">
-                                                <img src={at.valor} alt="preview" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
-                                                <button
-                                                  onClick={() => setNewLogAttachments(prev => prev.filter((_, idx) => idx !== i))}
-                                                  className="absolute -top-1 -right-1 bg-rose-500 text-white rounded-full p-0.5 opacity-0 group-hover/at:opacity-100 transition-all z-10"
-                                                >
-                                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-                                                </button>
-                                              </div>
-                                            ))}
-                                          </div>
-                                          <button
-                                            onClick={() => {
-                                              handleCreateWorkItem(unit.id, 'geral', newLogText, newLogAttachments);
-                                              setNewLogText('');
-                                              setNewLogAttachments([]);
-                                            }}
-                                            disabled={!newLogText.trim()}
-                                            className="w-full bg-slate-900 text-white py-3 rounded-none md:rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 disabled:grayscale"
-                                          >
-                                            Registrar
-                                          </button>
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                    <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-white space-y-6 pb-24">
-                                      <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/70">
-                                        <div className="flex items-start justify-between gap-4">
-                                          <div>
-                                            <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Demandas registradas</h5>
-                                            <p className="text-sm font-semibold text-slate-700 mt-2">
-                                              {systemWorkItems.length === 0
-                                                ? 'Nenhuma demanda registrada para este sistema.'
-                                                : `${systemWorkItems.length} demanda(s) registrada(s). ${activeWorkItems.length} ainda aberta(s).`}
-                                            </p>
-                                            <p className="text-[10px] text-slate-500 mt-2">
-                                              {latestWorkItem
-                                                ? `Ultimo registro em ${new Date(latestWorkItem.data_criacao).toLocaleDateString('pt-BR')}.`
-                                                : 'Use o campo acima para guardar ideias, melhorias e ajustes para fazer depois.'}
-                                            </p>
-                                          </div>
-                                          {latestWorkItem && (
-                                            <button
-                                              onClick={() => {
-                                                setEditingWorkItem(latestWorkItem);
-                                                setEditingWorkItemText(latestWorkItem.descricao);
-                                                setEditingWorkItemAttachments(latestWorkItem.pool_dados || []);
-                                              }}
-                                              className="shrink-0 text-[9px] font-black uppercase tracking-widest text-violet-600 hover:text-violet-800"
-                                            >
-                                              Ver ultimo
-                                            </button>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      <div className="space-y-3">
-                                        <div className="flex items-center justify-between gap-4">
-                                          <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-violet-500 pl-3">Acoes vinculadas</h5>
-                                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">{linkedTasks.length} acao{linkedTasks.length !== 1 ? 'es' : ''}</span>
-                                        </div>
-
-                                        {linkedTasks.length > 0 ? (
-                                          <div className="space-y-2">
-                                            {linkedTasks
-                                              .sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime())
-                                              .slice(0, 8)
-                                              .map(task => (
-                                                <button
-                                                  key={task.id}
-                                                  onClick={() => setSelectedTask(task)}
-                                                  className="w-full text-left border border-slate-200 rounded-xl px-4 py-3 bg-white hover:border-violet-300 hover:bg-violet-50/30 transition-all"
-                                                >
-                                                  <div className="flex items-start justify-between gap-3">
-                                                    <div className="min-w-0">
-                                                      <div className="flex items-center gap-2 flex-wrap">
-                                                        <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-wider ${STATUS_COLORS[normalizeStatus(task.status)] || 'bg-slate-100 text-slate-600'}`}>
-                                                          {task.status}
-                                                        </span>
-                                                        {task.base_conhecimento && <span className="text-[8px] font-black uppercase tracking-widest text-violet-600">RAG</span>}
-                                                      </div>
-                                                      <p className="text-sm font-semibold text-slate-800 mt-2 truncate">{task.titulo}</p>
-                                                      <p className="text-[10px] text-slate-500 mt-1 truncate">
-                                                        {task.data_limite ? `Prazo: ${new Date(task.data_limite).toLocaleDateString('pt-BR')}` : 'Sem prazo definido'}
-                                                      </p>
-                                                    </div>
-                                                    <svg className="w-4 h-4 text-slate-300 shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
-                                                  </div>
-                                                </button>
-                                              ))}
-                                          </div>
-                                        ) : (
-                                          <div className="text-center py-12 bg-slate-50/50 rounded-xl border-2 border-dashed border-slate-100">
-                                            <p className="text-slate-300 font-black text-[10px] uppercase tracking-widest italic">Nenhuma acao vinculada</p>
-                                            <p className="text-[10px] text-slate-400 mt-2">Acoes com base RAG deste sistema aparecerao aqui.</p>
-                                          </div>
-                                        )}
-                                      </div>
-
-                                      {/* Listagem de Logs */}
-                                      <div className="hidden">
-                                      {/* Ativos (Não concluídos) */}
-                                      <div className="space-y-3">
-                                        <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-violet-500 pl-3">Logs Ativos</h5>
-                                        {activeWorkItems.sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime()).map(log => (
-                                          <div key={log.id} className="group bg-slate-50 border border-slate-100 rounded-none md:rounded-xl p-4 hover:border-violet-200 hover:bg-white transition-all">
-                                            <div className="flex flex-col md:flex-row items-start justify-between gap-3 md:gap-4">
-                                              <div className="flex-1 space-y-2 w-full">
-                                                <div className="flex items-center gap-3 flex-wrap">
-                                                  <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-wider ${log.tipo === 'desenvolvimento' ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-600'}`}>
-                                                    {log.tipo === 'ajuste' ? 'log' : log.tipo}
-                                                  </span>
-                                                  <span className="text-[8px] font-black text-slate-300 uppercase">{new Date(log.data_criacao).toLocaleDateString('pt-BR')}</span>
-                                                  {log.pool_dados && log.pool_dados.length > 0 && <span className="text-[8px] font-black text-emerald-600 uppercase">{log.pool_dados.length} anexo{log.pool_dados.length !== 1 ? 's' : ''}</span>}
-                                                </div>
-                                                <p className="text-sm font-medium text-slate-700 leading-relaxed break-words">{log.descricao}</p>
-                                                {log.pool_dados && log.pool_dados.length > 0 && (
-                                                  <div className="flex flex-wrap gap-2 mt-2">
-                                                    {log.pool_dados.map((at, i) => (
-                                                      <a key={i} href={at.valor} target="_blank" rel="noopener noreferrer" className="block">
-                                                        <img src={at.valor} alt="preview" className="w-12 h-12 object-cover rounded-lg border border-slate-100 hover:scale-105 transition-transform shadow-sm" />
-                                                      </a>
-                                                    ))}
-                                                  </div>
-                                                )}
-                                              </div>
-                                              <div className="flex gap-1 items-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                                                <button
-                                                  onClick={() => {
-                                                    setEditingWorkItem(log);
-                                                    setEditingWorkItemText(log.descricao);
-                                                    setEditingWorkItemAttachments(log.pool_dados || []);
-                                                  }}
-                                                  className="p-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-all"
-                                                  title="Editar"
-                                                >
-                                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                                </button>
-                                                <button
-                                                  onClick={() => {
-                                                    if (confirmDeleteLogId === log.id) {
-                                                      handleDeleteWorkItem(log.id);
-                                                      setConfirmDeleteLogId(null);
-                                                    } else {
-                                                      setConfirmDeleteLogId(log.id);
-                                                      setTimeout(() => setConfirmDeleteLogId(null), 3000);
-                                                    }
-                                                  }}
-                                                  className={`p-2 rounded-lg transition-colors ${confirmDeleteLogId === log.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'}`}
-                                                  title="Excluir"
-                                                >
-                                                  {confirmDeleteLogId === log.id ? (
-                                                    <svg className="w-4 h-4 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                  ) : (
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                  )}
-                                                </button>
-                                                <button
-                                                  onClick={() => handleUpdateWorkItem(log.id, { concluido: true, data_conclusao: new Date().toISOString() })}
-                                                  className="w-10 h-10 rounded-full border-2 border-slate-200 flex items-center justify-center text-slate-300 hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-50 transition-all group/check ml-2"
-                                                >
-                                                  <svg className="w-5 h-5 opacity-0 group-hover/check:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                </button>
-                                              </div>
-                                            </div>
-                                          </div>
-                                        ))}
-                                        {systemWorkItems.filter(w => !w.concluido).length === 0 && (
-                                          <div className="text-center py-12 bg-slate-50/50 rounded-none md:rounded-3xl border-2 border-dashed border-slate-100">
-                                            <p className="text-slate-300 font-black text-[10px] uppercase tracking-widest italic">Nenhum log ativo</p>
-                                          </div>
-                                        )}
-                                      </div>
-                                      {/* Concluídos */}
-                                      {systemWorkItems.filter(w => w.concluido).length > 0 && (
-                                        <div className="space-y-4 pt-8">
-                                          <button
-                                            onClick={() => setIsCompletedLogsOpen(!isCompletedLogsOpen)}
-                                            className="w-full flex items-center justify-between group cursor-pointer"
-                                          >
-                                            <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-l-4 border-emerald-500 pl-3">Concluídos ({systemWorkItems.filter(w => w.concluido).length})</h5>
-                                            <svg className={`w-4 h-4 text-slate-300 transition-transform ${isCompletedLogsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" /></svg>
-                                          </button>
-
-                                          {isCompletedLogsOpen && (
-                                            <div className="space-y-3 opacity-60 animate-in slide-in-from-top-2 duration-200">
-                                              {systemWorkItems.filter(w => w.concluido).sort((a, b) => new Date(b.data_conclusao!).getTime() - new Date(a.data_conclusao!).getTime()).map(log => (
-                                                <div key={log.id} className="bg-white border border-slate-100 rounded-none md:rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 md:gap-4">
-                                                  <div className="flex-1 flex items-center gap-4 w-full">
-                                                    <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
-                                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                    </div>
-                                                    <p className="text-xs font-medium text-slate-500 line-clamp-1">{log.descricao}</p>
-                                                    {log.pool_dados && log.pool_dados.length > 0 && (
-                                                      <div className="flex flex-wrap gap-1 mt-1">
-                                                        {log.pool_dados.map((at, i) => (
-                                                          <a key={i} href={at.valor} target="_blank" rel="noopener noreferrer" className="block">
-                                                            <img src={at.valor} alt="preview" className="w-8 h-8 object-cover rounded border border-slate-100 opacity-60 hover:opacity-100 transition-opacity" />
-                                                          </a>
-                                                        ))}
-                                                      </div>
-                                                    )}
-                                                  </div>
-                                                  <div className="flex gap-2 items-center">
-                                                    <button
-                                                      onClick={() => {
-                                                        setEditingWorkItem(log);
-                                                        setEditingWorkItemText(log.descricao);
-                                                      }}
-                                                      className="p-1.5 text-slate-300 hover:text-violet-600 rounded-lg transition-all"
-                                                      title="Editar"
-                                                    >
-                                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                                    </button>
-                                                    <button
-                                                      onClick={() => {
-                                                        if (confirmDeleteLogId === log.id) {
-                                                          handleDeleteWorkItem(log.id);
-                                                          setConfirmDeleteLogId(null);
-                                                        } else {
-                                                          setConfirmDeleteLogId(log.id);
-                                                          setTimeout(() => setConfirmDeleteLogId(null), 3000);
-                                                        }
-                                                      }}
-                                                      className={`p-1.5 rounded-lg transition-colors ${confirmDeleteLogId === log.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-300 hover:text-rose-600'}`}
-                                                      title="Excluir"
-                                                    >
-                                                      {confirmDeleteLogId === log.id ? (
-                                                        <svg className="w-3.5 h-3.5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                      ) : (
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                      )}
-                                                    </button>
-                                                    <button
-                                                      onClick={() => handleUpdateWorkItem(log.id, { concluido: false })}
-                                                      className="text-[9px] font-black text-slate-300 hover:text-violet-600 uppercase ml-2"
-                                                    >
-                                                      Reabrir
-                                                    </button>
-                                                  </div>
-                                                </div>
-                                              ))}
-                                            </div>
-                                          )}
-                                        </div>
-                                      )}
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Modal de Edição de Recurso (Link) */}
-                              {editingResource && (
-                                <div className="fixed inset-0 z-[400] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 md:p-8 animate-in zoom-in-95 duration-300">
-                                  <div className="bg-white w-full max-w-lg rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden">
-                                    <div className="p-8 border-b border-slate-100 flex items-center justify-between">
-                                      <h3 className="text-xl font-black text-slate-900 tracking-tight">Editar {editingResource.label}</h3>
-                                      <button onClick={() => setEditingResource(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-                                      </button>
-                                    </div>
-                                    <div className="p-8 space-y-6">
-                                      <div className="space-y-2">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">URL do Recurso</label>
-                                        <input
-                                          type="text"
-                                          value={editingResource.value}
-                                          onChange={(e) => setEditingResource({ ...editingResource, value: e.target.value })}
-                                          placeholder="https://..."
-                                          className="w-full bg-slate-50 border border-slate-200 rounded-none md:rounded-2xl px-6 py-4 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-violet-500 transition-all"
-                                        />
-                                      </div>
-                                      <div className="flex gap-4">
-                                        <button
-                                          onClick={() => setEditingResource(null)}
-                                          className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-none md:rounded-2xl transition-all"
-                                        >
-                                          Cancelar
-                                        </button>
-                                        <button
-                                          onClick={() => {
-                                            handleUpdateSistema(unit.id, { [editingResource.field]: editingResource.value });
-                                            setEditingResource(null);
-                                          }}
-                                          className="flex-1 bg-slate-900 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all"
-                                        >
-                                          Salvar Link
-                                        </button>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Modal de Logs Full-screen */}
-                              {isLogsModalOpen && (
-                                <div className={`fixed inset-0 z-[35] bg-white flex flex-col ${isSidebarRetracted ? 'md:pl-24' : 'md:pl-72'} pt-[60px] md:pt-[72px] animate-in fade-in duration-300`}>
-                                  <div className="bg-white w-full h-full flex flex-col overflow-hidden shadow-2xl">
-                                    <div className="p-6 md:p-10 border-b border-slate-100 flex items-center justify-between bg-white sticky top-0 z-10">
-                                      <div className="flex items-center gap-4">
-                                        <div className="p-3 bg-violet-100 text-violet-600 rounded-none md:rounded-2xl">
-                                          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                        </div>
-                                        <div>
-                                          <h3 className="text-2xl font-black text-slate-900 tracking-tight">Registro de Atividades</h3>
-                                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">{systemName}</p>
-                                        </div>
-                                      </div>
-                                      <button
-                                        onClick={() => setIsLogsModalOpen(false)}
-                                        className="p-3 bg-slate-100 text-slate-500 rounded-full hover:bg-slate-200 transition-all active:scale-95"
-                                      >
-                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-                                      </button>
-                                    </div>
-
-                                    <div className="flex-1 overflow-y-auto p-6 md:p-12 space-y-12">
-                                      <div className="space-y-6">
-                                        <div className="flex items-center justify-between">
-                                          <h5 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] border-l-4 border-violet-500 pl-4">Logs em Aberto</h5>
-                                          <span className="bg-violet-100 text-violet-600 text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest">
-                                            {systemWorkItems.filter(w => !w.concluido).length} Pendentes
-                                          </span>
-                                        </div>
-                                        <div className="grid grid-cols-1 gap-6">
-                                          {systemWorkItems.filter(w => !w.concluido).sort((a, b) => new Date(b.data_criacao).getTime() - new Date(a.data_criacao).getTime()).map(log => (
-                                            <div key={log.id} className="bg-slate-50 border border-slate-100 rounded-none md:rounded-[2.5rem] p-8 md:p-10 hover:shadow-xl hover:bg-white transition-all group relative overflow-hidden">
-                                              {/* Decorative accent */}
-                                              <div className="absolute top-0 left-0 w-1.5 h-full bg-violet-500 opacity-20 group-hover:opacity-100 transition-opacity"></div>
-
-                                              <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-8">
-                                                <div className="flex-1 min-w-0 space-y-4">
-                                                  <div className="flex items-center flex-wrap gap-3">
-                                                    <span className={`text-[9px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest shadow-sm ${log.tipo === 'desenvolvimento' ? 'bg-violet-600 text-white' : 'bg-slate-200 text-slate-700'}`}>
-                                                      {log.tipo === 'ajuste' ? 'log' : log.tipo}
-                                                    </span>
-                                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{new Date(log.data_criacao).toLocaleDateString('pt-BR')}</span>
-                                                  </div>
-
-                                                  <div className="space-y-4">
-                                                    <p className="text-base md:text-xl font-bold text-slate-800 leading-[1.6] tracking-tight">{log.descricao}</p>
-
-                                                    {log.pool_dados && log.pool_dados.length > 0 && (
-                                                      <div className="flex flex-wrap gap-3 mt-6">
-                                                        {log.pool_dados.map((at, i) => (
-                                                          <a key={i} href={at.valor} target="_blank" rel="noopener noreferrer" className="block relative group/preview">
-                                                            <div className="absolute inset-0 bg-violet-600/20 opacity-0 group-hover/preview:opacity-100 rounded-2xl transition-all z-10 flex items-center justify-center">
-                                                              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                                                            </div>
-                                                            <img src={at.valor} alt="preview" className="w-24 h-24 object-cover rounded-2xl border-2 border-white shadow-md hover:scale-105 transition-transform" />
-                                                          </a>
-                                                        ))}
-                                                      </div>
-                                                    )}
-                                                  </div>
-                                                </div>
-
-                                                <div className="flex items-center gap-3 shrink-0 self-end lg:self-start bg-white lg:bg-transparent p-2 lg:p-0 rounded-2xl shadow-sm lg:shadow-none border lg:border-none border-slate-100">
-                                                  <button
-                                                    onClick={() => {
-                                                      setEditingWorkItem(log);
-                                                      setEditingWorkItemText(log.descricao);
-                                                      setEditingWorkItemAttachments(log.pool_dados || []);
-                                                    }}
-                                                    className="p-4 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-2xl transition-all"
-                                                    title="Editar"
-                                                  >
-                                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                                  </button>
-                                                  <button
-                                                    onClick={() => {
-                                                      if (confirmDeleteLogId === log.id) {
-                                                        handleDeleteWorkItem(log.id);
-                                                        setConfirmDeleteLogId(null);
-                                                      } else {
-                                                        setConfirmDeleteLogId(log.id);
-                                                        setTimeout(() => setConfirmDeleteLogId(null), 3000);
-                                                      }
-                                                    }}
-                                                    className={`p-4 rounded-2xl transition-all ${confirmDeleteLogId === log.id ? 'bg-rose-500 text-white shadow-lg shadow-rose-200' : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'}`}
-                                                    title="Excluir"
-                                                  >
-                                                    {confirmDeleteLogId === log.id ? (
-                                                      <svg className="w-6 h-6 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                    ) : (
-                                                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                    )}
-                                                  </button>
-                                                  <button
-                                                    onClick={() => handleUpdateWorkItem(log.id, { concluido: true, data_conclusao: new Date().toISOString() })}
-                                                    className="w-16 h-16 rounded-full bg-white border-2 border-slate-200 flex items-center justify-center text-slate-300 hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-50 transition-all shadow-sm ml-2 group/check"
-                                                  >
-                                                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                  </button>
-                                                </div>
-                                              </div>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-
-                                      {systemWorkItems.filter(w => w.concluido).length > 0 && (
-                                        <div className="space-y-6">
-                                          <button
-                                            onClick={() => setIsModalCompletedLogsOpen(!isModalCompletedLogsOpen)}
-                                            className="w-full flex items-center justify-between group cursor-pointer"
-                                          >
-                                            <h5 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] border-l-4 border-emerald-500 pl-4">Concluídos ({systemWorkItems.filter(w => w.concluido).length})</h5>
-                                            <svg className={`w-5 h-5 text-slate-300 transition-transform ${isModalCompletedLogsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" /></svg>
-                                          </button>
-
-                                          {isModalCompletedLogsOpen && (
-                                            <div className="grid grid-cols-1 gap-4 opacity-80 animate-in slide-in-from-top-4 duration-300">
-                                              {systemWorkItems.filter(w => w.concluido).sort((a, b) => new Date(b.data_conclusao!).getTime() - new Date(a.data_conclusao!).getTime()).map(log => (
-                                                <div key={log.id} className="bg-white border border-slate-100 rounded-none md:rounded-[2rem] p-8 flex flex-col md:flex-row md:items-center justify-between gap-6 hover:shadow-md transition-all">
-                                                  <div className="flex-1 min-w-0 space-y-3">
-                                                    <div className="flex items-center gap-3">
-                                                      <span className="text-[10px] font-black text-emerald-500 bg-emerald-50 px-3 py-1 rounded-full uppercase tracking-widest">Concluído em {new Date(log.data_conclusao!).toLocaleDateString('pt-BR')}</span>
-                                                    </div>
-                                                    <p className="text-base font-bold text-slate-500 leading-relaxed line-clamp-2 hover:line-clamp-none transition-all">{log.descricao}</p>
-                                                    {log.pool_dados && log.pool_dados.length > 0 && (
-                                                      <div className="flex flex-wrap gap-2 mt-3">
-                                                        {log.pool_dados.map((at, i) => (
-                                                          <a key={i} href={at.valor} target="_blank" rel="noopener noreferrer" className="block relative group/preview">
-                                                            <img src={at.valor} alt="preview" className="w-12 h-12 object-cover rounded-xl border border-slate-100 opacity-60 hover:opacity-100 transition-opacity shadow-sm" />
-                                                          </a>
-                                                        ))}
-                                                      </div>
-                                                    )}
-                                                  </div>
-                                                  <div className="flex gap-4 items-center shrink-0">
-                                                    <button
-                                                      onClick={() => {
-                                                        setEditingWorkItem(log);
-                                                        setEditingWorkItemText(log.descricao);
-                                                      }}
-                                                      className="p-3 text-slate-300 hover:text-violet-600 hover:bg-violet-50 rounded-xl transition-all"
-                                                      title="Editar"
-                                                    >
-                                                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                                    </button>
-                                                    <button
-                                                      onClick={() => {
-                                                        if (confirmDeleteLogId === log.id) {
-                                                          handleDeleteWorkItem(log.id);
-                                                          setConfirmDeleteLogId(null);
-                                                        } else {
-                                                          setConfirmDeleteLogId(log.id);
-                                                          setTimeout(() => setConfirmDeleteLogId(null), 3000);
-                                                        }
-                                                      }}
-                                                      className={`p-3 rounded-xl transition-all ${confirmDeleteLogId === log.id ? 'bg-rose-500 text-white shadow-lg' : 'text-slate-300 hover:text-rose-600 hover:bg-rose-50'}`}
-                                                      title="Excluir"
-                                                    >
-                                                      {confirmDeleteLogId === log.id ? (
-                                                        <svg className="w-5 h-5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                      ) : (
-                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                      )}
-                                                    </button>
-                                                    <button
-                                                      onClick={() => handleUpdateWorkItem(log.id, { concluido: false })}
-                                                      className="px-6 py-3 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-violet-600 transition-all shadow-md active:scale-95 ml-2"
-                                                    >
-                                                      Reabrir
-                                                    </button>
-                                                  </div>
-                                                </div>
-                                              ))}
-                                            </div>
-                                          )}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
-                              {/* Modal de Edição de Log */}
-                              {editingWorkItem && (
-                                <div className="fixed inset-0 z-[500] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 md:p-8 animate-in zoom-in-95 duration-300">
-                                  <div className="bg-white w-full max-w-2xl rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden">
-                                    <div className="p-8 border-b border-slate-100 flex items-center justify-between">
-                                      <div className="flex items-center gap-4">
-                                        <div className="p-3 bg-violet-100 text-violet-600 rounded-2xl">
-                                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                                        </div>
-                                        <h3 className="text-xl font-black text-slate-900 tracking-tight">Editar Registro</h3>
-                                      </div>
-                                      <button onClick={() => setEditingWorkItem(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400">
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-                                      </button>
-                                    </div>
-                                    <div className="p-8 space-y-6">
-                                      <div className="space-y-4">
-                                        <div className="space-y-2">
-                                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Descrição</label>
-                                          <WysiwygEditor
-                                            value={editingWorkItemText}
-                                            onChange={setEditingWorkItemText}
-                                            className="bg-slate-50 min-h-[120px]"
-                                          />
-                                        </div>
-
-                                        <div className="space-y-2">
-                                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Anexos (Drive)</label>
-                                          <div className="flex flex-wrap gap-2">
-                                            {editingWorkItemAttachments.map((at, i) => (
-                                              <div key={i} className="relative group/at">
-                                                <img src={at.valor} alt="preview" className="w-20 h-20 object-cover rounded-xl border border-slate-200" />
-                                                <button
-                                                  onClick={() => setEditingWorkItemAttachments(prev => prev.filter((_, idx) => idx !== i))}
-                                                  className="absolute -top-2 -right-2 bg-rose-500 text-white rounded-full p-1 opacity-0 group-hover/at:opacity-100 transition-all z-10 shadow-lg"
-                                                >
-                                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-                                                </button>
-                                              </div>
-                                            ))}
-                                            <label className={`w-20 h-20 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center cursor-pointer hover:border-violet-400 hover:bg-violet-50 transition-all ${isUploading ? 'animate-pulse pointer-events-none' : ''}`}>
-                                              <input
-                                                type="file"
-                                                accept="image/*"
-                                                className="hidden"
-                                                onChange={async (e) => {
-                                                  const file = e.target.files?.[0];
-                                                  if (file) {
-                                                    const item = await handleFileUploadToDrive(file);
-                                                    if (item) setEditingWorkItemAttachments(prev => [...prev, item]);
-                                                  }
-                                                }}
-                                              />
-                                              {isUploading ? (
-                                                <div className="w-5 h-5 border-2 border-violet-600 border-t-transparent rounded-full animate-spin"></div>
-                                              ) : (
-                                                <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-                                              )}
-                                            </label>
-                                          </div>
-                                        </div>
-                                      </div>
-
-                                      <div className="flex gap-4 pt-4">
-                                        <button
-                                          onClick={() => setEditingWorkItem(null)}
-                                          className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-none md:rounded-[1.5rem] transition-all"
-                                        >
-                                          Cancelar
-                                        </button>
-                                        <button
-                                          onClick={() => {
-                                            handleUpdateWorkItem(editingWorkItem.id, {
-                                              descricao: editingWorkItemText,
-                                              tipo: editingWorkItem.tipo,
-                                              pool_dados: editingWorkItemAttachments
-                                            });
-                                            setEditingWorkItem(null);
-                                            setEditingWorkItemAttachments([]);
-                                          }}
-                                          disabled={!editingWorkItemText.trim()}
-                                          className="flex-1 bg-slate-900 text-white py-4 rounded-none md:rounded-[1.5rem] text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50"
-                                        >
-                                          Salvar Alterações
-                                        </button>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })()
-                            )}
-                            </div>
-                          </div>
-                        );
-                      })()
-                    )}
+                    ) : null
+                    }
                   </div>
 
 
@@ -7443,6 +5222,7 @@ const App: React.FC = () => {
                 tarefas={tarefas}
                 appSettings={appSettings}
                 knowledgeBases={knowledgeBases}
+                knowledgeItems={knowledgeItems}
                 onSave={handleUpdateTarefa}
                 onClose={() => setSelectedTask(null)}
                 showToast={showToast}

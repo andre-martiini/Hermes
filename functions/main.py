@@ -13,6 +13,8 @@ import uuid
 import secrets
 import os
 import sys
+import unicodedata
+from urllib.parse import urlparse
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 if CURRENT_DIR not in sys.path:
@@ -47,6 +49,98 @@ MAX_SYNC_PASSES = 3
 def get_genai_module():
     from google import genai
     return genai
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def build_intake_record(
+    *,
+    channel: str,
+    domain_hint: str,
+    processing_status: str = 'linked',
+    request_text: str | None = None,
+    confidentiality: str = 'internal',
+    source_artifact_ids: list[str] | None = None,
+    source_refs: list[dict] | None = None,
+) -> dict:
+    return {
+        'channel': channel,
+        'captured_at': utc_now_iso(),
+        'domain_hint': domain_hint,
+        'confidentiality': confidentiality,
+        'processing_status': processing_status,
+        'request_text': request_text,
+        'source_artifact_ids': source_artifact_ids or [],
+        'source_refs': source_refs or [],
+    }
+
+
+def build_knowledge_artifact_metadata(
+    *,
+    origin_kind: str,
+    artifact_role: str = 'source',
+    source_artifact_id: str | None = None,
+    version: int = 1,
+) -> dict:
+    return {
+        'artifact_role': artifact_role,
+        'artifact_origin_kind': origin_kind,
+        'source_artifact_id': source_artifact_id,
+        'version': version,
+    }
+
+
+def build_versioned_update(existing_item: dict | None, updates: dict) -> dict:
+    existing_item = existing_item or {}
+    significant_fields = [
+        'titulo',
+        'tipo_arquivo',
+        'url_drive',
+        'texto_bruto',
+        'resumo_tldr',
+        'tags',
+        'categoria',
+        'base_id',
+        'parent_id',
+        'origem',
+    ]
+    changed = any(
+        field in updates and existing_item.get(field) != updates.get(field)
+        for field in significant_fields
+    )
+    next_version = updates.get('version')
+    if next_version is None:
+        base_version = existing_item.get('version') or 1
+        next_version = base_version + 1 if changed else base_version
+    payload = {
+        **updates,
+        'data_atualizacao': utc_now_iso(),
+        'version': next_version,
+    }
+    payload.setdefault('last_updated_by', 'system')
+    return payload
+
+
+def write_knowledge_history_snapshot(db, knowledge_id: str, existing_item: dict | None, *, reason: str, actor: str = 'system'):
+    existing_item = existing_item or {}
+    if not existing_item:
+        return
+    version = existing_item.get('version') or 1
+    snapshot_id = f"v{version}_{reason}"
+    db.collection('conhecimento').document(knowledge_id).collection('history').document(snapshot_id).set({
+        'item_id': knowledge_id,
+        'captured_at': utc_now_iso(),
+        'version': version,
+        'reason': reason,
+        'actor': actor,
+        'titulo': existing_item.get('titulo'),
+        'texto_bruto': (existing_item.get('texto_bruto') or '')[:4000],
+        'resumo_tldr': existing_item.get('resumo_tldr'),
+        'tags': existing_item.get('tags') or [],
+        'categoria': existing_item.get('categoria'),
+    })
 
 
 def get_embedding(text: str, api_key: str = None) -> list:
@@ -155,6 +249,571 @@ def get_drive_service():
     from googleapiclient.discovery import build
 
     return build('drive', 'v3', credentials=get_google_creds())
+
+
+def get_system_config_dict(db):
+    config_doc = db.collection('system').document('config').get()
+    return config_doc.to_dict() if config_doc.exists else {}
+
+
+def ensure_drive_folder(service, *, name: str, parent_id: str | None = None) -> dict:
+    query = (
+        "mimeType='application/vnd.google-apps.folder' "
+        f"and name='{name}' and trashed=false"
+    )
+    if parent_id:
+        query += f" and '{parent_id}' in parents"
+    folders = service.files().list(
+        q=query,
+        fields='files(id, name, webViewLink)',
+        pageSize=1,
+    ).execute().get('files', [])
+    if folders:
+        return folders[0]
+
+    metadata = {
+        'name': name,
+        'mimeType': 'application/vnd.google-apps.folder',
+    }
+    if parent_id:
+        metadata['parents'] = [parent_id]
+    return service.files().create(
+        body=metadata,
+        fields='id, name, webViewLink',
+    ).execute()
+
+
+def ensure_raw_drive_structure(db, service) -> dict:
+    config = get_system_config_dict(db)
+    root_folder_id = config.get('googleDriveFolderId')
+    if not root_folder_id:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+            message="googleDriveFolderId não configurado em system/config.",
+        )
+
+    raw_folder = ensure_drive_folder(service, name='raw', parent_id=root_folder_id)
+    processed_folder = ensure_drive_folder(service, name='raw_processed', parent_id=root_folder_id)
+    rejected_folder = ensure_drive_folder(service, name='raw_rejected', parent_id=root_folder_id)
+
+    db.collection('system').document('config').set({
+        'rawDriveFolderId': raw_folder.get('id'),
+        'rawProcessedDriveFolderId': processed_folder.get('id'),
+        'rawRejectedDriveFolderId': rejected_folder.get('id'),
+        'rawDriveUpdatedAt': utc_now_iso(),
+    }, merge=True)
+
+    return {
+        'rootFolderId': root_folder_id,
+        'rawFolderId': raw_folder.get('id'),
+        'processedFolderId': processed_folder.get('id'),
+        'rejectedFolderId': rejected_folder.get('id'),
+    }
+
+
+RAW_MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024
+RAW_ALLOWED_GOOGLE_MIME_TYPES = {
+    'application/vnd.google-apps.document',
+    'application/vnd.google-apps.spreadsheet',
+    'application/vnd.google-apps.presentation',
+}
+RAW_ALLOWED_MIME_PREFIXES = (
+    'text/',
+)
+RAW_ALLOWED_MIME_EXACT = {
+    'application/pdf',
+    'application/json',
+    'application/xml',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+}
+RAW_ALLOWED_EXTENSIONS = {
+    '.pdf', '.docx', '.doc', '.txt', '.md', '.markdown', '.csv', '.json', '.log', '.url', '.webloc'
+}
+RAW_DEFAULT_ALLOWED_SOURCE_KINDS = {'drive_raw'}
+RAW_DEFAULT_ALLOWED_DOMAINS = {
+    'captura_e_conhecimento',
+    'operacoes_administrativas',
+    'sistemas_e_codigo',
+}
+
+
+def move_drive_file(service, file_id: str, *, from_parent_id: str | None, to_parent_id: str) -> None:
+    kwargs = {
+        'fileId': file_id,
+        'addParents': to_parent_id,
+        'fields': 'id, parents',
+    }
+    if from_parent_id:
+        kwargs['removeParents'] = from_parent_id
+    service.files().update(**kwargs).execute()
+
+
+def get_file_extension(filename: str | None) -> str:
+    name = (filename or '').lower()
+    if '.' not in name:
+        return ''
+    return f".{name.rsplit('.', 1)[-1]}"
+
+
+def evaluate_raw_ingestion_policy(*, filename: str, mime_type: str, size_bytes: int) -> dict:
+    extension = get_file_extension(filename)
+    normalized_mime = (mime_type or '').lower()
+
+    if size_bytes > RAW_MAX_FILE_SIZE_BYTES:
+        return {
+            'accepted': False,
+            'reason': 'file_too_large',
+            'details': f'Tamanho {size_bytes} excede o limite de {RAW_MAX_FILE_SIZE_BYTES} bytes.',
+        }
+
+    if normalized_mime in RAW_ALLOWED_GOOGLE_MIME_TYPES:
+        return {
+            'accepted': True,
+            'reason': 'accepted',
+            'details': 'Google Workspace exportável.',
+        }
+
+    if normalized_mime in RAW_ALLOWED_MIME_EXACT:
+        return {
+            'accepted': True,
+            'reason': 'accepted',
+            'details': 'MIME homologado.',
+        }
+
+    if any(normalized_mime.startswith(prefix) for prefix in RAW_ALLOWED_MIME_PREFIXES):
+        return {
+            'accepted': True,
+            'reason': 'accepted',
+            'details': 'Prefixo MIME homologado.',
+        }
+
+    if extension in RAW_ALLOWED_EXTENSIONS:
+        return {
+            'accepted': True,
+            'reason': 'accepted',
+            'details': 'Extensão homologada.',
+        }
+
+    return {
+        'accepted': False,
+        'reason': 'unsupported_type',
+        'details': f'Tipo não homologado: {mime_type or "desconhecido"} ({extension or "sem extensão"}).',
+    }
+
+
+def extract_candidate_url(text: str) -> str | None:
+    if not text:
+        return None
+    matches = re.findall(r'https?://[^\s<>"\']+', text)
+    if not matches:
+        return None
+    candidate = matches[0].strip()
+    parsed = urlparse(candidate)
+    if parsed.scheme in {'http', 'https'} and parsed.netloc:
+        return candidate
+    return None
+
+
+def fetch_and_clean_url_content(url: str) -> str:
+    import requests as req_lib
+    import html
+
+    response = req_lib.get(
+        url,
+        timeout=20,
+        headers={
+            'User-Agent': 'HermesRawIngestion/1.0 (+https://hermes.local)',
+        },
+    )
+    response.raise_for_status()
+    content_type = (response.headers.get('content-type') or '').lower()
+    body = response.text or ''
+
+    if 'html' in content_type or '<html' in body.lower():
+        body = re.sub(r'(?is)<script.*?>.*?</script>', ' ', body)
+        body = re.sub(r'(?is)<style.*?>.*?</style>', ' ', body)
+        body = re.sub(r'(?is)<br\s*/?>', '\n', body)
+        body = re.sub(r'(?is)</p\s*>', '\n\n', body)
+        body = re.sub(r'(?is)<[^>]+>', ' ', body)
+        body = html.unescape(body)
+
+    body = re.sub(r'\s+', ' ', body)
+    return body.strip()
+
+
+def clean_extracted_text(text: str) -> str:
+    cleaned = (text or '').replace('\r\n', '\n').replace('\r', '\n')
+    cleaned = re.sub(r'[ \t]+', ' ', cleaned)
+    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+    return cleaned.strip()
+
+
+def line_looks_like_heading(line: str) -> bool:
+    stripped = line.strip(' :.-')
+    if len(stripped) < 4 or len(stripped) > 90:
+        return False
+    if stripped.isupper():
+        return True
+    if re.match(r'^\d+(\.\d+){0,3}\s+[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ]', stripped):
+        return True
+    words = stripped.split()
+    if 1 <= len(words) <= 10 and stripped[:1].isupper() and stripped.endswith(':'):
+        return True
+    return False
+
+
+def build_logical_markdown(text: str) -> str:
+    lines = [line.strip() for line in clean_extracted_text(text).split('\n')]
+    markdown_lines = []
+
+    for line in lines:
+        if not line:
+            if markdown_lines and markdown_lines[-1] != '':
+                markdown_lines.append('')
+            continue
+
+        if line_looks_like_heading(line):
+            heading = line.strip(' :')
+            level = 2 if re.match(r'^\d+(\.\d+){0,3}\s+', heading) else 1
+            markdown_lines.append(f"{'#' * level} {heading}")
+            continue
+
+        if re.match(r'^[-*•]\s+', line) or re.match(r'^\d+[\).]\s+', line):
+            markdown_lines.append(f"- {re.sub(r'^([-*•]|\d+[\).])\s*', '', line)}")
+            continue
+
+        markdown_lines.append(line)
+
+    markdown = '\n'.join(markdown_lines).strip()
+    markdown = re.sub(r'\n{3,}', '\n\n', markdown)
+    return markdown
+
+
+def get_raw_sipoc_policy(config: dict | None = None) -> dict:
+    config = config or {}
+    allowed_source_kinds = config.get('rawAllowedSourceKinds') or list(RAW_DEFAULT_ALLOWED_SOURCE_KINDS)
+    allowed_domains = config.get('rawAllowedDomains') or list(RAW_DEFAULT_ALLOWED_DOMAINS)
+    return {
+        'suppliers': ['google_drive_raw'],
+        'inputs': ['pdf', 'docx', 'txt', 'md', 'csv', 'json', 'url_shortcut', 'google_workspace_export'],
+        'process': 'extract_clean_classify_link_vectorize',
+        'outputs': ['knowledge_item', 'rejected_item', 'raw_audit_summary'],
+        'customers': ['biblioteca', 'tarefas', 'sistemas', 'pops'],
+        'allowed_source_kinds': allowed_source_kinds,
+        'allowed_domains': allowed_domains,
+    }
+
+
+def evaluate_raw_sipoc_gate(*, source_kind: str, domain_hint: str, config: dict | None = None) -> dict:
+    sipoc = get_raw_sipoc_policy(config)
+    if source_kind not in set(sipoc['allowed_source_kinds']):
+        return {
+            'accepted': False,
+            'reason': 'source_not_homologated',
+            'details': f'Fonte {source_kind} não homologada para a esteira RAW.',
+            'sipoc': sipoc,
+        }
+    if domain_hint not in set(sipoc['allowed_domains']):
+        return {
+            'accepted': False,
+            'reason': 'domain_not_allowed',
+            'details': f'Domínio {domain_hint} fora do escopo permitido para a esteira RAW.',
+            'sipoc': sipoc,
+        }
+    return {
+        'accepted': True,
+        'reason': 'accepted',
+        'details': 'Fonte e domínio homologados.',
+        'sipoc': sipoc,
+    }
+
+
+def extract_text_from_file_bytes(file_bytes: bytes, *, mime_type: str, filename: str) -> str:
+    normalized_name = (filename or '').lower()
+    normalized_mime = (mime_type or '').lower()
+
+    try:
+        if 'pdf' in normalized_mime or normalized_name.endswith('.pdf'):
+            import pdfplumber
+            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                raw_text = "\n\n".join(page.extract_text() or "" for page in pdf.pages).strip()
+                return clean_extracted_text(raw_text)
+
+        if normalized_name.endswith('.docx') or normalized_mime.endswith('wordprocessingml.document'):
+            import zipfile
+            import xml.etree.ElementTree as ET
+
+            with zipfile.ZipFile(io.BytesIO(file_bytes)) as docx_zip:
+                xml_content = docx_zip.read('word/document.xml')
+            root = ET.fromstring(xml_content)
+            namespaces = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+            chunks = []
+            for paragraph in root.findall('.//w:p', namespaces):
+                texts = [node.text for node in paragraph.findall('.//w:t', namespaces) if node.text]
+                if texts:
+                    chunks.append(''.join(texts))
+            return clean_extracted_text('\n'.join(chunks))
+
+        if normalized_mime.startswith('text/') or normalized_name.endswith(('.txt', '.md', '.markdown', '.csv', '.json', '.log')):
+            try:
+                return clean_extracted_text(file_bytes.decode('utf-8'))
+            except UnicodeDecodeError:
+                return clean_extracted_text(file_bytes.decode('latin-1', errors='replace'))
+
+        if normalized_name.endswith(('.url', '.webloc')):
+            try:
+                decoded = file_bytes.decode('utf-8', errors='replace')
+            except Exception:
+                decoded = file_bytes.decode('latin-1', errors='replace')
+            return clean_extracted_text(decoded)
+    except Exception as extraction_error:
+        print(f"Erro ao extrair texto de {filename}: {extraction_error}")
+        return ""
+
+    return ""
+
+
+def classify_raw_document(*, filename: str, mime_type: str, text: str) -> dict:
+    corpus = f"{filename}\n{text[:4000]}".lower()
+
+    technical_terms = ['bug', 'erro', 'stack', 'sistema', 'api', 'frontend', 'backend', 'reposit', 'código', 'codigo']
+    administrative_terms = ['processo', 'sei', 'encaminhamento', 'despacho', 'ofício', 'oficio', 'memorando', 'licitação', 'licitacao']
+    sensitive_terms = ['cpf', 'cnpj', 'paciente', 'laudo', 'endereço', 'endereco', 'telefone']
+
+    if any(term in corpus for term in technical_terms):
+        domain_hint = 'sistemas_e_codigo'
+        categoria = 'Sistemas'
+    elif any(term in corpus for term in administrative_terms):
+        domain_hint = 'operacoes_administrativas'
+        categoria = 'Administrativo'
+    else:
+        domain_hint = 'captura_e_conhecimento'
+        categoria = 'Captura'
+
+    confidentiality = 'restricted' if any(term in corpus for term in sensitive_terms) else 'internal'
+    file_type = 'pdf' if ('pdf' in mime_type.lower() or filename.lower().endswith('.pdf')) else (
+        'docx' if filename.lower().endswith('.docx') else (
+            'markdown' if filename.lower().endswith(('.md', '.markdown')) else 'texto'
+        )
+    )
+
+    return {
+        'domain_hint': domain_hint,
+        'categoria': categoria,
+        'confidentiality': confidentiality,
+        'tipo_arquivo': file_type,
+    }
+
+
+MATCH_STOPWORDS = {
+    'com', 'para', 'uma', 'uns', 'umas', 'que', 'por', 'dos', 'das', 'nos', 'nas', 'sem',
+    'sob', 'entre', 'sobre', 'arquivo', 'documento', 'texto', 'processo', 'sistema',
+    'task', 'tarefa', 'pop', 'procedimento', 'ser', 'sao', 'são', 'the', 'and', 'from',
+}
+
+
+def normalize_match_text(value: str | None) -> str:
+    raw = (value or '').strip().lower()
+    normalized = unicodedata.normalize('NFKD', raw)
+    ascii_text = ''.join(ch for ch in normalized if not unicodedata.combining(ch))
+    ascii_text = re.sub(r'[^a-z0-9]+', ' ', ascii_text)
+    return re.sub(r'\s+', ' ', ascii_text).strip()
+
+
+def tokenize_match_text(value: str | None) -> set[str]:
+    normalized = normalize_match_text(value)
+    return {
+        token for token in normalized.split(' ')
+        if len(token) >= 3 and token not in MATCH_STOPWORDS
+    }
+
+
+def compute_match_score(query_text: str, candidate_text: str, *, bonus_terms: list[str] | None = None) -> float:
+    query_tokens = tokenize_match_text(query_text)
+    candidate_tokens = tokenize_match_text(candidate_text)
+    if not query_tokens or not candidate_tokens:
+        return 0.0
+
+    overlap = query_tokens.intersection(candidate_tokens)
+    base_score = len(overlap) / max(1, len(candidate_tokens))
+
+    normalized_query = normalize_match_text(query_text)
+    normalized_candidate = normalize_match_text(candidate_text)
+
+    if normalized_candidate and normalized_candidate in normalized_query:
+        base_score += 0.35
+
+    if bonus_terms:
+        for term in bonus_terms:
+            normalized_term = normalize_match_text(term)
+            if normalized_term and normalized_term in normalized_query:
+                base_score += 0.08
+
+    return min(base_score, 1.0)
+
+
+def build_raw_document_suggestions(db, *, filename: str, text: str, classification: dict) -> dict:
+    query_text = f"{filename}\n{text[:6000]}"
+    domain_hint = classification.get('domain_hint') or ''
+
+    suggestions = {
+        'system': None,
+        'task': None,
+        'pop': None,
+    }
+
+    best_system = None
+    for snap in db.collection('sistemas').stream():
+        data = snap.to_dict() or {}
+        candidate_text = ' '.join([
+            data.get('nome') or '',
+            data.get('objetivo_negocio') or '',
+            data.get('repositorio_principal') or '',
+        ])
+        score = compute_match_score(query_text, candidate_text)
+        if score >= 0.34 and (best_system is None or score > best_system['score']):
+            best_system = {
+                'id': snap.id,
+                'label': data.get('nome') or snap.id,
+                'score': round(score, 3),
+                'match_basis': 'nome/objetivo/repositorio',
+            }
+    suggestions['system'] = best_system
+
+    best_task = None
+    for snap in db.collection('tarefas').limit(250).stream():
+        data = snap.to_dict() or {}
+        candidate_text = ' '.join([
+            data.get('titulo') or '',
+            data.get('descricao') or '',
+            data.get('categoria') or '',
+            data.get('sistema') or '',
+        ])
+        score = compute_match_score(
+            query_text,
+            candidate_text,
+            bonus_terms=[data.get('sistema') or '', data.get('categoria') or ''],
+        )
+        if best_system and normalize_match_text(data.get('sistema')) == normalize_match_text(best_system['label']):
+            score += 0.15
+        if domain_hint == 'sistemas_e_codigo' and data.get('sistema'):
+            score += 0.05
+        if score >= 0.28 and (best_task is None or score > best_task['score']):
+            best_task = {
+                'id': snap.id,
+                'label': data.get('titulo') or snap.id,
+                'score': round(min(score, 1.0), 3),
+                'match_basis': 'titulo/descricao/categoria',
+            }
+    suggestions['task'] = best_task
+
+    best_pop = None
+    for snap in db.collection('pops').where('status', '==', 'active').stream():
+        data = snap.to_dict() or {}
+        candidate_text = ' '.join([
+            data.get('nome') or '',
+            data.get('descricao') or '',
+            ' '.join(data.get('tags') or []),
+            ' '.join(data.get('gatilhos') or []),
+            ' '.join(data.get('artefatos_gerados') or []),
+        ])
+        score = compute_match_score(
+            query_text,
+            candidate_text,
+            bonus_terms=[data.get('dominio') or '', data.get('subdominio') or ''],
+        )
+        if normalize_match_text(data.get('dominio')) == normalize_match_text(domain_hint):
+            score += 0.2
+        if score >= 0.3 and (best_pop is None or score > best_pop['score']):
+            best_pop = {
+                'id': snap.id,
+                'label': data.get('nome') or snap.id,
+                'score': round(min(score, 1.0), 3),
+                'match_basis': 'nome/descricao/tags/gatilhos',
+            }
+    suggestions['pop'] = best_pop
+
+    return suggestions
+
+
+def slugify_memory_segment(value: str | None, fallback: str = 'geral') -> str:
+    normalized = normalize_match_text(value)
+    return normalized.replace(' ', '_') if normalized else fallback
+
+
+def build_memory_location(*, domain_hint: str, room: str, drawer: str, cabinet: str | None = None) -> dict:
+    wing = 'captura'
+    if domain_hint == 'sistemas_e_codigo':
+        wing = 'sistemas'
+    elif domain_hint == 'operacoes_administrativas':
+        wing = 'operacoes'
+    location = {
+        'wing': slugify_memory_segment(wing),
+        'room': slugify_memory_segment(room, 'biblioteca'),
+        'drawer': slugify_memory_segment(drawer, 'documentos'),
+    }
+    if cabinet:
+        location['cabinet'] = slugify_memory_segment(cabinet, 'corrente')
+    location['path_label'] = ' / '.join([
+        location['wing'],
+        location['room'],
+        location['drawer'],
+        location.get('cabinet', ''),
+    ]).strip(' /')
+    return location
+
+
+def fetch_repo_file_text(*, base_url: str, path: str, headers: dict) -> str:
+    import requests as http_req
+
+    response = http_req.get(f'{base_url}/contents/{path}', headers=headers, timeout=30)
+    if response.status_code != 200:
+        return ''
+    try:
+        payload = response.json()
+        return base64.b64decode(payload.get('content', '')).decode('utf-8', errors='replace')
+    except Exception:
+        return ''
+
+
+def extract_code_semantics(*, path: str, content: str) -> dict:
+    ext = os.path.splitext(path)[1].lower()
+    functions_found = []
+    classes_found = []
+    imports_found = []
+
+    if ext == '.py':
+        functions_found = re.findall(r'^\s*def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(', content, flags=re.MULTILINE)
+        classes_found = re.findall(r'^\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*[\(:]', content, flags=re.MULTILINE)
+        imports_found = re.findall(r'^\s*(?:from\s+([a-zA-Z0-9_\.]+)\s+import|import\s+([a-zA-Z0-9_\.]+))', content, flags=re.MULTILINE)
+        imports_found = [a or b for a, b in imports_found]
+    elif ext in {'.ts', '.tsx', '.js', '.jsx'}:
+        functions_found = re.findall(r'\bfunction\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(', content)
+        functions_found += re.findall(r'\bconst\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(?:async\s*)?\(', content)
+        classes_found = re.findall(r'\bclass\s+([a-zA-Z_][a-zA-Z0-9_]*)\b', content)
+        imports_found = re.findall(r'import\s+.*?\s+from\s+[\'"]([^\'"]+)[\'"]', content)
+
+    functions_found = sorted(set(functions_found))[:25]
+    classes_found = sorted(set(classes_found))[:20]
+    imports_found = sorted(set(imports_found))[:25]
+
+    semantic_lines = [f'ARQUIVO: {path}']
+    if imports_found:
+        semantic_lines.append(f'IMPORTS: {", ".join(imports_found)}')
+    if classes_found:
+        semantic_lines.append(f'CLASSES: {", ".join(classes_found)}')
+    if functions_found:
+        semantic_lines.append(f'FUNCOES: {", ".join(functions_found)}')
+
+    return {
+        'path': path,
+        'extension': ext,
+        'imports': imports_found,
+        'classes': classes_found,
+        'functions': functions_found,
+        'semantic_text': '\n'.join(semantic_lines),
+    }
 
 
 def get_target_calendar_id(db=None):
@@ -1693,6 +2352,23 @@ def scheduled_sync(event: scheduler_fn.ScheduledEvent) -> None:
 
     run_full_sync('scheduled')
 
+
+@scheduler_fn.on_schedule(schedule="every 30 minutes")
+def scheduled_raw_drive_ingestion(event: scheduler_fn.ScheduledEvent) -> None:
+    try:
+        result = _process_raw_drive_cycle(max_files=20)
+        print(
+            "RAW ingestion cycle:",
+            json.dumps({
+                'processed': result.get('processed'),
+                'rejected': result.get('rejected'),
+                'skipped': result.get('skipped'),
+                'total_seen': result.get('total_seen'),
+            })
+        )
+    except Exception as e:
+        print(f"Erro no ciclo agendado de RAW Drive: {e}")
+
 @firestore_fn.on_document_created(document="notificacoes/{notification_id}")
 
 def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]):
@@ -2045,6 +2721,365 @@ def upload_to_drive(req: https_fn.CallableRequest):
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=str(e))
 
 
+@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=120)
+def ensureRawDriveStructure(req: https_fn.CallableRequest):
+    db = get_db()
+    service = get_drive_service()
+    return {
+        'success': True,
+        **ensure_raw_drive_structure(db, service),
+    }
+
+
+def _download_drive_file_content(service, *, file_id: str, mime_type: str) -> bytes:
+    google_doc_export_map = {
+        'application/vnd.google-apps.document': 'text/plain',
+        'application/vnd.google-apps.spreadsheet': 'text/csv',
+        'application/vnd.google-apps.presentation': 'text/plain',
+    }
+    if mime_type in google_doc_export_map:
+        request = service.files().export_media(fileId=file_id, mimeType=google_doc_export_map[mime_type])
+    else:
+        request = service.files().get_media(fileId=file_id)
+    return request.execute()
+
+
+def _process_raw_drive_cycle(*, max_files: int = 20) -> dict:
+    db = get_db()
+    service = get_drive_service()
+    structure = ensure_raw_drive_structure(db, service)
+    config = get_system_config_dict(db)
+
+    files = service.files().list(
+        q=f"'{structure['rawFolderId']}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'",
+        fields='files(id, name, mimeType, webViewLink, size, createdTime)',
+        pageSize=max_files,
+        orderBy='createdTime asc',
+    ).execute().get('files', [])
+
+    processed = 0
+    rejected = 0
+    skipped = 0
+    errors = []
+    matched_samples = []
+    blocked_by_policy = 0
+
+    keys_doc = db.collection('system').document('api_keys').get()
+    api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+
+    for file in files:
+        file_id = file.get('id')
+        filename = file.get('name') or 'arquivo'
+        mime_type = file.get('mimeType') or 'application/octet-stream'
+        web_link = file.get('webViewLink') or ''
+        size_bytes = int(file.get('size') or 0)
+
+        existing = db.collection('conhecimento').where('source_artifact_id', '==', file_id).limit(1).get()
+        if existing:
+            move_drive_file(service, file_id, from_parent_id=structure['rawFolderId'], to_parent_id=structure['processedFolderId'])
+            skipped += 1
+            continue
+
+        try:
+            policy = evaluate_raw_ingestion_policy(
+                filename=filename,
+                mime_type=mime_type,
+                size_bytes=size_bytes,
+            )
+            if not policy['accepted']:
+                db.collection('conhecimento').document(file_id).set({
+                    'id': file_id,
+                    'titulo': filename,
+                    'tipo_arquivo': get_file_extension(filename).lstrip('.') or 'desconhecido',
+                    'url_drive': web_link,
+                    'tamanho': size_bytes,
+                    'data_criacao': utc_now_iso(),
+                    'data_atualizacao': utc_now_iso(),
+                    'origem': {'modulo': 'raw_drive', 'id_origem': file_id},
+                    'categoria': 'Rejeitado',
+                    'parent_id': 'biblioteca',
+                    'memory_location': build_memory_location(
+                        domain_hint='captura_e_conhecimento',
+                        room='raw_rejeitados',
+                        drawer=get_file_extension(filename).lstrip('.') or 'desconhecido',
+                        cabinet='policy',
+                    ),
+                    'intake_record': build_intake_record(
+                        channel='drive_file',
+                        domain_hint='captura_e_conhecimento',
+                        processing_status='error',
+                        request_text=filename,
+                        confidentiality='internal',
+                        source_artifact_ids=[file_id],
+                        source_refs=[{
+                            'kind': 'drive_file',
+                            'id': file_id,
+                            'filename': filename,
+                            'mime_type': mime_type,
+                            'size_bytes': size_bytes,
+                            'url': web_link,
+                        }],
+                    ),
+                    **build_knowledge_artifact_metadata(
+                        origin_kind='file_upload',
+                        source_artifact_id=file_id,
+                    ),
+                    'raw_ingestion': {
+                        'source': 'drive_raw',
+                        'status': 'rejected',
+                        'processed_at': utc_now_iso(),
+                        'raw_folder_id': structure['rawFolderId'],
+                        'rejected_folder_id': structure['rejectedFolderId'],
+                        'policy': policy,
+                    },
+                }, merge=True)
+                move_drive_file(service, file_id, from_parent_id=structure['rawFolderId'], to_parent_id=structure['rejectedFolderId'])
+                rejected += 1
+                blocked_by_policy += 1
+                errors.append(f"{filename}: rejeitado por política ({policy['reason']})")
+                continue
+
+            file_bytes = _download_drive_file_content(service, file_id=file_id, mime_type=mime_type)
+            text_content = extract_text_from_file_bytes(file_bytes, mime_type=mime_type, filename=filename)
+            source_url = extract_candidate_url(text_content)
+            if source_url:
+                try:
+                    cleaned_url_text = fetch_and_clean_url_content(source_url)
+                    if cleaned_url_text:
+                        text_content = f"URL: {source_url}\n\n{cleaned_url_text}"
+                        mime_type = 'text/url'
+                except Exception as url_error:
+                    print(f"Aviso: falha ao expandir URL de {filename}: {url_error}")
+            if not text_content.strip():
+                db.collection('conhecimento').document(file_id).set({
+                    'id': file_id,
+                    'titulo': filename,
+                    'tipo_arquivo': get_file_extension(filename).lstrip('.') or 'desconhecido',
+                    'url_drive': web_link,
+                    'tamanho': size_bytes or len(file_bytes),
+                    'data_criacao': utc_now_iso(),
+                    'data_atualizacao': utc_now_iso(),
+                    'origem': {'modulo': 'raw_drive', 'id_origem': file_id},
+                    'categoria': 'Rejeitado',
+                    'parent_id': 'biblioteca',
+                    'memory_location': build_memory_location(
+                        domain_hint='captura_e_conhecimento',
+                        room='raw_rejeitados',
+                        drawer=get_file_extension(filename).lstrip('.') or 'desconhecido',
+                        cabinet='texto',
+                    ),
+                    'intake_record': build_intake_record(
+                        channel='drive_file',
+                        domain_hint='captura_e_conhecimento',
+                        processing_status='error',
+                        request_text=filename,
+                        confidentiality='internal',
+                        source_artifact_ids=[file_id],
+                        source_refs=[{
+                            'kind': 'drive_file',
+                            'id': file_id,
+                            'filename': filename,
+                            'mime_type': mime_type,
+                            'size_bytes': size_bytes or len(file_bytes),
+                            'url': web_link,
+                        }],
+                    ),
+                    **build_knowledge_artifact_metadata(
+                        origin_kind='file_upload',
+                        source_artifact_id=file_id,
+                    ),
+                    'raw_ingestion': {
+                        'source': 'drive_raw',
+                        'status': 'rejected',
+                        'processed_at': utc_now_iso(),
+                        'raw_folder_id': structure['rawFolderId'],
+                        'rejected_folder_id': structure['rejectedFolderId'],
+                        'policy': policy,
+                        'rejection_reason': 'no_extractable_text',
+                    },
+                }, merge=True)
+                move_drive_file(service, file_id, from_parent_id=structure['rawFolderId'], to_parent_id=structure['rejectedFolderId'])
+                rejected += 1
+                errors.append(f"{filename}: nenhum texto extraído")
+                continue
+
+            classification = classify_raw_document(filename=filename, mime_type=mime_type, text=text_content)
+            sipoc_gate = evaluate_raw_sipoc_gate(
+                source_kind='drive_raw',
+                domain_hint=classification['domain_hint'],
+                config=config,
+            )
+            if not sipoc_gate['accepted']:
+                db.collection('conhecimento').document(file_id).set({
+                    'id': file_id,
+                    'titulo': filename,
+                    'tipo_arquivo': classification['tipo_arquivo'],
+                    'texto_bruto': text_content[:500000],
+                    'texto_markdown': build_logical_markdown(text_content)[:500000],
+                    'url_drive': web_link,
+                    'tamanho': size_bytes or len(file_bytes),
+                    'data_criacao': utc_now_iso(),
+                    'data_atualizacao': utc_now_iso(),
+                    'origem': {'modulo': 'raw_drive', 'id_origem': file_id},
+                    'categoria': 'Rejeitado',
+                    'parent_id': 'biblioteca',
+                    'memory_location': build_memory_location(
+                        domain_hint=classification['domain_hint'],
+                        room='raw_rejeitados',
+                        drawer=classification['tipo_arquivo'],
+                        cabinet='sipoc',
+                    ),
+                    'intake_record': build_intake_record(
+                        channel='drive_file',
+                        domain_hint=classification['domain_hint'],
+                        processing_status='error',
+                        request_text=filename,
+                        confidentiality=classification['confidentiality'],
+                        source_artifact_ids=[file_id],
+                        source_refs=[{
+                            'kind': 'drive_file',
+                            'id': file_id,
+                            'filename': filename,
+                            'mime_type': mime_type,
+                            'size_bytes': size_bytes or len(file_bytes),
+                            'url': web_link,
+                        }],
+                    ),
+                    **build_knowledge_artifact_metadata(
+                        origin_kind='file_upload',
+                        source_artifact_id=file_id,
+                    ),
+                    'raw_ingestion': {
+                        'source': 'drive_raw',
+                        'status': 'rejected',
+                        'processed_at': utc_now_iso(),
+                        'raw_folder_id': structure['rawFolderId'],
+                        'rejected_folder_id': structure['rejectedFolderId'],
+                        'policy': policy,
+                        'classification': classification,
+                        'sipoc_gate': sipoc_gate,
+                        'source_url': source_url,
+                    },
+                }, merge=True)
+                move_drive_file(service, file_id, from_parent_id=structure['rawFolderId'], to_parent_id=structure['rejectedFolderId'])
+                rejected += 1
+                blocked_by_policy += 1
+                errors.append(f"{filename}: rejeitado por SIPOC ({sipoc_gate['reason']})")
+                continue
+
+            suggestions = build_raw_document_suggestions(
+                db,
+                filename=filename,
+                text=text_content,
+                classification=classification,
+            )
+            logical_markdown = build_logical_markdown(text_content)
+            knowledge_payload = {
+                'id': file_id,
+                'titulo': filename,
+                'tipo_arquivo': classification['tipo_arquivo'],
+                'texto_bruto': text_content[:500000],
+                'texto_markdown': logical_markdown[:500000],
+                'url_drive': web_link,
+                'tamanho': size_bytes or len(file_bytes),
+                'data_criacao': utc_now_iso(),
+                'data_atualizacao': utc_now_iso(),
+                'origem': {'modulo': 'raw_drive', 'id_origem': file_id},
+                'categoria': classification['categoria'],
+                'parent_id': 'biblioteca',
+                'memory_location': build_memory_location(
+                    domain_hint=classification['domain_hint'],
+                    room=classification['categoria'],
+                    drawer=classification['tipo_arquivo'],
+                    cabinet='raw_processed',
+                ),
+                'intake_record': build_intake_record(
+                    channel='drive_file',
+                    domain_hint=classification['domain_hint'],
+                    processing_status='prepared',
+                    request_text=filename,
+                    confidentiality=classification['confidentiality'],
+                    source_artifact_ids=[file_id],
+                    source_refs=[
+                        {
+                            'kind': 'drive_file',
+                            'id': file_id,
+                            'filename': filename,
+                            'mime_type': mime_type,
+                            'size_bytes': size_bytes or len(file_bytes),
+                            'url': web_link,
+                        }
+                    ],
+                ),
+                **build_knowledge_artifact_metadata(
+                    origin_kind='file_upload',
+                    source_artifact_id=file_id,
+                ),
+                'raw_ingestion': {
+                    'source': 'drive_raw',
+                    'status': 'processed',
+                    'processed_at': utc_now_iso(),
+                    'raw_folder_id': structure['rawFolderId'],
+                    'processed_folder_id': structure['processedFolderId'],
+                    'policy': policy,
+                    'classification': classification,
+                    'sipoc_gate': sipoc_gate,
+                    'suggested_links': suggestions,
+                    'source_url': source_url,
+                },
+            }
+
+            if api_key:
+                try:
+                    knowledge_payload['embedding'] = get_embedding(text_content, api_key=api_key)
+                    knowledge_payload['intake_record']['processing_status'] = 'vectorized'
+                    knowledge_payload['last_update_reason'] = 'vectorization'
+                    knowledge_payload['last_updated_by'] = 'system'
+                except Exception as embedding_error:
+                    print(f"Aviso: falha ao vetorizar {filename}: {embedding_error}")
+
+            db.collection('conhecimento').document(file_id).set(knowledge_payload, merge=True)
+            move_drive_file(service, file_id, from_parent_id=structure['rawFolderId'], to_parent_id=structure['processedFolderId'])
+            processed += 1
+            if any(suggestions.values()) and len(matched_samples) < 10:
+                matched_samples.append({
+                    'file_id': file_id,
+                    'filename': filename,
+                    'domain_hint': classification['domain_hint'],
+                    'system': suggestions.get('system'),
+                    'task': suggestions.get('task'),
+                    'pop': suggestions.get('pop'),
+                })
+        except Exception as processing_error:
+            print(f"Erro ao processar arquivo RAW {filename}: {processing_error}")
+            try:
+                move_drive_file(service, file_id, from_parent_id=structure['rawFolderId'], to_parent_id=structure['rejectedFolderId'])
+            except Exception as move_error:
+                print(f"Erro ao mover arquivo RAW rejeitado {filename}: {move_error}")
+            rejected += 1
+            errors.append(f"{filename}: {processing_error}")
+
+    return {
+        'success': True,
+        'processed': processed,
+        'rejected': rejected,
+        'skipped': skipped,
+        'total_seen': len(files),
+        'blocked_by_policy': blocked_by_policy,
+        'sipoc': get_raw_sipoc_policy(config),
+        **structure,
+        'errors': errors[:20],
+        'matched_samples': matched_samples,
+    }
+
+
+@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=300)
+def processRawDriveCycle(req: https_fn.CallableRequest):
+    data = req.data or {}
+    max_files = int(data.get('maxFiles') or 20)
+    return _process_raw_drive_cycle(max_files=max(1, min(max_files, 100)))
+
+
 
 @firestore_fn.on_document_written(document="tarefas/{taskId}")
 def on_tarefa_written(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot]]):
@@ -2332,8 +3367,16 @@ def vectorizeKnowledgeItemCallable(req: https_fn.CallableRequest):
         if not GEMINI_API_KEY:
             raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION, message="Chave Gemini não configurada.")
 
+        write_knowledge_history_snapshot(db, knowledge_id, item_data, reason='vectorization')
         embedding_vec = get_embedding(text_content, api_key=GEMINI_API_KEY)
-        doc_ref.update({'embedding': embedding_vec})
+        doc_ref.update(build_versioned_update(
+            item_data,
+            {
+                'embedding': embedding_vec,
+                'intake_record.processing_status': 'vectorized',
+                'last_update_reason': 'vectorization',
+            }
+        ))
         
         return {'success': True, 'message': f'Item {knowledge_id} vetorizado.'}
     except Exception as e:
@@ -2392,8 +3435,18 @@ def extractAndVectorizeRAGItem(req: https_fn.CallableRequest):
     # Trunca para 500.000 chars antes de salvar no Firestore (limite de 1MB por documento)
     texto_bruto = texto_bruto[:500000]
 
+    existing_item = doc_ref.get().to_dict() or {}
+
     # Salva texto no documento existente
-    doc_ref.update({'texto_bruto': texto_bruto})
+    write_knowledge_history_snapshot(db, knowledge_id, existing_item, reason='ocr_extraction')
+    doc_ref.update(build_versioned_update(
+        existing_item,
+        {
+            'texto_bruto': texto_bruto,
+            'intake_record.processing_status': 'prepared',
+            'last_update_reason': 'ocr_extraction',
+        }
+    ))
 
     # Vetoriza
     try:
@@ -2402,8 +3455,16 @@ def extractAndVectorizeRAGItem(req: https_fn.CallableRequest):
         if not api_key:
             return {'success': True, 'vectorized': False, 'message': 'Texto salvo, mas chave Gemini não configurada.'}
 
+        write_knowledge_history_snapshot(db, knowledge_id, doc_ref.get().to_dict() or existing_item, reason='vectorization')
         embedding_vec = get_embedding(texto_bruto, api_key=api_key)
-        doc_ref.update({'embedding': embedding_vec})
+        doc_ref.update(build_versioned_update(
+            doc_ref.get().to_dict() or existing_item,
+            {
+                'embedding': embedding_vec,
+                'intake_record.processing_status': 'vectorized',
+                'last_update_reason': 'vectorization',
+            }
+        ))
         return {'success': True, 'vectorized': True}
     except Exception as e:
         print(f"Erro ao vetorizar RAG item {knowledge_id}: {e}")
@@ -2793,6 +3854,24 @@ def processExtraContextFile(req: https_fn.CallableRequest):
     # Salva no Firestore
     doc_id = str(uuid.uuid4())
     tipo = 'pdf' if is_pdf else 'texto'
+    intake_record = build_intake_record(
+        channel='file_upload',
+        domain_hint='operacoes_administrativas',
+        processing_status='linked',
+        request_text=filename,
+        source_refs=[
+            {
+                'kind': 'extra_context_bucket',
+                'id': extra_context_id,
+            },
+            {
+                'kind': 'uploaded_file',
+                'filename': filename,
+                'mime_type': mime_type,
+                'size_bytes': len(file_bytes),
+            },
+        ],
+    )
     doc_data = {
         'id': doc_id,
         'titulo': filename,
@@ -2801,9 +3880,11 @@ def processExtraContextFile(req: https_fn.CallableRequest):
         'extra_context_id': extra_context_id,
         'base_id': None,
         'tamanho': len(file_bytes),
-        'data_criacao': datetime.now(timezone.utc).isoformat(),
+        'data_criacao': utc_now_iso(),
         'origem': None,
         'parent_id': None,
+        'intake_record': intake_record,
+        **build_knowledge_artifact_metadata(origin_kind='extra_context'),
     }
     db.collection('conhecimento').document(doc_id).set(doc_data)
 
@@ -2817,7 +3898,8 @@ def processExtraContextFile(req: https_fn.CallableRequest):
             if api_key:
                 embedding_vec = get_embedding(texto_bruto, api_key=api_key)
                 db.collection('conhecimento').document(doc_id).update({
-                    'embedding': embedding_vec
+                    'embedding': embedding_vec,
+                    'intake_record.processing_status': 'vectorized',
                 })
                 vectorized = True
         except Exception as e:
@@ -2901,13 +3983,20 @@ def sync_github_repo(req: https_fn.CallableRequest):
 
     # 3. Árvore de arquivos (até 2 níveis de profundidade, máx 120 arquivos)
     file_tree = ""
+    tree_items = []
     tree_resp = http_req.get(f'{base_url}/git/trees/{default_branch}?recursive=1', headers=headers, timeout=30)
     if tree_resp.status_code == 200:
+        tree_items = tree_resp.json().get('tree', [])
         paths = [
-            item['path'] for item in tree_resp.json().get('tree', [])
+            item['path'] for item in tree_items
             if item['type'] == 'blob' and item['path'].count('/') <= 2
         ][:120]
         file_tree = '\n'.join(paths)
+
+    source_paths = [
+        item['path'] for item in tree_items
+        if item.get('type') == 'blob' and os.path.splitext(item.get('path', ''))[1].lower() in {'.py', '.ts', '.tsx', '.js', '.jsx'}
+    ][:15]
 
     # 4. Dependências (primeira correspondência encontrada)
     deps_content = ""
@@ -2969,32 +4058,138 @@ def sync_github_repo(req: https_fn.CallableRequest):
 
     # ─── Cria novos documentos com embeddings ────────────────────
     created_count = 0
+    chunk_doc_ids = {}
     for chunk_type, chunk_text in chunks:
         if not chunk_text.strip():
             continue
         doc_id = str(uuid.uuid4())
+        intake_record = build_intake_record(
+            channel='repository_event',
+            domain_hint='sistemas_e_codigo',
+            processing_status='linked',
+            request_text=f'{sistema_nome}::{chunk_type}',
+            source_refs=[
+                {
+                    'kind': 'repository',
+                    'url': repo_url,
+                    'default_branch': default_branch,
+                    'sistema_id': sistema_id,
+                    'chunk_type': chunk_type,
+                }
+            ],
+        )
         doc_data = {
             'id': doc_id,
             'titulo': f'GitHub: {sistema_nome} [{chunk_type}]',
             'tipo_arquivo': 'texto',
             'texto_bruto': chunk_text,
+            'texto_markdown': build_logical_markdown(chunk_text),
             'base_id': base_id,
             'extra_context_id': None,
             'tamanho': len(chunk_text.encode()),
-            'data_criacao': datetime.now(timezone.utc).isoformat(),
+            'data_criacao': utc_now_iso(),
             'origem': repo_url,
             'parent_id': None,
+            'memory_location': build_memory_location(
+                domain_hint='sistemas_e_codigo',
+                room=sistema_id,
+                drawer=chunk_type,
+                cabinet=base_id,
+            ),
+            'intake_record': intake_record,
+            **build_knowledge_artifact_metadata(origin_kind='repository_sync'),
         }
         db.collection('conhecimento').document(doc_id).set(doc_data)
+        chunk_doc_ids[chunk_type] = doc_id
 
         if gemini_key:
             try:
                 emb = get_embedding(chunk_text[:8000], api_key=gemini_key)
-                db.collection('conhecimento').document(doc_id).update({'embedding': emb})
+                db.collection('conhecimento').document(doc_id).update({
+                    'embedding': emb,
+                    'intake_record.processing_status': 'vectorized',
+                })
             except Exception as e:
                 print(f"Erro embedding chunk {chunk_type}: {e}")
 
         created_count += 1
+
+    semantic_created = 0
+    structure_doc_id = chunk_doc_ids.get('structure_deps') or chunk_doc_ids.get('overview_readme')
+    for source_path in source_paths:
+        file_text = fetch_repo_file_text(base_url=base_url, path=source_path, headers=headers)
+        if not file_text.strip():
+            continue
+
+        semantics = extract_code_semantics(path=source_path, content=file_text)
+        if not semantics['functions'] and not semantics['classes'] and not semantics['imports']:
+            continue
+
+        semantic_doc_id = str(uuid.uuid4())
+        semantic_text = (
+            f"REPOSITÓRIO: {repo_url}\n"
+            f"SISTEMA: {sistema_nome}\n"
+            f"{semantics['semantic_text']}\n\n"
+            f"TRECHO INICIAL:\n{file_text[:5000]}"
+        )
+        semantic_doc = {
+            'id': semantic_doc_id,
+            'titulo': f'GitHub: {sistema_nome} [semantic::{source_path}]',
+            'tipo_arquivo': 'texto',
+            'texto_bruto': semantic_text[:500000],
+            'texto_markdown': build_logical_markdown(semantic_text)[:500000],
+            'base_id': base_id,
+            'extra_context_id': None,
+            'tamanho': len(semantic_text.encode()),
+            'data_criacao': utc_now_iso(),
+            'origem': repo_url,
+            'parent_id': structure_doc_id,
+            'memory_location': build_memory_location(
+                domain_hint='sistemas_e_codigo',
+                room=sistema_id,
+                drawer='codigo_semantico',
+                cabinet=source_path,
+            ),
+            'code_semantics': semantics,
+            'intake_record': build_intake_record(
+                channel='repository_event',
+                domain_hint='sistemas_e_codigo',
+                processing_status='linked',
+                request_text=f'{sistema_nome}::semantic::{source_path}',
+                source_refs=[{
+                    'kind': 'repository',
+                    'url': repo_url,
+                    'default_branch': default_branch,
+                    'sistema_id': sistema_id,
+                    'chunk_type': 'semantic_file',
+                    'label': source_path,
+                }],
+            ),
+            **build_knowledge_artifact_metadata(origin_kind='repository_sync'),
+        }
+        db.collection('conhecimento').document(semantic_doc_id).set(semantic_doc)
+
+        if structure_doc_id:
+            db.collection('knowledge_edges').add({
+                'source_id': semantic_doc_id,
+                'target_id': structure_doc_id,
+                'relation_kind': 'part_of',
+                'notes': f'Arquivo semântico {source_path} componente do espelho do repositório.',
+                'created_at': utc_now_iso(),
+                'created_by': 'system',
+            })
+
+        if gemini_key:
+            try:
+                emb = get_embedding(semantic_text[:8000], api_key=gemini_key)
+                db.collection('conhecimento').document(semantic_doc_id).update({
+                    'embedding': emb,
+                    'intake_record.processing_status': 'vectorized',
+                })
+            except Exception as e:
+                print(f"Erro embedding semantic chunk {source_path}: {e}")
+
+        semantic_created += 1
 
     # ─── Cria/atualiza entrada na knowledge_bases ────────────────
     kb_data = {
@@ -3003,23 +4198,24 @@ def sync_github_repo(req: https_fn.CallableRequest):
         'descricao': f'Contexto extraído automaticamente do repositório {repo_url}',
         'tipo': 'github',
         'sistema_id': sistema_id,
-        'data_atualizacao': datetime.now(timezone.utc).isoformat(),
+        'data_atualizacao': utc_now_iso(),
     }
     kb_ref = db.collection('knowledge_bases').document(base_id)
     if not kb_ref.get().exists:
-        kb_data['data_criacao'] = datetime.now(timezone.utc).isoformat()
+        kb_data['data_criacao'] = utc_now_iso()
     kb_ref.set(kb_data, merge=True)
 
     # ─── Atualiza sistema com data de sincronização ───────────────
     db.collection('sistemas_detalhes').document(sistema_id).set({
-        'github_rag_synced_at': datetime.now(timezone.utc).isoformat(),
-        'data_atualizacao': datetime.now(timezone.utc).isoformat(),
+        'github_rag_synced_at': utc_now_iso(),
+        'data_atualizacao': utc_now_iso(),
     }, merge=True)
 
     return {
         'success': True,
         'base_id': base_id,
         'chunks_created': created_count,
+        'semantic_chunks_created': semantic_created,
         'repo_name': sistema_nome,
     }
 
@@ -3097,6 +4293,7 @@ def transcreverAudio(req: https_fn.CallableRequest):
     audio_base64 = data.get('audioBase64')
 
     extension = data.get('extension', '.m4a')
+    source_ref = data.get('sourceRef') if isinstance(data.get('sourceRef'), dict) else None
 
 
 
@@ -3182,7 +4379,27 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
 
 
-        return {"raw": texto_bruto, "refined": texto_refinado}
+        intake_record = build_intake_record(
+            channel='audio_upload',
+            domain_hint='captura_e_conhecimento',
+            processing_status='transcribed',
+            request_text=texto_refinado or texto_bruto,
+            source_refs=[
+                {
+                    'kind': 'audio_upload',
+                    'extension': extension,
+                    'size_bytes': len(audio_data),
+                },
+                *([source_ref] if source_ref else []),
+            ],
+        )
+
+        return {
+            "raw": texto_bruto,
+            "refined": texto_refinado,
+            "intake_record": intake_record,
+            **build_knowledge_artifact_metadata(origin_kind='audio_transcription'),
+        }
 
     except Exception as e:
 
@@ -4810,14 +6027,38 @@ def salvarTranscricaoReuniao(req: https_fn.CallableRequest):
             'id': file_id,
             'titulo': file_name,
             'tipo_arquivo': 'txt',
+            'texto_bruto': content,
             'url_drive': web_link,
             'tamanho': int(uploaded.get('size') or len(payload)),
-            'data_criacao': datetime.now().isoformat(),
+            'data_criacao': utc_now_iso(),
             'origem': {'modulo': 'reunioes', 'id_origem': started_dt.isoformat()},
             'categoria': 'Reuniões',
             'parent_id': 'biblioteca',
             'meeting_started_at': started_dt.isoformat(),
-            'meeting_ended_at': ended_dt.isoformat()
+            'meeting_ended_at': ended_dt.isoformat(),
+            'intake_record': build_intake_record(
+                channel='meeting_transcript',
+                domain_hint='operacoes_administrativas',
+                processing_status='linked',
+                request_text=content,
+                source_artifact_ids=[file_id],
+                source_refs=[
+                    {
+                        'kind': 'meeting_window',
+                        'started_at': started_dt.isoformat(),
+                        'ended_at': ended_dt.isoformat(),
+                    },
+                    {
+                        'kind': 'drive_file',
+                        'id': file_id,
+                        'url': web_link,
+                    },
+                ],
+            ),
+            **build_knowledge_artifact_metadata(
+                origin_kind='meeting_transcription',
+                source_artifact_id=file_id,
+            )
         }, merge=True)
 
         return {
@@ -4926,3 +6167,5 @@ def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
         error_msg = traceback.format_exc()
         print(f"Erro em analisarPadroesCategoriaIA: {error_msg}")
         return {"success": False, "error": str(e), "traceback": error_msg}
+
+from webhooks import n8n_callback_handler
