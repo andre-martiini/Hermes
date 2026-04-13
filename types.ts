@@ -76,6 +76,10 @@ export interface Tarefa {
     reuniao_vinculada_id?: string;
     knowledge_item_ids?: string[];
     extra_context_id?: string;
+    // Knowledge Graph fields
+    concept_node_id?: string | null;     // Preenchido na Fase 2 (cristalização)
+    kg_tags?: string[];                  // Tags geradas pela Fase 1 (Retrieval-First)
+    kg_crystallized?: boolean;           // true após a Fase 2 ser concluída
 }
 
 export interface AtividadeRealizada {
@@ -694,6 +698,29 @@ export interface ParcelaServico {
     data_prevista: string;
     status: 'pendente' | 'pago';
 }
+
+// ─── Knowledge Graph ──────────────────────────────────────────────────────────
+
+export interface KnowledgeNode {
+    id: string;
+    titulo: string;
+    area_tematica: string;
+    embedding: number[];
+    n_tasks: number;              // contador para média vetorial incremental
+    task_ids: string[];           // IDs das tarefas cristalizadas neste nó
+    resumo?: string;              // Último resumo consolidado gerado pela IA
+    data_criacao: string;
+    data_atualizacao: string;
+}
+
+export interface KnowledgeEdge {
+    task_id: string;
+    node_id: string;
+    peso_semantico: number;       // 0.0 – 1.0
+    data_conclusao: string;       // ISO date — marco zero para time decay
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export interface Servico {
     id: string;

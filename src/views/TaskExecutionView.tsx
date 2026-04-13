@@ -149,6 +149,9 @@ export const TaskExecutionView = ({
   const [isGeneratingTags, setIsGeneratingTags] = useState(false);
   const existingTags = useMemo(() => Array.from(new Set(tarefas.flatMap(t => t.tags || []))), [tarefas]);
 
+  // Knowledge Graph citations: msgIndex → lista de nós do grafo retornados pelo backend
+  const [kgNodesByMsg, setKgNodesByMsg] = useState<Record<number, Array<{ node_id: string; titulo: string; resumo?: string; n_tasks?: number }>>>({});
+
   // Knowledge panel
   const [showKnowledgePanel, setShowKnowledgePanel] = useState(false);
   const [sessionExtraFiles, setSessionExtraFiles] = useState<{ id: string; name: string; status: 'uploading' | 'ready' | 'error' }[]>([]);
@@ -495,9 +498,12 @@ export const TaskExecutionView = ({
         ragContext: currentTaskData.base_conhecimento,
         extraContextId: currentTaskData.extra_context_id,
         knowledgeItemIds: currentTaskData.knowledge_item_ids || [],
+        kgTags: currentTaskData.kg_tags || [],
       });
 
-      let result = (res.data as any).result || '';
+      const resData = res.data as any;
+      let result = resData.result || '';
+      const kgNodes: Array<{ node_id: string; titulo: string; resumo?: string; n_tasks?: number }> = resData.kg_nodes || [];
       let proposedPlan: ActionPlanItem[] | undefined = undefined;
 
       // Detect proposal
@@ -516,6 +522,12 @@ export const TaskExecutionView = ({
         content: asArtifact ? '📄 Artefato gerado e salvo no painel de Artefatos.' + (proposedPlan ? '\n\nO copiloto também sugeriu uma atualização no plano de ação.' : '') : result,
         ...(proposedPlan ? { proposedPlan } : {})
       };
+
+      // Salva os nós do grafo indexados pela posição desta mensagem assistente
+      if (kgNodes.length > 0) {
+        const assistantMsgIndex = historyWithUser.length; // índice após user msg
+        setKgNodesByMsg(prev => ({ ...prev, [assistantMsgIndex]: kgNodes }));
+      }
 
       if (asArtifact) {
         const artifact: Artifact = {
@@ -691,6 +703,22 @@ export const TaskExecutionView = ({
   const handleStatusChange = (status: string) => {
     onSave(task.id, { status: status as any });
     showToast('Status atualizado!', 'success');
+  };
+
+  // ─── Citation renderer ────────────────────────────────────────
+  // Substitui [N] no texto da IA por badges clicáveis com tooltip mostrando
+  // o título e resumo do Nó Conceitual correspondente no Grafo de Conhecimento.
+  const renderWithCitations = (text: string, msgIndex: number) => {
+    const nodes = kgNodesByMsg[msgIndex];
+    if (!nodes || nodes.length === 0) return text;
+
+    return text.replace(/\[(\d+)\]/g, (match, numStr) => {
+      const idx = parseInt(numStr, 10) - 1;
+      const node = nodes[idx];
+      if (!node) return match;
+      // Retorna um marcador especial que o ReactMarkdown vai renderizar via componente customizado
+      return `[${numStr}](kg-cite:${encodeURIComponent(JSON.stringify({ titulo: node.titulo, resumo: node.resumo || '', n_tasks: node.n_tasks || 0, node_id: node.node_id }))})`;
+    });
   };
 
   // ─── Theme classes ────────────────────────────────────────────
@@ -1300,11 +1328,36 @@ export const TaskExecutionView = ({
                         ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-2" {...props} />,
                         ol: ({ node, ...props }) => <ol className="list-decimal ml-4 mb-2" {...props} />,
                         li: ({ node, ...props }) => <li className="mb-0.5" {...props} />,
-                        a: ({ node, ...props }) => <a className="text-blue-400 underline hover:text-blue-300" target="_blank" rel="noopener noreferrer" {...props} />,
                         strong: ({ node, ...props }) => <strong className="font-bold text-emerald-400" {...props} />,
+                        a: ({ node, href, children, ...props }) => {
+                          if (href && href.startsWith('kg-cite:')) {
+                            try {
+                              const meta = JSON.parse(decodeURIComponent(href.replace('kg-cite:', '')));
+                              return (
+                                <span className="relative group inline-block">
+                                  <span className="inline-flex items-center justify-center w-4 h-4 text-[9px] font-black rounded bg-violet-500/20 text-violet-400 border border-violet-500/30 cursor-default ml-0.5 align-middle">
+                                    {children}
+                                  </span>
+                                  {/* Tooltip */}
+                                  <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 hidden group-hover:block w-56 pointer-events-none">
+                                    <span className={`block text-[10px] font-medium leading-snug p-2.5 rounded-xl shadow-xl border ${isDark ? 'bg-[#1a1a2e] border-violet-500/30 text-white/80' : 'bg-white border-violet-200 text-slate-700'}`}>
+                                      <span className="block font-black text-violet-400 mb-0.5 truncate">{meta.titulo}</span>
+                                      {meta.resumo && <span className="block text-[9px] opacity-70 line-clamp-3">{meta.resumo}</span>}
+                                      <span className="block text-[9px] mt-1 opacity-50">{meta.n_tasks} tarefa(s) · Grafo de Conhecimento</span>
+                                    </span>
+                                    <span className={`block w-2 h-2 mx-auto -mt-1 rotate-45 border-r border-b ${isDark ? 'bg-[#1a1a2e] border-violet-500/30' : 'bg-white border-violet-200'}`} />
+                                  </span>
+                                </span>
+                              );
+                            } catch {
+                              return <>{children}</>;
+                            }
+                          }
+                          return <a className="text-blue-400 underline hover:text-blue-300" href={href} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>;
+                        },
                       }}
                     >
-                      {msg.content}
+                      {msg.role === 'assistant' ? renderWithCitations(msg.content, i) : msg.content}
                     </ReactMarkdown>
 
                     {msg.proposedPlan && (

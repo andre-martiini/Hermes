@@ -31,6 +31,15 @@ from security_portals import (
     submitPublicScholarshipRegistration,
 )
 
+# Grafo de Conhecimento — importa as Cloud Functions e o helper de RAG
+from knowledge_graph import (  # noqa: F401 — registra as Cloud Functions
+    on_tarefa_created_kg,
+    on_tarefa_concluida_kg,
+    buscar_procedimento,
+    crystallize_task_manual,
+    extract_kg_rag_context,
+)
+
 
 # Inicializa o Firebase Admin apenas uma vez no escopo global
 try:
@@ -4543,6 +4552,7 @@ def transcrever_audio(req: https_fn.CallableRequest):
 def askTaskAssistant(req: https_fn.CallableRequest):
     """
     Responde perguntas sobre o contexto de uma tarefa específica baseando-se no diário de bordo.
+    Injeta contexto do Grafo de Conhecimento (RAG Dinâmica) com citações inline [N].
     """
     from google import genai
 
@@ -4553,6 +4563,7 @@ def askTaskAssistant(req: https_fn.CallableRequest):
     rag_context_id = data.get('ragContext')
     extra_context_id = data.get('extraContextId')
     knowledge_item_ids = data.get('knowledgeItemIds', [])
+    kg_tags = data.get('kgTags', [])  # tags kg da tarefa atual para scoring do grafo
 
     if not isinstance(prompt, str) or not prompt.strip():
         raise https_fn.HttpsError(
@@ -4607,12 +4618,28 @@ def askTaskAssistant(req: https_fn.CallableRequest):
             except Exception as e:
                 print(f"Erro ao recuperar contexto extra: {e}")
 
+        # --- GRAFO DE CONHECIMENTO (RAG Dinâmica) ---
+        kg_context = ""
+        kg_nodes_payload = []
+        if area_tematica:
+            try:
+                kg_nodes_payload, kg_context = extract_kg_rag_context(
+                    db=db,
+                    api_key=gemini_key,
+                    area_tematica=area_tematica,
+                    tags=kg_tags,
+                )
+            except Exception as e:
+                print(f"Erro ao extrair contexto do grafo de conhecimento: {e}")
+
         system_instruction = (
             "Você é o HERMES, copiloto de execução de tarefas do André. "
             "Você tem acesso a: (1) o contexto completo da ação (título, descrição, plano e diário), "
             "(2) bases de conhecimento RAG personalizadas, "
             "(3) documentos extras carregados para esta ação, "
-            "(4) manuais de procedimento padrão. "
+            "(4) manuais de procedimento padrão, "
+            "(5) contexto operacional do Grafo de Conhecimento com procedimentos passados. "
+            "Ao usar informações do Grafo de Conhecimento, cite a fonte com marcadores [1], [2], etc. "
             "Seja executivo, preciso e profissional (pt-BR). "
             "Quando gerar documentos longos (atas, ofícios, pareceres), produza o conteúdo completo e formatado."
         )
@@ -4630,17 +4657,22 @@ def askTaskAssistant(req: https_fn.CallableRequest):
         === MANUAL DE PROCEDIMENTOS ===
         {manual_context if manual_context else 'Nenhum guia mestre para esta area_tematica.'}
 
+        {kg_context if kg_context else ''}
+
         === COMANDO DO USUÁRIO ===
         {prompt}
         """
 
-        response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=[system_instruction, full_prompt])
+        response = client.models.generate_content(model="gemini-2.0-flash", contents=[system_instruction, full_prompt])
 
         result = (response.text or "").strip()
         if not result:
             result = "Não consegui gerar uma resposta. Tente reformular o comando."
 
-        return {"result": result}
+        return {
+            "result": result,
+            "kg_nodes": kg_nodes_payload,  # enviado ao frontend para montar tooltips
+        }
 
     except Exception as e:
         print(f"Erro em askTaskAssistant: {e}")
