@@ -13,6 +13,7 @@ import { httpsCallable } from 'firebase/functions';
 import { setDoc, doc } from 'firebase/firestore';
 import { DiarioBordoUI } from './DiarioBordoUI';
 import { SpeedDialMenu } from '../components/ui/SpeedDialMenu';
+import { KnowledgeChatModal } from '../components/ui/KnowledgeChatModal';
 
 const getPendingFileKey = (file: File) => `${file.name}-${file.size}-${file.lastModified}`;
 
@@ -97,6 +98,7 @@ export const TaskExecutionView = ({
   const [showArtifacts, setShowArtifacts] = useState(false);
   const [copiedArtifactId, setCopiedArtifactId] = useState<string | null>(null);
   const [isChatFocused, setIsChatFocused] = useState(false);
+  const [isIntelligenceOpen, setIsIntelligenceOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1448,10 +1450,17 @@ export const TaskExecutionView = ({
           onOpenNotes={onOpenNotes} onOpenLog={onOpenLog} onOpenShopping={onOpenShopping}
           onOpenTranscription={onOpenTranscription} onOpenMeetingTranscription={onOpenMeetingTranscription}
           onToggleNotifications={onToggleNotifications} onSync={onSync} onOpenSettings={onOpenSettings}
+          onOpenIntelligence={() => setIsIntelligenceOpen(true)}
           onCloseNotifications={onCloseNotifications} onMarkAsRead={onMarkAsRead} onDismiss={onDismiss}
           onCreateAction={onCreateAction} direction="up"
         />
       </div>
+
+      <KnowledgeChatModal 
+        isOpen={isIntelligenceOpen} 
+        onClose={() => setIsIntelligenceOpen(false)} 
+        isDark={isDark} 
+      />
 
       {/* ══════════════════════════════════════════════════════════
           MODAL SYSTEM (link / contact / edit / delete / upload / reminder)

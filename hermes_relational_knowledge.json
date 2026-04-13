@@ -1,0 +1,76 @@
+[
+  {
+    "id": "item_wiki_captura_thread_by_@karpathy",
+    "display": {
+      "title": "Base de Conhecimento: Metodologia de Bases de Conhecimento via LLM",
+      "tldr": "O texto resume a abordagem de Andrej Karpathy para construir bases de conhecimento com LLMs, usando uma pasta raw, uma wiki compilada em Markdown, health checks e retroalimentacao das respostas na propria base."
+    },
+    "technical": {
+      "type": "web_article",
+      "tags": [
+        "ia",
+        "wiki",
+        "automacao",
+        "software"
+      ],
+      "project": "Geral",
+      "confidence_weight": 0.7,
+      "created_at": "2026-04-07",
+      "original_wiki_file": "Wiki_Captura Thread by @karpathy.md"
+    },
+    "content": {
+      "summary": "O material descreve uma arquitetura pratica em que fontes heterogeneas sao armazenadas em uma pasta `raw/`, transformadas por um LLM em uma wiki Markdown interconectada e depois consultadas por agentes. O fluxo enfatiza manutencao automatizada, saidas em Markdown e o reaproveitamento das respostas para enriquecer continuamente a base.",
+      "details": "### Paradigma da wiki gerada por IA\nKarpathy descreve uma mudanca de foco: menos manipulacao direta de codigo e mais manipulacao de conhecimento. O LLM passa a compilar, resumir, categorizar e conectar informacoes em artigos Markdown.",
+      "raw_sources_ref": "- Origem migrada de `Wiki_Captura Thread by @karpathy.md`.\n- Fonte original: https://x.com/karpathy/status/2039805659525644595"
+    },
+    "graph": {
+      "explicit_links": [
+        "Gestao do Conhecimento",
+        "Obsidian",
+        "LLMs",
+        "Automacao de Processos",
+        "Sistemas de Gestao",
+        "Andrej Karpathy"
+      ],
+      "semantic_cluster": "Geral"
+    }
+  },
+  {
+    "id": "item_wiki_certificado_inpi_mago",
+    "display": {
+      "title": "Mago (Software)",
+      "tldr": "Mago e um software registrado no INPI pelo IFES para monitoramento de acoes de governanca institucional, com registro formal, autores identificados e classificacao como ferramenta de gestao administrativa."
+    },
+    "technical": {
+      "type": "legal_doc",
+      "tags": [
+        "gestao_publica",
+        "software",
+        "propriedade_intelectual",
+        "governanca"
+      ],
+      "project": "MAGO",
+      "confidence_weight": 0.7,
+      "created_at": "2026-04-07",
+      "original_wiki_file": "Wiki_certificado_INPI_Mago.md"
+    },
+    "content": {
+      "summary": "O verbete descreve o registro formal do software Mago junto ao INPI, com foco em sua titularidade, autores, finalidade institucional e classificacao como ferramenta de gestao e controle administrativo.",
+      "details": "### Dados do registro\n- Numero do processo: BR512024001217-6\n- Data de criacao: 10/07/2020\n- Data de publicacao: 10/07/2020\n- Data de expedicao do certificado: 24/04/2024\n- Orgao responsavel: [[Diretoria de Patentes, Programas de Computador e Topografias de Circuitos]]\n- Validade: 50 anos, conforme a [[Lei de Software]] (Lei nº 9.609/1998)",
+      "raw_sources_ref": "- Origem migrada de `Wiki_certificado_INPI_Mago.md`.\n- Base local relacionada: `00_Raw/certificado_INPI_Mago.pdf`"
+    },
+    "graph": {
+      "explicit_links": [
+        "Instituto Federal de Educacao, Ciencia e Tecnologia do Espirito Santo",
+        "Governanca Publica",
+        "Lei de Software",
+        "Direito Autoral",
+        "Instituto Nacional da Propriedade Industrial",
+        "SHA-512",
+        "Diretoria de Patentes, Programas de Computador e Topografias de Circuitos",
+        "Instituto Federal do Espirito Santo"
+      ],
+      "semantic_cluster": "MAGO"
+    }
+  }
+]

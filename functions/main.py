@@ -4926,3 +4926,144 @@ def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
         error_msg = traceback.format_exc()
         print(f"Erro em analisarPadroesCategoriaIA: {error_msg}")
         return {"success": False, "error": str(e), "traceback": error_msg}
+
+@https_fn.on_call(
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=300
+)
+def askHermesIntelligence(req: https_fn.CallableRequest):
+    """
+    RAG Chatbot: Responde perguntas baseadas no índice mestre e nos arquivos JSON de conhecimento.
+    """
+    from google import genai
+    import json
+    import os
+    import re
+
+    prompt_user = req.data.get('prompt') if req.data else None
+    history = req.data.get('history', [])
+    if not prompt_user:
+        return {"result": "Desculpe, não recebi sua pergunta."}
+
+    try:
+        current_dir = os.path.dirname(__file__)
+        db = firestore.client()
+        keys_doc = db.collection('system').document('api_keys').get()
+        gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+        
+        if not gemini_key:
+            return {"result": "Erro: Chave Gemini não configurada em system/api_keys."}
+
+        client = genai.Client(api_key=gemini_key)
+
+        # 1. Carregar Master Index
+        master_index_path = os.path.join(current_dir, "00_HERMES_MASTER_INDEX.json")
+        index_data = []
+        graph_insights = {}
+        if os.path.exists(master_index_path):
+            with open(master_index_path, 'r', encoding='utf-8') as f:
+                raw_data = json.load(f)
+                if isinstance(raw_data, dict):
+                    index_data = raw_data.get('items', [])
+                    graph_insights = raw_data.get('graph_insights', {})
+                else:
+                    index_data = raw_data
+
+        # 2. IA para selecionar documentos relevantes (RAG)
+        # Resumo do índice para a IA
+        index_summ = ""
+        for item in index_data:
+             tags_str = ", ".join(item.get('tags', []))
+             cat_str = item.get('category', 'GERAL')
+             index_summ += f"- {item.get('title', item.get('titulo', 'Sem Título'))} (ID: {item['id']}, Tipo: {item.get('type', 'item')}, Cat: {cat_str}, Tags: [{tags_str}])\n"
+
+        if not index_summ:
+            print("Aviso: Master Index carregado está vazio ou mal formatado.")
+            index_summ = "Nenhum documento disponível no momento."
+
+        history_text = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in history[-5:]]) if history else "Nenhum histórico."
+        
+        god_nodes_str = "Não calculado"
+        if graph_insights.get("god_nodes"):
+            god_nodes_str = ", ".join([f"{gn['label']}({gn['degree']})" for gn in graph_insights["god_nodes"]])
+
+        selection_prompt = f"""
+        Baseado na pergunta atual do usuário e no histórico da conversa, identifique até 5 documentos no Índice Mestre abaixo que contenham o contexto necessário.
+        Você também tem acesso aos "God Nodes" (os conceitos mais centrais e influentes de toda a base de dados). Use isso para entender a topologia relacional.
+        Retorne APENAS os IDs dos documentos separados por vírgula. Se não houver nada relevante, retorne "NONE".
+        
+        HISTÓRICO DA CONVERSA:
+        {history_text}
+        
+        PERGUNTA ATUAL: "{prompt_user}"
+        
+        GOD NODES (Centralidade de Grafo): {god_nodes_str}
+        
+        ÍNDICE MESTRE:
+        {index_summ}
+        """
+
+        sel_response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=selection_prompt)
+        relevant_ids_text = sel_response.text.strip()
+        
+        relevant_context = ""
+        sources = []
+        
+        if "NONE" not in relevant_ids_text.upper():
+            # Limpeza básica do retorno da IA (remover aspas, espaços, etc)
+            clean_ids = re.sub(r'[^a-zA-Z0-9_,]', '', relevant_ids_text)
+            doc_ids = [did.strip() for did in clean_ids.split(',') if did.strip()]
+            
+            for doc_id in doc_ids:
+                # Tenta localizar arquivo físico no folder CONHECIMENTO_PROCESSADO
+                file_path = os.path.join(current_dir, "CONHECIMENTO_PROCESSADO", f"{doc_id}.json")
+                if os.path.exists(file_path):
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        node_data = json.load(f)
+                        # Estrutura Relacional: display, technical, content, graph
+                        display = node_data.get('display', {})
+                        content = node_data.get('content', {})
+                        graph = node_data.get('graph', {})
+                        
+                        title = display.get('title', display.get('titulo', doc_id))
+                        relevant_context += f"Fonte: {title} (ID: {doc_id})\n"
+                        relevant_context += f"Conteúdo: {content.get('summary', '')} | {content.get('details', '')}\n"
+                        if content.get('journal') and content.get('journal') != "Nenhum registro no diário de bordo.":
+                             relevant_context += f"DIÁRIO DE BORDO:\n{content.get('journal')}\n"
+                        relevant_context += "---\n\n"
+                        
+                        sources.append({
+                            "id": doc_id,
+                            "title": title,
+                            "type": node_data.get('technical', {}).get('type', 'generic')
+                        })
+
+        # 3. Gerar Resposta Final
+        final_prompt = f"""
+        Você é o "Cérebro Hermes", a inteligência relacional do sistema Hermes do André.
+        
+        REGRAS DE OURO:
+        1. NUNCA mostre IDs técnicos (ex: act_...) no texto da resposta.
+        2. Toda vez que usar uma informação de um documento do contexto, cite-o como: [Fonte X](hermes://{'{type}'}/{'{id}'}) onde X é a ordem.
+        3. Seja conciso, elegante e aja como um assistente executivo de alto nível.
+        
+        CONTEXTO RECUPERADO (RAG):
+        {relevant_context if relevant_context else "Nenhum documento específico encontrado."}
+        
+        HISTÓRICO DA CONVERSA RECENTE:
+        {history_text}
+        
+        PERGUNTA DO USUÁRIO:
+        "{prompt_user}"
+        """
+
+        final_response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=final_prompt)
+        
+        return {
+            "result": final_response.text,
+            "sources": sources
+        }
+
+    except Exception as e:
+        print(f"Erro no Cérebro Hermes: {e}")
+        return {"result": f"Tive um problema ao processar sua consulta: {str(e)}", "sources": []}

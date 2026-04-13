@@ -1,0 +1,172 @@
+[
+  {
+    "id": "02roboYzSXaN1gAKoABm",
+    "fields": [
+      "projeto",
+      "contabilizar_meta",
+      "categoria",
+      "notas",
+      "titulo",
+      "status",
+      "data_limite",
+      "data_criacao",
+      "data_conclusao",
+      "horario_fim",
+      "data_inicio",
+      "data_atualizacao",
+      "google_id",
+      "horario_inicio"
+    ],
+    "data_sample": {
+      "projeto": "GOOGLE",
+      "categoria": "NÃO CLASSIFICADA",
+      "titulo": "Ver Sobre o Problema de Acesso do Atlas",
+      "status": "concluído",
+      "data_limite": "2026-01-29",
+      "data_criacao": "2026-02-14T11:46:05.766203",
+      "data_conclusao": "2026-01-29T14:10:40.570Z",
+      "data_inicio": "2026-01-29",
+      "data_atualizacao": "2026-03-05T11:31:05.013Z",
+      "google_id": "MnBGTmFvRXBvZ0ZiM3F2LQ"
+    },
+    "subcollections": []
+  },
+  {
+    "id": "04oDeHSqVFWQfEKmsZeF",
+    "fields": [
+      "projeto",
+      "contabilizar_meta",
+      "categoria",
+      "notas",
+      "titulo",
+      "status",
+      "data_limite",
+      "data_criacao",
+      "origem",
+      "horario_fim",
+      "data_conclusao",
+      "data_inicio",
+      "data_atualizacao",
+      "horario_inicio",
+      "tipo_acao",
+      "google_id"
+    ],
+    "data_sample": {
+      "projeto": "GOOGLE",
+      "categoria": "NÃO CLASSIFICADA",
+      "titulo": "Tirar Linguiça da Geladeira",
+      "status": "concluído",
+      "data_limite": "2026-03-24",
+      "data_criacao": "2026-03-24T13:43:19.092226",
+      "origem": "google",
+      "data_conclusao": "2026-03-24T14:13:15.587Z",
+      "data_inicio": "2026-03-24",
+      "data_atualizacao": "2026-03-24T14:13:15.730Z",
+      "tipo_acao": "fast",
+      "google_id": "YVhSeUVjVTJYRnEwZ1F3Zg"
+    },
+    "subcollections": []
+  },
+  {
+    "id": "0OF0U5k5i6Dw1tBTKZLz",
+    "fields": [
+      "projeto",
+      "contabilizar_meta",
+      "categoria",
+      "notas",
+      "titulo",
+      "status",
+      "data_limite",
+      "data_criacao",
+      "horario_fim",
+      "data_conclusao",
+      "data_inicio",
+      "data_atualizacao",
+      "horario_inicio",
+      "google_id"
+    ],
+    "data_sample": {
+      "projeto": "GOOGLE",
+      "categoria": "NÃO CLASSIFICADA",
+      "titulo": "Reorganizar para Viagem para Barra de São Francisco",
+      "status": "concluído",
+      "data_limite": "2026-03-01",
+      "data_criacao": "2026-03-01T13:59:07.747167",
+      "data_conclusao": "2026-03-01T16:04:44.838Z",
+      "data_inicio": "2026-03-01",
+      "data_atualizacao": "2026-03-05T11:31:05.511Z",
+      "google_id": "Tm5nZHEyb1FJaFI2dHh2Yg"
+    },
+    "subcollections": []
+  },
+  {
+    "id": "0ghhpZG1c5uQ4I71Pnmn",
+    "fields": [
+      "projeto",
+      "contabilizar_meta",
+      "categoria",
+      "notas",
+      "titulo",
+      "status",
+      "data_limite",
+      "data_criacao",
+      "origem",
+      "horario_fim",
+      "ordem",
+      "data_conclusao",
+      "data_inicio",
+      "data_atualizacao",
+      "google_id",
+      "tipo_acao",
+      "horario_inicio"
+    ],
+    "data_sample": {
+      "projeto": "GOOGLE",
+      "categoria": "NÃO CLASSIFICADA",
+      "titulo": "Ajustes Frontend Reforço Positivo",
+      "status": "concluído",
+      "data_limite": "2026-04-05",
+      "data_criacao": "2026-04-01T23:26:16.485985",
+      "origem": "google",
+      "ordem": "5",
+      "data_conclusao": "2026-04-06T01:26:19.010Z",
+      "data_inicio": "2026-04-05",
+      "data_atualizacao": "2026-04-06T01:26:19.140Z",
+      "google_id": "QzhsU2JoRU5oUm9CT3Y0MA",
+      "tipo_acao": "fast"
+    },
+    "subcollections": []
+  },
+  {
+    "id": "0hYCeGuvhFZjEqvn4FhE",
+    "fields": [
+      "projeto",
+      "contabilizar_meta",
+      "categoria",
+      "notas",
+      "titulo",
+      "status",
+      "data_limite",
+      "data_criacao",
+      "data_conclusao",
+      "horario_fim",
+      "data_inicio",
+      "data_atualizacao",
+      "google_id",
+      "horario_inicio"
+    ],
+    "data_sample": {
+      "projeto": "GOOGLE",
+      "categoria": "NÃO CLASSIFICADA",
+      "titulo": "Receita Cookie de Cacau, Aveia e Mel - - 2 Xícaras (chá) de Farinha de Amêndoas - 1,5 Xícaras (chá) ",
+      "status": "concluído",
+      "data_limite": "2019-11-13",
+      "data_criacao": "2026-02-14T11:46:52.375038",
+      "data_conclusao": "2019-11-13T11:09:56.246Z",
+      "data_inicio": "2019-11-13",
+      "data_atualizacao": "2026-03-05T11:31:06.006Z",
+      "google_id": "WURIZ1JybEEyMVN1UURsQw"
+    },
+    "subcollections": []
+  }
+]

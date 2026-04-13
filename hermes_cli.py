@@ -32,6 +32,391 @@ DEBUG_MODE = True # Ativa log detalhado de cada tarefa no terminal do sistema
 # Configuração do Firebase
 KEY_FILE = 'firebase_service_account_key.json'
 
+def sync_hermes_knowledge(db=None):
+    """Sincroniza do Drive e processa a entrada local."""
+    import subprocess
+    input_dir = r"C:\Users\andre\Documents\Hermes\ENTRADA_HERMES"
+    
+    # 1. Tenta buscar novidades do Google Drive primeiro
+    try:
+        if db:
+            sync_google_drive_knowledge(db)
+            # NOVO: Sobe arquivos que foram colocados localmente para o Drive
+            push_raw_files_to_drive()
+    except Exception as e:
+        print(f"Aviso: Falha ao sincronizar brutos com Drive: {e}")
+
+    # 2. Processa o que estiver na pasta de entrada
+    if os.path.exists(input_dir) and any(os.scandir(input_dir)):
+        print("\n[🧠 HERMES] Verificando entrada de novos conhecimentos...")
+        try:
+            script_path = r"C:\Users\andre\Documents\Hermes\hermes_gatekeeper.py"
+            venv_python = r"C:\Users\andre\Documents\Hermes\functions\venv\Scripts\python.exe"
+            if not os.path.exists(venv_python): venv_python = "python"
+            
+            subprocess.run([venv_python, script_path], check=True)
+            print("[🧠 HERMES] Base de conhecimento sincronizada localmente.\n")
+            
+            # 3. Após processar local, sobe os JSONs para o Drive
+            if db:
+                push_knowledge_to_drive(db)
+                generate_master_index(db)
+                # NOVO: Exporta para o formato Obsidian (.md)
+                export_to_obsidian()
+        except Exception as e:
+            print(f"Aviso: Não foi possível atualizar o conhecimento: {e}\n")
+
+def push_knowledge_to_drive(db):
+    """Sobe os arquivos JSON de CONHECIMENTO_PROCESSADO para o subdiretório no Drive."""
+    import io
+    from googleapiclient.http import MediaFileUpload
+    
+    print("[☁️ DRIVE] Sincronizando conhecimento tratado...")
+    service = get_drive_service()
+    processed_dir = r"C:\Users\andre\Documents\Hermes\CONHECIMENTO_PROCESSADO"
+    if not os.path.exists(processed_dir): return
+
+    # 1. Garantir a existência da pasta raiz 'KnowledgeHermes'
+    results = service.files().list(
+        q="name = 'KnowledgeHermes' and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+        fields="files(id)"
+    ).execute()
+    roots = results.get('files', [])
+    if not roots:
+        root = service.files().create(body={'name': 'KnowledgeHermes', 'mimeType': 'application/vnd.google-apps.folder'}, fields='id').execute()
+        root_id = root.get('id')
+    else:
+        root_id = roots[0]['id']
+
+    # 2. Garantir a subpasta 'Hermes Relational Knowledge'
+    results = service.files().list(
+        q=f"name = 'Hermes Relational Knowledge' and '{root_id}' in parents and trashed = false",
+        fields="files(id)"
+    ).execute()
+    folders = results.get('files', [])
+    if not folders:
+        folder = service.files().create(body={'name': 'Hermes Relational Knowledge', 'parents': [root_id], 'mimeType': 'application/vnd.google-apps.folder'}, fields='id').execute()
+        folder_id = folder.get('id')
+    else:
+        folder_id = folders[0]['id']
+
+    # 3. Sincronizar arquivos
+    results = service.files().list(q=f"'{folder_id}' in parents and trashed = false", fields="files(name)").execute()
+    existing_drive_files = {f['name'] for f in results.get('files', [])}
+    
+    count = 0
+    for filename in os.listdir(processed_dir):
+        if filename.endswith(".json") and filename not in existing_drive_files:
+            file_metadata = {'name': filename, 'parents': [folder_id]}
+            media = MediaFileUpload(os.path.join(processed_dir, filename), mimetype='application/json')
+            service.files().create(body=file_metadata, media_body=media).execute()
+            count += 1
+    
+    if count > 0: print(f"[☁️ DRIVE] {count} item(ns) tratados enviados para KnowledgeHermes/Hermes Relational Knowledge.")
+
+def sync_google_drive_knowledge(db):
+    """Busca brutos da subpasta 'RawData' dentro de 'KnowledgeHermes'."""
+    import io
+    from googleapiclient.http import MediaIoBaseDownload
+    
+    print("[☁️ DRIVE] Verificando novos dados em KnowledgeHermes/RawData...")
+    service = get_drive_service()
+    input_dir = r"C:\Users\andre\Documents\Hermes\ENTRADA_HERMES"
+    
+    # 1. Encontrar a pasta raiz 'KnowledgeHermes'
+    results = service.files().list(
+        q="name = 'KnowledgeHermes' and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+        fields="files(id)"
+    ).execute()
+    roots = results.get('files', [])
+    if not roots:
+        # Se não existe a raiz, cria ela e a pasta de entrada
+        root = service.files().create(body={'name': 'KnowledgeHermes', 'mimeType': 'application/vnd.google-apps.folder'}, fields='id').execute()
+        root_id = root.get('id')
+        service.files().create(body={'name': 'RawData', 'parents': [root_id], 'mimeType': 'application/vnd.google-apps.folder'}).execute()
+        print("[☁️ DRIVE] Estrutura 'KnowledgeHermes/RawData' criada. Adicione arquivos lá.")
+        return
+    
+    root_id = roots[0]['id']
+
+    # 2. Encontrar a subpasta 'RawData'
+    results = service.files().list(
+        q=f"name = 'RawData' and '{root_id}' in parents and trashed = false",
+        fields="files(id)"
+    ).execute()
+    folders = results.get('files', [])
+    if not folders:
+        service.files().create(body={'name': 'RawData', 'parents': [root_id], 'mimeType': 'application/vnd.google-apps.folder'}).execute()
+        print("[☁️ DRIVE] Subpasta 'RawData' criada dentro de 'KnowledgeHermes'.")
+        return
+    
+    folder_id = folders[0]['id']
+    
+    # 3. Listar e baixar arquivos
+    results = service.files().list(q=f"'{folder_id}' in parents and trashed = false", fields="files(id, name, mimeType)").execute()
+    files = results.get('files', [])
+    
+    processed_ref = db.collection('system').document('processed_drive_files')
+    processed_ids = (processed_ref.get().to_dict() or {}).get('ids', [])
+    new_ids = []
+
+    for f in files:
+        if f['id'] in processed_ids or 'folder' in f['mimeType']: continue
+        print(f"[☁️ DRIVE] Puxando bruto: {f['name']}...")
+        request = service.files().get_media(fileId=f['id'])
+        fh = io.FileIO(os.path.join(input_dir, f['name']), 'wb')
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done: _, done = downloader.next_chunk()
+        new_ids.append(f['id'])
+
+    if new_ids:
+        updated_ids = list(set(processed_ids + new_ids))[-500:]
+        processed_ref.set({'ids': updated_ids}, merge=True)
+        print(f"[☁️ DRIVE] {len(new_ids)} novo(s) arquivo(s) prontos para processamento.")
+
+def push_raw_files_to_drive():
+    """Sincroniza arquivos brutos colocados localmente para a pasta RawData no Drive."""
+    import os
+    from googleapiclient.http import MediaFileUpload
+    
+    print("[☁️ DRIVE] Espelhando arquivos locais para RawData...")
+    service = get_drive_service()
+    input_dir = r"C:\Users\andre\Documents\Hermes\ENTRADA_HERMES"
+    
+    # 1. Localizar KnowledgeHermes/RawData
+    results = service.files().list(q="name = 'KnowledgeHermes' and trashed = false").execute()
+    if not results.get('files'): return
+    root_id = results['files'][0]['id']
+    
+    results = service.files().list(q=f"name = 'RawData' and '{root_id}' in parents and trashed = false").execute()
+    if not results.get('files'): return
+    folder_id = results['files'][0]['id']
+
+    # 2. Listar arquivos no Drive
+    results = service.files().list(q=f"'{folder_id}' in parents and trashed = false").execute()
+    existing_drive_files = {f['name'] for f in results.get('files', [])}
+
+    # 3. Subir o que falte
+    for filename in os.listdir(input_dir):
+        if filename not in existing_drive_files and os.path.isfile(os.path.join(input_dir, filename)):
+            print(f"[☁️ DRIVE] Sincronizando bruto para nuvem: {filename}...")
+            file_metadata = {'name': filename, 'parents': [folder_id]}
+            media = MediaFileUpload(os.path.join(input_dir, filename))
+            service.files().create(body=file_metadata, media_body=media).execute()
+
+def generate_master_index(db):
+    """Consolida todos os JSONs de conhecimento em um único arquivo de Índice Mestre."""
+    import os
+    import json
+    from googleapiclient.http import MediaFileUpload
+    
+    print("[🧠] Gerando Índice Mestre do Conhecimento...")
+    processed_dir = r"C:\Users\andre\Documents\Hermes\CONHECIMENTO_PROCESSADO"
+    index_path = r"C:\Users\andre\Documents\Hermes\00_HERMES_MASTER_INDEX.json"
+    
+    if not os.path.exists(processed_dir): return
+    
+    master_index = {
+        "generated_at": datetime.now().isoformat(),
+        "total_items": 0,
+        "items": []
+    }
+    
+    for filename in os.listdir(processed_dir):
+        if filename.endswith(".json") and filename != "00_HERMES_MASTER_INDEX.json":
+            try:
+                with open(os.path.join(processed_dir, filename), "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    
+                    category = data.get("technical", {}).get("category", "GERAL")
+                    tags = data.get("technical", {}).get("tags", [])
+                    entities = data.get("technical", {}).get("entities", [])
+                    explicit_links = data.get("graph", {}).get("explicit_links", [])
+                    
+                    master_index["items"].append({
+                        "id": data.get("id"),
+                        "title": data.get("display", {}).get("title"),
+                        "type": data.get("technical", {}).get("type"),
+                        "category": category,
+                        "tags": tags,
+                        "entities": entities,
+                        "tldr": data.get("display", {}).get("tldr"),
+                        "created_at": data.get("technical", {}).get("created_at")
+                    })
+                    master_index["total_items"] += 1
+            except: continue
+            
+    # Processamento de Grafo (Inspirado no Graphify-4)
+    print("[🧠] Analisando Conexões e Estruturas de Grafo (God Nodes)...")
+    try:
+        import networkx as nx
+        G = nx.Graph()
+        for item in master_index["items"]:
+            # O arquivo em si é o centro ("hub")
+            doc_id = item["id"]
+            G.add_node(doc_id, type="document")
+            
+            # Anexar as tags e entidades (Conceitos/God Nodes potenciais)
+            concepts = item.get("entities", []) + item.get("tags", [])
+            for concept in concepts:
+                if not concept or len(concept) < 2: continue
+                c_id = f"c_{concept.strip().upper()}"
+                G.add_node(c_id, type="concept", label=concept.strip())
+                G.add_edge(doc_id, c_id)
+                
+        # Calcula nós mais influentes (degree de networkx)
+        degrees = dict(G.degree())
+        concept_degrees = [(n, d) for n, d in degrees.items() if n.startswith("c_")]
+        top_concepts = sorted(concept_degrees, key=lambda x: x[1], reverse=True)[:15]
+        
+        # Injeta métricas relacional-globais no RAG
+        master_index["graph_insights"] = {
+            "god_nodes": [{"label": G.nodes[n].get("label"), "degree": d} for n, d in top_concepts],
+            "total_nodes": G.number_of_nodes(),
+            "total_edges": G.number_of_edges()
+        }
+    except Exception as e:
+        print(f"⚠️ Aviso: Falha na análise estrutural de grafo: {e}")
+            
+    # Salvar localmente
+    with open(index_path, "w", encoding="utf-8") as f:
+        json.dump(master_index, f, indent=2, ensure_ascii=False)
+        
+    # Subir para o Drive (Na raiz da KnowledgeHermes)
+    try:
+        service = get_drive_service()
+        results = service.files().list(q="name = 'KnowledgeHermes' and trashed = false").execute()
+        if not results.get('files'): return
+        root_id = results['files'][0]['id']
+        
+        print("[☁️ DRIVE] Atualizando Índice Mestre na nuvem...")
+        # Deletar anterior se existir
+        existing = service.files().list(q=f"name = '00_HERMES_MASTER_INDEX.json' and '{root_id}' in parents and trashed = false").execute()
+        for f in existing.get('files', []):
+            service.files().delete(fileId=f['id']).execute()
+            
+        file_metadata = {'name': '00_HERMES_MASTER_INDEX.json', 'parents': [root_id]}
+        media = MediaFileUpload(index_path, mimetype='application/json')
+        service.files().create(body=file_metadata, media_body=media).execute()
+        print(f"[🧠] Índice Mestre com {master_index['total_items']} itens sincronizado.")
+    except Exception as e:
+        print(f"Aviso: Erro ao subir índice mestre: {e}")
+
+def export_to_obsidian():
+    """Converte os JSONs relacionais em arquivos Markdown amigáveis ao Obsidian usando MarkItDown."""
+    import os
+    import json
+    from googleapiclient.http import MediaFileUpload
+    
+    print("[💎] Gerando visualização Obsidian (Markdown Alta Fidelidade)...")
+    base_dir = r"C:\Users\andre\Documents\Hermes"
+    processed_dir = os.path.join(base_dir, "CONHECIMENTO_PROCESSADO")
+    obsidian_dir = os.path.join(base_dir, "OBSIDIAN_VIEW")
+    originals_dir = os.path.join(base_dir, "ORIGINAIS_HERMES")
+    os.makedirs(obsidian_dir, exist_ok=True)
+    
+    # Inicializa MarkItDown
+    try:
+        from markitdown import MarkItDown
+        md_engine = MarkItDown()
+    except Exception as e:
+        print(f"Aviso: MarkItDown falhou ao carregar: {e}")
+        md_engine = None
+
+    if not os.path.exists(processed_dir): return
+    
+    count = 0
+    for filename in os.listdir(processed_dir):
+        if filename.endswith(".json") and filename != "00_HERMES_MASTER_INDEX.json":
+            try:
+                with open(os.path.join(processed_dir, filename), "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    
+                title = data.get("display", {}).get("title", "Sem Título")
+                md_filename = f"{filename.replace('.json', '')}.md"
+                md_path = os.path.join(obsidian_dir, md_filename)
+                
+                # 1. Construir Frontmatter e Resumo (IA)
+                content = f"---\n"
+                content += f"id: {data.get('id')}\n"
+                content += f"type: {data.get('technical', {}).get('type')}\n"
+                content += f"created_at: {data.get('technical', {}).get('created_at')}\n"
+                content += f"confidence: {data.get('technical', {}).get('confidence_weight', '')}\n"
+                content += f"---\n\n"
+                content += f"# {title}\n\n"
+                content += f"## 📝 TLDR\n{data.get('display', {}).get('tldr', '')}\n\n"
+                content += f"## 🤖 Resumo da IA\n{data.get('content', {}).get('summary', '')}\n\n"
+                
+                # 3. Diário de Bordo (Se existir)
+                journal = data.get("content", {}).get("journal")
+                if journal and journal != "Nenhum registro no diário de bordo.":
+                    content += f"## 📅 Diário de Bordo\n"
+                    content += f"```text\n{journal}\n```\n\n"
+
+                # 4. Inserir Conteúdo Íntegro (MarkItDown)
+                original_file = data.get("technical", {}).get("original_file")
+                if md_engine and original_file:
+                    original_path = os.path.join(originals_dir, original_file)
+                    if os.path.exists(original_path):
+                        print(f"   ∟ Convertendo corpo técnico: {original_file}")
+                        try:
+                            conversion = md_engine.convert(original_path)
+                            content += f"## 📄 Conteúdo Original Extratado\n\n"
+                            content += conversion.text_content
+                            content += "\n\n"
+                        except Exception as ce:
+                            content += f"\n> [!WARNING] Falha na conversão MarkItDown: {ce}\n\n"
+
+                # 3. Relações do Grafo
+                links = data.get("graph", {}).get("explicit_links", [])
+                if links:
+                    content += f"## 🔗 Relações\n"
+                    for link in links:
+                        content += f"- [[{link}]]\n"
+                
+                with open(md_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                count += 1
+            except: continue
+
+    # Sincronizar pasta Obsidian com o Drive
+    try:
+        service = get_drive_service()
+        results = service.files().list(q="name = 'KnowledgeHermes' and trashed = false").execute()
+        if not results.get('files'): return
+        root_id = results['files'][0]['id']
+        
+        # Encontrar ou criar subpasta OBSIDIAN_GRAPH
+        res = service.files().list(q=f"name = 'OBSIDIAN_GRAPH' and '{root_id}' in parents and trashed = false").execute()
+        if not res.get('files'):
+            folder = service.files().create(body={'name': 'OBSIDIAN_GRAPH', 'parents': [root_id], 'mimeType': 'application/vnd.google-apps.folder'}, fields='id').execute()
+            folder_id = folder.get('id')
+        else:
+            folder_id = res['files'][0]['id']
+            
+        # Listar para saber o que atualizar ou criar
+        existing = service.files().list(q=f"'{folder_id}' in parents and trashed = false", fields="files(id, name)").execute()
+        drive_files = {f['name']: f['id'] for f in existing.get('files', [])}
+        
+        for f in os.listdir(obsidian_dir):
+            if f.endswith(".md"):
+                file_metadata = {'name': f}
+                media = MediaFileUpload(os.path.join(obsidian_dir, f), mimetype='text/markdown')
+                
+                if f in drive_files:
+                    # Atualizar
+                    service.files().update(fileId=drive_files[f], media_body=media).execute()
+                else:
+                    # Criar novo
+                    file_metadata['parents'] = [folder_id]
+                    service.files().create(body=file_metadata, media_body=media).execute()
+        
+        print(f"[☁️ DRIVE] {count} arquivos de Alta Fidelidade atualizados no seu Grafo Obsidian.")
+        
+    except Exception as e:
+        print(f"Aviso: Erro ao sincronizar Obsidian: {e}")
+
 def get_units_mapping(db):
     mapping = {
         'CLC': ['licitação', 'pregão', 'irp', 'processo'],
@@ -112,6 +497,9 @@ def get_gmail_service():
 
 def get_calendar_service():
     return build('calendar', 'v3', credentials=get_google_creds())
+
+def get_drive_service():
+    return build('drive', 'v3', credentials=get_google_creds())
 
 def cleanup_old_sync_badges(db, log_func=None):
     def log(msg):
@@ -683,7 +1071,10 @@ def main():
     subparsers.add_parser('sync-cal')
     args = parser.parse_args()
     if not args.command: parser.print_help(); return
+    
+    # Ingestão de conhecimento prioritária
     db = init_db()
+    sync_hermes_knowledge(db)
     if args.command == 'sync-tasks': sync_google_tasks(db)
     elif args.command == 'watch': watch_commands(db)
     elif args.command == 'sync-pix': sync_pix_emails(db)

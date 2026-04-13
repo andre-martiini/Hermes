@@ -57,6 +57,7 @@ import { FerramentasView } from './src/components/tools/FerramentasView';
 import { QuickNoteModal } from './src/components/modals/QuickNoteModal';
 import { SpeedDialMenu } from './src/components/ui/SpeedDialMenu';
 import { generateMarkdown, generateActionsMarkdown, downloadMarkdown } from './src/utils/markdownGenerator';
+import { KnowledgeChatModal } from './src/components/ui/KnowledgeChatModal';
 import {
   ROOT_ACTIONS_FOLDER_ID,
   ROOT_HEALTH_FOLDER_ID,
@@ -1013,6 +1014,7 @@ const App: React.FC = () => {
   const [convertingIdea, setConvertingIdea] = useState<BrainstormIdea | null>(null);
   const [isSystemSelectorOpen, setIsSystemSelectorOpen] = useState(false);
   const [taskInitialData, setTaskInitialData] = useState<Partial<Tarefa> | null>(null);
+  const [isIntelligenceOpen, setIsIntelligenceOpen] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -4752,6 +4754,7 @@ const App: React.FC = () => {
                       onToggleNotifications={() => setIsNotificationCenterOpen(prev => !prev)}
                       onSync={handleSync}
                       onOpenSettings={() => setIsSettingsModalOpen(true)}
+                      onOpenIntelligence={() => setIsIntelligenceOpen(true)}
                       onCloseNotifications={() => setIsNotificationCenterOpen(false)}
                       onMarkAsRead={handleMarkNotificationRead}
                       onDismiss={handleDismissNotification}
@@ -5040,6 +5043,7 @@ const App: React.FC = () => {
                     onToggleNotifications={() => setIsNotificationCenterOpen(prev => !prev)}
                     onSync={handleSync}
                     onOpenSettings={() => setIsSettingsModalOpen(true)}
+                    onOpenIntelligence={() => setIsIntelligenceOpen(true)}
                     onCloseNotifications={() => setIsNotificationCenterOpen(false)}
                     onMarkAsRead={handleMarkNotificationRead}
                     onDismiss={handleDismissNotification}
@@ -7802,6 +7806,33 @@ const App: React.FC = () => {
             />
           )
         }
+
+        <KnowledgeChatModal 
+          isOpen={isIntelligenceOpen} 
+          onClose={() => setIsIntelligenceOpen(false)} 
+          isDark={true} 
+          onNavigateTask={(id) => {
+            const task = tarefas.find(t => t.id === id);
+            if (task) {
+              setSelectedTask(task);
+              setTaskModalMode('execute');
+              setIsIntelligenceOpen(false);
+            }
+          }}
+          onNavigateSystem={(id) => {
+            setViewMode('sistemas-dev');
+            setSelectedSystemId(id);
+            setIsIntelligenceOpen(false);
+          }}
+          onNavigateFile={(url_or_id) => {
+            // Se for ID, tenta achar no knowledgeItems
+            const item = knowledgeItems.find(k => k.id === url_or_id);
+            const targetUrl = item?.url_drive || url_or_id;
+            if (targetUrl && (targetUrl.startsWith('http') || targetUrl.includes('drive.google.com'))) {
+              window.open(targetUrl, '_blank');
+            }
+          }}
+        />
       </div>
     </>
   );
