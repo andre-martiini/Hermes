@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
-import { 
-    Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry, 
-    HealthWeight, DailyHabits, HealthSettings, WorkItem, Sistema 
+import {
+    Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry,
+    HealthWeight, DailyHabits, HealthSettings, WorkItem, Sistema
 } from './types';
 
 interface DashboardViewProps {
@@ -25,7 +25,7 @@ interface DashboardViewProps {
 // --- SUBCOMPONENTES MOVIDOS PARA FORA ---
 
 const DashboardCard = ({ title, iconColor, onRedirect, children }: { title: string, iconColor: string, onRedirect: () => void, children: React.ReactNode }) => (
-    <div 
+    <div
         onClick={onRedirect}
         className="group bg-white p-3 md:p-4 rounded-2xl md:rounded-[1.5rem] border border-slate-200 shadow-sm md:shadow-md hover:shadow-xl hover:border-slate-300 h-full transition-all flex flex-col cursor-pointer min-h-0"
         role="button"
@@ -61,7 +61,7 @@ const PieChart = ({ data }: { data: [string, number][] }) => {
                 {data.map((item, i) => {
                     const percentage = item[1] / total;
                     const angle = percentage * 360;
-                    
+
                     if (percentage === 1) {
                         return <circle key={i} cx="50" cy="50" r="40" fill={colors[i % colors.length]} />;
                     }
@@ -144,7 +144,7 @@ const SystemsBarChart = ({ data }: { data: [string, number][] }) => {
 
 const OrphanItemsDebugger = ({ workItems, unidades, sistemasDetalhes }: { workItems: WorkItem[], unidades: { id: string, nome: string }[], sistemasDetalhes: Sistema[] }) => {
     const orphans = workItems.filter(w => !w.concluido && !unidades.some(u => u.id === w.sistema_id) && !sistemasDetalhes.some(s => s.id === w.sistema_id));
-    
+
     if (orphans.length === 0) return null;
 
     return (
@@ -210,7 +210,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     const actionsByArea = useMemo(() => {
         const counts: Record<string, number> = {};
         inProgressActions.forEach(t => {
-            const area = t.categoria || 'GERAL';
+            let area = t.area_tematica || 'GERAL';
+            area = area.replace('SISTEMA:', '').trim();
             counts[area] = (counts[area] || 0) + 1;
         });
         return Object.entries(counts).sort((a, b) => b[1] - a[1]);
@@ -326,7 +327,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
             if (hDate === expectedDate) {
                 const completedCount = [habit.noSugar, habit.noAlcohol, habit.noSnacks, habit.workout, habit.eatUntil18, habit.eatSlowly].filter(Boolean).length;
-                if (completedCount >= 4) { 
+                if (completedCount >= 4) {
                     streak++;
                     checkDate.setDate(checkDate.getDate() - 1);
                 } else break;
@@ -349,13 +350,13 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         workItems.filter(w => !w.concluido).forEach(w => {
             const unit = unidades.find(u => u.id === w.sistema_id);
             let name = unit ? unit.nome.replace('SISTEMA:', '').trim() : '';
-            
+
             // If not found in units, try in system details for consistency
             if (!name) {
                 const sys = sistemasDetalhes.find(s => s.id === w.sistema_id);
                 name = sys ? sys.nome : (w.sistema_id ? 'Sistema Desconhecido' : 'Sem Sistema Vinculado');
             }
-            
+
             counts[name] = (counts[name] || 0) + 1;
         });
         return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5);

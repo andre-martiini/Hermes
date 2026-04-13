@@ -222,7 +222,7 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
       const res = await fn({
         prompt: customPrompt,
         historyContext: buildHistoryContext(),
-        categoria: 'SISTEMA',
+        area_tematica: 'SISTEMA',
         ragContext: unit.id,
       });
       const result = (res.data as any).result || '';

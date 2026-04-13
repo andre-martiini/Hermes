@@ -45,7 +45,8 @@ export interface Tarefa {
     data_inicio: string;
     data_limite: string;
     status: Status;
-    categoria: Categoria;
+    area_tematica: string;
+    tags?: string[];
     contabilizar_meta: boolean;
     data_criacao: string;
     data_atualizacao?: string;
@@ -59,7 +60,6 @@ export interface Tarefa {
     chat_gemini_url?: string;
     chat_history?: ChatMessage[];
     processo_sei?: string;
-    tempo_total_segundos?: number;
     sync_status?: 'new' | 'updated' | 'synced' | 'pendente' | 'processando' | 'concluido' | 'erro' | null;
     last_sync_date?: string;
     horario_inicio?: string; // format "HH:mm"
@@ -71,7 +71,7 @@ export interface Tarefa {
     tipo_acao?: TipoAcao;
     plano_acao?: ActionPlanItem[];
     plano_acao_historico?: ActionPlanHistory[];
-    origem?: 'manual' | 'audio' | 'whatsapp' | 'google';
+    origem?: 'manual' | 'audio' | 'whatsapp';
     base_conhecimento?: string;
     reuniao_vinculada_id?: string;
     knowledge_item_ids?: string[];
@@ -344,7 +344,7 @@ export interface AppSettings {
 
 export const formatDate = (dateStr: any) => {
     if (!dateStr || dateStr === "-" || dateStr === "0000-00-00") return 'Sem Data';
-    
+
     let actualDateStr = "";
     if (typeof dateStr === 'string') {
         actualDateStr = dateStr;
@@ -462,6 +462,7 @@ export interface ConhecimentoItem {
     resumo_tldr?: string;
     tags?: string[];
     categoria?: string;
+    area_tematica?: string;
     base_id?: string; // Link to a specific personalized RAG base
     origem?: {
         modulo: string;

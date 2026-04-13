@@ -4,13 +4,13 @@ import { normalizeStatus } from '../utils/helpers';
 
 export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask, onAnalysePatterns }: { tasks: Tarefa[], viewMode: string, onSelectTask: (t: Tarefa) => void, onExecuteTask: (t: Tarefa) => void, onAnalysePatterns?: (cat: string) => void }) => {
   const isCLC = viewMode === 'licitacoes';
-  const categoria = isCLC ? 'CLC' : 'ASSISTÊNCIA';
+  const areaTematica = isCLC ? 'CLC' : 'ASSISTÊNCIA';
   const color = isCLC ? 'blue' : 'emerald';
   const title = isCLC ? 'Licitações' : 'Assistência Estudantil';
 
   const todayStr = formatDateLocalISO(new Date());
 
-  const pendentes = tasks.filter(t => t.categoria === categoria && normalizeStatus(t.status) !== 'concluido' && t.status !== 'excluído' as any);
+  const pendentes = tasks.filter(t => t.area_tematica === areaTematica && normalizeStatus(t.status) !== 'concluido' && t.status !== 'excluído' as any);
 
   const getRelevantDate = (t: Tarefa) => {
     const isConcluido = normalizeStatus(t.status) === 'concluido';
@@ -20,7 +20,7 @@ export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask, onA
 
   const historyTasks = tasks
     .filter(t => {
-      const isCat = t.categoria === categoria;
+      const isCat = t.area_tematica === areaTematica;
       const isNotExcluded = t.status !== 'excluído' as any;
       const isConcluido = normalizeStatus(t.status) === 'concluido';
       const hasStarted = t.data_criacao && t.data_criacao <= todayStr;

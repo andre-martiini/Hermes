@@ -349,20 +349,26 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
           <div className={`${highlighted ? 'text-[15px] md:text-lg font-black text-amber-950' : 'text-[13px] md:text-[15px] font-bold text-[#1a202c]'} leading-snug transition-colors whitespace-normal break-words ${isCompleted ? 'line-through text-slate-400' : (highlighted ? 'group-hover:text-amber-700' : 'group-hover:text-blue-600')}`}>
             {task.titulo}
           </div>
+          {task.tags && task.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-0.5 opacity-60">
+              {task.tags.map(tag => (
+                <span key={tag} className="text-[8px] md:text-[9px] font-bold text-slate-500 lowercase tracking-wide before:content-['#']">
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Centro/Direita: Tags + Data + Ações */}
       <div className="flex items-start justify-between sm:justify-end sm:self-start gap-4 md:gap-6 flex-wrap sm:flex-nowrap">
         <div className="flex items-center gap-2 flex-wrap">
-          {task.categoria && task.categoria !== 'NÃO CLASSIFICADA' && (
-            <span className={`text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded-full border whitespace-nowrap ${getTagStyle(task.categoria, 'category')}`}>
-              {task.categoria}
+          {task.area_tematica && task.area_tematica !== 'NÃO CLASSIFICADA' && (
+            <span className={`text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded-full border whitespace-nowrap ${getTagStyle(task.area_tematica, 'category')}`}>
+              {task.area_tematica}
             </span>
           )}
-          <span className={`text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded-full border whitespace-nowrap ${getTagStyle(task.projeto, 'project')}`}>
-            {task.projeto}
-          </span>
 
           {task.sync_status && (
             <div className={`w-2 h-2 rounded-full ${task.sync_status === 'new' ? 'bg-purple-500 animate-pulse' : 'bg-amber-500'}`} title={task.sync_status === 'new' ? 'Nova' : 'Atualizada'}></div>
@@ -459,15 +465,15 @@ export const AutoExpandingTextarea = (props: AutoExpandingTextareaProps) => {
     if (textareaRef.current) {
       const scrollPos = window.scrollY;
       const caretPos = textareaRef.current.selectionStart;
-      
+
       textareaRef.current.style.height = 'auto'; // Still needed to get scrollHeight from collapsed state
       const newHeight = textareaRef.current.scrollHeight;
       textareaRef.current.style.height = `${newHeight}px`;
-      
+
       // Restore scroll and caret just in case
       window.scrollTo(window.scrollX, scrollPos);
       if (document.activeElement === textareaRef.current) {
-         textareaRef.current.setSelectionRange(caretPos, caretPos);
+        textareaRef.current.setSelectionRange(caretPos, caretPos);
       }
     }
   }, [props.value]);

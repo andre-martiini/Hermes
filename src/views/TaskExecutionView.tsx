@@ -29,6 +29,7 @@ interface TaskExecutionViewProps {
   appSettings: AppSettings;
   knowledgeBases?: BaseConhecimento[];
   onSave: (id: string, updates: Partial<Tarefa>) => void;
+  unidades?: { id: string, nome: string }[];
   onClose: () => void;
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
   notifications: any[];
@@ -56,6 +57,7 @@ export const TaskExecutionView = ({
   appSettings,
   knowledgeBases = [],
   onSave,
+  unidades = [],
   onClose,
   showToast,
   notifications,
@@ -142,6 +144,11 @@ export const TaskExecutionView = ({
   // Plan history viewer (Feature 5)
   const [showPlanHistory, setShowPlanHistory] = useState(false);
 
+  // Tags
+  const [tagInput, setTagInput] = useState('');
+  const [isGeneratingTags, setIsGeneratingTags] = useState(false);
+  const existingTags = useMemo(() => Array.from(new Set(tarefas.flatMap(t => t.tags || []))), [tarefas]);
+
   // Knowledge panel
   const [showKnowledgePanel, setShowKnowledgePanel] = useState(false);
   const [sessionExtraFiles, setSessionExtraFiles] = useState<{ id: string; name: string; status: 'uploading' | 'ready' | 'error' }[]>([]);
@@ -172,9 +179,9 @@ export const TaskExecutionView = ({
     if (!item) return;
     const newCompleted = !item.completed;
     const updated = items.map(i => i.id === itemId ? { ...i, completed: newCompleted } : i);
-    
+
     let updatedAcompanhamento = [...(currentTaskData.acompanhamento || [])];
-    
+
     if (newCompleted) {
       const systemEntry: Acompanhamento = {
         data: new Date().toISOString(),
@@ -188,7 +195,7 @@ export const TaskExecutionView = ({
         updatedAcompanhamento.splice(lastIndex, 1);
       }
     }
-    
+
     onSave(task.id, {
       plano_acao: updated,
       acompanhamento: updatedAcompanhamento
@@ -231,10 +238,10 @@ export const TaskExecutionView = ({
       'DIÁRIO DE BORDO',
       entries.length > 0
         ? entries.map(e => {
-            const p = parseDiaryRichNote(e.nota || '');
-            const content = p ? `${p.type}: ${p.name || p.value}` : e.nota;
-            return `[${new Date(e.data).toLocaleString('pt-BR')}] ${content}`;
-          }).join('\n\n')
+          const p = parseDiaryRichNote(e.nota || '');
+          const content = p ? `${p.type}: ${p.name || p.value}` : e.nota;
+          return `[${new Date(e.data).toLocaleString('pt-BR')}] ${content}`;
+        }).join('\n\n')
         : 'Sem registros.',
       '',
       'POOL DE DADOS',
@@ -318,9 +325,9 @@ export const TaskExecutionView = ({
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) { 
-      mediaRecorderRef.current.stop(); 
-      setIsRecording(false); 
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
       // Tracks will be stopped in onstop callback
     }
   };
@@ -459,15 +466,15 @@ export const TaskExecutionView = ({
 
   const sendChatMessage = async (messageText: string, asArtifact = false) => {
     if (!messageText.trim() || isChatLoading) return;
-    
+
     const userMsg: ChatMessage = { role: 'user', content: messageText };
     const historyWithUser = [...chatMessages, userMsg];
     setChatMessages(historyWithUser);
     setIsChatLoading(true);
-    
+
     try {
       const fn = httpsCallable(functions, 'askTaskAssistant');
-      
+
       const customPrompt = `
         Comando: ${messageText}
         ---
@@ -484,12 +491,12 @@ export const TaskExecutionView = ({
       const res = await fn({
         prompt: customPrompt,
         historyContext: buildHistoryContext(),
-        categoria: task.categoria,
+        area_tematica: task.area_tematica,
         ragContext: currentTaskData.base_conhecimento,
         extraContextId: currentTaskData.extra_context_id,
         knowledgeItemIds: currentTaskData.knowledge_item_ids || [],
       });
-      
+
       let result = (res.data as any).result || '';
       let proposedPlan: ActionPlanItem[] | undefined = undefined;
 
@@ -504,8 +511,8 @@ export const TaskExecutionView = ({
         }
       }
 
-      const assistantMsg: ChatMessage = { 
-        role: 'assistant', 
+      const assistantMsg: ChatMessage = {
+        role: 'assistant',
         content: asArtifact ? '📄 Artefato gerado e salvo no painel de Artefatos.' + (proposedPlan ? '\n\nO copiloto também sugeriu uma atualização no plano de ação.' : '') : result,
         ...(proposedPlan ? { proposedPlan } : {})
       };
@@ -519,18 +526,18 @@ export const TaskExecutionView = ({
         };
         setArtifacts(prev => [...prev, artifact]);
         setShowArtifacts(true);
-        
+
         const aiEntry: Acompanhamento = {
           data: new Date().toISOString(),
           nota: `🤖 IA: ${artifact.title} — documento gerado pelo copiloto.`
         };
-        
-        onSave(task.id, { 
+
+        onSave(task.id, {
           acompanhamento: [...(currentTaskData.acompanhamento || []), aiEntry],
           chat_history: [...historyWithUser, assistantMsg]
         });
       } else {
-        onSave(task.id, { 
+        onSave(task.id, {
           chat_history: [...historyWithUser, assistantMsg]
         });
       }
@@ -558,7 +565,7 @@ export const TaskExecutionView = ({
       const res = await fn({
         prompt,
         historyContext: buildHistoryContext(),
-        categoria: task.categoria,
+        area_tematica: task.area_tematica,
         ragContext: currentTaskData.base_conhecimento,
         extraContextId: currentTaskData.extra_context_id,
         knowledgeItemIds: currentTaskData.knowledge_item_ids || [],
@@ -639,6 +646,44 @@ export const TaskExecutionView = ({
       showToast('Erro ao processar o arquivo.', 'error');
     } finally {
       setIsUploadingExtra(false);
+    }
+  };
+
+  const handleAutoClassifyTags = async () => {
+    if (isGeneratingTags) return;
+    setIsGeneratingTags(true);
+    try {
+      const prompt = `Analise a seguinte tarefa e forneça até 5 tags curtas e altamente relevantes (1 a 2 palavras) para caracterizá-la. Use o formato de resposta estrito: [TAGS] tag1, tag2, tag3 [/TAGS].\n\nTítulo: ${currentTaskData.titulo}\nDescrição: ${currentTaskData.descricao || ''}\nÁrea Temática: ${currentTaskData.area_tematica || ''}`;
+
+      const fn = httpsCallable(functions, 'askTaskAssistant');
+      const res = await fn({
+        prompt,
+        historyContext: buildHistoryContext(),
+        area_tematica: task.area_tematica,
+        ragContext: currentTaskData.base_conhecimento,
+        extraContextId: currentTaskData.extra_context_id,
+        knowledgeItemIds: currentTaskData.knowledge_item_ids || [],
+      });
+
+      const result = (res.data as any).result || '';
+      const tagsMatch = result.match(/\[TAGS\]([\s\S]*?)\[\/TAGS\]/);
+      if (tagsMatch) {
+        const newTagsRaw = tagsMatch[1].split(',').map((t: string) => t.trim().replace(/^#/, '')).filter((t: string) => t.length > 0);
+        if (newTagsRaw.length > 0) {
+          const currentTagList = currentTaskData.tags || [];
+          const mergedTags = Array.from(new Set([...currentTagList, ...newTagsRaw]));
+          onSave(task.id, { tags: mergedTags });
+          showToast('Tags geradas com sucesso!', 'success');
+        } else {
+          showToast('A inteligência não conseguiu extrair tags.', 'info');
+        }
+      } else {
+        showToast('Erro ao obter formato de tags.', 'error');
+      }
+    } catch {
+      showToast('Erro ao invocar copiloto para gerar tags.', 'error');
+    } finally {
+      setIsGeneratingTags(false);
     }
   };
 
@@ -738,7 +783,7 @@ export const TaskExecutionView = ({
               className={`flex-1 flex flex-col items-center gap-1 py-2.5 text-[9px] font-black uppercase tracking-widest transition-all border-b-2 ${active
                 ? isDark ? 'border-blue-400 text-blue-400' : 'border-blue-600 text-blue-600'
                 : `border-transparent ${mutedText}`
-              }`}
+                }`}
             >
               {icons[tab]}
               {labels[tab]}
@@ -767,6 +812,104 @@ export const TaskExecutionView = ({
               </p>
             </div>
           )}
+
+          {/* Área Temática */}
+          <div className={`rounded-2xl border p-4 ${cardBg}`}>
+            <p className={`${labelCls} mb-2`}>Área Temática</p>
+            <select
+              value={currentTaskData.area_tematica || 'NÃO CLASSIFICADA'}
+              onChange={e => onSave(task.id, { area_tematica: e.target.value as any })}
+              className={`w-full bg-transparent border-none p-0 text-xs font-black uppercase tracking-widest focus:ring-0 cursor-pointer ${isDark ? 'text-white' : 'text-slate-900'}`}
+            >
+              <option value="GERAL">Geral</option>
+              <option value="NÃO CLASSIFICADA">Não Classificada</option>
+              {unidades.map(u => (
+                <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Tags Dinâmicas */}
+          <div className={`rounded-2xl border p-4 ${cardBg}`}>
+            <div className="flex items-center justify-between mb-3">
+              <p className={labelCls}>Tags Dinâmicas</p>
+              <button
+                onClick={handleAutoClassifyTags}
+                disabled={isGeneratingTags}
+                className="flex items-center gap-1.5 px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors text-[9px] font-black uppercase tracking-widest border border-indigo-100 disabled:opacity-50"
+              >
+                {isGeneratingTags ? '...' : '✨ Auto'}
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {(currentTaskData.tags || []).map(tag => (
+                <span key={tag} className="flex items-center gap-1 bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg text-[10px] font-bold border border-indigo-100">
+                  #{tag}
+                  <button onClick={(e) => {
+                    e.preventDefault();
+                    const newTags = (currentTaskData.tags || []).filter(t => t !== tag);
+                    onSave(task.id, { tags: newTags });
+                  }} className="text-indigo-400 hover:text-rose-500 scale-125 ml-1 transition-colors">&times;</button>
+                </span>
+              ))}
+              {(currentTaskData.tags || []).length === 0 && (
+                <span className="text-[10px] text-slate-400 font-medium italic">Nenhuma tag...</span>
+              )}
+            </div>
+            <div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={tagInput}
+                  onChange={e => setTagInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (tagInput.trim() && !(currentTaskData.tags || []).includes(tagInput.trim())) {
+                        onSave(task.id, { tags: [...(currentTaskData.tags || []), tagInput.trim()] });
+                        setTagInput('');
+                      }
+                    }
+                  }}
+                  className={`flex-1 border rounded-lg px-3 py-1.5 text-[11px] font-medium focus:ring-1 focus:ring-indigo-500 outline-none ${isDark ? 'bg-black/50 border-white/10 text-white' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                  placeholder="Adicionar nova tag (Enter)..."
+                />
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (tagInput.trim() && !(currentTaskData.tags || []).includes(tagInput.trim())) {
+                      onSave(task.id, { tags: [...(currentTaskData.tags || []), tagInput.trim()] });
+                      setTagInput('');
+                    }
+                  }}
+                  className={`px-3 py-1.5 rounded-lg transition-all text-[10px] font-bold border ${isDark ? 'bg-white/10 text-white/70 border-white/20 hover:bg-white/20' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}
+                >
+                  Add
+                </button>
+              </div>
+              {tagInput.trim() && existingTags.filter(t => t.toLowerCase().includes(tagInput.trim().toLowerCase()) && !(currentTaskData.tags || []).includes(t)).length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 mt-2 pl-1">
+                  <span className={`text-[9px] font-bold uppercase tracking-widest ${mutedText}`}>Sugestões:</span>
+                  {existingTags
+                    .filter(t => t.toLowerCase().includes(tagInput.trim().toLowerCase()) && !(currentTaskData.tags || []).includes(t))
+                    .slice(0, 5)
+                    .map(sug => (
+                      <button
+                        key={sug}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          onSave(task.id, { tags: [...(currentTaskData.tags || []), sug] });
+                          setTagInput('');
+                        }}
+                        className="text-[9px] bg-indigo-50 hover:bg-indigo-100 text-indigo-500 font-bold px-1.5 py-0.5 rounded cursor-pointer transition-colors"
+                      >
+                        {sug}
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
+          </div>
 
           {/* Plano de Ação */}
           <div className={`rounded-2xl border ${cardBg}`}>
@@ -798,7 +941,7 @@ export const TaskExecutionView = ({
                     <div className={`w-4 h-4 mt-0.5 rounded border-2 flex items-center justify-center shrink-0 transition-all ${item.completed
                       ? 'bg-emerald-500 border-emerald-500'
                       : isDark ? 'border-white/30 group-hover:border-emerald-400' : 'border-slate-300 group-hover:border-emerald-500'
-                    }`}>
+                      }`}>
                       {item.completed && (
                         <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" />
@@ -808,7 +951,7 @@ export const TaskExecutionView = ({
                     <span className={`text-xs font-medium leading-snug transition-all ${item.completed
                       ? isDark ? 'text-white/30 line-through' : 'text-slate-300 line-through'
                       : isDark ? 'text-white/80' : 'text-slate-700'
-                    }`}>
+                      }`}>
                       {item.text}
                     </span>
                   </button>
@@ -842,7 +985,7 @@ export const TaskExecutionView = ({
                       <div key={vIdx} className={`p-2 rounded-xl border ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
                         <div className="flex items-center justify-between mb-1.5">
                           <p className={`text-[8px] font-black uppercase tracking-widest ${mutedText}`}>
-                            Versão {(currentTaskData.plano_acao_historico || []).length - vIdx} 
+                            Versão {(currentTaskData.plano_acao_historico || []).length - vIdx}
                             {version.data && ` — ${formatDate(version.data)}`}
                           </p>
                         </div>
@@ -969,13 +1112,12 @@ export const TaskExecutionView = ({
                   {sessionExtraFiles.length > 0 && (
                     <div className="space-y-1 mb-2">
                       {sessionExtraFiles.map(f => (
-                        <div key={f.id} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[10px] font-medium border ${
-                          f.status === 'ready'
-                            ? isDark ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                            : f.status === 'uploading'
-                              ? isDark ? 'bg-blue-500/10 border-blue-500/20 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-600'
-                              : isDark ? 'bg-rose-500/10 border-rose-500/20 text-rose-300' : 'bg-rose-50 border-rose-200 text-rose-600'
-                        }`}>
+                        <div key={f.id} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[10px] font-medium border ${f.status === 'ready'
+                          ? isDark ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                          : f.status === 'uploading'
+                            ? isDark ? 'bg-blue-500/10 border-blue-500/20 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-600'
+                            : isDark ? 'bg-rose-500/10 border-rose-500/20 text-rose-300' : 'bg-rose-50 border-rose-200 text-rose-600'
+                          }`}>
                           {f.status === 'ready' && <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>}
                           {f.status === 'uploading' && <svg className="w-3 h-3 shrink-0 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>}
                           {f.status === 'error' && <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>}
@@ -1045,10 +1187,10 @@ export const TaskExecutionView = ({
               fileInputRef={fileInputRef}
               handleFileUploadInput={handleFileUploadInput}
               setModalConfig={setModalConfig}
-              applyFormatting={() => {}}
+              applyFormatting={() => { }}
               isTimerRunning={false}
               diaryEndRef={diaryEndRef}
-              handleDiaryScroll={() => {}}
+              handleDiaryScroll={() => { }}
               handleEditDiaryEntry={(index) => {
                 setModalInputValue(currentTaskData.acompanhamento![index].nota);
                 setModalConfig({ type: 'edit_diary', data: { index }, isOpen: true });
@@ -1072,7 +1214,7 @@ export const TaskExecutionView = ({
               className={`shrink-0 flex items-center justify-between px-4 py-2.5 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition-all ${showArtifacts
                 ? isDark ? 'bg-indigo-500/20 border-indigo-500/30 text-indigo-300' : 'bg-indigo-50 border-indigo-200 text-indigo-600'
                 : isDark ? 'bg-white/5 border-white/10 text-white/40 hover:text-white/60' : 'bg-white border-slate-200 text-slate-400 hover:text-slate-700'
-              }`}>
+                }`}>
               <div className="flex items-center gap-2">
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                 Artefatos
@@ -1102,7 +1244,7 @@ export const TaskExecutionView = ({
                         className={`shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black transition-all ${copiedArtifactId === artifact.id
                           ? 'bg-emerald-500 text-white'
                           : isDark ? 'bg-white/10 text-white/60 hover:bg-white/20' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }`}>
+                          }`}>
                         {copiedArtifactId === artifact.id
                           ? <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> Copiado</>
                           : <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" /></svg> Copiar</>
@@ -1150,16 +1292,16 @@ export const TaskExecutionView = ({
                     : msg.isArtifact
                       ? isDark ? 'bg-indigo-500/20 text-indigo-200 border border-indigo-500/30 rounded-bl-none' : 'bg-indigo-50 text-indigo-800 border border-indigo-200 rounded-bl-none'
                       : isDark ? 'bg-white/10 text-white/80 rounded-bl-none' : 'bg-blue-50 text-slate-700 rounded-bl-none'
-                  }`}>
-                    <ReactMarkdown 
+                    }`}>
+                    <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       components={{
-                        p: ({node, ...props}) => <p className="mb-2 last:mb-0" {...props} />,
-                        ul: ({node, ...props}) => <ul className="list-disc ml-4 mb-2" {...props} />,
-                        ol: ({node, ...props}) => <ol className="list-decimal ml-4 mb-2" {...props} />,
-                        li: ({node, ...props}) => <li className="mb-0.5" {...props} />,
-                        a: ({node, ...props}) => <a className="text-blue-400 underline hover:text-blue-300" target="_blank" rel="noopener noreferrer" {...props} />,
-                        strong: ({node, ...props}) => <strong className="font-bold text-emerald-400" {...props} />,
+                        p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
+                        ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-2" {...props} />,
+                        ol: ({ node, ...props }) => <ol className="list-decimal ml-4 mb-2" {...props} />,
+                        li: ({ node, ...props }) => <li className="mb-0.5" {...props} />,
+                        a: ({ node, ...props }) => <a className="text-blue-400 underline hover:text-blue-300" target="_blank" rel="noopener noreferrer" {...props} />,
+                        strong: ({ node, ...props }) => <strong className="font-bold text-emerald-400" {...props} />,
                       }}
                     >
                       {msg.content}
@@ -1308,7 +1450,7 @@ export const TaskExecutionView = ({
                       setChatInput(prev => prev ? prev + '\n' + cleaned : cleaned);
                       return;
                     }
-                    
+
                     if (e.clipboardData.files && e.clipboardData.files.length > 0) {
                       const filesArray = Array.from(e.clipboardData.files);
                       const audioFile = filesArray.find(f => f.type.startsWith('audio/') || f.name.endsWith('.ogg') || f.name.endsWith('.opus') || f.name.endsWith('.m4a'));
@@ -1319,9 +1461,8 @@ export const TaskExecutionView = ({
                     }
                   }}
                   placeholder="Pergunte ao copiloto…"
-                  className={`flex-1 px-4 py-2 rounded-xl text-xs font-medium outline-none border focus:ring-2 focus:ring-blue-500 transition-all resize-none ${
-                    isChatFocused ? 'h-32' : 'h-10'
-                  } ${isDark ? 'bg-white/10 border-white/10 text-white placeholder:text-white/30' : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400'}`}
+                  className={`flex-1 px-4 py-2 rounded-xl text-xs font-medium outline-none border focus:ring-2 focus:ring-blue-500 transition-all resize-none ${isChatFocused ? 'h-32' : 'h-10'
+                    } ${isDark ? 'bg-white/10 border-white/10 text-white placeholder:text-white/30' : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400'}`}
                 />
                 <button
                   onClick={handleSendMessage}
@@ -1462,10 +1603,10 @@ export const TaskExecutionView = ({
             <h3 className="text-base font-black mb-4 tracking-tighter">
               {modalConfig.type === 'confirm_delete' ? 'Excluir Registro'
                 : modalConfig.type === 'reminder' ? 'Agendar Lembrete'
-                : modalConfig.type === 'edit_diary' ? 'Editar Registro'
-                : modalConfig.type === 'file_upload' ? 'Renomear Arquivos'
-                : modalConfig.type === 'link' ? 'Inserir Link'
-                : 'Inserir Contato'}
+                  : modalConfig.type === 'edit_diary' ? 'Editar Registro'
+                    : modalConfig.type === 'file_upload' ? 'Renomear Arquivos'
+                      : modalConfig.type === 'link' ? 'Inserir Link'
+                        : 'Inserir Contato'}
             </h3>
 
             {modalConfig.type === 'edit_diary' && (

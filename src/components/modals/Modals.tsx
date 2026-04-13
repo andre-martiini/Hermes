@@ -412,17 +412,17 @@ export const SettingsModal = ({
                     )}
 
                     {newCustom.frequency === 'monthly' && (
-                       <div className="flex items-center gap-2">
-                         <span className="text-[10px] font-black text-slate-400 uppercase">Dia do mês:</span>
-                         <input
-                           type="number"
-                           min="1"
-                           max="31"
-                           className="w-12 bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
-                           value={newCustom.dayOfMonth || 1}
-                           onChange={e => setNewCustom({ ...newCustom, dayOfMonth: Number(e.target.value) })}
-                         />
-                       </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-black text-slate-400 uppercase">Dia do mês:</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="31"
+                          className="w-12 bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+                          value={newCustom.dayOfMonth || 1}
+                          onChange={e => setNewCustom({ ...newCustom, dayOfMonth: Number(e.target.value) })}
+                        />
+                      </div>
                     )}
 
                     <button
@@ -466,32 +466,32 @@ export const SettingsModal = ({
                           </span>
                           <span className="text-[9px] font-black text-slate-400 uppercase">
                             {notif.frequency === 'daily' ? 'Diária' :
-                             notif.frequency === 'weekly' ? `Semanal (${notif.daysOfWeek?.length} dias)` :
-                             `Mensal (Dia ${notif.dayOfMonth})`}
+                              notif.frequency === 'weekly' ? `Semanal (${notif.daysOfWeek?.length} dias)` :
+                                `Mensal (Dia ${notif.dayOfMonth})`}
                           </span>
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                         <button
-                           onClick={() => {
-                              const updated = (localSettings.notifications.custom || []).map(n =>
-                                n.id === notif.id ? { ...n, enabled: !n.enabled } : n
-                              );
-                              setLocalSettings({ ...localSettings, notifications: { ...localSettings.notifications, custom: updated } });
-                           }}
-                           className={`w-8 h-4 rounded-full transition-all relative ${notif.enabled ? 'bg-purple-600' : 'bg-slate-300'}`}
-                         >
-                           <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${notif.enabled ? 'left-4.5' : 'left-0.5'}`} />
-                         </button>
-                         <button
-                           onClick={() => {
-                              const updated = (localSettings.notifications.custom || []).filter(n => n.id !== notif.id);
-                              setLocalSettings({ ...localSettings, notifications: { ...localSettings.notifications, custom: updated } });
-                           }}
-                           className="text-slate-300 hover:text-rose-500 p-1 transition-colors"
-                         >
-                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                         </button>
+                        <button
+                          onClick={() => {
+                            const updated = (localSettings.notifications.custom || []).map(n =>
+                              n.id === notif.id ? { ...n, enabled: !n.enabled } : n
+                            );
+                            setLocalSettings({ ...localSettings, notifications: { ...localSettings.notifications, custom: updated } });
+                          }}
+                          className={`w-8 h-4 rounded-full transition-all relative ${notif.enabled ? 'bg-purple-600' : 'bg-slate-300'}`}
+                        >
+                          <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${notif.enabled ? 'left-4.5' : 'left-0.5'}`} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            const updated = (localSettings.notifications.custom || []).filter(n => n.id !== notif.id);
+                            setLocalSettings({ ...localSettings, notifications: { ...localSettings.notifications, custom: updated } });
+                          }}
+                          className="text-slate-300 hover:text-rose-500 p-1 transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -875,7 +875,8 @@ export const DailyHabitsModal = ({
           {[
             { id: 'noSugar', label: 'Sem Açúcar', color: 'rose' },
             { id: 'noAlcohol', label: 'Sem Ãlcool', color: 'purple' },
-            { id: 'noSnacks', label: 'Sem Lanches/Delivery', color: 'orange' },
+            { id: 'noSnacks', label: 'Sem Lanches/Delivery', color: 'orange' },
+
             { id: 'eatUntil18', label: 'Comer até as 18h', color: 'blue' },
             { id: 'eatSlowly', label: 'Comer Devagar', color: 'indigo' }
           ].map((habit) => {
@@ -930,10 +931,9 @@ export const DailyHabitsModal = ({
 
 const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems = [], onSave, onClose, showAlert, initialData }: { unidades: { id: string, nome: string }[], knowledgeBases?: { id: string, nome: string, tipo?: string }[], knowledgeItems?: ConhecimentoItem[], onSave: (data: Partial<Tarefa>) => void, onClose: () => void, showAlert: (title: string, message: string) => void, initialData?: Partial<Tarefa> }) => {
+export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems = [], onSave, onClose, showAlert, initialData, existingTags = [] }: { unidades: { id: string, nome: string }[], knowledgeBases?: { id: string, nome: string, tipo?: string, sistema_id?: string }[], knowledgeItems?: ConhecimentoItem[], onSave: (data: Partial<Tarefa>) => void, onClose: () => void, showAlert: (title: string, message: string) => void, initialData?: Partial<Tarefa>, existingTags?: string[] }) => {
   const [tipoAcao, setTipoAcao] = useState<TipoAcao>('fast');
   const [origemIngestao, setOrigemIngestao] = useState<'manual' | 'whatsapp' | 'audio'>('manual');
-  const [ragContext, setRagContext] = useState('Nenhum');
   const [isExtraContextOpen, setIsExtraContextOpen] = useState(false);
   const [extraContext, setExtraContext] = useState('');
   const [extraContextId] = useState<string>(() => crypto.randomUUID());
@@ -955,7 +955,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
     data_limite: initialData?.data_limite || initialData?.data_inicio || formatDateLocalISO(new Date()),
     data_criacao: new Date().toISOString(),
     status: initialData?.status || 'em andamento' as Status,
-    categoria: initialData?.categoria || 'GERAL' as Categoria,
+    area_tematica: initialData?.area_tematica || 'GERAL' as Categoria,
     notas: initialData?.notas || '',
     descricao: initialData?.descricao || '',
     horario_inicio: initialData?.horario_inicio || '',
@@ -966,6 +966,8 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
   const [planoAcao, setPlanoAcao] = useState<ActionPlanItem[]>([]);
   const [newChecklistItem, setNewChecklistItem] = useState('');
   const [autoClassified, setAutoClassified] = useState(false);
+  const [tags, setTags] = useState<string[]>(initialData?.tags || []);
+  const [tagInput, setTagInput] = useState('');
 
   const recognitionRef = useRef<any>(null);
 
@@ -1103,22 +1105,27 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
       const generateFunc = httpsCallable(functions, 'generate_task_with_ia');
       const meetingContext = selectedReuniao
         ? `\n\n=== CONTEXTO DE REUNIÃO: ${selectedReuniao.titulo} ===\n` +
-          selectedReuniao.transcripts.map(t => `${t.speaker}: ${t.text}`).join('\n')
+        selectedReuniao.transcripts.map(t => `${t.speaker}: ${t.text}`).join('\n')
         : '';
-        
+
       const tagsDisponiveis = [
-        'GERAL', 
-        'NÃO CLASSIFICADA', 
+        'GERAL',
+        'NÃO CLASSIFICADA',
         ...unidades.map(u => u.nome.toUpperCase())
       ];
-      
+
+      const unit = formData.area_tematica && formData.area_tematica !== 'GERAL' && formData.area_tematica !== 'NÃO CLASSIFICADA'
+        ? unidades.find(u => u.nome.toUpperCase() === formData.area_tematica)
+        : null;
+      const computedRagContext = unit ? (knowledgeBases.find(b => b.sistema_id === unit.id)?.id || 'Nenhum') : 'Nenhum';
+
       const response = await generateFunc({
         content: inputText,
         origin: origemIngestao,
-        ragContext: ragContext,
+        ragContext: computedRagContext,
         extraContext: extraContext + meetingContext,
         availableTags: tagsDisponiveis,
-        ...(extraContextFiles.some(f => f.status === 'ready') ? { 
+        ...(extraContextFiles.some(f => f.status === 'ready') ? {
           extraContextId: extraContextId,
           knowledgeItemIds: extraContextFiles.filter(f => f.status === 'ready').map(f => f.id)
         } : {})
@@ -1131,7 +1138,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
           ...prev,
           titulo: data.titulo || prev.titulo,
           descricao: data.descricao || prev.descricao,
-          categoria: (data.categoria as Categoria) || prev.categoria,
+          area_tematica: (data.categoria as Categoria) || prev.area_tematica,
           status: (data.status as Status) || prev.status,
           data_limite: data.data_limite || prev.data_limite
         }));
@@ -1141,6 +1148,9 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
             text: item,
             completed: false
           })));
+        }
+        if (data.tags && Array.isArray(data.tags)) {
+          setTags(prev => Array.from(new Set([...prev, ...data.tags])));
         }
         showAlert("Sucesso", "Demanda gerada com sucesso pela IA!");
       }
@@ -1217,27 +1227,20 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Base RAG</label>
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Área Temática</label>
                   <select
-                    value={ragContext}
-                    onChange={e => setRagContext(e.target.value)}
-                    className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                    value={formData.area_tematica}
+                    onChange={e => {
+                      setFormData({ ...formData, area_tematica: e.target.value as Categoria });
+                      setAutoClassified(true);
+                    }}
+                    className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
                   >
-                    <option value="Nenhum">Nenhum</option>
-                    {knowledgeBases.filter(b => b.tipo !== 'github').length > 0 && (
-                      <optgroup label="Bases de Conhecimento">
-                        {knowledgeBases.filter(b => b.tipo !== 'github').map(base => (
-                          <option key={base.id} value={base.id}>{base.nome}</option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {knowledgeBases.filter(b => b.tipo === 'github').length > 0 && (
-                      <optgroup label="Repositórios GitHub">
-                        {knowledgeBases.filter(b => b.tipo === 'github').map(base => (
-                          <option key={base.id} value={base.id}>{base.nome}</option>
-                        ))}
-                      </optgroup>
-                    )}
+                    <option value="GERAL">Geral</option>
+                    <option value="NÃO CLASSIFICADA">Não Classificada</option>
+                    {unidades.map(u => (
+                      <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
+                    ))}
                   </select>
                 </div>
                 <div className="flex items-end gap-2">
@@ -1273,8 +1276,8 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                   />
                   <div className="max-h-[150px] overflow-y-auto space-y-2 custom-scrollbar pr-1">
                     {knowledgeItems
-                      ?.filter(item => 
-                        (item.categoria === 'REUNIÕES' || item.tipo_arquivo === 'transcription') &&
+                      ?.filter(item =>
+                        (item.area_tematica === 'REUNIÕES' || item.tipo_arquivo === 'transcription') &&
                         item.titulo.toLowerCase().includes(transcriptionSearch.toLowerCase()) &&
                         !extraContextFiles.some(f => f.id === item.id)
                       )
@@ -1293,7 +1296,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                           <p className="text-[8px] text-slate-400 font-medium uppercase mt-1">{formatDate(item.data_criacao)}</p>
                         </button>
                       ))}
-                    {knowledgeItems?.filter(item => (item.categoria === 'REUNIÕES' || item.tipo_arquivo === 'transcription')).length === 0 && (
+                    {knowledgeItems?.filter(item => (item.area_tematica === 'REUNIÕES' || item.tipo_arquivo === 'transcription')).length === 0 && (
                       <p className="text-[10px] text-slate-400 italic text-center py-4">Nenhuma transcrição encontrada.</p>
                     )}
                   </div>
@@ -1399,9 +1402,9 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                         className={`w-16 h-16 rounded-full flex items-center justify-center transition-all disabled:opacity-60 ${isRecording ? 'bg-rose-500 scale-110 shadow-lg shadow-rose-200 animate-pulse' : isTranscribing ? 'bg-blue-100 text-blue-500' : 'bg-white text-slate-400 border border-slate-200 hover:border-slate-400'}`}
                       >
                         {isTranscribing ? (
-                          <svg className="w-7 h-7 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                          <svg className="w-7 h-7 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
                         ) : isRecording ? (
-                          <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+                          <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
                         ) : (
                           <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
                         )}
@@ -1438,7 +1441,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                 onChange={e => {
                   const newTitulo = e.target.value;
                   const detectedArea = detectAreaFromTitle(newTitulo);
-                  setFormData({ ...formData, titulo: newTitulo, categoria: autoClassified ? formData.categoria : detectedArea });
+                  setFormData({ ...formData, titulo: newTitulo, area_tematica: autoClassified ? formData.area_tematica : detectedArea });
                 }}
                 className="w-full bg-slate-100 border-none rounded-xl px-4 py-3 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans pr-12"
                 placeholder={tipoAcao === 'fast' ? "O que precisa ser feito agora?" : "Título da demanda profunda..."}
@@ -1469,35 +1472,59 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Status</label>
-                      <select
-                        value={formData.status}
-                        onChange={e => setFormData({ ...formData, status: e.target.value as Status })}
-                        className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
-                      >
-                        <option value="em andamento">Em Andamento</option>
-                        <option value="stand-by">Stand-by</option>
-                        <option value="concluído">Concluído</option>
-                      </select>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Status</label>
+                    <select
+                      value={formData.status}
+                      onChange={e => setFormData({ ...formData, status: e.target.value as Status })}
+                      className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                    >
+                      <option value="em andamento">Em Andamento</option>
+                      <option value="stand-by">Stand-by</option>
+                      <option value="concluído">Concluído</option>
+                    </select>
+                  </div>
+
+                  {/* Tags Dinâmicas */}
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Tags Dinâmicas</label>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {tags.map(tag => (
+                        <span key={tag} className="flex items-center gap-1 bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg text-[10px] font-bold border border-indigo-100">
+                          #{tag}
+                          <button onClick={(e) => { e.preventDefault(); setTags(tags.filter(t => t !== tag)); }} className="text-indigo-400 hover:text-rose-500 scale-125 ml-1 transition-colors">&times;</button>
+                        </span>
+                      ))}
                     </div>
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Tag (Classificação)</label>
-                      <select
-                        value={formData.categoria}
-                        onChange={e => {
-                          setFormData({ ...formData, categoria: e.target.value as Categoria });
-                          setAutoClassified(true);
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={tagInput}
+                        onChange={e => setTagInput(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (tagInput.trim() && !tags.includes(tagInput.trim())) {
+                              setTags([...tags, tagInput.trim()]);
+                              setTagInput('');
+                            }
+                          }
                         }}
-                        className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
+                        className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-[11px] font-medium text-slate-700 focus:ring-1 focus:ring-indigo-500 outline-none"
+                        placeholder="Adicionar nova tag (Enter)..."
+                      />
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (tagInput.trim() && !tags.includes(tagInput.trim())) {
+                            setTags([...tags, tagInput.trim()]);
+                            setTagInput('');
+                          }
+                        }}
+                        className="bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg hover:bg-slate-200 transition-all text-[10px] font-bold border border-slate-200"
                       >
-                        <option value="GERAL">Geral</option>
-                        <option value="NÃO CLASSIFICADA">Não Classificada</option>
-                        {unidades.map(u => (
-                          <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
-                        ))}
-                      </select>
+                        Add
+                      </button>
                     </div>
                   </div>
 
@@ -1568,12 +1595,18 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
 
               onSave({
                 ...formData,
+                tags,
                 tipo_acao: tipoAcao,
                 plano_acao: planoAcao,
                 data_inicio: formData.data_limite || '',
                 origem: tipoAcao === 'deep' ? origemIngestao : 'manual',
-                base_conhecimento: ragContext,
-                ...(extraContextFiles.some(f => f.status === 'ready') ? { 
+                base_conhecimento: (() => {
+                  const unit = formData.area_tematica && formData.area_tematica !== 'GERAL' && formData.area_tematica !== 'NÃO CLASSIFICADA'
+                    ? unidades.find(u => u.nome.toUpperCase() === formData.area_tematica)
+                    : null;
+                  return unit ? (knowledgeBases.find(b => b.sistema_id === unit.id)?.id || undefined) : undefined;
+                })(),
+                ...(extraContextFiles.some(f => f.status === 'ready') ? {
                   extra_context_id: extraContextId,
                   knowledge_item_ids: extraContextFiles.filter(f => f.status === 'ready').map(f => f.id)
                 } : {}),
@@ -1590,14 +1623,14 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
     </div>
   );
 };
-export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showAlert, showConfirm, pgcEntregas = [] }: { unidades: { id: string, nome: string }[], task: Tarefa, onSave: (id: string, updates: Partial<Tarefa>) => void, onDelete: (id: string) => void, onClose: () => void, showAlert: (title: string, message: string) => void, showConfirm: (title: string, message: string, onConfirm: () => void) => void, pgcEntregas?: EntregaInstitucional[] }) => {
+export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showAlert, showConfirm, pgcEntregas = [], existingTags = [] }: { unidades: { id: string, nome: string }[], task: Tarefa, onSave: (id: string, updates: Partial<Tarefa>) => void, onDelete: (id: string) => void, onClose: () => void, showAlert: (title: string, message: string) => void, showConfirm: (title: string, message: string, onConfirm: () => void) => void, pgcEntregas?: EntregaInstitucional[], existingTags?: string[] }) => {
   const [tipoAcao, setTipoAcao] = useState<TipoAcao>(task.tipo_acao || 'fast');
   const [formData, setFormData] = useState({
     titulo: task.titulo,
     data_limite: task.data_limite === '-' ? (task.data_inicio || '') : (task.data_limite || task.data_inicio || ''),
     data_criacao: task.data_criacao,
     status: task.status,
-    categoria: task.categoria || 'NÃO CLASSIFICADA',
+    area_tematica: task.area_tematica || 'NÃO CLASSIFICADA',
     notas: task.notas || '',
     descricao: task.descricao || '',
     entregas_relacionadas: task.entregas_relacionadas || [],
@@ -1607,6 +1640,8 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
 
   const [planoAcao, setPlanoAcao] = useState<ActionPlanItem[]>(task.plano_acao || []);
   const [newChecklistItem, setNewChecklistItem] = useState('');
+  const [tags, setTags] = useState<string[]>(task.tags || []);
+  const [tagInput, setTagInput] = useState('');
 
   const addChecklistItem = () => {
     if (!newChecklistItem.trim()) return;
@@ -1676,6 +1711,49 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
                   className="w-full bg-slate-100 border-none rounded-xl px-4 py-3 text-xs font-medium text-slate-700 focus:ring-2 focus:ring-slate-900 transition-all font-sans min-h-[80px] resize-none"
                   placeholder="Detone o contexto desta ação..."
                 />
+              </div>
+
+              {/* Tags Dinâmicas */}
+              <div className="space-y-2">
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Tags Dinâmicas</label>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {tags.map(tag => (
+                    <span key={tag} className="flex items-center gap-1 bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg text-[10px] font-bold border border-indigo-100">
+                      #{tag}
+                      <button onClick={(e) => { e.preventDefault(); setTags(tags.filter(t => t !== tag)); }} className="text-indigo-400 hover:text-rose-500 scale-125 ml-1 transition-colors">&times;</button>
+                    </span>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={tagInput}
+                    onChange={e => setTagInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (tagInput.trim() && !tags.includes(tagInput.trim())) {
+                          setTags([...tags, tagInput.trim()]);
+                          setTagInput('');
+                        }
+                      }
+                    }}
+                    className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-[11px] font-medium text-slate-700 focus:ring-1 focus:ring-indigo-500 outline-none"
+                    placeholder="Adicionar nova tag (Enter)..."
+                  />
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      if (tagInput.trim() && !tags.includes(tagInput.trim())) {
+                        setTags([...tags, tagInput.trim()]);
+                        setTagInput('');
+                      }
+                    }}
+                    className="bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg hover:bg-slate-200 transition-all text-[10px] font-bold border border-slate-200"
+                  >
+                    Add
+                  </button>
+                </div>
               </div>
 
               {/* Plano de Ação (Checklist) */}
@@ -1749,17 +1827,15 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Tag</label>
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Área Temática</label>
               <select
-                value={formData.categoria}
-                onChange={e => setFormData({ ...formData, categoria: e.target.value as Categoria })}
+                value={formData.area_tematica}
+                onChange={e => setFormData({ ...formData, area_tematica: e.target.value as Categoria })}
                 className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
               >
                 <option value="GERAL">Geral</option>
                 <option value="NÃO CLASSIFICADA">Não Classificada</option>
-                <option value="CLC">CLC</option>
-                <option value="ASSISTÊNCIA">Assistência Estudantil</option>
-                {unidades.filter(u => u.nome !== 'CLC' && u.nome !== 'Assistência Estudantil').map(u => (
+                {unidades.map(u => (
                   <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
                 ))}
               </select>
@@ -1776,6 +1852,7 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
               }
               onSave(task.id, {
                 ...formData,
+                tags,
                 tipo_acao: tipoAcao,
                 plano_acao: planoAcao,
                 data_inicio: formData.data_limite || ''
@@ -1791,8 +1868,8 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
             <button
               onClick={() => {
                 showConfirm("Confirmar Exclusão", "Deseja realmente excluir esta tarefa?", () => {
-                   onDelete(task.id);
-                   onClose();
+                  onDelete(task.id);
+                  onClose();
                 });
               }}
               className="flex-1 md:flex-none px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all border flex items-center justify-center gap-2 text-rose-600 hover:bg-rose-50 border-rose-100"

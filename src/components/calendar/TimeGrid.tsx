@@ -365,8 +365,8 @@ export const TimeGrid = ({
                      <React.Fragment key={event.id}>
                        <div
                           className={`absolute rounded-lg border p-1 shadow-sm group transition-all overflow-hidden hover:z-30 cursor-grab active:cursor-grabbing
-                             ${taskItem.categoria === 'CLC' ? 'bg-blue-50 border-blue-200 text-blue-800' :
-                               taskItem.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
+                             ${taskItem.area_tematica === 'CLC' ? 'bg-blue-50 border-blue-200 text-blue-800' :
+                               taskItem.area_tematica === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
                                'bg-white border-slate-200 text-slate-800'}
                              ${isDragging || isResizing ? 'opacity-30' : ''}
                           `}

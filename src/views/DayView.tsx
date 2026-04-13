@@ -55,7 +55,7 @@ export const DayView = ({
         ...task,
         titulo: 'Nova Tarefa',
         status: 'em andamento',
-        categoria: 'GERAL',
+        area_tematica: 'GERAL',
         projeto: 'GERAL',
         contabilizar_meta: true,
         data_criacao: new Date().toISOString()

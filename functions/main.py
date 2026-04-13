@@ -368,7 +368,7 @@ def classify_task(title, notes):
 
     text = f"{title} {notes}".upper()
 
-    categoria, contabilizar_meta = 'NÃO CLASSIFICADA', False
+    area_tematica, contabilizar_meta = 'NÃO CLASSIFICADA', False
 
     tags = re.findall(r'\[(.*?)\]|TAG:\s*([\w\-]+)', text)
 
@@ -378,21 +378,21 @@ def classify_task(title, notes):
 
     if any(tag in ['CLC', 'LICITACAO'] for tag in tags):
 
-        categoria, contabilizar_meta = 'CLC', True
+        area_tematica, contabilizar_meta = 'CLC', True
 
     elif any(tag in ['ASSISTENCIA', 'ESTUDANTIL'] for tag in tags):
 
-        categoria, contabilizar_meta = 'ASSISTÊNCIA', True
+        area_tematica, contabilizar_meta = 'ASSISTÊNCIA', True
 
     elif 'GERAL' in tags:
 
-        categoria = 'GERAL'
+        area_tematica = 'GERAL'
 
 
 
     # Se não classificou por tag, tenta por palavra-chave no texto
 
-    if categoria == 'NÃO CLASSIFICADA':
+    if area_tematica == 'NÃO CLASSIFICADA':
 
         clc_keywords = ['LICITAÇÃO', 'LICITACAO', 'PREGÃO', 'PREGAO', 'CONTRATO', 'DISPENSA', 'INEXIGIBILIDADE', 'COMPRA', 'AQUISIÇÃO', 'AQUISICAO', 'PROCESSO']
 
@@ -402,15 +402,15 @@ def classify_task(title, notes):
 
         if any(kw in text for kw in clc_keywords):
 
-            categoria, contabilizar_meta = 'CLC', True
+            area_tematica, contabilizar_meta = 'CLC', True
 
         elif any(kw in text for kw in assist_keywords):
 
-            categoria, contabilizar_meta = 'ASSISTÊNCIA', True
+            area_tematica, contabilizar_meta = 'ASSISTÊNCIA', True
 
 
 
-    return categoria, None, contabilizar_meta
+    return area_tematica, None, contabilizar_meta
 
 
 
@@ -697,10 +697,10 @@ def sync_google_tasks_pull(service, sync_ref, logs):
                 db.collection('tarefas').add({
                     'titulo': title, 'projeto': 'GOOGLE', 'google_id': g_id, 'status': status,
                     'data_criacao': datetime.now().isoformat(), 'data_atualizacao': datetime.now().isoformat() if title_was_normalized else g_updated,
-                    'categoria': cat, 'contabilizar_meta': meta, 'notas': g_notes,
+                    'area_tematica': cat, 'contabilizar_meta': meta, 'notas': g_notes,
                     'data_limite': g_due if g_due else '-',
                     'horario_inicio': h_inicio, 'horario_fim': h_fim,
-                    'tipo_acao': 'fast', 'origem': 'google'
+                    'tipo_acao': 'fast', 'origem': 'manual'
                 })
 
                 log_to_firestore(sync_ref, logs, f"[+] IMPORTADA: {title}")
@@ -762,7 +762,7 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
 
             t = doc.to_dict()
 
-            cat = t.get('categoria', '')
+            cat = t.get('area_tematica', '')
 
             if cat == 'SISTEMAS': continue
 
@@ -2091,9 +2091,9 @@ def on_processo_updated(event: firestore_fn.Event[firestore_fn.Change[firestore_
 
 
 
-    # Condição: Se categoria == 'CLC' e o campo processo_sei for alterado/inserido.
+    # Condição: Se area_tematica == 'CLC' e o campo processo_sei for alterado/inserido.
 
-    if after.get('categoria') == 'CLC' and after.get('processo_sei'):
+    if after.get('area_tematica') == 'CLC' and after.get('processo_sei'):
 
         if before.get('processo_sei') != after.get('processo_sei'):
 
@@ -2490,7 +2490,7 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
     {{
       "titulo": "Título claro e profissional da demanda",
       "descricao": "Descrição detalhada contextualizando a demanda e o que deve ser feito",
-      "categoria": "NOME_EXATO_DE_UMA_DAS_TAGS_DISPONIVEIS",
+      "area_tematica": "NOME_EXATO_DE_UMA_DAS_TAGS_DISPONIVEIS",
       "status": "em andamento",
       "data_limite": "YYYY-MM-DD",
       "plano_acao": ["Passo 1 detalhado", "Passo 2 detalhado", "..."]
@@ -2620,7 +2620,7 @@ def retrieve_personalized_rag_context(db, genai, query_text, base_id):
 
     else:
 
-        # Se não existe como base_id, tenta tratar como categoria (legado)
+        # Se não existe como base_id, tenta tratar como area_tematica (legado)
 
         context_parts.append(f"### [PESQUISA LEGADA POR CATEGORIA] {base_id}")
 
@@ -2630,7 +2630,7 @@ def retrieve_personalized_rag_context(db, genai, query_text, base_id):
 
             'incluir_diarios': True,
 
-            'categorias_vinculadas': [base_id]
+            'area_tematicas_vinculadas': [base_id]
 
         }
 
@@ -2640,13 +2640,13 @@ def retrieve_personalized_rag_context(db, genai, query_text, base_id):
 
     if config.get('incluir_manual'):
 
-        cats = config.get('categorias_vinculadas', [])
+        cats = config.get('area_tematicas_vinculadas', [])
 
         if cats:
 
             for cat in cats:
 
-                master = db.collection('conhecimento_mestre').where('categoria', '==', cat).limit(2).stream()
+                master = db.collection('conhecimento_mestre').where('area_tematica', '==', cat).limit(2).stream()
 
                 for d in master:
 
@@ -2660,14 +2660,14 @@ def retrieve_personalized_rag_context(db, genai, query_text, base_id):
 
     if config.get('incluir_diarios'):
 
-        cats = config.get('categorias_vinculadas', [])
+        cats = config.get('area_tematicas_vinculadas', [])
 
         if cats:
 
             for cat in cats:
 
                 tasks = (db.collection('tarefas')
-                    .where('categoria', '==', cat)
+                    .where('area_tematica', '==', cat)
                     .where('status', '==', 'concluído')
                     .order_by('data_conclusao', direction=firestore.Query.DESCENDING)
                     .limit(3).stream())
@@ -3298,7 +3298,7 @@ def start_file_indexing(item_id, item_data):
 
             4. tags: Lista de 5-10 palavras-chave.
 
-            5. categoria: Uma única palavra de classificação.
+            5. area_tematica: Uma única palavra de classificação.
 
             """
 
@@ -3316,7 +3316,7 @@ def start_file_indexing(item_id, item_data):
 
             3. tags: Lista de 5-10 palavras-chave.
 
-            4. categoria: Uma única palavra de classificação.
+            4. area_tematica: Uma única palavra de classificação.
 
             """
 
@@ -3344,7 +3344,7 @@ def start_file_indexing(item_id, item_data):
 
             2. tags: Lista de 5-10 palavras-chave.
 
-            3. categoria: Uma única palavra de classificação.
+            3. area_tematica: Uma única palavra de classificação.
 
             4. texto_bruto: O próprio texto.
 
@@ -3378,7 +3378,7 @@ def start_file_indexing(item_id, item_data):
 
                 'tags': data.get('tags'),
 
-                'categoria': data.get('categoria', 'Geral').upper()
+                'area_tematica': data.get('area_tematica', 'Geral').upper()
 
             }
 
@@ -4549,7 +4549,7 @@ def askTaskAssistant(req: https_fn.CallableRequest):
     data = req.data or {}
     prompt = data.get('prompt')
     history_context = data.get('historyContext')
-    categoria = data.get('categoria')
+    area_tematica = data.get('area_tematica')
     rag_context_id = data.get('ragContext')
     extra_context_id = data.get('extraContextId')
     knowledge_item_ids = data.get('knowledgeItemIds', [])
@@ -4576,10 +4576,10 @@ def askTaskAssistant(req: https_fn.CallableRequest):
 
         # --- CONHECIMENTO MESTRE (Manual do André) ---
         manual_context = ""
-        if categoria:
+        if area_tematica:
             try:
                 master_docs = db.collection('conhecimento_mestre')\
-                    .where('categoria', '==', categoria)\
+                    .where('area_tematica', '==', area_tematica)\
                     .order_by('data_criacao', direction=firestore.Query.DESCENDING)\
                     .limit(3).stream()
                 manual_items = []
@@ -4628,7 +4628,7 @@ def askTaskAssistant(req: https_fn.CallableRequest):
         {extra_rag_context if extra_rag_context else 'Nenhum documento extra.'}
 
         === MANUAL DE PROCEDIMENTOS ===
-        {manual_context if manual_context else 'Nenhum guia mestre para esta categoria.'}
+        {manual_context if manual_context else 'Nenhum guia mestre para esta area_tematica.'}
 
         === COMANDO DO USUÁRIO ===
         {prompt}
@@ -4814,7 +4814,7 @@ def salvarTranscricaoReuniao(req: https_fn.CallableRequest):
             'tamanho': int(uploaded.get('size') or len(payload)),
             'data_criacao': datetime.now().isoformat(),
             'origem': {'modulo': 'reunioes', 'id_origem': started_dt.isoformat()},
-            'categoria': 'Reuniões',
+            'area_tematica': 'Reuniões',
             'parent_id': 'biblioteca',
             'meeting_started_at': started_dt.isoformat(),
             'meeting_ended_at': ended_dt.isoformat()
@@ -4844,7 +4844,7 @@ def salvarTranscricaoReuniao(req: https_fn.CallableRequest):
 )
 def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
     """
-    Analisa tarefas de uma categoria específica para identificar padrões e propor artefatos de conhecimento.
+    Analisa tarefas de uma area_tematica específica para identificar padrões e propor artefatos de conhecimento.
     """
     from google import genai
     import json
@@ -4852,9 +4852,9 @@ def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
     import traceback
 
     data = req.data or {}
-    categoria = data.get('categoria')
+    area_tematica = data.get('area_tematica')
     
-    if not categoria:
+    if not area_tematica:
          raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
             message="Categoria é obrigatória."
@@ -4862,9 +4862,9 @@ def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
 
     try:
         db = firestore.client()
-        # Busca tarefas concluídas desta categoria (limite de 15 para análise)
+        # Busca tarefas concluídas desta area_tematica (limite de 15 para análise)
         tasks_query = db.collection('tarefas')\
-            .where('categoria', '==', categoria)\
+            .where('area_tematica', '==', area_tematica)\
             .where('status', '==', 'concluído')\
             .limit(15)
         
@@ -4875,7 +4875,7 @@ def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
             contexto_tarefas.append(f"Tarefa: {t.get('titulo')}\nNotas: {t.get('notas')}")
 
         if not contexto_tarefas:
-            return {"success": False, "message": f"Não há tarefas concluídas suficientes em '{categoria}' para analisar padrões."}
+            return {"success": False, "message": f"Não há tarefas concluídas suficientes em '{area_tematica}' para analisar padrões."}
 
         keys_doc = db.collection('system').document('api_keys').get()
         gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
@@ -4886,10 +4886,10 @@ def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
         client = genai.Client(api_key=gemini_key)
 
         prompt = f"""
-        Você é o HERMES Master IA. Analise a sequência de tarefas abaixo da categoria '{categoria}'.
+        Você é o HERMES Master IA. Analise a sequência de tarefas abaixo da area_tematica '{area_tematica}'.
         Sua missão é identificar um PADRÃO de trabalho ou um PROCEDIMENTO que o André segue.
         
-        Com base nessas tarefas, crie um "Guia de Procedimento Operacional Padrão" para esta categoria.
+        Com base nessas tarefas, crie um "Guia de Procedimento Operacional Padrão" para esta area_tematica.
         
         TAREFAS ANALISADAS:
         {chr(10).join(contexto_tarefas)}
@@ -4911,7 +4911,7 @@ def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
             db.collection("conhecimento_mestre").add({
                 "titulo": result_data.get('titulo'),
                 "conteudo": result_data.get('conteudo'),
-                "categoria": categoria,
+                "area_tematica": area_tematica,
                 "insight_ia": result_data.get('insight'),
                 "data_criacao": firestore.SERVER_TIMESTAMP,
                 "tipo": "procedimento_aprendido",

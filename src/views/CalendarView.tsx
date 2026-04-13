@@ -65,7 +65,7 @@ export const CalendarView = ({
         ...task,
         titulo: 'Nova Tarefa',
         status: 'em andamento',
-        categoria: 'GERAL',
+        area_tematica: 'GERAL',
         projeto: 'GERAL',
         contabilizar_meta: true,
         data_criacao: new Date().toISOString()
@@ -272,8 +272,8 @@ export const CalendarView = ({
                         key={`${t.id}-${dayStr}`}
                         onClick={() => onTaskClick(t)}
                         className={`px-2 py-1.5 rounded-md border text-[9px] font-bold cursor-pointer transition-all active:scale-95 group relative z-10
-                          ${t.categoria === 'CLC' ? 'bg-blue-50 border-blue-100 text-blue-700 hover:border-blue-300' :
-                            t.categoria === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-100 text-emerald-700 hover:border-emerald-300' :
+                          ${t.area_tematica === 'CLC' ? 'bg-blue-50 border-blue-100 text-blue-700 hover:border-blue-300' :
+                            t.area_tematica === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-100 text-emerald-700 hover:border-emerald-300' :
                               'bg-slate-50 border-slate-100 text-slate-600 hover:border-slate-300'}
                         `}
                       >

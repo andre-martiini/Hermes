@@ -1645,7 +1645,7 @@ const App: React.FC = () => {
         descricao: desc,
         data_criacao: new Date().toISOString()
       });
-      setIsProjectCreateModalOpen(false);
+      setIsCreateModalOpen(false);
       showToast("Projeto criado com sucesso!", "success");
     } catch (error) {
       console.error("Error creating project:", error);
@@ -2173,22 +2173,8 @@ const App: React.FC = () => {
       }
 
       // 3. Task Reminders (Scheduled via TaskExecutionView)
-      tarefas.forEach(task => {
-        if (task.reminder_at && !task.reminder_sent) {
-          const reminderTime = new Date(task.reminder_at);
-          if (now >= reminderTime) {
-            emitNotification(
-              "Lembrete de Tarefa",
-              `Chegou a hora de: ${task.titulo}`,
-              'info',
-              'acoes',
-              `task_${task.id}`
-            );
-            // Mark as sent to prevent loop
-            updateDoc(doc(db, 'tarefas', task.id), { reminder_sent: true }).catch(console.error);
-          }
-        }
-      });
+      // Delegated to backend Cloud Function to prevent duplicate triggering
+      // and ensure execution when frontend is offline.
 
       // 4. Daily Task Notifications (Legacy / Overdue)
       const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
@@ -2727,8 +2713,8 @@ const App: React.FC = () => {
         const task = tarefas.find(t => t.id === id);
         if (task) {
           setSelectedTask(task);
-          if (task.categoria === 'CLC') setViewMode('licitacoes');
-          else if (task.categoria === 'ASSISTÊNCIA') setViewMode('assistencia');
+          if (task.area_tematica === 'CLC') setViewMode('licitacoes');
+          else if (task.area_tematica === 'ASSISTÊNCIA') setViewMode('assistencia');
           else setViewMode('gallery');
           setActiveModule('acoes');
         } else {
@@ -3300,7 +3286,7 @@ const App: React.FC = () => {
         google_id: "", // Sinaliza que precisa de PUSH
         data_atualizacao: new Date().toISOString(),
         projeto: 'Google Tasks',
-        contabilizar_meta: inputData.categoria === 'CLC' || inputData.categoria === 'ASSISTÊNCIA',
+        contabilizar_meta: inputData.area_tematica === 'CLC' || inputData.area_tematica === 'ASSISTÊNCIA',
         acompanhamento: [],
         entregas_relacionadas: []
       };
@@ -3344,13 +3330,14 @@ const App: React.FC = () => {
     const qTarefas = query(collection(db, 'tarefas'));
     const unsubscribeTarefas = onSnapshot(qTarefas, (snapshot) => {
       const normalized: Tarefa[] = snapshot.docs.map(taskDoc => {
-        const raw = { id: taskDoc.id, ...taskDoc.data() } as Tarefa;
+        const raw = { id: taskDoc.id, ...taskDoc.data() } as any;
         const singleDate = raw.data_limite || raw.data_inicio || '';
         return {
           ...raw,
+          area_tematica: raw.area_tematica || raw.categoria,
           data_limite: singleDate,
           data_inicio: singleDate
-        };
+        } as Tarefa;
       });
       setTarefas(normalized);
 
@@ -4030,7 +4017,7 @@ const App: React.FC = () => {
 
           const phaseOrder: PullupPhase[] = ['dead_hang', 'negative', 'assisted', 'full'];
           const currentPhaseIdx = phaseOrder.indexOf(currentPhase);
-          let nextPhase = currentPhase;
+          let nextPhase: PullupPhase = currentPhase;
           let nextGoal = Math.min(currentGoal + (metGate ? phaseNextGoalIncrement[currentPhase] : 0), gateValue);
 
           if (consecutiveGateMet >= 2) {
@@ -4064,10 +4051,10 @@ const App: React.FC = () => {
     emAndamento: tarefas.filter(t => normalizeStatus(t.status) === 'em andamento').length,
     standBy: tarefas.filter(t => normalizeStatus(t.status) === 'stand-by').length,
     concluidas: tarefas.filter(t => normalizeStatus(t.status) === 'concluido').length,
-    clc: tarefas.filter(t => t.categoria === 'CLC' && normalizeStatus(t.status) !== 'concluido').length,
-    assistencia: tarefas.filter(t => t.categoria === 'ASSISTÊNCIA' && normalizeStatus(t.status) !== 'concluido').length,
-    geral: tarefas.filter(t => t.categoria === 'GERAL' && normalizeStatus(t.status) !== 'concluido').length,
-    semTag: tarefas.filter(t => (t.categoria === 'NÃO CLASSIFICADA' || !t.categoria) && normalizeStatus(t.status) !== 'concluido' && t.status !== 'excluído' as any).length,
+    clc: tarefas.filter(t => t.area_tematica === 'CLC' && normalizeStatus(t.status) !== 'concluido').length,
+    assistencia: tarefas.filter(t => t.area_tematica === 'ASSISTÊNCIA' && normalizeStatus(t.status) !== 'concluido').length,
+    geral: tarefas.filter(t => t.area_tematica === 'GERAL' && normalizeStatus(t.status) !== 'concluido').length,
+    semTag: tarefas.filter(t => (t.area_tematica === 'NÃO CLASSIFICADA' || !t.area_tematica) && normalizeStatus(t.status) !== 'concluido' && t.status !== 'excluído' as any).length,
   }), [tarefas]);
 
   const prioridadesHoje = useMemo(() => {
@@ -4086,9 +4073,9 @@ const App: React.FC = () => {
     if (searchTerm) {
       const s = searchTerm.toLowerCase();
       if (s === 'filter:unclassified') {
-        result = result.filter(t => (!t.categoria || t.categoria === 'NÃO CLASSIFICADA') && normalizeStatus(t.status) !== 'concluido');
+        result = result.filter(t => (!t.area_tematica || t.area_tematica === 'NÃO CLASSIFICADA') && normalizeStatus(t.status) !== 'concluido');
       } else if (s === 'categoria:geral') {
-        result = result.filter(t => t.categoria === 'GERAL');
+        result = result.filter(t => t.area_tematica === 'GERAL');
       } else {
         result = result.filter(t => t.titulo?.toLowerCase().includes(s) || t.projeto?.toLowerCase().includes(s) || t.notas?.toLowerCase().includes(s));
       }
@@ -4116,10 +4103,10 @@ const App: React.FC = () => {
       const norm = (val: any) => (val || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
       const filterNorm = norm(areaFilter);
       result = result.filter(t => {
-        const cat = norm(t.categoria);
+        const cat = norm(t.area_tematica);
         if (filterNorm === 'CLC') return cat === 'CLC';
         if (filterNorm === 'ASSISTENCIA') return cat === 'ASSISTENCIA' || cat === 'ASSISTENCIA ESTUDANTIL';
-        if (filterNorm === 'NAO CLASSIFICADA') return !t.categoria || cat === 'NAO CLASSIFICADA';
+        if (filterNorm === 'NAO CLASSIFICADA') return !t.area_tematica || cat === 'NAO CLASSIFICADA';
         return cat === filterNorm;
       });
     }
@@ -4134,7 +4121,7 @@ const App: React.FC = () => {
     // Se viewMode for gallery (Dashboard), ele mostra tudo filtrado por status.
     // Se criarmos uma visão específica para sem classificação, podemos filtrar aqui.
     if (viewMode === 'gallery' && searchTerm === 'filter:unclassified') {
-      result = result.filter(t => (!t.categoria || t.categoria === 'NÃO CLASSIFICADA') && normalizeStatus(t.status) !== 'concluido');
+      result = result.filter(t => (!t.area_tematica || t.area_tematica === 'NÃO CLASSIFICADA') && normalizeStatus(t.status) !== 'concluido');
     }
 
     result.sort((a, b) => {
@@ -4158,7 +4145,7 @@ const App: React.FC = () => {
   // Calcula tarefas não classificadas usando EXATAMENTE o mesmo filtro da exibição
   const unclassifiedTasksCount = useMemo(() => {
     return tarefas.filter(t =>
-      (!t.categoria || t.categoria === 'NÃO CLASSIFICADA') &&
+      (!t.area_tematica || t.area_tematica === 'NÃO CLASSIFICADA') &&
       normalizeStatus(t.status) !== 'concluido' &&
       t.status !== 'excluído' as any
     ).length;
@@ -4302,7 +4289,7 @@ const App: React.FC = () => {
       if (t.status === 'excluído' as any) return false;
 
       const proj = norm(t.projeto);
-      const cat = norm(t.categoria);
+      const cat = norm(t.area_tematica);
 
       // Identificadores das unidades PGD/PGC - Pelo PROJETO ou CATEGORIA
       const isCLC = proj.includes('CLC') || cat === 'CLC';
@@ -4352,8 +4339,8 @@ const App: React.FC = () => {
 
     return pgcTasks.filter(t => {
       // Regra 1: Deve ser da categoria CLC ou ASSISTÊNCIA
-      const isCLC = t.categoria === 'CLC' || (t.projeto && norm(t.projeto).includes('CLC'));
-      const isAssist = t.categoria === 'ASSISTÊNCIA' || (t.projeto && (norm(t.projeto).includes('ASSIST') || norm(t.projeto).includes('ESTUDANTIL')));
+      const isCLC = t.area_tematica === 'CLC' || (t.projeto && norm(t.projeto).includes('CLC'));
+      const isAssist = t.area_tematica === 'ASSISTÊNCIA' || (t.projeto && (norm(t.projeto).includes('ASSIST') || norm(t.projeto).includes('ESTUDANTIL')));
 
       if (!isCLC && !isAssist) return false;
 
@@ -5505,7 +5492,9 @@ const App: React.FC = () => {
                             <RowCard
                               task={task}
                               onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
-                              onDeleteTask={handleDeleteTarefa}
+                              onToggle={handleToggleTarefaStatus}
+                              onDelete={handleDeleteTarefa}
+                              onEdit={(t) => { setSelectedTask(t); setTaskModalMode('default'); }}
                               onUpdateTask={handleUpdateTarefa}
                             />
                           </div>
@@ -5542,15 +5531,15 @@ const App: React.FC = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                       {(sistemasAtivos.length > 0
                         ? sistemasAtivos
-                        : Array.from(new Set(tarefas.filter(t => t.categoria === 'SISTEMAS').map(t => t.sistema || 'OUTROS')))
+                        : Array.from(new Set(tarefas.filter(t => t.area_tematica === 'SISTEMAS').map(t => t.sistema || 'OUTROS')))
                       ).map(sistema => (
                         <div key={sistema} className="bg-white border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-lg flex flex-col">
                           <div className="p-6 bg-slate-900 text-white flex justify-between items-center">
                             <h4 className="text-xs font-black uppercase tracking-[0.2em]">{sistema}</h4>
-                            <span className="bg-white/20 px-3 py-1 rounded-full text-[10px] font-black">{tarefas.filter(t => t.categoria === 'SISTEMAS' && (t.sistema || 'OUTROS') === sistema).length}</span>
+                            <span className="bg-white/20 px-3 py-1 rounded-full text-[10px] font-black">{tarefas.filter(t => t.area_tematica === 'SISTEMAS' && (t.sistema || 'OUTROS') === sistema).length}</span>
                           </div>
                           <div className="p-6 space-y-4 flex-1 bg-slate-50/50">
-                            {tarefas.filter(t => t.categoria === 'SISTEMAS' && (t.sistema || 'OUTROS') === sistema).map(t => (
+                            {tarefas.filter(t => t.area_tematica === 'SISTEMAS' && (t.sistema || 'OUTROS') === sistema).map(t => (
                               <div key={t.id} className="bg-white p-4 rounded-lg md:rounded-xl border border-slate-200 shadow-sm hover:border-amber-400 transition-all cursor-pointer" onClick={() => setSelectedTask(t)}>
                                 <div className={`text-[8px] font-black mb-1.5 uppercase ${STATUS_COLORS[normalizeStatus(t.status)] || ''} border-none p-0 bg-transparent`}>
                                   {t.status}
@@ -5831,8 +5820,8 @@ const App: React.FC = () => {
                                     key={s}
                                     onClick={() => setSistemaFilterStatus(s)}
                                     className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${sistemaFilterStatus === s
-                                        ? 'bg-slate-900 text-white'
-                                        : 'bg-white border border-slate-200 text-slate-500 hover:border-slate-400'
+                                      ? 'bg-slate-900 text-white'
+                                      : 'bg-white border border-slate-200 text-slate-500 hover:border-slate-400'
                                       }`}
                                   >
                                     {s === 'todos' ? 'Todos' : statusLabelMap[s]}
@@ -7312,14 +7301,14 @@ const App: React.FC = () => {
                                   }
                                 }}
                                 className={`w-full py-3.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-md active:scale-95 ${(() => {
-                                    const currentPlan = planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`);
-                                    const missing = currentPlan?.itens.some(item => {
-                                      const entregaEntity = pgcEntregas.find(e => e.entrega === item.entrega);
-                                      const registros = entregaEntity ? atividadesPGC.filter(a => a.entrega_id === entregaEntity.id) : [];
-                                      return registros.length === 0;
-                                    });
-                                    return missing ? 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-60' : 'bg-slate-900 text-white hover:bg-blue-600';
-                                  })()
+                                  const currentPlan = planosTrabalho.find(p => p.mes_ano === `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`);
+                                  const missing = currentPlan?.itens.some(item => {
+                                    const entregaEntity = pgcEntregas.find(e => e.entrega === item.entrega);
+                                    const registros = entregaEntity ? atividadesPGC.filter(a => a.entrega_id === entregaEntity.id) : [];
+                                    return registros.length === 0;
+                                  });
+                                  return missing ? 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-60' : 'bg-slate-900 text-white hover:bg-blue-600';
+                                })()
                                   }`}
                               >
                               </button>
@@ -7389,6 +7378,7 @@ const App: React.FC = () => {
               }}
               showAlert={showAlert}
               initialData={taskInitialData || undefined}
+              existingTags={Array.from(new Set(tarefas.flatMap(t => t.tags || [])))}
             />
           )
         }
@@ -7397,13 +7387,14 @@ const App: React.FC = () => {
 
         {
           selectedTask && (
-            (taskModalMode === 'execute' || (taskModalMode === 'default' && selectedTask.categoria === 'CLC')) ? (
+            (taskModalMode === 'execute' || (taskModalMode === 'default' && selectedTask.area_tematica === 'CLC')) ? (
               <TaskExecutionView
                 task={selectedTask}
                 tarefas={tarefas}
                 appSettings={appSettings}
                 knowledgeBases={knowledgeBases}
                 onSave={handleUpdateTarefa}
+                unidades={unidades}
                 onClose={() => setSelectedTask(null)}
                 showToast={showToast}
                 notifications={notifications}
@@ -7437,6 +7428,7 @@ const App: React.FC = () => {
                 showAlert={showAlert}
                 showConfirm={showConfirm}
                 pgcEntregas={pgcEntregas}
+                existingTags={Array.from(new Set(tarefas.flatMap(t => t.tags || [])))}
               />
             )
           )

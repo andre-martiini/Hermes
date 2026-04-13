@@ -264,7 +264,7 @@ def sync_google_tasks(db, log_list=None, sync_ref=None):
                     h_fim = f"{(h+1)%24:02d}:{m:02d}"
                 except: pass
 
-            categoria, sistema, contabilizar_meta = classify_task(title, g_notes, dynamic_mapping)
+            area_tematica, sistema, contabilizar_meta = classify_task(title, g_notes, dynamic_mapping)
             existing_data = local_tasks.get(g_id) or local_tasks.get(f"title_{title}") or local_tasks.get(f"title_{title_raw}")
             
             if existing_data:
@@ -316,7 +316,7 @@ def sync_google_tasks(db, log_list=None, sync_ref=None):
                     'titulo': title, 'projeto': 'GOOGLE', 'data_limite': deadline,
                     'google_id': g_id, 'status': h_status, 'data_criacao': datetime.now().isoformat(),
                     'data_conclusao': gt.get('completed'), 'data_atualizacao': applied_updated,
-                    'categoria': categoria, 'contabilizar_meta': contabilizar_meta,
+                    'area_tematica': area_tematica, 'contabilizar_meta': contabilizar_meta,
                     'notas': g_notes, 'sync_status': 'new', 'last_sync_date': datetime.now().isoformat(),
                     'horario_inicio': h_inicio, 'horario_fim': h_fim
                 })
@@ -636,20 +636,20 @@ def classify_task(title, notes, mapping=None):
     if mapping is None: mapping = {'CLC': [], 'ASSISTÊNCIA': []}
     title_upper, notes_upper = title.upper(), notes.upper()
     full_text = f"{title_upper} {notes_upper}"
-    categoria, contabilizar_meta = 'NÃO CLASSIFICADA', False
+    area_tematica, contabilizar_meta = 'NÃO CLASSIFICADA', False
     
     for area, keywords in mapping.items():
         if any(kw.upper() in title_upper for kw in keywords):
-            categoria = area
+            area_tematica = area
             if area in ['CLC', 'ASSISTÊNCIA']: contabilizar_meta = True
-            return categoria, None, contabilizar_meta
+            return area_tematica, None, contabilizar_meta
 
     tags = re.findall(r'\[(.*?)\]|TAG:\s*([\w\-]+)', full_text)
     tags = [t[0].upper() if t[0] else t[1].upper() for t in tags]
-    if any(tag in ['CLC', 'LICITACAO'] for tag in tags): categoria, contabilizar_meta = 'CLC', True
-    elif any(tag in ['ASSISTENCIA', 'ESTUDANTIL'] for tag in tags): categoria, contabilizar_meta = 'ASSISTÊNCIA', True
-    elif 'GERAL' in tags: categoria = 'GERAL'
-    return categoria, None, contabilizar_meta
+    if any(tag in ['CLC', 'LICITACAO'] for tag in tags): area_tematica, contabilizar_meta = 'CLC', True
+    elif any(tag in ['ASSISTENCIA', 'ESTUDANTIL'] for tag in tags): area_tematica, contabilizar_meta = 'ASSISTÊNCIA', True
+    elif 'GERAL' in tags: area_tematica = 'GERAL'
+    return area_tematica, None, contabilizar_meta
 
 def watch_commands(db):
     print("MÓDULO DE SINCRONIZAÇÃO AUTOMÁTICA INICIADO")
