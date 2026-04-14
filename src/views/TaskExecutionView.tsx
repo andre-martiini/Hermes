@@ -46,10 +46,11 @@ interface TaskExecutionViewProps {
   onCloseNotifications: () => void;
   onMarkAsRead: (id: string) => void;
   onDismiss: (id: string) => void;
+  onOpenCopiloto: () => void;
   onCreateAction: () => void;
 }
 
-type MobileTab = 'mapa' | 'diario' | 'copiloto';
+type MobileTab = 'mapa' | 'diario';
 
 export const TaskExecutionView = ({
   task,
@@ -74,6 +75,7 @@ export const TaskExecutionView = ({
   onCloseNotifications,
   onMarkAsRead,
   onDismiss,
+  onOpenCopiloto,
   onCreateAction,
 }: TaskExecutionViewProps) => {
 
@@ -737,7 +739,6 @@ export const TaskExecutionView = ({
   // ─── Columns visibility (mobile tabs) ────────────────────────
   const showMapa = mobileTab === 'mapa';
   const showDiario = mobileTab === 'diario';
-  const showCopiloto = mobileTab === 'copiloto';
 
   // ─── Render ───────────────────────────────────────────────────
   return (
@@ -796,12 +797,11 @@ export const TaskExecutionView = ({
           MOBILE TAB BAR
       ══════════════════════════════════════════════════════════ */}
       <nav className={`lg:hidden shrink-0 flex border-b ${isDark ? 'border-white/10 bg-black/20' : 'border-slate-200 bg-white/60'}`}>
-        {(['mapa', 'diario', 'copiloto'] as MobileTab[]).map(tab => {
-          const labels: Record<MobileTab, string> = { mapa: 'Mapa', diario: 'Diário', copiloto: 'Copiloto' };
+        {(['mapa', 'diario'] as MobileTab[]).map(tab => {
+          const labels: Record<MobileTab, string> = { mapa: 'Mapa', diario: 'Diário' };
           const icons: Record<MobileTab, React.ReactNode> = {
             mapa: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>,
             diario: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>,
-            copiloto: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>,
           };
           const active = mobileTab === tab;
           return (
@@ -825,10 +825,8 @@ export const TaskExecutionView = ({
       ══════════════════════════════════════════════════════════ */}
       <div className="flex-1 flex flex-col lg:grid lg:grid-cols-12 gap-0 lg:gap-4 lg:p-4 overflow-hidden">
 
-        {/* ─────────────────────────────────────────────────────────
-            LEFT COLUMN — Mapa Operacional
-        ───────────────────────────────────────────────────────── */}
-        <div className={`lg:col-span-3 flex flex-col gap-3 overflow-y-auto lg:overflow-y-auto p-4 lg:p-0 ${!showMapa ? 'hidden lg:flex' : 'flex'}`}
+        {/* LEFT COLUMN — Mapa Operacional */}
+        <div className={`lg:col-span-4 flex flex-col gap-3 overflow-y-auto lg:overflow-y-auto p-4 lg:p-0 ${!showMapa ? 'hidden lg:flex' : 'flex'}`}
           style={{ scrollbarWidth: 'thin', scrollbarColor: '#CBD5E0 transparent' }}>
 
           {/* Síntese / Descrição */}
@@ -1177,10 +1175,8 @@ export const TaskExecutionView = ({
           </div>
         </div>
 
-        {/* ─────────────────────────────────────────────────────────
-            CENTER COLUMN — Diário de Missão
-        ───────────────────────────────────────────────────────── */}
-        <div className={`lg:col-span-6 flex flex-col overflow-hidden ${!showDiario ? 'hidden lg:flex' : 'flex'} min-h-0`}>
+        {/* CENTER COLUMN — Diário de Missão */}
+        <div className={`lg:col-span-8 flex flex-col overflow-hidden ${!showDiario ? 'hidden lg:flex' : 'flex'} min-h-0`}>
           <div className={`flex-1 flex flex-col rounded-none lg:rounded-2xl border overflow-hidden ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
             {/* Diary header */}
             <div className={`shrink-0 px-4 py-3 flex items-center justify-between border-b ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
@@ -1231,311 +1227,6 @@ export const TaskExecutionView = ({
           </div>
         </div>
 
-        {/* ─────────────────────────────────────────────────────────
-            RIGHT COLUMN — Copiloto + Artefatos
-        ───────────────────────────────────────────────────────── */}
-        <div className={`lg:col-span-3 flex flex-col gap-3 overflow-hidden p-4 lg:p-0 ${!showCopiloto ? 'hidden lg:flex' : 'flex'} min-h-0`}>
-
-          {/* Artifacts toggle button */}
-          {artifacts.length > 0 && (
-            <button onClick={() => setShowArtifacts(!showArtifacts)}
-              className={`shrink-0 flex items-center justify-between px-4 py-2.5 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition-all ${showArtifacts
-                ? isDark ? 'bg-indigo-500/20 border-indigo-500/30 text-indigo-300' : 'bg-indigo-50 border-indigo-200 text-indigo-600'
-                : isDark ? 'bg-white/5 border-white/10 text-white/40 hover:text-white/60' : 'bg-white border-slate-200 text-slate-400 hover:text-slate-700'
-                }`}>
-              <div className="flex items-center gap-2">
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                Artefatos
-              </div>
-              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] ${isDark ? 'bg-indigo-500/30 text-indigo-300' : 'bg-indigo-100 text-indigo-600'}`}>{artifacts.length}</span>
-            </button>
-          )}
-
-          {/* Artifacts Panel */}
-          {showArtifacts && artifacts.length > 0 && (
-            <div className={`shrink-0 rounded-2xl border overflow-hidden ${isDark ? 'bg-indigo-950/30 border-indigo-500/20' : 'bg-indigo-50/50 border-indigo-200'}`}>
-              <div className={`px-4 py-3 border-b flex items-center justify-between ${isDark ? 'border-indigo-500/20' : 'border-indigo-200'}`}>
-                <span className={`text-[9px] font-black uppercase tracking-widest ${isDark ? 'text-indigo-300' : 'text-indigo-600'}`}>Artefatos gerados</span>
-                <button onClick={() => setShowArtifacts(false)} className={`${isDark ? 'text-white/30 hover:text-white/60' : 'text-indigo-300 hover:text-indigo-600'}`}>
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-                </button>
-              </div>
-              <div className="max-h-64 overflow-y-auto p-3 space-y-2" style={{ scrollbarWidth: 'thin' }}>
-                {artifacts.map(artifact => (
-                  <div key={artifact.id} className={`rounded-xl border p-3 space-y-2 ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-indigo-100'}`}>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-[10px] font-black truncate ${isDark ? 'text-white/80' : 'text-slate-800'}`}>{artifact.title}</p>
-                        <p className={`text-[8px] ${mutedText}`}>{artifact.createdAt}</p>
-                      </div>
-                      <button onClick={() => handleCopyArtifact(artifact)}
-                        className={`shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black transition-all ${copiedArtifactId === artifact.id
-                          ? 'bg-emerald-500 text-white'
-                          : isDark ? 'bg-white/10 text-white/60 hover:bg-white/20' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                          }`}>
-                        {copiedArtifactId === artifact.id
-                          ? <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> Copiado</>
-                          : <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" /></svg> Copiar</>
-                        }
-                      </button>
-                    </div>
-                    <p className={`text-[10px] leading-relaxed line-clamp-4 ${isDark ? 'text-white/50' : 'text-slate-500'}`}>{artifact.content}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Copilot Chat */}
-          <div className={`flex-1 flex flex-col rounded-2xl border overflow-hidden min-h-0 ${isDark ? 'bg-indigo-950/20 border-white/5' : 'bg-white border-blue-100'}`}>
-            {/* Chat header */}
-            <div className={`shrink-0 px-4 py-3 flex items-center gap-3 border-b ${isDark ? 'border-white/10' : 'border-blue-50'}`}>
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shrink-0 shadow-lg">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className={`text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>Copiloto Hermes</p>
-                <p className={`text-[8px] ${mutedText}`}>RAG · Diário · Plano</p>
-              </div>
-              <button
-                onClick={() => sendChatMessage('Quais são os próximos passos desta ação com base no diário e no plano?')}
-                className={`shrink-0 px-2.5 py-1.5 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-white/10 text-white/60 hover:bg-white/20' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-              >
-                Próx. passos
-              </button>
-            </div>
-
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto space-y-3 p-3 min-h-0" style={{ scrollbarWidth: 'thin', scrollbarColor: '#CBD5E0 transparent' }}>
-              {chatMessages.length === 0 && (
-                <div className="h-full flex flex-col items-center justify-center text-center p-4 opacity-30">
-                  <svg className="w-10 h-10 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
-                  <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? 'text-white' : 'text-slate-500'}`}>Pergunte sobre esta ação</p>
-                </div>
-              )}
-              {chatMessages.map((msg, i) => (
-                <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                  <div className={`max-w-[100%] px-3 py-2.5 rounded-2xl text-xs font-medium leading-relaxed shadow-sm ${msg.role === 'user'
-                    ? isDark ? 'bg-blue-600 text-white rounded-br-none' : 'bg-slate-900 text-white rounded-br-none'
-                    : msg.isArtifact
-                      ? isDark ? 'bg-indigo-500/20 text-indigo-200 border border-indigo-500/30 rounded-bl-none' : 'bg-indigo-50 text-indigo-800 border border-indigo-200 rounded-bl-none'
-                      : isDark ? 'bg-white/10 text-white/80 rounded-bl-none' : 'bg-blue-50 text-slate-700 rounded-bl-none'
-                    }`}>
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={{
-                        p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
-                        ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-2" {...props} />,
-                        ol: ({ node, ...props }) => <ol className="list-decimal ml-4 mb-2" {...props} />,
-                        li: ({ node, ...props }) => <li className="mb-0.5" {...props} />,
-                        strong: ({ node, ...props }) => <strong className="font-bold text-emerald-400" {...props} />,
-                        a: ({ node, href, children, ...props }) => {
-                          if (href && href.startsWith('kg-cite:')) {
-                            try {
-                              const meta = JSON.parse(decodeURIComponent(href.replace('kg-cite:', '')));
-                              return (
-                                <span className="relative group inline-block">
-                                  <span className="inline-flex items-center justify-center w-4 h-4 text-[9px] font-black rounded bg-violet-500/20 text-violet-400 border border-violet-500/30 cursor-default ml-0.5 align-middle">
-                                    {children}
-                                  </span>
-                                  {/* Tooltip */}
-                                  <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 hidden group-hover:block w-56 pointer-events-none">
-                                    <span className={`block text-[10px] font-medium leading-snug p-2.5 rounded-xl shadow-xl border ${isDark ? 'bg-[#1a1a2e] border-violet-500/30 text-white/80' : 'bg-white border-violet-200 text-slate-700'}`}>
-                                      <span className="block font-black text-violet-400 mb-0.5 truncate">{meta.titulo}</span>
-                                      {meta.resumo && <span className="block text-[9px] opacity-70 line-clamp-3">{meta.resumo}</span>}
-                                      <span className="block text-[9px] mt-1 opacity-50">{meta.n_tasks} tarefa(s) · Grafo de Conhecimento</span>
-                                    </span>
-                                    <span className={`block w-2 h-2 mx-auto -mt-1 rotate-45 border-r border-b ${isDark ? 'bg-[#1a1a2e] border-violet-500/30' : 'bg-white border-violet-200'}`} />
-                                  </span>
-                                </span>
-                              );
-                            } catch {
-                              return <>{children}</>;
-                            }
-                          }
-                          return <a className="text-blue-400 underline hover:text-blue-300" href={href} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>;
-                        },
-                      }}
-                    >
-                      {msg.role === 'assistant' ? renderWithCitations(msg.content, i) : msg.content}
-                    </ReactMarkdown>
-
-                    {msg.proposedPlan && (
-                      <div className={`mt-3 p-3 rounded-xl border ${isDark ? 'bg-black/20 border-white/10' : 'bg-white/50 border-blue-200'}`}>
-                        {/* Header com toggle de edição */}
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
-                            <svg className="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                            Proposta de Plano de Ação
-                          </p>
-                          {/* Feature 1: botão editar */}
-                          <button
-                            onClick={() => setEditingProposal(
-                              editingProposal?.msgIndex === i
-                                ? null
-                                : { msgIndex: i, items: msg.proposedPlan!.map(it => ({ ...it })) }
-                            )}
-                            className={`text-[9px] font-bold px-2 py-0.5 rounded transition-all ${editingProposal?.msgIndex === i ? 'bg-blue-500/20 text-blue-300' : isDark ? 'text-white/40 hover:text-white/70' : 'text-slate-400 hover:text-slate-600'}`}
-                          >
-                            {editingProposal?.msgIndex === i ? 'Concluir edição' : 'Editar'}
-                          </button>
-                        </div>
-
-                        {/* Lista de itens */}
-                        <div className="space-y-1.5 mb-3">
-                          {(editingProposal?.msgIndex === i ? editingProposal.items : msg.proposedPlan).map((item, idx) => (
-                            <div key={item.id} className="flex items-center gap-2 text-[10px]">
-                              <span className="shrink-0 w-4 h-4 rounded bg-blue-500/20 text-blue-300 flex items-center justify-center text-[8px] font-bold">{idx + 1}</span>
-                              {editingProposal?.msgIndex === i ? (
-                                <>
-                                  {/* Feature 1: edição inline */}
-                                  <input
-                                    value={item.text}
-                                    onChange={(e) => {
-                                      const newItems = [...editingProposal.items];
-                                      newItems[idx] = { ...newItems[idx], text: e.target.value };
-                                      setEditingProposal({ ...editingProposal, items: newItems });
-                                    }}
-                                    className={`flex-1 bg-transparent border-b text-[10px] outline-none ${isDark ? 'border-white/20 text-white/80' : 'border-slate-300 text-slate-700'}`}
-                                  />
-                                  {/* Feature 2: remover item */}
-                                  <button
-                                    onClick={() => setEditingProposal({
-                                      ...editingProposal,
-                                      items: editingProposal.items.filter((_, j) => j !== idx)
-                                    })}
-                                    className="shrink-0 text-rose-400 hover:text-rose-300 font-bold text-[10px] px-1"
-                                  >✕</button>
-                                </>
-                              ) : (
-                                <span className={isDark ? 'text-white/70' : 'text-slate-600'}>{item.text}</span>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* Feature 1: adicionar etapa (max 5) */}
-                        {editingProposal?.msgIndex === i && editingProposal.items.length < 5 && (
-                          <button
-                            onClick={() => setEditingProposal({
-                              ...editingProposal,
-                              items: [...editingProposal.items, { id: Date.now().toString(), text: '', completed: false }]
-                            })}
-                            className={`w-full mb-2 py-1 rounded-lg text-[9px] border border-dashed transition-all ${isDark ? 'border-white/20 text-white/40 hover:text-white/60' : 'border-slate-300 text-slate-400 hover:text-slate-600'}`}
-                          >
-                            + Adicionar etapa
-                          </button>
-                        )}
-
-                        {/* Botões de ação */}
-                        <div className="flex gap-2 flex-wrap">
-                          <button
-                            onClick={() => handleApplyProposedPlan(
-                              i,
-                              editingProposal?.msgIndex === i ? editingProposal.items : undefined
-                            )}
-                            className="flex-1 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-black uppercase tracking-widest transition-all"
-                          >
-                            Aplicar Alterações
-                          </button>
-
-                          {/* Feature 2: Refinar — aparece quando itens foram removidos */}
-                          {editingProposal?.msgIndex === i && editingProposal.items.length < msg.proposedPlan!.length && (
-                            <button
-                              onClick={() => {
-                                const kept = editingProposal.items;
-                                const missing = msg.proposedPlan!.length - kept.length;
-                                const refineMsg = `Refinamento do plano: mantenha as etapas existentes [${kept.map(it => `"${it.text}"`).join(', ')}] e sugira ${missing} etapa(s) complementar(es) para completar um plano de ${msg.proposedPlan!.length} etapas.`;
-                                setEditingProposal(null);
-                                sendChatMessage(refineMsg);
-                              }}
-                              className="px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 text-[9px] font-black uppercase tracking-widest transition-all border border-blue-500/30"
-                            >
-                              Refinar
-                            </button>
-                          )}
-
-                          <button
-                            onClick={() => {
-                              const updatedMessages = [...chatMessages];
-                              updatedMessages[i] = { ...updatedMessages[i], proposedPlan: undefined };
-                              setChatMessages(updatedMessages);
-                              setEditingProposal(null);
-                            }}
-                            className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-white/5 text-white/40 hover:bg-white/10' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                          >
-                            Recusar
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {isChatLoading && (
-                <div className="flex justify-start">
-                  <div className={`px-4 py-3 rounded-2xl rounded-bl-none flex gap-1 items-center ${isDark ? 'bg-white/10' : 'bg-blue-50'}`}>
-                    <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce"></span>
-                    <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></span>
-                    <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></span>
-                  </div>
-                </div>
-              )}
-              <div ref={chatEndRef} />
-            </div>
-
-            {/* Chat input */}
-            <div className={`shrink-0 p-3 border-t ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
-              <div className="flex gap-2">
-                <textarea
-                  value={chatInput}
-                  onChange={e => setChatInput(e.target.value)}
-                  onFocus={() => setIsChatFocused(true)}
-                  onBlur={() => setIsChatFocused(false)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); }
-                  }}
-                  onPaste={(e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-                    const pastedText = e.clipboardData.getData('text');
-                    if (pastedText && /\[\d{2}:\d{2}, \d{2}\/\d{2}\/\d{4}\]/.test(pastedText)) {
-                      e.preventDefault();
-                      const cleaned = pastedText.replace(/\[\d{2}:\d{2}, \d{2}\/\d{2}\/\d{4}\][^:]+:\s*/g, '').trim();
-                      setChatInput(prev => prev ? prev + '\n' + cleaned : cleaned);
-                      return;
-                    }
-
-                    if (e.clipboardData.files && e.clipboardData.files.length > 0) {
-                      const filesArray = Array.from(e.clipboardData.files);
-                      const audioFile = filesArray.find(f => f.type.startsWith('audio/') || f.name.endsWith('.ogg') || f.name.endsWith('.opus') || f.name.endsWith('.m4a'));
-                      if (audioFile) {
-                        e.preventDefault();
-                        handleProcessAudio(audioFile, 'chat');
-                      }
-                    }
-                  }}
-                  placeholder="Pergunte ao copiloto…"
-                  className={`flex-1 px-4 py-2 rounded-xl text-xs font-medium outline-none border focus:ring-2 focus:ring-blue-500 transition-all resize-none ${isChatFocused ? 'h-32' : 'h-10'
-                    } ${isDark ? 'bg-white/10 border-white/10 text-white placeholder:text-white/30' : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400'}`}
-                />
-                <button
-                  onClick={handleSendMessage}
-                  disabled={isChatLoading || !chatInput.trim()}
-                  className="w-9 h-9 shrink-0 bg-blue-600 text-white rounded-xl flex items-center justify-center shadow-md hover:bg-blue-700 disabled:opacity-40 transition-all"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 12h14M12 5l7 7-7 7" /></svg>
-                </button>
-              </div>
-              {/* Artifact shortcut */}
-              <button
-                onClick={() => { if (chatInput.trim()) { const msg = chatInput; setChatInput(''); sendChatMessage(msg, true); } }}
-                disabled={!chatInput.trim() || isChatLoading}
-                className={`mt-2 w-full py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all disabled:opacity-30 ${isDark ? 'border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10' : 'border-indigo-200 text-indigo-500 hover:bg-indigo-50'}`}
-              >
-                Gerar como Artefato →
-              </button>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════
@@ -1639,7 +1330,7 @@ export const TaskExecutionView = ({
       <div className="fixed bottom-6 right-6 z-[250]">
         <SpeedDialMenu
           notifications={notifications} isSyncing={isSyncing} isNotificationCenterOpen={isNotificationCenterOpen}
-          onOpenNotes={onOpenNotes} onOpenLog={onOpenLog} onOpenShopping={onOpenShopping}
+          onOpenNotes={onOpenNotes} onOpenLog={onOpenLog} onOpenCopiloto={onOpenCopiloto} onOpenShopping={onOpenShopping}
           onOpenTranscription={onOpenTranscription} onOpenMeetingTranscription={onOpenMeetingTranscription}
           onToggleNotifications={onToggleNotifications} onSync={onSync} onOpenSettings={onOpenSettings}
           onCloseNotifications={onCloseNotifications} onMarkAsRead={onMarkAsRead} onDismiss={onDismiss}

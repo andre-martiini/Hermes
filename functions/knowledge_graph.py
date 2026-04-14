@@ -482,7 +482,7 @@ Regras:
 
 Responda:"""
     response = client.models.generate_content(
-        model="gemini-2.0-flash-lite", contents=prompt
+        model="gemini-3-flash-preview", contents=prompt
     )
     raw = (response.text or "").strip()
     match = re.search(r'\[.*?\]', raw, re.DOTALL)
@@ -549,7 +549,7 @@ Regras:
 Responda:"""
 
     response = client.models.generate_content(
-        model="gemini-2.0-flash-lite", contents=prompt
+        model="gemini-3-flash-preview", contents=prompt
     )
     raw = (response.text or "").strip()
 
@@ -677,7 +677,7 @@ Responda APENAS com uma das opções acima, sem mais texto."""
 
         client = _gemini_client(api_key)
         response = client.models.generate_content(
-            model="gemini-2.0-flash-lite", contents=prompt
+            model="gemini-3-flash-preview", contents=prompt
         )
         decision = (response.text or "").strip()
 
@@ -717,7 +717,7 @@ O nó agrupará tarefas com o seguinte tipo de procedimento:
 \"\"\"{summary[:400]}\"\"\"
 Responda APENAS com o título, sem pontuação final. Exemplo: Contratação CLC Dispensa"""
     response = client.models.generate_content(
-        model="gemini-2.0-flash-lite", contents=prompt
+        model="gemini-3-flash-preview", contents=prompt
     )
     title = (response.text or "").strip().strip(".").strip()
     return title[:80] if title else f"Procedimento {area}"
@@ -750,7 +750,7 @@ Diário:
 Resumo:"""
 
     summary_response = client.models.generate_content(
-        model="gemini-2.0-flash", contents=summary_prompt
+        model="gemini-3-flash-preview", contents=summary_prompt
     )
     summary = (summary_response.text or "").strip()
     if not summary:
@@ -949,7 +949,7 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
         client = _gemini_client(api_key)
         file_b64 = _b64.b64encode(file_bytes).decode("utf-8")
         extract_resp = client.models.generate_content(
-            model="gemini-2.0-flash-lite",
+            model="gemini-3-flash-preview",
             contents=[
                 "Extraia todo o texto relevante deste documento. "
                 "Ignore cabecalhos repetitivos, rodapes e numeracao de paginas.",
@@ -972,7 +972,7 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
     # ── Resumo semântico ─────────────────────────────────────────────────────
     try:
         summary_resp = client.models.generate_content(
-            model="gemini-2.0-flash-lite",
+            model="gemini-3-flash-preview",
             contents=(
                 f"Voce e um analista de documentos corporativos.\n"
                 f"Resuma o objetivo e os principais parametros deste documento "

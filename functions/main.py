@@ -60,9 +60,9 @@ def get_genai_module():
     return genai
 
 
-def get_embedding(text: str, api_key: str = None) -> list:
-    """Get text embedding via Gemini REST API v1beta using gemini-embedding-001.
-    If api_key is not provided, fetches it from Firestore system/api_keys."""
+def get_embedding(text: str, api_key: str = None, task_type: str = "RETRIEVAL_DOCUMENT") -> list:
+    """Get text embedding via Gemini REST API v1beta.
+    task_type should be RETRIEVAL_DOCUMENT for indexing and RETRIEVAL_QUERY for searching."""
     import requests as req_lib
     if not api_key:
         db = get_db()
@@ -75,7 +75,7 @@ def get_embedding(text: str, api_key: str = None) -> list:
     payload = {
         "model": "models/gemini-embedding-001",
         "content": {"parts": [{"text": text[:8000]}]},
-        "taskType": "RETRIEVAL_DOCUMENT"
+        "taskType": task_type
     }
     response = req_lib.post(url, json=payload, headers=headers, timeout=30)
     response.raise_for_status()
@@ -1458,7 +1458,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 content_parts.append({"mime_type": "application/pdf", "data": pdf_data})
             
             try:
-                response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=content_parts)
+                response = client.models.generate_content(model="gemini-3-flash-preview", contents=content_parts)
                 res_text = response.text.strip()
                 if "```json" in res_text:
                     res_text = res_text.split("```json")[-1].split("```")[0].strip()
@@ -2279,7 +2279,7 @@ def process_vectorization(task_id):
 
                     # Extração de texto via Gemini 1.5 Flash
 
-                    response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=[
+                    response = client.models.generate_content(model="gemini-3-flash-preview", contents=[
 
                         "Extraia todo o texto relevante deste documento para indexação. Se for HTML, ignore tags. Se for PDF, faça OCR se necessário.",
 
@@ -2514,7 +2514,7 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
     """
 
     try:
-        response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+        response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
         text = response.text
         # Limpeza para garantir JSON puro
         if "```json" in text:
@@ -3192,7 +3192,7 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
         """
 
-        result = gemini_client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=prompt)
+        result = gemini_client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
 
         texto_refinado = result.text
 
@@ -3376,7 +3376,7 @@ def start_file_indexing(item_id, item_data):
 
 
 
-        response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=parts)
+        response = client.models.generate_content(model="gemini-3-flash-preview", contents=parts)
 
         res_text = response.text
 
@@ -4260,7 +4260,7 @@ def gerarSlidesIA(req: https_fn.CallableRequest):
 
 
 
-        response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=[
+        response = client.models.generate_content(model="gemini-3-flash-preview", contents=[
 
             system_instruction,
 
@@ -4394,7 +4394,7 @@ def processInvoiceOCR(req: https_fn.CallableRequest):
 
 
 
-        response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=parts)
+        response = client.models.generate_content(model="gemini-3-flash-preview", contents=parts)
 
         res_text = response.text
 
@@ -4528,7 +4528,7 @@ def transcrever_audio(req: https_fn.CallableRequest):
         Texto: "{texto_bruto}"
         """
 
-        response = gemini_client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=prompt)
+        response = gemini_client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
         texto_refinado = response.text
 
         return {
@@ -4670,7 +4670,7 @@ def askTaskAssistant(req: https_fn.CallableRequest):
         {prompt}
         """
 
-        response = client.models.generate_content(model="gemini-2.0-flash", contents=[system_instruction, full_prompt])
+        response = client.models.generate_content(model="gemini-3-flash-preview", contents=[system_instruction, full_prompt])
 
         result = (response.text or "").strip()
         if not result:
@@ -4719,7 +4719,7 @@ def askChatbot(req: https_fn.CallableRequest):
 
         client = genai.Client(api_key=gemini_key)
         response = client.models.generate_content(
-            model="gemini-3.1-flash-lite-preview",
+            model="gemini-3-flash-preview",
             contents=[
                 "Você é um assistente de reunião em pt-BR. Responda com objetividade, "
                 "baseando-se no contexto recebido. Se o contexto estiver incompleto, "
@@ -4742,6 +4742,297 @@ def askChatbot(req: https_fn.CallableRequest):
             message="Falha ao processar sua solicitação no assistente de reunião."
         )
 
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=120
+)
+def askCopilotoHermes(req: https_fn.CallableRequest):
+    """
+    Módulo Copiloto Hermes
+    Estrategista sênior de processos com Tool Calling e RAG Híbrido.
+    """
+    from google import genai
+    from google.genai import types
+
+    data = req.data or {}
+    prompt = (data.get('prompt') or "").strip()
+    task_id = data.get('taskId')
+    system_id = data.get('systemId')
+    session_id = data.get('sessionId')
+
+    if not prompt:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="Prompt é obrigatório."
+        )
+
+    try:
+        db = get_db()
+        keys_doc = db.collection('system').document('api_keys').get()
+        gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+
+        if not gemini_key:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                message="Chave Gemini não configurada."
+            )
+
+        client = genai.Client(api_key=gemini_key)
+
+        # --- DEFINIÇÃO DE FERRAMENTAS ---
+        def consultar_historico_acoes(query: str, area_tematica: str = None):
+            """Busca no Grafo de Conhecimento (Nós Conceituais) como a equipe executa na prática."""
+            try:
+                # Reutiliza o buscar_procedimento do knowledge_graph
+                res = buscar_procedimento_internal(query, area_tematica)
+                return res.get("context", "Nenhum histórico substantivo encontrado.")
+            except Exception as e:
+                return f"Erro ao consultar histórico: {e}"
+
+        def buscar_arquivos_acervo(query: str):
+            """Busca documentação, manuais e arquivos de referência no Acervo Global (A Teoria)."""
+            sanitized_query = (query or "").strip()
+            if not sanitized_query:
+                sanitized_query = "manuais e procedimentos gerais"
+            
+            try:
+                # Busca vetorial em indice_artefatos
+                query_emb = get_embedding(sanitized_query, gemini_key, task_type="RETRIEVAL_QUERY")
+                
+                if not query_emb:
+                    print("ERRO CRÍTICO VETORIAL: Embedding retornado pela API é nulo/vazio.")
+                    return "Erro técnico: Falha ao gerar vetor de busca."
+
+                # PROTOCOLO DE SEGURANÇA: Conversão explícita para lista de floats
+                vector_data = list(map(float, query_emb))
+                
+                # Verificação de Dimensões (Segurança adicional)
+                if len(vector_data) != 768:
+                    print(f"ERRO CRÍTICO VETORIAL: Dimensão incorreta ({len(vector_data)}). Esperado 768.")
+
+                from google.cloud.firestore_v1.vector import Vector
+                from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
+
+                docs = db.collection("indice_artefatos").find_nearest(
+                    vector_field="embedding",
+                    query_vector=Vector(vector_data),
+                    distance_measure=DistanceMeasure.COSINE,
+                    limit=5
+                ).get()
+
+                results = []
+                for doc in docs:
+                    d = doc.to_dict()
+                    results.append(
+                        f"DOC: {d.get('nome')} | LINK: {d.get('url')}\n"
+                        f"RESUMO: {d.get('resumo_semantico')}"
+                    )
+                return "\n\n".join(results) if results else "Nenhum documento encontrado no acervo."
+            except Exception as e:
+                err_msg = f"FALHA TÉCNICA NA BUSCA VETORIAL: {str(e)}"
+                print(err_msg)
+                import traceback
+                print(traceback.format_exc())
+                # Exposição direta para a IA ler o erro técnico e informar ao usuário
+                return err_msg
+
+        def obter_contexto_tela(id_tarefa: str):
+            """Obtém o contexto completo da tarefa em foco, incluindo diário integral e plano de ação."""
+            if not id_tarefa:
+                return "Nenhuma tarefa em foco no momento."
+            try:
+                doc_snap = db.collection('tarefas').document(id_tarefa).get()
+                if not doc_snap.exists:
+                    return "Tarefa não identificada no banco de dados."
+                t = doc_snap.to_dict()
+                
+                # Diário Integral conforme solicitado
+                diario_full = []
+                for e in sorted(t.get('acompanhamento', []), key=lambda x: x.get('data', '')):
+                    diario_full.append(f"[{e.get('data')}] {e.get('nota')}")
+                
+                context = {
+                    "titulo": t.get('titulo'),
+                    "area_tematica": t.get('area_tematica'),
+                    "plano_atual": t.get('plano_acao', []),
+                    "diario_integral": "\n".join(diario_full),
+                    "tags": t.get('tags', [])
+                }
+                return json.dumps(context, indent=2)
+            except Exception as e:
+                return f"Erro ao obter contexto da tela: {e}"
+
+        # Configuração do Chat com ferramentas
+        model_id = "gemini-3.1-pro-preview"
+        
+        system_instruction = (
+            "Você é o Copiloto Hermes, estrategista sênior de processos. "
+            "Seu tom de voz: Consultivo, analítico e absurdamente conciso. "
+            "Use bullet points para melhorar a legibilidade. "
+            "REGRA DE SIGLAS E JARGÕES: Se o usuário pesquisar por uma sigla (ex: IRP, PCA, DFD), "
+            "VOCÊ É ESTRITAMENTE PROIBIDO de adivinhar o seu significado. Você deve procurar a definição "
+            "da sigla exclusivamente nos documentos retornados pelas ferramentas. Se não encontrar a "
+            "definição exata, informe: 'Não encontrei a definição exata para [SIGLA] na base de dados' "
+            "e peça contexto. NUNCA associe siglas a processos genéricos sem provas nos arquivos.\n"
+            "TRATAMENTO DE CONFLITOS: Se a prática [Grafo] divergir do manual [Acervo], exponha explicitamente.\n"
+            "Sempre termine propostas de ajuste de plano de ação dentro de: [PROPOSAL]{...}[/PROPOSAL]"
+        )
+
+        chat = client.chats.create(
+            model=model_id,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                tools=[consultar_historico_acoes, buscar_arquivos_acervo, obter_contexto_tela]
+            )
+        )
+
+        # Injeta contexto inicial se houver task_id
+        initial_context = ""
+        if task_id:
+            initial_context = f"DICA DE CONTEXTO: O usuário está visualizando a tarefa {task_id}. " \
+                             f"Use obter_contexto_tela('{task_id}') para se situar antes de responder."
+
+        final_prompt = f"{initial_context}\n\nUSUÁRIO: {prompt}" if initial_context else prompt
+        
+        response = chat.send_message(final_prompt)
+        result_text = response.text
+        # Extração de Proposta [PROPOSAL]{...}[/PROPOSAL]
+        proposal_data = None
+        clean_text = result_text
+        if "[PROPOSAL]" in result_text:
+            try:
+                parts = result_text.split("[PROPOSAL]")
+                proposal_raw = parts[1].split("[/PROPOSAL]")[0]
+                proposal_data = json.loads(proposal_raw)
+                clean_text = parts[0] + (parts[1].split("[/PROPOSAL]")[1] if "[/PROPOSAL]" in parts[1] else "")
+                clean_text = clean_text.strip()
+            except Exception as e:
+                print(f"Erro ao extrair proposta: {e}")
+
+        # Salva a resposta do assistente no Firestore para o histórico
+        if session_id:
+            try:
+                db.collection('sessoes_copiloto').document(session_id).collection('mensagens').add({
+                    "role": "assistant",
+                    "content": clean_text,
+                    "proposedPlan": proposal_data.get("items") if proposal_data else None,
+                    "timestamp": firestore.SERVER_TIMESTAMP
+                })
+                # Atualiza timestamp da sessão
+                db.collection('sessoes_copiloto').document(session_id).update({
+                    "lastMessageAt": firestore.SERVER_TIMESTAMP
+                })
+            except Exception as e:
+                print(f"Erro ao salvar resposta no Firestore: {e}")
+
+        # Tenta extrair título sugerido se for início de sessão
+        suggested_title = None
+        if prompt and len(prompt) < 100:
+            suggested_title = prompt[:50]
+
+        return {
+            "result": clean_text,
+            "proposedPlan": proposal_data.get("items") if proposal_data else None,
+            "suggestedTitle": suggested_title
+        }
+
+    except Exception as e:
+        print(f"Erro em askCopilotoHermes: {e}")
+        import traceback
+        print(traceback.format_exc())
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=str(e)
+        )
+
+def buscar_procedimento_internal(query_text: str, area_tematica: str = None):
+    # Wrapper interno para chamar a lógica de buscar_procedimento sem o overhead do Callable HTTPS
+    try:
+        db = get_db()
+        keys_doc = db.collection('system').document('api_keys').get()
+        api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+        
+        from knowledge_graph import _get_embedding, _cosine_similarity
+        
+        # Sanitização de input
+        q_text = (query_text or "").strip()
+        if not q_text:
+            q_text = "procedimentos operacionais"
+
+        query_embedding = _get_embedding(q_text, api_key)
+        # Protocolo de Segurança: Converte para floats
+        query_vector = list(map(float, query_embedding))
+
+        collection_query = db.collection("knowledge_nodes")
+        if area_tematica:
+            collection_query = collection_query.where("area_tematica", "==", area_tematica)
+
+        nodes_raw = []
+        for ndoc in collection_query.stream():
+            nd = ndoc.to_dict() or {}
+            node_emb = nd.get("embedding")
+            if not node_emb: continue
+            sim = _cosine_similarity(query_vector, node_emb)
+            # Limiar mais flexível
+            if sim < 0.35: continue
+            nodes_raw.append({
+                "titulo": nd.get("titulo"),
+                "resumo": nd.get("resumo"),
+                "area_tematica": nd.get("area_tematica"),
+                "score": sim
+            })
+        
+        nodes_raw.sort(key=lambda x: x["score"], reverse=True)
+        candidates = nodes_raw[:5]
+        
+        lines = [f"Resultados do Grafo para: {q_text}"]
+        for i, n in enumerate(candidates, 1):
+            lines.append(f"[{i}] {n['titulo']} ({n['area_tematica']}) - {n['resumo']}")
+            
+        # --- FALLBACK: Busca em Tarefas Reais (In-Memory Bypass) ---
+        if len(candidates) < 2:
+            lines.append("\n--- Buscando em Tarefas (Execução Real - Filtro em Memória) ---")
+            # Busca as 50 tarefas mais recentes para processamento local (Bypass substring limitation)
+            task_query = db.collection("tarefas").order_by("data_criacao", direction=firestore.Query.DESCENDING).limit(50)
+            
+            keyword = q_text.lower()
+            is_sigla = len(q_text) <= 5 # Siglas geralmente são curtas
+            
+            import re
+            found_tasks = []
+            for tdoc in task_query.stream():
+                t = tdoc.to_dict()
+                titulo = t.get("titulo", "")
+                notas = t.get("notas", "")
+                
+                # Se for sigla, usa Regex com limite de palavra (\b) para evitar match parcial (ex: evitar q "IR" dê match em "Diretoria")
+                if is_sigla:
+                    pattern = rf"\b{re.escape(q_text)}\b"
+                    match_t = re.search(pattern, titulo, re.IGNORECASE)
+                    match_n = re.search(pattern, notas, re.IGNORECASE)
+                    has_match = match_t or match_n
+                else:
+                    has_match = keyword in titulo.lower() or keyword in notas.lower()
+                
+                if has_match:
+                    found_tasks.append(
+                        f"TAREFA: {t.get('titulo')} | STATUS: {t.get('status')} | "
+                        f"DATA: {t.get('data_criacao')[:10] if t.get('data_criacao') else 'N/A'}"
+                    )
+            
+            if found_tasks:
+                lines.extend(found_tasks[:10])
+            else:
+                lines.append(f"Nenhuma das últimas 50 tarefas contém o termo '{q_text}'.")
+
+        return {"context": "\n".join(lines)}
+    except Exception as e:
+        print(f"DEBUG_ERROR [Grafo]: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return {"context": f"Erro interno ao consultar grafo: {str(e)}"}
 
 @https_fn.on_call(
     cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
@@ -4939,7 +5230,7 @@ def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
         3. insight: Um breve comentário seu sobre por que isso é importante ou o que você notou de especial.
         """
 
-        response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=prompt)
+        response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
         res_text = response.text
 
         json_match = re.search(r'\{.*\}', res_text, re.DOTALL)

@@ -293,7 +293,7 @@ Responda SOMENTE com JSON valido, sem markdown, sem explicacoes:
     try:
         genai = get_genai_module()
         client = genai.Client(api_key=gemini_key)
-        result = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        result = client.models.generate_content(model='gemini-3-flash-preview', contents=prompt)
         parsed = parse_json_response(result.text or '')
         itens = parsed.get('itens') or []
 
@@ -379,7 +379,7 @@ def generatePgdFromDiariesAI(req: https_fn.CallableRequest):
     try:
         genai = get_genai_module()
         client = genai.Client(api_key=gemini_key)
-        result = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        result = client.models.generate_content(model='gemini-3-flash-preview', contents=prompt)
         parsed = parse_json_response(result.text or '')
         return {'registros': parsed.get('registros') or []}
     except Exception as e:
@@ -435,7 +435,7 @@ def generatePgdFromRawTextAI(req: https_fn.CallableRequest):
     try:
         genai = get_genai_module()
         client = genai.Client(api_key=gemini_key)
-        result = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        result = client.models.generate_content(model='gemini-3-flash-preview', contents=prompt)
         parsed = parse_json_response(result.text or '')
         return {'registros': parsed.get('registros') or []}
     except Exception as e:
@@ -637,7 +637,7 @@ def askWhatsAppAssistantSecure(req: https_fn.CallableRequest):
         genai = get_genai_module()
         client = genai.Client(api_key=gemini_key)
         result = client.models.generate_content(
-            model='gemini-3.1-flash-lite',
+            model='gemini-3-flash-preview',
             contents=[system_instruction, prompt],
         )
         markdown = (result.text or '').strip() or 'Nao consegui gerar uma resposta com o contexto atual.'

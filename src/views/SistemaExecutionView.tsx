@@ -1,11 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../../firebase';
 import {
   Sistema, WorkItem, Tarefa, BaseConhecimento, ConhecimentoItem,
-  PoolItem, ChatMessage, SistemaStatus,
+  PoolItem, SistemaStatus,
 } from '../../types';
 import { normalizeStatus } from '../utils/helpers';
 import { STATUS_COLORS } from '../../constants';
@@ -13,14 +11,9 @@ import { STATUS_COLORS } from '../../constants';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Unidade = { id: string; nome: string };
-type MobileTab = 'visao-geral' | 'logs' | 'copiloto';
+type MobileTab = 'visao-geral' | 'logs';
 
-interface Artifact {
-  id: string;
-  title: string;
-  content: string;
-  createdAt: string;
-}
+
 
 interface EditingResource {
   field: string;
@@ -59,11 +52,11 @@ const STEP_LABELS: Record<SistemaStatus, string> = {
   producao: 'Produção',
 };
 const STATUS_THEME: Record<SistemaStatus, { panel: string; pill: string; accent: string; helper: string }> = {
-  ideia:        { panel: 'bg-slate-50',   pill: 'bg-slate-100 text-slate-700',   accent: 'bg-slate-500',   helper: 'Hipóteses, escopo inicial e definição do que vale perseguir.' },
-  prototipacao: { panel: 'bg-amber-50',   pill: 'bg-amber-100 text-amber-700',   accent: 'bg-amber-500',   helper: 'Experimentos rápidos, prova de conceito e validação inicial.' },
-  desenvolvimento: { panel: 'bg-blue-50', pill: 'bg-blue-100 text-blue-700',    accent: 'bg-blue-500',    helper: 'Construção principal, ajustes técnicos e integração com base RAG.' },
-  testes:       { panel: 'bg-orange-50',  pill: 'bg-orange-100 text-orange-700', accent: 'bg-orange-500',  helper: 'Validação, correções finais e fechamento de pendências.' },
-  producao:     { panel: 'bg-emerald-50', pill: 'bg-emerald-100 text-emerald-700', accent: 'bg-emerald-500', helper: 'Operação estável, documentação e manutenção evolutiva.' },
+  ideia: { panel: 'bg-slate-50', pill: 'bg-slate-100 text-slate-700', accent: 'bg-slate-500', helper: 'Hipóteses, escopo inicial e definição do que vale perseguir.' },
+  prototipacao: { panel: 'bg-amber-50', pill: 'bg-amber-100 text-amber-700', accent: 'bg-amber-500', helper: 'Experimentos rápidos, prova de conceito e validação inicial.' },
+  desenvolvimento: { panel: 'bg-blue-50', pill: 'bg-blue-100 text-blue-700', accent: 'bg-blue-500', helper: 'Construção principal, ajustes técnicos e integração com base RAG.' },
+  testes: { panel: 'bg-orange-50', pill: 'bg-orange-100 text-orange-700', accent: 'bg-orange-500', helper: 'Validação, correções finais e fechamento de pendências.' },
+  producao: { panel: 'bg-emerald-50', pill: 'bg-emerald-100 text-emerald-700', accent: 'bg-emerald-500', helper: 'Operação estável, documentação e manutenção evolutiva.' },
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -122,20 +115,7 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
   const [confirmDeleteLogId, setConfirmDeleteLogId] = useState<string | null>(null);
   const [isCompletedLogsOpen, setIsCompletedLogsOpen] = useState(false);
 
-  // Copilot
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState('');
-  const [isChatLoading, setIsChatLoading] = useState(false);
-  const [isChatFocused, setIsChatFocused] = useState(false);
-  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
-  const [showArtifacts, setShowArtifacts] = useState(false);
-  const [copiedArtifactId, setCopiedArtifactId] = useState<string | null>(null);
 
-  const chatEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
 
   // ─── Audio ─────────────────────────────────────────────────────
   const startRecording = async () => {
@@ -203,66 +183,6 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
     }
   };
 
-  // ─── Copilot ───────────────────────────────────────────────────
-  const buildHistoryContext = () =>
-    chatMessages
-      .slice(-6)
-      .map(m => `${m.role === 'user' ? 'Usuário' : 'Copiloto'}: ${m.content}`)
-      .join('\n');
-
-  const sendChatMessage = async (messageText: string, asArtifact = false) => {
-    if (!messageText.trim() || isChatLoading) return;
-    const userMsg: ChatMessage = { role: 'user', content: messageText };
-    const historyWithUser = [...chatMessages, userMsg];
-    setChatMessages(historyWithUser);
-    setIsChatLoading(true);
-    try {
-      const fn = httpsCallable(functions, 'askTaskAssistant');
-      const customPrompt = `Contexto: Sistema de software chamado "${systemName}" (status: ${STEP_LABELS[sysDetails.status]}).\n\nComando: ${messageText}`;
-      const res = await fn({
-        prompt: customPrompt,
-        historyContext: buildHistoryContext(),
-        area_tematica: 'SISTEMA',
-        ragContext: unit.id,
-      });
-      const result = (res.data as any).result || '';
-      const assistantMsg: ChatMessage = {
-        role: 'assistant',
-        content: asArtifact
-          ? '📄 Artefato gerado e salvo no painel de Artefatos.'
-          : result,
-        ...(asArtifact ? { isArtifact: true } : {}),
-      };
-      if (asArtifact) {
-        const artifact: Artifact = {
-          id: Date.now().toString(),
-          title: messageText.length > 60 ? messageText.substring(0, 60) + '…' : messageText,
-          content: result,
-          createdAt: new Date().toLocaleString('pt-BR'),
-        };
-        setArtifacts(prev => [...prev, artifact]);
-        setShowArtifacts(true);
-      }
-      setChatMessages([...historyWithUser, assistantMsg]);
-    } catch {
-      showToast('Erro ao consultar o Copiloto.', 'error');
-    } finally {
-      setIsChatLoading(false);
-    }
-  };
-
-  const handleSendMessage = () => {
-    const msg = chatInput.trim();
-    if (!msg) return;
-    setChatInput('');
-    sendChatMessage(msg);
-  };
-
-  const handleCopyArtifact = (artifact: Artifact) => {
-    navigator.clipboard.writeText(artifact.content);
-    setCopiedArtifactId(artifact.id);
-    setTimeout(() => setCopiedArtifactId(null), 2000);
-  };
 
   // ─── Derived ───────────────────────────────────────────────────
   const theme = STATUS_THEME[sysDetails.status] ?? STATUS_THEME['ideia'];
@@ -320,11 +240,10 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
               <React.Fragment key={step}>
                 <button
                   onClick={() => onUpdateSistema(unit.id, { status: step })}
-                  className={`flex-1 md:flex-none px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
-                    isActive
-                      ? `${theme.accent} text-white shadow-lg`
-                      : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'
-                  }`}
+                  className={`flex-1 md:flex-none px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${isActive
+                    ? `${theme.accent} text-white shadow-lg`
+                    : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'
+                    }`}
                 >
                   {STEP_LABELS[step]}
                 </button>
@@ -567,13 +486,12 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
             <button
               onClick={isRecording ? stopRecording : startRecording}
               disabled={isProcessingAudio}
-              className={`absolute right-3 top-3 p-2.5 rounded-xl transition-all ${
-                isRecording
-                  ? 'bg-emerald-600 text-white animate-pulse shadow-lg'
-                  : isProcessingAudio
-                    ? 'bg-violet-100 text-violet-600 cursor-wait'
-                    : 'bg-slate-100 text-slate-400 hover:text-violet-600 hover:bg-violet-50'
-              }`}
+              className={`absolute right-3 top-3 p-2.5 rounded-xl transition-all ${isRecording
+                ? 'bg-emerald-600 text-white animate-pulse shadow-lg'
+                : isProcessingAudio
+                  ? 'bg-violet-100 text-violet-600 cursor-wait'
+                  : 'bg-slate-100 text-slate-400 hover:text-violet-600 hover:bg-violet-50'
+                }`}
               title="Transcrever áudio"
             >
               {isProcessingAudio ? (
@@ -804,163 +722,7 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
     </div>
   );
 
-  const renderCopilot = () => (
-    <div className="flex flex-col h-full overflow-hidden bg-white border-l border-slate-100">
-      {/* Copilot header */}
-      <div className="shrink-0 px-4 py-3 flex items-center gap-3 border-b border-blue-50">
-        <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white shrink-0 shadow-lg">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-          </svg>
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-[10px] font-black uppercase tracking-widest text-violet-600">Copiloto Hermes</p>
-          <p className="text-[8px] text-slate-400">RAG · Repositório</p>
-        </div>
-        <button
-          onClick={() => sendChatMessage(`Analise o sistema "${systemName}" (status: ${STEP_LABELS[sysDetails.status]}) e sugira os próximos passos com base no contexto do repositório e das demandas abertas.`)}
-          disabled={isChatLoading}
-          className="shrink-0 px-2.5 py-1.5 rounded-xl text-[8px] font-black uppercase tracking-widest bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all disabled:opacity-40"
-        >
-          Próx. passos
-        </button>
-      </div>
 
-      {/* Artifacts toggle */}
-      {artifacts.length > 0 && (
-        <div className="shrink-0 px-4 py-2 border-b border-slate-50">
-          <button
-            onClick={() => setShowArtifacts(prev => !prev)}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${showArtifacts ? 'bg-indigo-50 border border-indigo-200 text-indigo-600' : 'bg-white border border-slate-200 text-slate-400 hover:text-slate-700'}`}
-          >
-            <div className="flex items-center gap-2">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              Artefatos
-            </div>
-            <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-[9px]">{artifacts.length}</span>
-          </button>
-          {showArtifacts && (
-            <div className="mt-2 max-h-48 overflow-y-auto space-y-2" style={{ scrollbarWidth: 'thin' }}>
-              {artifacts.map(artifact => (
-                <div key={artifact.id} className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 space-y-1.5">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-[10px] font-black truncate text-slate-800">{artifact.title}</p>
-                      <p className="text-[8px] text-slate-400">{artifact.createdAt}</p>
-                    </div>
-                    <button
-                      onClick={() => handleCopyArtifact(artifact)}
-                      className={`shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black transition-all ${copiedArtifactId === artifact.id ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                    >
-                      {copiedArtifactId === artifact.id ? (
-                        <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> Copiado</>
-                      ) : (
-                        <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" /></svg> Copiar</>
-                      )}
-                    </button>
-                  </div>
-                  <p className="text-[10px] leading-relaxed line-clamp-3 text-slate-500">{artifact.content}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto space-y-3 p-3 min-h-0" style={{ scrollbarWidth: 'thin', scrollbarColor: '#CBD5E0 transparent' }}>
-        {chatMessages.length === 0 && (
-          <div className="h-full flex flex-col items-center justify-center text-center p-4 opacity-30">
-            <svg className="w-10 h-10 mb-2 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-            </svg>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Pergunte sobre este sistema</p>
-            {!sysDetails.github_rag_synced_at && (
-              <p className="text-[9px] text-slate-400 mt-2 max-w-[180px]">Sincronize o repositório para respostas contextualizadas</p>
-            )}
-          </div>
-        )}
-        {chatMessages.map((msg, i) => (
-          <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-            <div className={`max-w-[100%] px-3 py-2.5 rounded-2xl text-xs font-medium leading-relaxed shadow-sm ${
-              msg.role === 'user'
-                ? 'bg-slate-900 text-white rounded-br-none'
-                : msg.isArtifact
-                  ? 'bg-indigo-50 text-indigo-800 border border-indigo-200 rounded-bl-none'
-                  : 'bg-blue-50 text-slate-700 rounded-bl-none'
-            }`}>
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
-                  ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-2" {...props} />,
-                  ol: ({ node, ...props }) => <ol className="list-decimal ml-4 mb-2" {...props} />,
-                  li: ({ node, ...props }) => <li className="mb-0.5" {...props} />,
-                  a: ({ node, ...props }) => <a className="text-violet-600 underline hover:text-violet-800" target="_blank" rel="noopener noreferrer" {...props} />,
-                  strong: ({ node, ...props }) => <strong className="font-bold text-violet-700" {...props} />,
-                }}
-              >
-                {msg.content}
-              </ReactMarkdown>
-            </div>
-          </div>
-        ))}
-        {isChatLoading && (
-          <div className="flex justify-start">
-            <div className="px-4 py-3 rounded-2xl rounded-bl-none flex gap-1 items-center bg-blue-50">
-              <span className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-bounce" />
-              <span className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
-              <span className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
-            </div>
-          </div>
-        )}
-        <div ref={chatEndRef} />
-      </div>
-
-      {/* Chat input */}
-      <div className="shrink-0 p-3 border-t border-slate-100">
-        <div className="flex gap-2">
-          <textarea
-            value={chatInput}
-            onChange={e => setChatInput(e.target.value)}
-            onFocus={() => setIsChatFocused(true)}
-            onBlur={() => setIsChatFocused(false)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); }
-            }}
-            onPaste={(e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-              const pastedText = e.clipboardData.getData('text');
-              if (pastedText && /\[\d{2}:\d{2}, \d{2}\/\d{2}\/\d{4}\]/.test(pastedText)) {
-                e.preventDefault();
-                const cleaned = pastedText.replace(/\[\d{2}:\d{2}, \d{2}\/\d{2}\/\d{4}\][^:]+:\s*/g, '').trim();
-                setChatInput(prev => prev ? prev + '\n' + cleaned : cleaned);
-              }
-            }}
-            placeholder="Pergunte sobre este sistema…"
-            className={`flex-1 px-4 py-2 rounded-xl text-xs font-medium outline-none border border-slate-200 focus:ring-2 focus:ring-violet-400 bg-slate-50 text-slate-900 placeholder:text-slate-400 transition-all resize-none ${isChatFocused ? 'h-32' : 'h-10'}`}
-          />
-          <button
-            onClick={handleSendMessage}
-            disabled={isChatLoading || !chatInput.trim()}
-            className="w-9 h-9 shrink-0 bg-violet-600 text-white rounded-xl flex items-center justify-center shadow-md hover:bg-violet-700 disabled:opacity-40 transition-all"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 12h14M12 5l7 7-7 7" />
-            </svg>
-          </button>
-        </div>
-        <button
-          onClick={() => { if (chatInput.trim()) { const msg = chatInput; setChatInput(''); sendChatMessage(msg, true); } }}
-          disabled={!chatInput.trim() || isChatLoading}
-          className="mt-2 w-full py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest border border-indigo-200 text-indigo-500 hover:bg-indigo-50 transition-all disabled:opacity-30"
-        >
-          Gerar como Artefato →
-        </button>
-      </div>
-    </div>
-  );
 
   // ─── Main render ──────────────────────────────────────────────────────────
 
@@ -1013,18 +775,17 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
 
       {/* ══════ MOBILE TAB BAR ══════════════════════════════════════════════ */}
       <nav className="lg:hidden shrink-0 flex border-b border-slate-200 bg-white">
-        {(['visao-geral', 'logs', 'copiloto'] as MobileTab[]).map(tab => {
-          const labels: Record<MobileTab, string> = { 'visao-geral': 'Visão Geral', logs: 'Logs', copiloto: 'Copiloto' };
+        {(['visao-geral', 'logs'] as MobileTab[]).map(tab => {
+          const labels: Record<MobileTab, string> = { 'visao-geral': 'Visão Geral', logs: 'Logs' };
           const isActive = mobileTab === tab;
           return (
             <button
               key={tab}
               onClick={() => setMobileTab(tab)}
-              className={`flex-1 py-2.5 text-[9px] font-black uppercase tracking-widest transition-colors border-b-2 ${
-                isActive
-                  ? 'border-violet-500 text-violet-600'
-                  : 'border-transparent text-slate-400 hover:text-slate-600'
-              }`}
+              className={`flex-1 py-2.5 text-[9px] font-black uppercase tracking-widest transition-colors border-b-2 ${isActive
+                ? 'border-violet-500 text-violet-600'
+                : 'border-transparent text-slate-400 hover:text-slate-600'
+                }`}
             >
               {labels[tab]}
             </button>
@@ -1045,10 +806,7 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
           {renderLogsColumn()}
         </div>
 
-        {/* Right: Copilot */}
-        <div className={`${mobileTab === 'copiloto' ? 'flex' : 'hidden'} lg:flex lg:w-[360px] xl:w-[400px] shrink-0 flex-col overflow-hidden`}>
-          {renderCopilot()}
-        </div>
+
       </div>
 
       {/* ══════ MODAL: Editar Recurso ══════════════════════════════════════ */}

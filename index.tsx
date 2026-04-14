@@ -56,6 +56,7 @@ import { SlidesTool } from './src/components/tools/SlidesTool';
 import { FerramentasView } from './src/components/tools/FerramentasView';
 import { QuickNoteModal } from './src/components/modals/QuickNoteModal';
 import { SpeedDialMenu } from './src/components/ui/SpeedDialMenu';
+import { HermesCopilotoDrawer } from './src/components/tools/HermesCopilotoDrawer';
 import { generateMarkdown, generateActionsMarkdown, downloadMarkdown } from './src/utils/markdownGenerator';
 import {
   ROOT_ACTIONS_FOLDER_ID,
@@ -983,6 +984,7 @@ const App: React.FC = () => {
   const logAudioChunksRef = useRef<Blob[]>([]);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isCopilotoOpen, setIsCopilotoOpen] = useState(false);
   const [isQuickNoteModalOpen, setIsQuickNoteModalOpen] = useState(false);
   const [hasAutoExpanded, setHasAutoExpanded] = useState(false);
 
@@ -4726,6 +4728,7 @@ const App: React.FC = () => {
                       notifications={notifications}
                       isSyncing={isSyncing}
                       isNotificationCenterOpen={isNotificationCenterOpen}
+                      onOpenCopiloto={() => setIsCopilotoOpen(true)}
                       onOpenNotes={() => setIsQuickNoteModalOpen(true)}
                       onOpenLog={() => { setIsQuickLogModalOpen(true); setIsMobileMenuOpen(false); }}
                       onOpenShopping={() => { setIsShoppingAIModalOpen(true); setIsMobileMenuOpen(false); }}
@@ -5015,6 +5018,7 @@ const App: React.FC = () => {
                     notifications={notifications}
                     isSyncing={isSyncing}
                     isNotificationCenterOpen={isNotificationCenterOpen}
+                    onOpenCopiloto={() => setIsCopilotoOpen(true)}
                     onOpenNotes={() => setIsQuickNoteModalOpen(true)}
                     onOpenLog={() => setIsQuickLogModalOpen(true)}
                     onOpenShopping={() => setIsShoppingAIModalOpen(true)}
@@ -7403,6 +7407,7 @@ const App: React.FC = () => {
                 onOpenNotes={() => setIsQuickNoteModalOpen(true)}
                 onOpenLog={() => setIsQuickLogModalOpen(true)}
                 onOpenShopping={() => setIsShoppingAIModalOpen(true)}
+                onOpenCopiloto={() => setIsCopilotoOpen(true)}
                 onOpenTranscription={() => setIsTranscriptionAIModalOpen(true)}
                 onOpenMeetingTranscription={() => {
                   setActiveModule('acoes');
@@ -7794,6 +7799,14 @@ const App: React.FC = () => {
             />
           )
         }
+
+        <HermesCopilotoDrawer
+          isOpen={isCopilotoOpen}
+          onClose={() => setIsCopilotoOpen(false)}
+          taskId={selectedWorkItem?.id}
+          systemId={selectedSystemId}
+          userId={user?.uid || ''}
+        />
       </div>
     </>
   );
