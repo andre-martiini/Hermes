@@ -2220,6 +2220,11 @@ def process_vectorization(task_id):
 
     task_data = task_doc.to_dict()
 
+    # Guard: tarefas cristalizadas são indexadas pelo novo pipeline de artefatos (KG).
+    # O pipeline legado (processos_conhecimento) não deve criar duplicatas para elas.
+    if task_data.get('kg_crystallized'):
+        return {'success': True, 'vectorized_count': 0, 'skipped': 'kg_pipeline'}
+
     pool_dados = task_data.get('pool_dados', [])
 
 

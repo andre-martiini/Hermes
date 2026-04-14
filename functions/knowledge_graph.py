@@ -36,7 +36,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from firebase_admin import firestore
-from firebase_functions import firestore_fn, https_fn, options
+from firebase_functions import firestore_fn, https_fn, options, pubsub_fn
 
 # ─── Constantes ──────────────────────────────────────────────────────────────
 
@@ -51,6 +51,21 @@ NOISE_PREFIXES = (            # entradas de chat descartadas na cristalização
     "[PROPOSAL]",
     "[/PROPOSAL]",
 )
+
+# ─── Módulo de Artefatos ─────────────────────────────────────────────────────
+ARTEFATO_TOKEN_CAP    = 15_000
+ARTEFATO_CHAR_CAP     = ARTEFATO_TOKEN_CAP * CHARS_PER_TOKEN  # ≈ 60 000 chars
+ARTEFATO_PUBSUB_TOPIC = "hermes-artefato-kg"
+SUPPORTED_MIMES = frozenset({
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/csv",
+})
+_DRIVE_ID_RE = re.compile(
+    r"(?:drive\.google\.com/(?:file/d/|open\?id=)|docs\.google\.com/\w+/d/)([a-zA-Z0-9_-]{20,})"
+)
+URL_RE = re.compile(r"https?://[^\s\)\"\'<>]+")
 
 
 # ─── Helpers: banco e LLM ────────────────────────────────────────────────────
@@ -169,6 +184,199 @@ def _build_clean_diary(task_data: dict) -> str:
 
 def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // CHARS_PER_TOKEN)
+
+
+# ─── Módulo de Artefatos: helpers ────────────────────────────────────────────
+
+def _infer_mime(nome: str) -> str:
+    """Infere MIME type pela extensão do arquivo."""
+    n = nome.lower()
+    if n.endswith(".pdf"):  return "application/pdf"
+    if n.endswith(".docx"): return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    if n.endswith(".xlsx"): return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    if n.endswith(".csv"):  return "text/csv"
+    return "application/octet-stream"
+
+
+def _extract_drive_id(url: str) -> str:
+    """Extrai o file_id de uma URL do Google Drive/Docs."""
+    m = _DRIVE_ID_RE.search(url)
+    return m.group(1) if m else ""
+
+
+def _get_google_creds_kg(db):
+    """Credenciais OAuth2 do Firestore com escopo Drive (espelho de main.py)."""
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+
+    creds_doc = db.collection("system").document("google_credentials").get()
+    if not creds_doc.exists:
+        raise RuntimeError("Credenciais Google nao encontradas no Firestore.")
+    d = creds_doc.to_dict()
+    creds = Credentials(
+        token=d.get("token"),
+        refresh_token=d.get("refresh_token"),
+        token_uri=d.get("token_uri"),
+        client_id=d.get("client_id"),
+        client_secret=d.get("client_secret"),
+        scopes=["https://www.googleapis.com/auth/drive"],
+    )
+    if creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            db.collection("system").document("google_credentials").update(
+                {"token": creds.token, "updated_at": firestore.SERVER_TIMESTAMP}
+            )
+        except Exception as exc:
+            print(f"[KG Artefato] Falha ao renovar token Google: {exc}")
+    return creds
+
+
+def _download_from_drive(file_id: str, db) -> bytes:
+    """Baixa um arquivo do Google Drive pelo ID."""
+    from googleapiclient.discovery import build
+    service = build("drive", "v3", credentials=_get_google_creds_kg(db))
+    return service.files().get_media(fileId=file_id).execute()
+
+
+def _aggregate_artefatos(task_data: dict, db) -> list[dict]:
+    """
+    Agrega artefatos de 3 fontes e desduplicates por URL.
+    Retorna lista com status_indexacao='pendente'.
+
+    Fontes:
+      1. pool_dados[tipo='arquivo']
+      2. URLs do Google Drive encontradas no acompanhamento (Diário de Bordo)
+      3. Arquivos do extra_context_id (coleção 'conhecimento')
+    """
+    seen_urls: set = set()
+    result: list = []
+
+    def _add(nome: str, url: str, tipo_mime: str, drive_file_id: str = ""):
+        url = url.rstrip("/")
+        if not url or url in seen_urls:
+            return
+        seen_urls.add(url)
+        entry: dict = {
+            "nome": nome or url.split("/")[-1] or "artefato",
+            "url": url,
+            "tipo_mime": tipo_mime,
+            "resumo_semantico": None,
+            "status_indexacao": "pendente",
+        }
+        if drive_file_id:
+            entry["drive_file_id"] = drive_file_id
+        result.append(entry)
+
+    # Fonte 1: pool_dados
+    for item in task_data.get("pool_dados", []):
+        if item.get("tipo") != "arquivo":
+            continue
+        file_id = item.get("drive_file_id", "")
+        url = item.get("valor", "")
+        if not url and file_id:
+            url = f"https://drive.google.com/file/d/{file_id}/view"
+        if not file_id and url:
+            file_id = _extract_drive_id(url)
+        nome = item.get("nome", "")
+        _add(nome, url, _infer_mime(nome), file_id)
+
+    # Fonte 2: URLs Drive brutas no diário
+    for entry in task_data.get("acompanhamento", []):
+        nota = entry.get("nota", "") or ""
+        for url in URL_RE.findall(nota):
+            if "drive.google.com" not in url and "docs.google.com" not in url:
+                continue
+            file_id = _extract_drive_id(url)
+            nome = url.split("/")[-1].split("?")[0] or "link-diario"
+            _add(nome, url, "application/pdf", file_id)
+
+    # Fonte 3: extra_context_id
+    extra_ctx_id = task_data.get("extra_context_id")
+    if extra_ctx_id:
+        try:
+            for doc in (
+                db.collection("conhecimento")
+                .where("extra_context_id", "==", extra_ctx_id)
+                .stream()
+            ):
+                d = doc.to_dict() or {}
+                url = d.get("url_drive", "")
+                nome = d.get("titulo", "")
+                tipo = d.get("tipo_arquivo", "")
+                if tipo == "pdf":
+                    mime = "application/pdf"
+                elif tipo in ("doc", "docx"):
+                    mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                elif tipo in ("xlsx", "csv"):
+                    mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                else:
+                    mime = _infer_mime(nome)
+                _add(nome, url, mime, _extract_drive_id(url))
+        except Exception as exc:
+            print(f"[KG Artefato] Erro ao buscar extra_context ({extra_ctx_id}): {exc}")
+
+    return result
+
+
+def _dispatch_artefatos_pubsub(project_id: str, task_id: str, artefatos: list) -> None:
+    """Publica uma mensagem por artefato no tópico hermes-artefato-kg."""
+    import json
+    from google.cloud import pubsub_v1
+
+    publisher = pubsub_v1.PublisherClient()
+    topic_path = publisher.topic_path(project_id, ARTEFATO_PUBSUB_TOPIC)
+    for idx, art in enumerate(artefatos):
+        msg = {
+            "task_id": task_id,
+            "artefato_idx": idx,
+            "url": art["url"],
+            "tipo_mime": art["tipo_mime"],
+            "drive_file_id": art.get("drive_file_id", ""),
+            "nome": art["nome"],
+        }
+        publisher.publish(topic_path, json.dumps(msg).encode("utf-8"))
+    print(f"[KG Artefato] {len(artefatos)} mensagens publicadas para tarefa {task_id}")
+
+
+def _update_artefato_status(
+    db, task_id: str, idx: int, status: str, resumo: Optional[str]
+) -> None:
+    """Atualiza status_indexacao e resumo_semantico de um item em artefatos_kg."""
+    task_ref = db.collection("tarefas").document(task_id)
+    snap = task_ref.get()
+    if not snap.exists:
+        print(f"[KG Artefato] Tarefa nao encontrada para update: {task_id}")
+        return
+    artefatos = (snap.to_dict() or {}).get("artefatos_kg", [])
+    if idx >= len(artefatos):
+        print(f"[KG Artefato] Indice {idx} fora do array artefatos_kg da tarefa {task_id}")
+        return
+    artefatos[idx]["status_indexacao"] = status
+    if resumo is not None:
+        artefatos[idx]["resumo_semantico"] = resumo
+    task_ref.update({"artefatos_kg": artefatos})
+
+
+def _gather_artefatos_for_node(db, task_ids: list, max_tasks: int = 3, max_per_task: int = 2) -> list:
+    """
+    Busca resumos de artefatos das tarefas mais recentes vinculadas a um nó.
+    Retorna lista de (nome, resumo) para inclusão no contexto RAG.
+    """
+    items = []
+    for t_id in task_ids[-max_tasks:]:
+        try:
+            snap = db.collection("tarefas").document(t_id).get()
+            if not snap.exists:
+                continue
+            for art in (snap.to_dict() or {}).get("artefatos_kg", []):
+                if art.get("status_indexacao") == "concluido" and art.get("resumo_semantico"):
+                    items.append((art["nome"], art["resumo_semantico"]))
+                    if len(items) >= max_tasks * max_per_task:
+                        return items
+        except Exception:
+            continue
+    return items
 
 
 # ─── Fase 1: geração de tags Retrieval-First ─────────────────────────────────
@@ -449,6 +657,17 @@ Resumo:"""
 
     print(f"[KG Fase2] Tarefa {task_id} cristalizada -> no {node_id} (peso={peso})")
 
+    # ── Módulo de Artefatos: agrega e despacha Pub/Sub ────────────────────────
+    import os as _os
+    artefatos = _aggregate_artefatos(task_data, db)
+    if artefatos:
+        db.collection("tarefas").document(task_id).update({"artefatos_kg": artefatos})
+        project_id = _os.environ.get("GCLOUD_PROJECT", "gestao-hermes")
+        try:
+            _dispatch_artefatos_pubsub(project_id, task_id, artefatos)
+        except Exception as exc:
+            print(f"[KG Artefato] Erro ao despachar Pub/Sub para {task_id}: {exc}")
+
 
 @firestore_fn.on_document_updated(document="tarefas/{taskId}", memory=options.MemoryOption.GB_1, timeout_sec=300)
 def on_tarefa_concluida_kg(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot]]):
@@ -484,6 +703,127 @@ def on_tarefa_concluida_kg(event: firestore_fn.Event[firestore_fn.Change[firesto
     except Exception as e:
         import traceback
         print(f"[KG Fase2] Erro ao cristalizar tarefa {task_id}: {traceback.format_exc()}")
+
+
+# ─── Módulo de Artefatos: worker Pub/Sub ─────────────────────────────────────
+
+@pubsub_fn.on_message_published(
+    topic=ARTEFATO_PUBSUB_TOPIC,
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=300,
+)
+def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedData]):
+    """
+    Worker Pub/Sub — processa um artefato da tarefa.
+
+    Fluxo:
+      1. Valida MIME type (aceita apenas tríade corporativa)
+      2. Baixa o arquivo (Drive OAuth ou URL pública) — Fail-Silently se inacessível
+      3. Extrai texto via Gemini (até ARTEFATO_CHAR_CAP chars)
+      4. Gera resumo_semantico em parágrafo denso
+      5. Atualiza artefatos_kg[idx] na tarefa com status final
+
+    Tópico: hermes-artefato-kg
+    """
+    import base64 as _b64
+    import json
+
+    # ── Decodifica mensagem ───────────────────────────────────────────────────
+    try:
+        raw = event.data.message.text
+        if not raw:
+            raw = _b64.b64decode(event.data.message.data).decode("utf-8")
+        data = json.loads(raw)
+    except Exception as exc:
+        print(f"[KG Artefato] Erro ao decodificar mensagem Pub/Sub: {exc}")
+        return
+
+    task_id       = data.get("task_id", "")
+    idx           = data.get("artefato_idx")
+    url           = data.get("url", "")
+    tipo_mime     = data.get("tipo_mime", "")
+    drive_file_id = data.get("drive_file_id", "")
+    nome          = data.get("nome", "artefato")
+
+    if not task_id or idx is None:
+        print("[KG Artefato] Mensagem invalida: task_id ou artefato_idx ausente")
+        return
+
+    db = _get_db()
+    api_key = _get_api_key(db)
+    if not api_key:
+        print(f"[KG Artefato] API key ausente — tarefa {task_id}[{idx}]")
+        return
+
+    # ── Valida MIME type ─────────────────────────────────────────────────────
+    if tipo_mime not in SUPPORTED_MIMES:
+        _update_artefato_status(db, task_id, idx, "ignorado_mime", None)
+        print(f"[KG Artefato] MIME ignorado ({tipo_mime}): tarefa {task_id}[{idx}] — {nome}")
+        return
+
+    # ── Download ─────────────────────────────────────────────────────────────
+    try:
+        if drive_file_id:
+            file_bytes = _download_from_drive(drive_file_id, db)
+        else:
+            # Tenta extrair drive_file_id da URL, senão faz requisição direta
+            fid = _extract_drive_id(url)
+            if fid:
+                file_bytes = _download_from_drive(fid, db)
+            else:
+                import requests as _req
+                resp = _req.get(url, timeout=30)
+                resp.raise_for_status()
+                file_bytes = resp.content
+    except Exception as exc:
+        _update_artefato_status(db, task_id, idx, "falha_acesso", None)
+        print(f"[KG Artefato] Falha no download ({nome}): {exc}")
+        return
+
+    # ── Extração de texto via Gemini ─────────────────────────────────────────
+    try:
+        client = _gemini_client(api_key)
+        file_b64 = _b64.b64encode(file_bytes).decode("utf-8")
+        extract_resp = client.models.generate_content(
+            model="gemini-2.0-flash-lite",
+            contents=[
+                "Extraia todo o texto relevante deste documento. "
+                "Ignore cabecalhos repetitivos, rodapes e numeracao de paginas.",
+                {"mime_type": tipo_mime, "data": file_b64},
+            ],
+        )
+        texto = (extract_resp.text or "").strip()
+    except Exception as exc:
+        _update_artefato_status(db, task_id, idx, "falha_acesso", None)
+        print(f"[KG Artefato] Falha na extracao de texto ({nome}): {exc}")
+        return
+
+    # ── Token cap ────────────────────────────────────────────────────────────
+    truncado = len(texto) > ARTEFATO_CHAR_CAP
+    texto_cap = texto[:ARTEFATO_CHAR_CAP]
+
+    # ── Resumo semântico ─────────────────────────────────────────────────────
+    try:
+        summary_resp = client.models.generate_content(
+            model="gemini-2.0-flash-lite",
+            contents=(
+                f"Voce e um analista de documentos corporativos.\n"
+                f"Resuma o objetivo e os principais parametros deste documento "
+                f"em um paragrafo denso (maximo 5 frases). "
+                f"Seja objetivo e tecnico. Inclua: tipo do documento, "
+                f"seu proposito central e dados-chave.\n\n"
+                f"Documento: \"{nome}\"\nConteudo:\n{texto_cap}\n\nResumo:"
+            ),
+        )
+        resumo = (summary_resp.text or "").strip()
+    except Exception as exc:
+        _update_artefato_status(db, task_id, idx, "falha_acesso", None)
+        print(f"[KG Artefato] Falha ao sumarizar ({nome}): {exc}")
+        return
+
+    status_final = "falha_limite_tamanho" if truncado else "concluido"
+    _update_artefato_status(db, task_id, idx, status_final, resumo)
+    print(f"[KG Artefato] OK — {nome} [{status_final}]: tarefa {task_id}[{idx}]")
 
 
 # ─── RAG: extração com time decay + circuit breaker ──────────────────────────
@@ -599,6 +939,14 @@ def extract_kg_rag_context(
         )
         if node.get("resumo"):
             lines.append(f"    Procedimento: {node['resumo'][:400]}")
+
+        # Artefatos: inclui resumos dos artefatos das tarefas vinculadas ao nó
+        artefato_items = _gather_artefatos_for_node(db, node.get("task_ids", []))
+        if artefato_items:
+            lines.append("    Artefatos produzidos/utilizados:")
+            for art_nome, art_resumo in artefato_items:
+                lines.append(f"      • {art_nome}: {art_resumo[:200]}")
+
         lines.append("")
 
     lines.append(

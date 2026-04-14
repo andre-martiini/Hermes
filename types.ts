@@ -80,6 +80,16 @@ export interface Tarefa {
     concept_node_id?: string | null;     // Preenchido na Fase 2 (cristalização)
     kg_tags?: string[];                  // Tags geradas pela Fase 1 (Retrieval-First)
     kg_crystallized?: boolean;           // true após a Fase 2 ser concluída
+    artefatos_kg?: ArtefatoKG[];         // Artefatos indexados pelo módulo de artefatos
+}
+
+export interface ArtefatoKG {
+    nome: string;
+    url: string;
+    tipo_mime: string;
+    resumo_semantico: string | null;
+    status_indexacao: 'pendente' | 'concluido' | 'falha_acesso' | 'falha_limite_tamanho' | 'ignorado_mime';
+    drive_file_id?: string;
 }
 
 export interface AtividadeRealizada {
