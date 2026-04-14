@@ -211,8 +211,8 @@ const FinanceView = ({
 
     const getBudgetColor = (percentage: number) => {
         if (!isCurrentMonth) return percentage >= 100 ? 'bg-rose-500' : 'bg-emerald-500';
-        if (percentage < monthProgress) return 'bg-emerald-500';
-        if (percentage < monthProgress + 5) return 'bg-yellow-500';
+        if (percentage < monthProgress!) return 'bg-emerald-500';
+        if (percentage < monthProgress! + 5) return 'bg-yellow-500';
         return 'bg-rose-500';
     };
 
