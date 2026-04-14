@@ -3293,9 +3293,12 @@ const App: React.FC = () => {
         entregas_relacionadas: []
       };
 
-      const docRef = await addDoc(collection(db, 'tarefas'), {
-        ...taskPayload
-      });
+      // Sanitiza: remove campos com valor undefined (Firestore não aceita undefined)
+      const sanitizedPayload = Object.fromEntries(
+        Object.entries(taskPayload).filter(([, v]) => v !== undefined)
+      );
+
+      const docRef = await addDoc(collection(db, 'tarefas'), sanitizedPayload);
 
       if (convertingIdea) {
         await deleteDoc(doc(db, 'brainstorm_ideas', convertingIdea.id));
