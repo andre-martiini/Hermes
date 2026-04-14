@@ -90,26 +90,35 @@ def _gemini_client(api_key: str):
     return genai.Client(api_key=api_key)
 
 
-def _get_embedding(text: str, api_key: str) -> list[float]:
-    """Embedding via Gemini REST — reutiliza o helper do main.py."""
-    import requests as req_lib
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta"
-        "/models/gemini-embedding-001:embedContent"
+_EMBEDDING_DIM = 768  # dimensão esperada do gemini-embedding-001
+
+
+def _get_embedding(
+    text: str,
+    api_key: str,
+    task_type: str = "RETRIEVAL_DOCUMENT",
+) -> list[float]:
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=api_key)
+    
+    response = client.models.embed_content(
+        model="gemini-embedding-001",  # Modelo atualizado recomendado
+        contents=text[:8000],
+        config=types.EmbedContentConfig(
+            task_type=task_type,
+            output_dimensionality=_EMBEDDING_DIM
+        )
     )
-    payload = {
-        "model": "models/gemini-embedding-001",
-        "content": {"parts": [{"text": text[:8000]}]},
-        "taskType": "RETRIEVAL_DOCUMENT",
-    }
-    r = req_lib.post(
-        url,
-        json=payload,
-        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
-        timeout=30,
-    )
-    r.raise_for_status()
-    return r.json()["embedding"]["values"]
+    
+    vec = response.embeddings[0].values
+    if len(vec) != _EMBEDDING_DIM:
+        raise ValueError(
+            f"Dimensão inválida: esperado {_EMBEDDING_DIM}, "
+            f"recebido {len(vec)}. task_type={task_type!r}"
+        )
+    return vec
 
 
 # ─── Helpers: álgebra vetorial ───────────────────────────────────────────────
@@ -1239,16 +1248,18 @@ def extract_kg_rag_context(
 
     # ── B) Busca vetorial: Acervo Global via Firestore KNN ────────────────────
     acervo_items: list[dict] = []
+    acervo_erro: str | None = None
     try:
-        # Normalização com chaves semânticas para melhor recall em 768d
+        # RETRIEVAL_QUERY (assimétrico): obrigatório para queries, nunca RETRIEVAL_DOCUMENT
         query_text = f"área: {area_tematica}. contexto: {', '.join(tags or [])}".lower()
-        query_emb = _get_embedding(query_text, api_key)
+        query_emb = _get_embedding(query_text, api_key, task_type="RETRIEVAL_QUERY")
 
+        # find_nearest só existe em CollectionReference — nunca encadeie .where() antes
         acervo_stream = (
             db.collection("indice_artefatos")
             .find_nearest(
                 vector_field="embedding",
-                query_vector=Vector(query_emb),
+                query_vector=Vector(query_emb),   # ← wrapper obrigatório
                 distance_measure=DistanceMeasure.COSINE,
                 limit=5,
             )
@@ -1266,11 +1277,12 @@ def extract_kg_rag_context(
                 break
             acervo_items.pop()
     except Exception as exc:
-        # Índice ainda não criado ou erro transitório — degrada graciosamente
-        print(f"[KG RAG] Busca vetorial indice_artefatos indisponível: {exc}")
+        # Expõe o erro cru — o LLM deve reportar, não mascarar
+        acervo_erro = f"[ERRO TÉCNICO FindNearest] {type(exc).__name__}: {exc}"
+        print(acervo_erro)
 
     # ── Retorno antecipado se nenhum eixo retornou dados ─────────────────────
-    if not candidates and not acervo_items:
+    if not candidates and not acervo_items and not acervo_erro:
         return [], ""
 
     # ── Formata o contexto ────────────────────────────────────────────────────
@@ -1298,6 +1310,17 @@ def extract_kg_rag_context(
 
         lines.append(
             "Use marcadores [1], [2]… no texto da resposta para indicar a fonte de cada informação."
+        )
+
+    # Eixo B: Erro técnico do FindNearest — reportar literalmente ao LLM
+    if acervo_erro:
+        lines.append("")
+        lines.append("--- ACERVO GLOBAL (Documentação e Manuais — A Teoria) ---")
+        lines.append("")
+        lines.append(f"⚠️ {acervo_erro}")
+        lines.append(
+            "INSTRUÇÃO: Reporte este erro LITERALMENTE ao usuário. "
+            "Não tente responder a pergunta como se o Acervo estivesse disponível."
         )
 
     # Eixo B: Acervo Global (A Teoria) — bloco condicional
@@ -1353,62 +1376,31 @@ def buscar_procedimento(req: https_fn.CallableRequest):
             message="Chave Gemini não configurada.",
         )
 
-    # Embedding da query para busca vetorial
-    query_embedding = _get_embedding(query, api_key)
-
-    # Busca nós (filtra por área se fornecida)
-    collection_query = db.collection("knowledge_nodes")
-    if area:
-        collection_query = collection_query.where("area_tematica", "==", area)
-
-    nodes_raw = []
-    for ndoc in collection_query.stream():
-        nd = ndoc.to_dict() or {}
-        node_emb = nd.get("embedding")
-        if not node_emb:
-            continue
-        sim = _cosine_similarity(query_embedding, node_emb)
-        # Time decay via aresta mais recente
-        edges = list(
-            db.collection("knowledge_edges").where("node_id", "==", ndoc.id).stream()
+    # Substituído pela implementação corrigida do Especialista GCP (ARTEFATO 2)
+    from tools.busca_grafo import buscar_tarefas
+    res = buscar_tarefas(query)
+    
+    if res.get("erro"):
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=res["erro"],
         )
-        dates = [e.to_dict().get("data_conclusao", "") for e in edges if e.to_dict().get("data_conclusao")]
-        decay = _time_decay(max(dates)) if dates else 1.0
-        avg_peso = (
-            sum(e.to_dict().get("peso_semantico", 0.7) for e in edges) / len(edges)
-            if edges else 0.7
-        )
-        score = avg_peso * decay * (0.5 + 0.5 * sim)  # combina peso estrutural e semântico
-        nodes_raw.append({
-            "node_id": ndoc.id,
-            "titulo": nd.get("titulo", ""),
-            "resumo": nd.get("resumo", ""),
-            "area_tematica": nd.get("area_tematica", ""),
-            "score": round(score, 5),
-            "n_tasks": nd.get("n_tasks", 0),
-            "task_ids": nd.get("task_ids", []),
-        })
-
-    nodes_raw.sort(key=lambda x: x["score"], reverse=True)
-    candidates = nodes_raw[:top_n]
-
-    # Circuit breaker
-    while len(candidates) > 1 and sum(_estimate_tokens(n.get("resumo", "")) for n in candidates) > TOKEN_SAFETY_LIMIT:
-        candidates.pop()
-
-    # Formata contexto com citações
-    lines = [f"Resultados para a busca: \"{query}\"", ""]
-    for i, node in enumerate(candidates, 1):
+    
+    resultados = res.get("resultados", [])
+    
+    # Formata contexto compatível com o retorno esperado
+    lines = [f"Resultados para a busca (Grafo): \"{query}\"", ""]
+    for i, r in enumerate(resultados, 1):
         lines.append(
-            f"[{i}] \"{node['titulo']}\" | Área: {node['area_tematica']} | "
-            f"Relevância: {node['score']:.2f} | Baseado em {node['n_tasks']} tarefa(s)"
+            f"[{i}] \"{r['titulo']}\" | Status: {r['status']} | "
+            f"Responsável: {r['responsavel']} | Data: {r['criado_em']}"
         )
-        if node.get("resumo"):
-            lines.append(f"    {node['resumo'][:500]}")
+        if r.get("descricao"):
+            lines.append(f"    {r['descricao']}")
         lines.append("")
 
     return {
-        "nodes": candidates,
+        "nodes": resultados, # Adaptado: retorna tarefas como se fossem nós
         "context": "\n".join(lines),
     }
 

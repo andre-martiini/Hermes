@@ -7803,9 +7803,16 @@ const App: React.FC = () => {
         <HermesCopilotoDrawer
           isOpen={isCopilotoOpen}
           onClose={() => setIsCopilotoOpen(false)}
-          taskId={selectedWorkItem?.id}
+          taskId={selectedTask?.id || selectedWorkItem?.id}
           systemId={selectedSystemId}
           userId={user?.uid || ''}
+          onOpenTask={(id) => {
+            const task = tarefas.find(t => t.id === id);
+            if (task) {
+              setSelectedTask(task);
+              setTaskModalMode('execute');
+            }
+          }}
         />
       </div>
     </>

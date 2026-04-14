@@ -32,10 +32,11 @@ interface HermesCopilotoDrawerProps {
     systemId?: string;
     isDark?: boolean;
     userId: string;
+    onOpenTask?: (taskId: string) => void;
 }
 
 export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
-    isOpen, onClose, taskId, systemId, isDark = false, userId
+    isOpen, onClose, taskId, systemId, isDark = false, userId, onOpenTask
 }) => {
     const [sessions, setSessions] = useState<Session[]>([]);
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -44,6 +45,36 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const [isLoading, setIsLoading] = useState(false);
     const [showHistory, setShowHistory] = useState(false);
     const chatEndRef = useRef<HTMLDivElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+    const [isFocused, setIsFocused] = useState(false);
+
+    // Auto-resize textarea logic
+    useEffect(() => {
+        const handleResize = () => {
+            if (textareaRef.current) {
+                textareaRef.current.style.height = 'auto';
+                const minH = isFocused ? 250 : 50;
+                const scrollH = textareaRef.current.scrollHeight;
+                textareaRef.current.style.height = `${Math.max(minH, Math.min(scrollH, 400))}px`;
+            }
+        };
+
+        handleResize();
+
+        // Listener global para fechar ao clicar fora (mais robusto que onBlur em alguns casos)
+        const handleClickOutside = (e: MouseEvent) => {
+            if (textareaRef.current && !textareaRef.current.contains(e.target as Node)) {
+                setIsFocused(false);
+            }
+        };
+
+        if (isFocused) {
+            window.addEventListener('mousedown', handleClickOutside);
+        }
+
+        return () => window.removeEventListener('mousedown', handleClickOutside);
+    }, [input, isFocused]);
 
     // Load Sessions
     useEffect(() => {
@@ -169,10 +200,25 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                     </div>
                     <div>
                         <h3 className="text-lg font-black tracking-tight">Copiloto Hermes</h3>
-                        <p className={`text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>Estrategista Sênior</p>
+                        <div className="flex items-center gap-3">
+                            <p className={`text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>Estrategista Sênior</p>
+                            {taskId && (
+                                <div className="flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]"></span>
+                                    <span className="text-[9px] font-black text-emerald-500 uppercase tracking-tight">Contexto da Ação Ativo</span>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => handleCreateSession()}
+                        className={`p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}
+                        title="Nova Conversa"
+                    >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+                    </button>
                     <button onClick={() => setShowHistory(!showHistory)} className={`p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}>
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                     </button>
@@ -237,7 +283,23 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-2" {...props} />,
                                             li: ({ node, ...props }) => <li className="mb-0.5" {...props} />,
                                             strong: ({ node, ...props }) => <strong className="font-bold text-blue-600" {...props} />,
-                                            a: ({ node, ...props }) => <a className="text-blue-600 underline hover:text-blue-800" target="_blank" rel="noopener noreferrer" {...props} />,
+                                            a: ({ node, ...props }) => {
+                                                const href = props.href || '';
+                                                if (href.startsWith('task:')) {
+                                                    const id = href.split(':')[1];
+                                                    return (
+                                                        <button
+                                                            onClick={() => onOpenTask?.(id)}
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-blue-600 hover:text-white text-blue-400 rounded-xl border border-blue-500/30 transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm group/btn"
+                                                        >
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                                            <span className="group-hover/btn:underline">{props.children}</span>
+                                                            <svg className="w-3 h-3 opacity-0 group-hover/btn:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
+                                                        </button>
+                                                    );
+                                                }
+                                                return <a className="text-blue-600 underline hover:text-blue-800" target="_blank" rel="noopener noreferrer" {...props} />;
+                                            },
                                         }}
                                     >
                                         {msg.content}
@@ -283,8 +345,10 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                     <div className={`shrink-0 p-6 border-t ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
                         <div className="flex gap-3">
                             <textarea
+                                ref={textareaRef}
                                 value={input}
                                 onChange={e => setInput(e.target.value)}
+                                onFocus={() => setIsFocused(true)}
                                 onKeyDown={e => {
                                     if (e.key === 'Enter' && !e.shiftKey) {
                                         e.preventDefault();
@@ -296,7 +360,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                     }
                                 }}
                                 placeholder="Estrategize com Hermes…"
-                                className={`flex-1 min-h-[50px] max-h-[150px] px-5 py-3.5 rounded-2xl text-sm font-medium outline-none border transition-all resize-none ${isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-blue-500' : 'bg-slate-50 border-slate-200 text-slate-700 placeholder:text-slate-400 focus:border-blue-500'}`}
+                                className={`flex-1 px-5 py-3.5 rounded-2xl text-sm font-medium outline-none border resize-none overflow-y-auto ${isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-blue-500' : 'bg-slate-50 border-slate-200 text-slate-700 placeholder:text-slate-400 focus:border-blue-500'} transition-all duration-300`}
                             />
                             <button
                                 onClick={() => {

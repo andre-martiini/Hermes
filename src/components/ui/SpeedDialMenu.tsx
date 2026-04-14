@@ -49,9 +49,7 @@ export const SpeedDialMenu = ({
     {
       label: 'Copiloto Hermes',
       color: 'text-indigo-600',
-      badge: (
-        <span className="bg-indigo-600 text-[8px] font-black text-white px-1.5 py-0.5 rounded-full uppercase tracking-tighter">V2</span>
-      ),
+      badge: null as React.ReactNode,
       onClick: () => { setOpen(false); onOpenCopiloto(); },
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
