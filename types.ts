@@ -92,6 +92,33 @@ export interface ArtefatoKG {
     drive_file_id?: string;
 }
 
+/** Documento da coleção acervo_global — arquivos avulsos da Pasta de Deságue. */
+export interface AcervoGlobal {
+    id: string;
+    nome: string;
+    url: string;
+    tipo_mime: string;
+    drive_file_id: string;
+    resumo_semantico: string | null;
+    tags: string[];
+    status_indexacao: 'pendente' | 'concluido' | 'falha_acesso' | 'falha_limite_tamanho' | 'ignorado_mime';
+    indexed_at: string;
+}
+
+/** Documento da coleção indice_artefatos — índice vetorial unificado (tarefas + acervo). */
+export interface IndiceArtefato {
+    nome: string;
+    url: string;
+    tipo_mime: string;
+    resumo_semantico: string;
+    // embedding: number[] — omitido no frontend (uso exclusivo do backend)
+    tags: string[];
+    origem: 'tarefa' | 'acervo';
+    task_id?: string;
+    acervo_id?: string;
+    indexed_at: string;
+}
+
 export interface AtividadeRealizada {
     id: string;
     descricao_atividade: string;

@@ -39,6 +39,7 @@ from knowledge_graph import (  # noqa: F401 — registra as Cloud Functions
     crystallize_task_manual,
     extract_kg_rag_context,
     processar_artefato_kg,
+    monitorar_acervo_global,
 )
 
 

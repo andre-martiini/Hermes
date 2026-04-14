@@ -36,7 +36,10 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from firebase_admin import firestore
-from firebase_functions import firestore_fn, https_fn, options, pubsub_fn
+from firebase_functions import firestore_fn, https_fn, options, pubsub_fn, scheduler_fn
+from google.cloud.firestore_v1 import ArrayUnion
+from google.cloud.firestore_v1.vector import Vector
+from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
 
 # ─── Constantes ──────────────────────────────────────────────────────────────
 
@@ -54,6 +57,9 @@ NOISE_PREFIXES = (            # entradas de chat descartadas na cristalização
 
 # ─── Módulo de Artefatos ─────────────────────────────────────────────────────
 ARTEFATO_TOKEN_CAP    = 15_000
+# ─── Módulo Acervo Global ─────────────────────────────────────────────────────
+KG_TOKEN_LIMIT     = 6_000   # budget máximo para Nós Conceituais no RAG híbrido
+ACERVO_TOKEN_LIMIT = 2_000   # budget máximo para Acervo Global no RAG híbrido
 ARTEFATO_CHAR_CAP     = ARTEFATO_TOKEN_CAP * CHARS_PER_TOKEN  # ≈ 60 000 chars
 ARTEFATO_PUBSUB_TOPIC = "hermes-artefato-kg"
 SUPPORTED_MIMES = frozenset({
@@ -320,7 +326,7 @@ def _aggregate_artefatos(task_data: dict, db) -> list[dict]:
 
 
 def _dispatch_artefatos_pubsub(project_id: str, task_id: str, artefatos: list) -> None:
-    """Publica uma mensagem por artefato no tópico hermes-artefato-kg."""
+    """Publica uma mensagem por artefato no tópico hermes-artefato-kg (origem='tarefa')."""
     import json
     from google.cloud import pubsub_v1
 
@@ -328,6 +334,7 @@ def _dispatch_artefatos_pubsub(project_id: str, task_id: str, artefatos: list) -
     topic_path = publisher.topic_path(project_id, ARTEFATO_PUBSUB_TOPIC)
     for idx, art in enumerate(artefatos):
         msg = {
+            "origem": "tarefa",
             "task_id": task_id,
             "artefato_idx": idx,
             "url": art["url"],
@@ -377,6 +384,135 @@ def _gather_artefatos_for_node(db, task_ids: list, max_tasks: int = 3, max_per_t
         except Exception:
             continue
     return items
+
+
+# ─── Módulo Acervo Global: helpers ───────────────────────────────────────────
+
+def _fetch_tag_vocabulary(db) -> list[str]:
+    """
+    Lê o dicionário centralizado de tags (system/tag_vocabulary) — 1 leitura.
+    Fallback: scan de 500 tarefas para bootstrap quando o doc ainda não existe.
+    """
+    try:
+        vocab_doc = db.collection("system").document("tag_vocabulary").get()
+        if vocab_doc.exists:
+            tags = vocab_doc.to_dict().get("tags", [])
+            if tags:
+                return sorted(set(str(t).strip() for t in tags if t))
+    except Exception as exc:
+        print(f"[KG Tags] Erro ao ler tag_vocabulary: {exc}")
+    return _fetch_all_existing_tags(db)
+
+
+def _update_acervo_doc(
+    db,
+    acervo_id: str,
+    status: str,
+    resumo: Optional[str],
+    tags: list,
+    embedding: list,
+) -> None:
+    """Atualiza um documento acervo_global com o resultado da indexação."""
+    update: dict = {"status_indexacao": status}
+    if resumo is not None:
+        update["resumo_semantico"] = resumo
+    if tags:
+        update["tags"] = tags
+    if embedding:
+        update["embedding"] = embedding
+    try:
+        db.collection("acervo_global").document(acervo_id).update(update)
+    except Exception as exc:
+        print(f"[KG Acervo] Erro ao atualizar acervo_global/{acervo_id}: {exc}")
+
+
+def _write_to_indice_artefatos(
+    db,
+    nome: str,
+    url: str,
+    tipo_mime: str,
+    resumo: str,
+    embedding: list,
+    tags: list,
+    origem: str,
+    task_id: Optional[str] = None,
+    acervo_id: Optional[str] = None,
+) -> None:
+    """Grava entrada no índice vetorial unificado (indice_artefatos)."""
+    doc_id = str(uuid.uuid4())[:16]
+    entry: dict = {
+        "nome": nome,
+        "url": url,
+        "tipo_mime": tipo_mime,
+        "resumo_semantico": resumo,
+        "embedding": embedding,
+        "tags": tags,
+        "origem": origem,
+        "indexed_at": firestore.SERVER_TIMESTAMP,
+    }
+    if task_id:
+        entry["task_id"] = task_id
+    if acervo_id:
+        entry["acervo_id"] = acervo_id
+    db.collection("indice_artefatos").document(doc_id).set(entry)
+    print(f"[KG IndiceArtefatos] Entrada gravada: {nome} ({origem})")
+
+
+def _assign_acervo_tags(
+    db, api_key: str, nome: str, texto_cap: str, existing_tags: list[str]
+) -> list[str]:
+    """Atribui tags ao arquivo avulso via Retrieval-First (mesmo padrão da Fase 1)."""
+    client = _gemini_client(api_key)
+    tags_list = ", ".join(f'"{t}"' for t in existing_tags[:100]) if existing_tags else "(nenhuma ainda)"
+    prompt = f"""Você é um classificador de documentos corporativos do sistema Hermes.
+
+Arquivo: {nome}
+Conteúdo (trecho):
+{texto_cap[:1500]}
+
+Tags existentes no sistema (priorize o reuso):
+{tags_list}
+
+Regras:
+1. Retorne entre 1 e 7 tags que descrevam o TIPO e TEMA deste documento.
+2. Prefira reusar tags da lista quando cobrirem o escopo.
+3. Crie tag inédita APENAS se nenhuma existente se aplicar (ex: manual de ferramenta nova).
+4. Tags curtas (1-3 palavras), em português, sem acentos especiais.
+5. Responda APENAS com um array JSON. Exemplo: ["Contrato", "Licitacao", "PNAE"]
+
+Responda:"""
+    response = client.models.generate_content(
+        model="gemini-2.0-flash-lite", contents=prompt
+    )
+    raw = (response.text or "").strip()
+    match = re.search(r'\[.*?\]', raw, re.DOTALL)
+    if not match:
+        return []
+    try:
+        tags = json.loads(match.group(0))
+        return [str(t).strip() for t in tags if t and str(t).strip()][:7]
+    except Exception:
+        return []
+
+
+def _dispatch_acervo_pubsub(
+    project_id: str, acervo_id: str, url: str, tipo_mime: str, drive_file_id: str, nome: str
+) -> None:
+    """Publica uma mensagem única de acervo no tópico hermes-artefato-kg."""
+    import json as _json
+    from google.cloud import pubsub_v1
+
+    publisher = pubsub_v1.PublisherClient()
+    topic_path = publisher.topic_path(project_id, ARTEFATO_PUBSUB_TOPIC)
+    msg = {
+        "origem": "acervo",
+        "acervo_id": acervo_id,
+        "url": url,
+        "tipo_mime": tipo_mime,
+        "drive_file_id": drive_file_id,
+        "nome": nome,
+    }
+    publisher.publish(topic_path, _json.dumps(msg).encode("utf-8"))
 
 
 # ─── Fase 1: geração de tags Retrieval-First ─────────────────────────────────
@@ -458,6 +594,13 @@ def on_tarefa_created_kg(event: firestore_fn.Event[firestore_fn.DocumentSnapshot
         tags = _generate_kg_tags(task_data, existing_tags, api_key)
         if tags:
             db.collection("tarefas").document(task_id).update({"kg_tags": tags})
+            # Sincroniza dicionário centralizado (1 escrita, custo fixo)
+            try:
+                db.collection("system").document("tag_vocabulary").set(
+                    {"tags": ArrayUnion(tags)}, merge=True
+                )
+            except Exception as exc:
+                print(f"[KG Fase1] Erro ao atualizar tag_vocabulary: {exc}")
             print(f"[KG Fase1] Tags geradas para {task_id}: {tags}")
     except Exception as e:
         print(f"[KG Fase1] Erro ao gerar tags para {task_id}: {e}")
@@ -714,14 +857,19 @@ def on_tarefa_concluida_kg(event: firestore_fn.Event[firestore_fn.Change[firesto
 )
 def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedData]):
     """
-    Worker Pub/Sub — processa um artefato da tarefa.
+    Worker Pub/Sub — processa um artefato de Tarefa ou do Acervo Global.
 
-    Fluxo:
+    Bifurcação por campo 'origem':
+      'tarefa' (padrão): atualiza artefatos_kg[idx] na tarefa + grava em indice_artefatos.
+      'acervo': grava/atualiza acervo_global + grava em indice_artefatos, com tag assignment.
+
+    Fluxo comum:
       1. Valida MIME type (aceita apenas tríade corporativa)
       2. Baixa o arquivo (Drive OAuth ou URL pública) — Fail-Silently se inacessível
       3. Extrai texto via Gemini (até ARTEFATO_CHAR_CAP chars)
       4. Gera resumo_semantico em parágrafo denso
-      5. Atualiza artefatos_kg[idx] na tarefa com status final
+      5. Gera embedding do resumo
+      6. Despacho final conforme origem
 
     Tópico: hermes-artefato-kg
     """
@@ -738,27 +886,41 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
         print(f"[KG Artefato] Erro ao decodificar mensagem Pub/Sub: {exc}")
         return
 
-    task_id       = data.get("task_id", "")
-    idx           = data.get("artefato_idx")
+    origem        = data.get("origem", "tarefa")  # backward compat: default 'tarefa'
     url           = data.get("url", "")
     tipo_mime     = data.get("tipo_mime", "")
     drive_file_id = data.get("drive_file_id", "")
     nome          = data.get("nome", "artefato")
 
-    if not task_id or idx is None:
-        print("[KG Artefato] Mensagem invalida: task_id ou artefato_idx ausente")
-        return
+    # ── Campos específicos por origem ─────────────────────────────────────────
+    if origem == "tarefa":
+        task_id  = data.get("task_id", "")
+        idx      = data.get("artefato_idx")
+        acervo_id = None
+        if not task_id or idx is None:
+            print("[KG Artefato] Mensagem invalida: task_id ou artefato_idx ausente")
+            return
+    else:
+        acervo_id = data.get("acervo_id", "")
+        task_id   = None
+        idx       = None
+        if not acervo_id:
+            print("[KG Artefato] Mensagem invalida: acervo_id ausente")
+            return
 
     db = _get_db()
     api_key = _get_api_key(db)
     if not api_key:
-        print(f"[KG Artefato] API key ausente — tarefa {task_id}[{idx}]")
+        print(f"[KG Artefato] API key ausente — {origem} {task_id or acervo_id}")
         return
 
     # ── Valida MIME type ─────────────────────────────────────────────────────
     if tipo_mime not in SUPPORTED_MIMES:
-        _update_artefato_status(db, task_id, idx, "ignorado_mime", None)
-        print(f"[KG Artefato] MIME ignorado ({tipo_mime}): tarefa {task_id}[{idx}] — {nome}")
+        if origem == "tarefa":
+            _update_artefato_status(db, task_id, idx, "ignorado_mime", None)
+        else:
+            _update_acervo_doc(db, acervo_id, "ignorado_mime", None, [], [])
+        print(f"[KG Artefato] MIME ignorado ({tipo_mime}): {nome}")
         return
 
     # ── Download ─────────────────────────────────────────────────────────────
@@ -766,7 +928,6 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
         if drive_file_id:
             file_bytes = _download_from_drive(drive_file_id, db)
         else:
-            # Tenta extrair drive_file_id da URL, senão faz requisição direta
             fid = _extract_drive_id(url)
             if fid:
                 file_bytes = _download_from_drive(fid, db)
@@ -776,7 +937,10 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
                 resp.raise_for_status()
                 file_bytes = resp.content
     except Exception as exc:
-        _update_artefato_status(db, task_id, idx, "falha_acesso", None)
+        if origem == "tarefa":
+            _update_artefato_status(db, task_id, idx, "falha_acesso", None)
+        else:
+            _update_acervo_doc(db, acervo_id, "falha_acesso", None, [], [])
         print(f"[KG Artefato] Falha no download ({nome}): {exc}")
         return
 
@@ -794,12 +958,15 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
         )
         texto = (extract_resp.text or "").strip()
     except Exception as exc:
-        _update_artefato_status(db, task_id, idx, "falha_acesso", None)
+        if origem == "tarefa":
+            _update_artefato_status(db, task_id, idx, "falha_acesso", None)
+        else:
+            _update_acervo_doc(db, acervo_id, "falha_acesso", None, [], [])
         print(f"[KG Artefato] Falha na extracao de texto ({nome}): {exc}")
         return
 
     # ── Token cap ────────────────────────────────────────────────────────────
-    truncado = len(texto) > ARTEFATO_CHAR_CAP
+    truncado  = len(texto) > ARTEFATO_CHAR_CAP
     texto_cap = texto[:ARTEFATO_CHAR_CAP]
 
     # ── Resumo semântico ─────────────────────────────────────────────────────
@@ -817,13 +984,165 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
         )
         resumo = (summary_resp.text or "").strip()
     except Exception as exc:
-        _update_artefato_status(db, task_id, idx, "falha_acesso", None)
+        if origem == "tarefa":
+            _update_artefato_status(db, task_id, idx, "falha_acesso", None)
+        else:
+            _update_acervo_doc(db, acervo_id, "falha_acesso", None, [], [])
         print(f"[KG Artefato] Falha ao sumarizar ({nome}): {exc}")
         return
 
     status_final = "falha_limite_tamanho" if truncado else "concluido"
-    _update_artefato_status(db, task_id, idx, status_final, resumo)
-    print(f"[KG Artefato] OK — {nome} [{status_final}]: tarefa {task_id}[{idx}]")
+
+    # ── Embedding do resumo ───────────────────────────────────────────────────
+    emb: list = []
+    try:
+        emb = _get_embedding(resumo, api_key)
+    except Exception as exc:
+        print(f"[KG Artefato] Falha ao gerar embedding ({nome}): {exc}")
+
+    # ── Despacho final por origem ─────────────────────────────────────────────
+    if origem == "tarefa":
+        _update_artefato_status(db, task_id, idx, status_final, resumo)
+        # Herda tags da tarefa para o índice vetorial
+        tags: list = []
+        try:
+            snap = db.collection("tarefas").document(task_id).get()
+            tags = (snap.to_dict() or {}).get("kg_tags", []) if snap.exists else []
+        except Exception:
+            pass
+        if emb:
+            _write_to_indice_artefatos(
+                db, nome, url, tipo_mime, resumo, emb, tags, "tarefa", task_id=task_id
+            )
+    else:  # acervo
+        existing_tags = _fetch_tag_vocabulary(db)
+        tags = _assign_acervo_tags(db, api_key, nome, texto_cap, existing_tags)
+        _update_acervo_doc(db, acervo_id, status_final, resumo, tags, emb)
+        if emb:
+            _write_to_indice_artefatos(
+                db, nome, url, tipo_mime, resumo, emb, tags, "acervo", acervo_id=acervo_id
+            )
+        # Sincroniza novas tags no vocabulário centralizado
+        if tags:
+            try:
+                db.collection("system").document("tag_vocabulary").set(
+                    {"tags": ArrayUnion(tags)}, merge=True
+                )
+            except Exception as exc:
+                print(f"[KG Acervo] Erro ao sync tag_vocabulary: {exc}")
+
+    print(f"[KG Artefato] OK — {nome} [{status_final}] ({origem})")
+
+
+# ─── Acervo Global: Cron Job de ingestão ─────────────────────────────────────
+
+@scheduler_fn.on_schedule(
+    schedule="every 15 minutes",
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=540,
+)
+def monitorar_acervo_global(event: scheduler_fn.ScheduledEvent) -> None:
+    """
+    Cron Job — monitora a Pasta de Deságue no Google Drive a cada 15 minutos.
+
+    Fluxo:
+      1. Lê drop_folder_id de system/settings
+      2. Lista todos os arquivos na pasta via Drive API (com paginação nextPageToken)
+      3. Cruza com drive_file_ids já em acervo_global para detectar apenas inéditos
+      4. Cria doc pendente em acervo_global e despacha para hermes-artefato-kg
+    """
+    import os as _os
+    import json as _json
+    from googleapiclient.discovery import build
+
+    db = _get_db()
+
+    # ── Lê configuração ───────────────────────────────────────────────────────
+    settings_doc = db.collection("system").document("settings").get()
+    if not settings_doc.exists:
+        print("[Acervo] system/settings não encontrado — cron abortado")
+        return
+    settings_data = settings_doc.to_dict() or {}
+    folder_id = settings_data.get("drop_folder_id", "")
+    if not folder_id:
+        print("[Acervo] drop_folder_id não configurado — cron abortado")
+        return
+
+    # ── Credenciais Drive ─────────────────────────────────────────────────────
+    try:
+        creds = _get_google_creds_kg(db)
+    except Exception as exc:
+        print(f"[Acervo] Erro ao obter credenciais Drive: {exc}")
+        return
+
+    service = build("drive", "v3", credentials=creds)
+
+    # ── Lista todos os arquivos na pasta (paginação completa) ─────────────────
+    all_files: list = []
+    page_token: Optional[str] = None
+    while True:
+        kwargs: dict = {
+            "q": f"'{folder_id}' in parents and trashed=false",
+            "fields": "nextPageToken, files(id, name, mimeType)",
+            "pageSize": 1000,
+        }
+        if page_token:
+            kwargs["pageToken"] = page_token
+        try:
+            resp = service.files().list(**kwargs).execute()
+        except Exception as exc:
+            print(f"[Acervo] Erro ao listar Drive: {exc}")
+            return
+        all_files.extend(resp.get("files", []))
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+
+    if not all_files:
+        print("[Acervo] Pasta de Deságue vazia — nada a processar")
+        return
+
+    print(f"[Acervo] {len(all_files)} arquivo(s) encontrado(s) na pasta")
+
+    # ── Busca drive_file_ids já indexados (1 query por stream) ───────────────
+    indexed_ids: set = set()
+    for doc in db.collection("acervo_global").select(["drive_file_id"]).stream():
+        fid = (doc.to_dict() or {}).get("drive_file_id", "")
+        if fid:
+            indexed_ids.add(fid)
+
+    # ── Filtra e despacha apenas arquivos inéditos ────────────────────────────
+    project_id = _os.environ.get("GCLOUD_PROJECT", "gestao-hermes")
+    novos = 0
+    for f in all_files:
+        fid  = f.get("id", "")
+        nome = f.get("name", "arquivo")
+        mime = f.get("mimeType", "")
+
+        if not fid or fid in indexed_ids:
+            continue
+
+        # Cria documento pendente em acervo_global antes de despachar
+        acervo_id = str(uuid.uuid4())[:16]
+        url = f"https://drive.google.com/file/d/{fid}/view"
+        db.collection("acervo_global").document(acervo_id).set({
+            "nome": nome,
+            "url": url,
+            "tipo_mime": mime,
+            "drive_file_id": fid,
+            "resumo_semantico": None,
+            "tags": [],
+            "status_indexacao": "pendente",
+            "indexed_at": firestore.SERVER_TIMESTAMP,
+        })
+
+        try:
+            _dispatch_acervo_pubsub(project_id, acervo_id, url, mime, fid, nome)
+            novos += 1
+        except Exception as exc:
+            print(f"[Acervo] Erro ao despachar {nome}: {exc}")
+
+    print(f"[Acervo] {novos} arquivo(s) novo(s) despachados para indexação")
 
 
 # ─── RAG: extração com time decay + circuit breaker ──────────────────────────
@@ -849,18 +1168,24 @@ def extract_kg_rag_context(
     tags: list[str],
     top_n: int = TOP_N_NODES,
     token_limit: int = TOKEN_SAFETY_LIMIT,
+    kg_token_limit: int = KG_TOKEN_LIMIT,
+    acervo_token_limit: int = ACERVO_TOKEN_LIMIT,
 ) -> tuple[list[dict], str]:
     """
-    Extrai o subgrafo RAG para uma nova tarefa.
+    Extrai contexto RAG híbrido para uma nova tarefa.
+
+    Dois eixos em paralelo:
+      A) Relacional (Single-hop): Nós Conceituais do KG por área (A Prática) — até kg_token_limit.
+      B) Vetorial (Similarity Search): indice_artefatos via Firestore KNN (A Teoria) — até acervo_token_limit.
 
     Retorna:
       (nodes_payload, formatted_context_string)
 
     nodes_payload: lista de dicts com {node_id, titulo, resumo, score, tasks}
     formatted_context_string: string pronta para injetar no prompt do Copiloto
-      com marcadores de citação [1], [2]…
+      com marcadores de citação [1], [2]… e bloco condicional de conflito.
     """
-    # ── Busca nós da mesma área ────────────────────────────────────────────────
+    # ── A) Busca relacional: Nós Conceituais da mesma área ────────────────────
     nodes_in_area = []
     nodes_stream = (
         db.collection("knowledge_nodes")
@@ -871,87 +1196,128 @@ def extract_kg_rag_context(
         nd = ndoc.to_dict() or {}
         nodes_in_area.append({"id": ndoc.id, **nd})
 
-    if not nodes_in_area:
-        return [], ""
+    candidates: list[dict] = []
+    if nodes_in_area:
+        # ── Scoring: peso semântico × time decay + bônus de tags ──────────────
+        tag_set = set(t.lower() for t in (tags or []))
+        scored = []
+        for node in nodes_in_area:
+            edges = (
+                db.collection("knowledge_edges")
+                .where("node_id", "==", node["id"])
+                .stream()
+            )
+            edge_list = [e.to_dict() for e in edges]
+            if not edge_list:
+                continue
 
-    # ── Scoring: similaridade de tags + time decay ────────────────────────────
-    tag_set = set(t.lower() for t in (tags or []))
-    scored = []
-    for node in nodes_in_area:
-        # Recupera arestas para obter pesos semânticos e datas de conclusão
-        edges = (
-            db.collection("knowledge_edges")
-            .where("node_id", "==", node["id"])
-            .stream()
+            avg_peso = sum(e.get("peso_semantico", 0.7) for e in edge_list) / len(edge_list)
+            dates = [e.get("data_conclusao", "") for e in edge_list if e.get("data_conclusao")]
+            decay = _time_decay(max(dates)) if dates else 1.0
+            node_text = (node.get("titulo", "") + " " + node.get("resumo", "")).lower()
+            tag_bonus = sum(0.05 for t in tag_set if t in node_text)
+            score = avg_peso * decay + tag_bonus
+
+            scored.append({
+                "node_id": node["id"],
+                "titulo": node.get("titulo", ""),
+                "resumo": node.get("resumo", ""),
+                "score": round(score, 5),
+                "n_tasks": node.get("n_tasks", 0),
+                "task_ids": node.get("task_ids", []),
+            })
+
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        candidates = scored[:top_n]
+
+        # ── Circuit Breaker KG: remove menor rank até caber em kg_token_limit ─
+        def _kg_tokens(nodes: list[dict]) -> int:
+            return sum(_estimate_tokens(n.get("resumo", "")) for n in nodes)
+
+        while len(candidates) > 1 and _kg_tokens(candidates) > kg_token_limit:
+            candidates.pop()
+
+    # ── B) Busca vetorial: Acervo Global via Firestore KNN ────────────────────
+    acervo_items: list[dict] = []
+    try:
+        # Normalização com chaves semânticas para melhor recall em 768d
+        query_text = f"área: {area_tematica}. contexto: {', '.join(tags or [])}".lower()
+        query_emb = _get_embedding(query_text, api_key)
+
+        acervo_stream = (
+            db.collection("indice_artefatos")
+            .find_nearest(
+                vector_field="embedding",
+                query_vector=Vector(query_emb),
+                distance_measure=DistanceMeasure.COSINE,
+                limit=5,
+            )
+            .get()
         )
-        edge_list = [e.to_dict() for e in edges]
+        for adoc in acervo_stream:
+            ad = adoc.to_dict() or {}
+            if ad.get("resumo_semantico"):
+                acervo_items.append(ad)
 
-        if not edge_list:
-            continue
+        # Circuit Breaker Acervo: descarta menor distância (último na lista KNN) primeiro
+        while acervo_items:
+            total = sum(_estimate_tokens(a.get("resumo_semantico", "")) for a in acervo_items)
+            if total <= acervo_token_limit:
+                break
+            acervo_items.pop()
+    except Exception as exc:
+        # Índice ainda não criado ou erro transitório — degrada graciosamente
+        print(f"[KG RAG] Busca vetorial indice_artefatos indisponível: {exc}")
 
-        # Peso semântico médio das arestas do nó
-        avg_peso = sum(e.get("peso_semantico", 0.7) for e in edge_list) / len(edge_list)
-
-        # Time decay: usa a aresta mais recente (tarefa mais nova)
-        dates = [e.get("data_conclusao", "") for e in edge_list if e.get("data_conclusao")]
-        latest_date = max(dates) if dates else ""
-        decay = _time_decay(latest_date) if latest_date else 1.0
-
-        # Bônus por sobreposição de tags
-        node_tags = set(t.lower() for t in (node.get("task_ids") or []))
-        # usa as kg_tags das tarefas vinculadas (lookup mais caro — omitido no scoring rápido)
-        # em vez disso, compara título do nó com as tags da nova tarefa
-        node_text = (node.get("titulo", "") + " " + node.get("resumo", "")).lower()
-        tag_bonus = sum(0.05 for t in tag_set if t in node_text)
-
-        score = avg_peso * decay + tag_bonus
-
-        scored.append({
-            "node_id": node["id"],
-            "titulo": node.get("titulo", ""),
-            "resumo": node.get("resumo", ""),
-            "score": round(score, 5),
-            "n_tasks": node.get("n_tasks", 0),
-            "task_ids": node.get("task_ids", []),
-        })
-
-    scored.sort(key=lambda x: x["score"], reverse=True)
-    candidates = scored[:top_n]
-
-    # ── Circuit Breaker ────────────────────────────────────────────────────────
-    # Remove o nó de menor rank até o payload total caber em token_limit.
-    # Nunca trunca — remove por inteiro.
-    def _payload_tokens(nodes: list[dict]) -> int:
-        return sum(_estimate_tokens(n.get("resumo", "")) for n in nodes)
-
-    while len(candidates) > 1 and _payload_tokens(candidates) > token_limit:
-        candidates.pop()  # remove o de menor score (já está ordenado desc)
-
-    if not candidates:
+    # ── Retorno antecipado se nenhum eixo retornou dados ─────────────────────
+    if not candidates and not acervo_items:
         return [], ""
 
-    # ── Formata o contexto com citações ───────────────────────────────────────
+    # ── Formata o contexto ────────────────────────────────────────────────────
     lines = ["=== CONTEXTO OPERACIONAL DO GRAFO DE CONHECIMENTO ===", ""]
-    for i, node in enumerate(candidates, 1):
-        lines.append(
-            f"[{i}] Nó: \"{node['titulo']}\" "
-            f"(relevância: {node['score']:.2f}, baseado em {node['n_tasks']} tarefa(s))"
-        )
-        if node.get("resumo"):
-            lines.append(f"    Procedimento: {node['resumo'][:400]}")
 
-        # Artefatos: inclui resumos dos artefatos das tarefas vinculadas ao nó
-        artefato_items = _gather_artefatos_for_node(db, node.get("task_ids", []))
-        if artefato_items:
-            lines.append("    Artefatos produzidos/utilizados:")
-            for art_nome, art_resumo in artefato_items:
-                lines.append(f"      • {art_nome}: {art_resumo[:200]}")
-
+    # Eixo A: Nós Conceituais (A Prática)
+    if candidates:
+        lines.append("--- HISTÓRICO DE TAREFAS (A Prática) ---")
         lines.append("")
+        for i, node in enumerate(candidates, 1):
+            lines.append(
+                f"[{i}] Nó: \"{node['titulo']}\" "
+                f"(relevância: {node['score']:.2f}, baseado em {node['n_tasks']} tarefa(s))"
+            )
+            if node.get("resumo"):
+                lines.append(f"    Procedimento: {node['resumo'][:400]}")
 
-    lines.append(
-        "Use marcadores [1], [2]… no texto da resposta para indicar a fonte de cada informação."
-    )
+            artefato_items = _gather_artefatos_for_node(db, node.get("task_ids", []))
+            if artefato_items:
+                lines.append("    Artefatos produzidos/utilizados:")
+                for art_nome, art_resumo in artefato_items:
+                    lines.append(f"      • {art_nome}: {art_resumo[:200]}")
+
+            lines.append("")
+
+        lines.append(
+            "Use marcadores [1], [2]… no texto da resposta para indicar a fonte de cada informação."
+        )
+
+    # Eixo B: Acervo Global (A Teoria) — bloco condicional
+    if acervo_items:
+        lines.append("")
+        lines.append("--- ACERVO GLOBAL (Documentação e Manuais — A Teoria) ---")
+        lines.append("")
+        for i, item in enumerate(acervo_items, 1):
+            ext = item.get("tipo_mime", "").split(".")[-1].upper() or "DOC"
+            lines.append(f"[A{i}] {item.get('nome', 'Documento')} ({ext})")
+            lines.append(f"    {item.get('resumo_semantico', '')[:300]}")
+            lines.append("")
+
+        lines.append(
+            "INSTRUÇÕES DE CONFLITO: Você possui duas fontes de verdade. "
+            "O [Histórico de Tarefas] representa como a equipe executa na prática. "
+            "O [Acervo Global] representa documentação e manuais. "
+            "Se houver divergência entre ambos, NÃO omita nenhuma. "
+            "Apresente a divergência explicitamente e pergunte ao usuário qual caminho deseja seguir."
+        )
 
     return candidates, "\n".join(lines)
 
