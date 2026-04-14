@@ -1,11 +1,14 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { db, functions } from '@/firebase';
+import { db, functions, auth } from '@/firebase';
 import { httpsCallable } from 'firebase/functions';
 import { collection, onSnapshot, query, orderBy, where, addDoc, doc, updateDoc, getDoc, limit, Timestamp } from 'firebase/firestore';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { formatDate } from '@/types';
+
+// URL do endpoint HTTP de upload (Node.js Functions)
+const UPLOAD_ENDPOINT = 'https://us-central1-gestao-hermes.cloudfunctions.net/uploadFileForCopiloto';
 
 interface Message {
     role: 'user' | 'assistant';
@@ -35,6 +38,8 @@ interface HermesCopilotoDrawerProps {
     onOpenTask?: (taskId: string) => void;
 }
 
+type UploadPhase = 'idle' | 'uploading' | 'processing';
+
 export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     isOpen, onClose, taskId, systemId, isDark = false, userId, onOpenTask
 }) => {
@@ -46,8 +51,18 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const [showHistory, setShowHistory] = useState(false);
     const chatEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const [isFocused, setIsFocused] = useState(false);
+
+    // Estado de anexo
+    const [attachedFile, setAttachedFile] = useState<File | null>(null);
+    const [uploadPhase, setUploadPhase] = useState<UploadPhase>('idle');
+    // Controla a largura da barra de progresso via CSS transition
+    const [progressWidth, setProgressWidth] = useState<number>(0);
+    const progressTransition = useRef<string>('none');
+    // Erro inline no footer (erros antes do Firestore não ficam visíveis no chat)
+    const [footerError, setFooterError] = useState<string | null>(null);
 
     // Auto-resize textarea logic
     useEffect(() => {
@@ -62,7 +77,6 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
         handleResize();
 
-        // Listener global para fechar ao clicar fora (mais robusto que onBlur em alguns casos)
         const handleClickOutside = (e: MouseEvent) => {
             if (textareaRef.current && !textareaRef.current.contains(e.target as Node)) {
                 setIsFocused(false);
@@ -118,6 +132,53 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
+    // ── Helpers de progresso ──────────────────────────────────────────────────
+    const startProgressAnimation = () => {
+        // Reset sem transição num frame, depois anima 0 → 90% em 15 s
+        progressTransition.current = 'none';
+        setProgressWidth(0);
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                progressTransition.current = 'width 15s linear';
+                setProgressWidth(90);
+            });
+        });
+    };
+
+    // Caminho de SUCESSO: salta para 100% e limpa suavemente.
+    // Só deve ser chamado dentro do bloco try, após resposta confirmada.
+    const completeProgress = (): Promise<void> => {
+        return new Promise((resolve) => {
+            progressTransition.current = 'width 0.3s ease';
+            setProgressWidth(100);
+            setTimeout(() => {
+                progressTransition.current = 'none';
+                setProgressWidth(0);
+                resolve();
+            }, 350);
+        });
+    };
+
+    // Caminho de ERRO: zera a barra instantaneamente, sem animação de conclusão.
+    // Evita que o usuário veja "100% concluído" enquanto um banner de erro aparece.
+    const abortProgress = () => {
+        progressTransition.current = 'none';
+        setProgressWidth(0);
+    };
+
+    // ── Seleção de arquivo ────────────────────────────────────────────────────
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0] ?? null;
+        setAttachedFile(file);
+        // Reset o input para permitir re-selecionar o mesmo arquivo
+        e.target.value = '';
+    };
+
+    const handleRemoveFile = () => {
+        setAttachedFile(null);
+    };
+
+    // ── Criação de sessão ─────────────────────────────────────────────────────
     const handleCreateSession = async (initialPrompt?: string) => {
         setIsLoading(true);
         try {
@@ -141,35 +202,82 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         }
     };
 
+    // ── Envio de mensagem (com ou sem arquivo) ────────────────────────────────
     const sendMessage = async (text: string, sessionId?: string) => {
         const sId = sessionId || currentSessionId;
-        if (!sId || !text.trim()) return;
+        const hasFile = !!attachedFile;
 
-        setInput(''); // Limpa o campo imediatamente para melhor UX
+        if (!sId || (!text.trim() && !hasFile)) return;
+
+        const fileToSend = attachedFile;
+        setInput('');
+        setAttachedFile(null);
+        setFooterError(null);
         setIsLoading(true);
+
         try {
-            // 1. Save user message
+            let driveFileId: string | null = null;
+            let driveFileName: string | null = null;
+
+            // ── FASE 1: Upload para o Drive via endpoint HTTP ─────────────────
+            if (fileToSend) {
+                setUploadPhase('uploading');
+
+                const idToken = await auth.currentUser?.getIdToken();
+                if (!idToken) throw new Error("Usuário não autenticado.");
+
+                const formData = new FormData();
+                formData.append('file', fileToSend, fileToSend.name);
+
+                const uploadRes = await fetch(UPLOAD_ENDPOINT, {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${idToken}` },
+                    body: formData
+                });
+
+                if (!uploadRes.ok) {
+                    const errBody = await uploadRes.json().catch(() => ({}));
+                    throw new Error(errBody.error || `Erro no upload: HTTP ${uploadRes.status}`);
+                }
+
+                const uploadData = await uploadRes.json();
+                driveFileId = uploadData.driveFileId;
+                driveFileName = uploadData.fileName || fileToSend.name;
+
+                // Transição para Fase 2
+                setUploadPhase('processing');
+                startProgressAnimation();
+            }
+
+            // Constrói o conteúdo da mensagem do usuário para o histórico
+            const userMessageContent = hasFile && fileToSend
+                ? `📎 ${fileToSend.name}${text.trim() ? `\n\n${text.trim()}` : ''}`
+                : text;
+
+            // 1. Salva mensagem do usuário no Firestore
             await addDoc(collection(db, 'sessoes_copiloto', sId, 'mensagens'), {
                 role: 'user',
-                content: text,
+                content: userMessageContent,
                 timestamp: Timestamp.now()
             });
 
-            // 2. Call Cloud Function
+            // 2. Chama a Cloud Function
             const askCopiloto = httpsCallable(functions, 'askCopilotoHermes');
             const response = await askCopiloto({
                 sessionId: sId,
-                prompt: text,
+                prompt: text.trim() || (hasFile ? '' : text),
                 taskId: taskId || null,
-                systemId: systemId || null
+                systemId: systemId || null,
+                driveFileId: driveFileId || null,
+                driveFileName: driveFileName || null
             });
 
             const data = response.data as any;
 
-            // 3. Update session title if it's the first message
+            // 3. Atualiza título da sessão se for a primeira mensagem
             if (messages.length === 0 && !sessionId) {
                 await updateDoc(doc(db, 'sessoes_copiloto', sId), {
-                    title: data.suggestedTitle || text.slice(0, 40) + '...',
+                    title: data.suggestedTitle || userMessageContent.slice(0, 40) + '...',
                     lastMessageAt: Timestamp.now()
                 });
             } else {
@@ -178,14 +286,48 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 });
             }
 
-        } catch (err) {
+            // Caminho de sucesso: anima para 100% antes de liberar o input.
+            // Só executa aqui — nunca no finally — para não colidir com erros.
+            await completeProgress();
+
+        } catch (err: any) {
             console.error("Erro no Copiloto:", err);
+
+            const errMsg: string = err?.message || String(err) || 'Erro desconhecido.';
+
+            // Aborta a barra instantaneamente: impede que o usuário veja "100%"
+            // enquanto um banner de erro vermelho é exibido simultaneamente.
+            abortProgress();
+            setFooterError(errMsg);
+
+            // Persiste no histórico da sessão se ela já existir.
+            const sId2 = sessionId || currentSessionId;
+            if (sId2) {
+                await addDoc(collection(db, 'sessoes_copiloto', sId2, 'mensagens'), {
+                    role: 'assistant',
+                    content: `⚠️ **Erro ao processar a solicitação:**\n\`${errMsg}\``,
+                    timestamp: Timestamp.now()
+                }).catch(() => {});
+            }
+
         } finally {
+            // O finally só faz reset de estado — nunca dispara animação.
+            // A animação de sucesso já aconteceu no try; a de erro foi abortada no catch.
+            setUploadPhase('idle');
             setIsLoading(false);
         }
     };
 
     if (!isOpen) return null;
+
+    // ── Labels da barra de status por fase ───────────────────────────────────
+    const uploadPhaseLabel: Record<UploadPhase, string> = {
+        idle: '',
+        uploading: 'Enviando arquivo seguro para o servidor...',
+        processing: 'Extraindo contexto e atualizando Acervo...'
+    };
+
+    const isBlocked = isLoading || uploadPhase !== 'idle';
 
     return (
         <div className={`fixed inset-y-0 right-0 z-[500] w-full md:w-[450px] shadow-2xl transition-transform duration-300 transform translate-x-0 flex flex-col ${isDark ? 'bg-[#0f0f1a] text-white' : 'bg-white text-slate-900 border-l border-slate-200'}`}>
@@ -229,7 +371,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             </div>
 
             <div className="flex-1 overflow-hidden flex relative">
-                {/* History Sidebar (Overlay logic or persistent) */}
+                {/* History Sidebar */}
                 {showHistory && (
                     <div className="absolute inset-0 z-10 bg-inherit flex flex-col border-r border-slate-200/50">
                         <div className="p-4 border-b border-slate-100/50 flex items-center justify-between">
@@ -329,12 +471,32 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                             </div>
                         ))}
 
-                        {isLoading && (
-                            <div className="flex justify-start">
-                                <div className="px-4 py-3 rounded-2xl rounded-bl-none bg-slate-100 flex gap-1.5 items-center">
-                                    <span className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" />
-                                    <span className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
-                                    <span className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+                        {/* Indicador de loading com mensagem de fase */}
+                        {isBlocked && (
+                            <div className="flex justify-start flex-col gap-2">
+                                <div className="px-4 py-3 rounded-2xl rounded-bl-none bg-slate-100 flex flex-col gap-2">
+                                    <div className="flex gap-1.5 items-center">
+                                        <span className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" />
+                                        <span className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
+                                        <span className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+                                        {uploadPhase !== 'idle' && (
+                                            <span className="text-[10px] font-bold text-slate-500 ml-2">
+                                                {uploadPhaseLabel[uploadPhase]}
+                                            </span>
+                                        )}
+                                    </div>
+                                    {/* Barra de progresso — visível apenas nas fases de upload/processamento */}
+                                    {uploadPhase !== 'idle' && (
+                                        <div className="w-48 h-1 bg-slate-200 rounded-full overflow-hidden">
+                                            <div
+                                                className="h-full bg-blue-500 rounded-full"
+                                                style={{
+                                                    width: `${progressWidth}%`,
+                                                    transition: progressTransition.current
+                                                }}
+                                            />
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -343,12 +505,79 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                     {/* Footer Input */}
                     <div className={`shrink-0 p-6 border-t ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
-                        <div className="flex gap-3">
+
+                        {/* Banner de erro inline */}
+                        {footerError && (
+                            <div className="flex items-start gap-2 mb-3 px-3 py-2.5 rounded-xl text-xs font-semibold bg-red-50 text-red-700 border border-red-200">
+                                <svg className="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                                </svg>
+                                <span className="flex-1 leading-relaxed break-words">{footerError}</span>
+                                <button
+                                    onClick={() => setFooterError(null)}
+                                    className="shrink-0 hover:text-red-900 transition-colors mt-0.5"
+                                    title="Fechar"
+                                >
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Badge de arquivo anexado */}
+                        {attachedFile && !isBlocked && (
+                            <div className={`flex items-center gap-2 mb-3 px-3 py-2 rounded-xl text-xs font-semibold ${isDark ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
+                                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                </svg>
+                                <span className="truncate flex-1">{attachedFile.name}</span>
+                                <button
+                                    onClick={handleRemoveFile}
+                                    className="shrink-0 hover:text-red-500 transition-colors"
+                                    title="Remover arquivo"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        )}
+
+                        <div className="flex gap-3 items-end">
+                            {/* Botão de clipe */}
+                            <button
+                                onClick={() => !isBlocked && fileInputRef.current?.click()}
+                                disabled={isBlocked}
+                                title="Anexar arquivo"
+                                className={`shrink-0 w-10 h-10 flex items-center justify-center rounded-2xl border transition-all ${
+                                    attachedFile
+                                        ? 'bg-blue-600 text-white border-blue-600'
+                                        : isDark
+                                            ? 'border-white/10 text-white/40 hover:text-white/80 hover:border-white/30'
+                                            : 'border-slate-200 text-slate-400 hover:text-slate-600 hover:border-slate-300'
+                                } disabled:opacity-30 disabled:cursor-not-allowed`}
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                </svg>
+                            </button>
+
+                            {/* Input de arquivo oculto */}
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.png,.jpg,.jpeg,.webp"
+                                className="hidden"
+                                onChange={handleFileSelect}
+                            />
+
                             <textarea
                                 ref={textareaRef}
                                 value={input}
                                 onChange={e => setInput(e.target.value)}
                                 onFocus={() => setIsFocused(true)}
+                                disabled={isBlocked}
                                 onKeyDown={e => {
                                     if (e.key === 'Enter' && !e.shiftKey) {
                                         e.preventDefault();
@@ -359,8 +588,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         }
                                     }
                                 }}
-                                placeholder="Estrategize com Hermes…"
-                                className={`flex-1 px-5 py-3.5 rounded-2xl text-sm font-medium outline-none border resize-none overflow-y-auto ${isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-blue-500' : 'bg-slate-50 border-slate-200 text-slate-700 placeholder:text-slate-400 focus:border-blue-500'} transition-all duration-300`}
+                                placeholder={attachedFile ? 'Pergunte sobre o arquivo ou envie sem texto…' : 'Estrategize com Hermes…'}
+                                className={`flex-1 px-5 py-3.5 rounded-2xl text-sm font-medium outline-none border resize-none overflow-y-auto ${isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-blue-500' : 'bg-slate-50 border-slate-200 text-slate-700 placeholder:text-slate-400 focus:border-blue-500'} transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed`}
                             />
                             <button
                                 onClick={() => {
@@ -370,7 +599,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         sendMessage(input);
                                     }
                                 }}
-                                disabled={isLoading || !input.trim()}
+                                disabled={isBlocked || (!input.trim() && !attachedFile)}
                                 className="w-12 h-12 shrink-0 bg-blue-600 text-white rounded-2xl flex items-center justify-center shadow-lg hover:bg-blue-700 disabled:opacity-40 transition-all"
                             >
                                 <svg className="w-6 h-6 rotate-45" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>

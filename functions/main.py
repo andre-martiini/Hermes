@@ -4783,6 +4783,12 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
     task_id = data.get('taskId')
     system_id = data.get('systemId')
     session_id = data.get('sessionId')
+    drive_file_id = data.get('driveFileId')
+    drive_file_name = (data.get('driveFileName') or 'documento').strip()
+
+    # Ingestão muda: arquivo sem texto → prompt padrão de catalogação
+    if not prompt and drive_file_id:
+        prompt = "Gere um resumo executivo deste documento e catalogue sua utilidade."
 
     if not prompt:
         raise https_fn.HttpsError(
@@ -4987,13 +4993,155 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             history=history
         )
 
+        # ─── INGESTÃO DOCUMENTAL ─────────────────────────────────────────────────
+        # Se um driveFileId foi enviado, baixa o binário, extrai metadados via
+        # Gemini File API (sem parsers locais) e grava no indice_artefatos (RAG).
+        file_context = ""
+        if drive_file_id:
+            try:
+                import io
+                import os
+                import tempfile
+                import uuid as _uuid
+                from googleapiclient.http import MediaIoBaseDownload
+                from google.cloud.firestore_v1.vector import Vector
+
+                drive_service = get_drive_service()
+
+                # 1. Busca metadados do arquivo no Drive
+                file_meta = drive_service.files().get(
+                    fileId=drive_file_id,
+                    fields='name,mimeType'
+                ).execute()
+                real_file_name = file_meta.get('name', drive_file_name)
+                real_mime_type = file_meta.get('mimeType', 'application/octet-stream')
+
+                # 2. Baixa o binário para memória volátil
+                request_dl = drive_service.files().get_media(fileId=drive_file_id)
+                fh = io.BytesIO()
+                downloader = MediaIoBaseDownload(fh, request_dl)
+                done = False
+                while not done:
+                    _, done = downloader.next_chunk()
+                fh.seek(0)
+                file_bytes = fh.read()
+
+                # 3. Salva em arquivo temporário para a File API do Gemini
+                file_ext = os.path.splitext(real_file_name)[1] or '.bin'
+                with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
+                    tmp.write(file_bytes)
+                    tmp_path = tmp.name
+
+                # 4. Faz upload para a File API do Gemini
+                gemini_file = client.files.upload(
+                    path=tmp_path,
+                    config=types.UploadFileConfig(
+                        mime_type=real_mime_type,
+                        display_name=real_file_name
+                    )
+                )
+                os.unlink(tmp_path)
+
+                # O bloco try/finally abaixo garante que o arquivo seja sempre
+                # deletado da File API do Gemini, mesmo que a extração falhe.
+                # Sem isso cada upload acumularia dados até estourar a cota de 2GB.
+                try:
+                    # 5. Extrai metadados com truncamento semântico de ~8.000 tokens
+                    extraction_prompt = (
+                        f"Você recebeu o arquivo '{real_file_name}'. "
+                        "Leia no máximo os primeiros 8.000 tokens de conteúdo. "
+                        "Retorne EXCLUSIVAMENTE um JSON válido, sem markdown, sem texto extra:\n"
+                        '{"titulo": "...", "natureza": "...", "resumo": "..."}\n'
+                        "Onde:\n"
+                        "- titulo: nome/título do documento\n"
+                        "- natureza: categoria (ex: Edital, Contrato, Relatório, Manual, Planilha, etc.)\n"
+                        "- resumo: resumo executivo em 3 a 5 frases sobre conteúdo e utilidade"
+                    )
+                    extraction_response = client.models.generate_content(
+                        model=model_id,
+                        contents=[
+                            types.Content(parts=[
+                                types.Part.from_uri(
+                                    file_uri=gemini_file.uri,
+                                    mime_type=real_mime_type
+                                ),
+                                types.Part(text=extraction_prompt)
+                            ])
+                        ]
+                    )
+                    extraction_text = extraction_response.text.strip()
+                    # Remove blocos de código caso o modelo os inclua mesmo instruído
+                    if extraction_text.startswith("```"):
+                        extraction_text = extraction_text.split("```")[1]
+                        if extraction_text.startswith("json"):
+                            extraction_text = extraction_text[4:]
+
+                    meta = json.loads(extraction_text)
+                    titulo_doc = meta.get('titulo', real_file_name)
+                    natureza_doc = meta.get('natureza', 'Documento')
+                    resumo_doc = meta.get('resumo', '')
+
+                    # 6. Vetoriza e grava no indice_artefatos
+                    from knowledge_graph import _get_embedding
+                    embed_text = f"{titulo_doc} | {natureza_doc} | {resumo_doc}"
+                    embedding = _get_embedding(embed_text, gemini_key)
+                    embedding_floats = list(map(float, embedding))
+
+                    artefato_id = str(_uuid.uuid4())[:12]
+                    db.collection('indice_artefatos').document(artefato_id).set({
+                        'titulo': titulo_doc,
+                        'trecho': resumo_doc,
+                        'fonte': natureza_doc,
+                        'embedding': Vector(embedding_floats),
+                        'tipo_arquivo': real_mime_type.split('/')[-1],
+                        'url_drive': f"https://drive.google.com/file/d/{drive_file_id}/view",
+                        'data_criacao': firestore.SERVER_TIMESTAMP,
+                        'origem': {'modulo': 'copiloto', 'id_origem': session_id or 'direto'},
+                        'categoria': 'Copiloto Hermes'
+                    })
+                    print(f"[Copiloto] Artefato '{titulo_doc}' gravado em indice_artefatos (id={artefato_id})")
+
+                    # 7. Monta o bloco de contexto que será injetado no prompt final
+                    drive_link = f"https://drive.google.com/file/d/{drive_file_id}/view"
+                    file_context = (
+                        f"[CONTEXTO DO ARQUIVO ANEXADO]\n"
+                        f"Nome: {real_file_name}\n"
+                        f"Título extraído: {titulo_doc}\n"
+                        f"Natureza: {natureza_doc}\n"
+                        f"Resumo: {resumo_doc}\n"
+                        f"Link original: {drive_link}\n"
+                        f"[/CONTEXTO DO ARQUIVO ANEXADO]"
+                    )
+
+                finally:
+                    # Limpeza obrigatória — evita acúmulo na File API do Gemini
+                    try:
+                        client.files.delete(name=gemini_file.name)
+                        print(f"[Copiloto] Arquivo Gemini '{gemini_file.name}' deletado com sucesso.")
+                    except Exception as del_err:
+                        print(f"[Copiloto] Aviso: falha ao deletar arquivo Gemini '{gemini_file.name}': {del_err}")
+
+            except Exception as file_err:
+                print(f"[Copiloto] Erro na ingestão documental: {file_err}")
+                import traceback
+                print(traceback.format_exc())
+                file_context = f"⚠️ Não foi possível processar o arquivo '{drive_file_name}': {file_err}"
+        # ─────────────────────────────────────────────────────────────────────────
+
         # Injeta contexto inicial se houver task_id
         initial_context = ""
         if task_id:
             initial_context = f"DICA DE CONTEXTO: O usuário está visualizando a tarefa {task_id}. " \
                              f"Use obter_contexto_tela('{task_id}') para se situar antes de responder."
 
-        final_prompt = f"{initial_context}\n\nUSUÁRIO: {prompt}" if initial_context else prompt
+        # Monta prompt final combinando task context + file context + pergunta do usuário
+        context_parts = []
+        if initial_context:
+            context_parts.append(initial_context)
+        if file_context:
+            context_parts.append(file_context)
+        context_parts.append(f"USUÁRIO: {prompt}")
+        final_prompt = "\n\n".join(context_parts)
         
         response = chat.send_message(final_prompt)
         result_text = response.text

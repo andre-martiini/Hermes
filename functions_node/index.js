@@ -8,6 +8,7 @@ const axios = require('axios');
 const { google } = require('googleapis');
 const { PubSub } = require('@google-cloud/pubsub');
 const { v4: uuidv4 } = require('uuid');
+const Busboy = require('busboy');
 
 puppeteer.use(StealthPlugin());
 if (admin.apps.length === 0) admin.initializeApp();
@@ -297,6 +298,120 @@ async function runScraper(data) {
 //    }
 //    return { success: true, message: "Sincronização iniciada em segundo plano." };
 //});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// uploadFileForCopiloto — Endpoint HTTP para ingestão documental do Copiloto
+// Recebe multipart/form-data, autentica via Bearer token, faz upload para uma
+// pasta isolada no Drive e retorna o driveFileId.
+// ─────────────────────────────────────────────────────────────────────────────
+exports.uploadFileForCopiloto = functions.runWith({
+    timeoutSeconds: 300,
+    memory: '1GB'
+}).https.onRequest((req, res) => {
+    // CORS
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+
+    if (req.method === 'OPTIONS') {
+        return res.status(204).send('');
+    }
+
+    if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'Método não permitido.' });
+    }
+
+    // Verificação do token Firebase Auth
+    const authHeader = req.headers['authorization'] || '';
+    if (!authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Token de autenticação ausente.' });
+    }
+
+    const idToken = authHeader.slice(7);
+
+    return admin.auth().verifyIdToken(idToken)
+        .then(() => new Promise((resolve) => {
+            const busboy = Busboy({ headers: req.headers, limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB max
+            let fileBuffer = null;
+            let fileName = null;
+            let mimeType = 'application/octet-stream';
+            let fileTooLarge = false;
+
+            busboy.on('file', (fieldname, file, info) => {
+                fileName = info.filename || `upload_${Date.now()}`;
+                mimeType = info.mimeType || 'application/octet-stream';
+                const chunks = [];
+
+                file.on('data', (chunk) => chunks.push(chunk));
+                file.on('limit', () => { fileTooLarge = true; file.resume(); });
+                file.on('end', () => {
+                    if (!fileTooLarge) {
+                        fileBuffer = Buffer.concat(chunks);
+                    }
+                });
+            });
+
+            busboy.on('finish', async () => {
+                try {
+                    if (fileTooLarge) {
+                        res.status(413).json({ error: 'Arquivo excede o limite de 50MB.' });
+                        return resolve();
+                    }
+                    if (!fileBuffer || !fileName) {
+                        res.status(400).json({ error: 'Nenhum arquivo recebido no campo "file".' });
+                        return resolve();
+                    }
+
+                    const auth = await getGoogleAuth();
+                    const drive = google.drive({ version: 'v3', auth });
+
+                    // Localiza ou cria a pasta isolada Hermes_Copiloto_Uploads
+                    let folderId = null;
+                    const folderSearch = await drive.files.list({
+                        q: "name='Hermes_Copiloto_Uploads' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+                        fields: 'files(id)',
+                        spaces: 'drive'
+                    });
+
+                    if (folderSearch.data.files && folderSearch.data.files.length > 0) {
+                        folderId = folderSearch.data.files[0].id;
+                    } else {
+                        const folderCreate = await drive.files.create({
+                            requestBody: { name: 'Hermes_Copiloto_Uploads', mimeType: 'application/vnd.google-apps.folder' },
+                            fields: 'id'
+                        });
+                        folderId = folderCreate.data.id;
+                    }
+
+                    const driveFile = await uploadToDrive(fileName, fileBuffer, mimeType, folderId);
+
+                    res.status(200).json({
+                        driveFileId: driveFile.id,
+                        webViewLink: driveFile.webViewLink,
+                        fileName,
+                        mimeType
+                    });
+                    resolve();
+                } catch (err) {
+                    console.error('Erro em uploadFileForCopiloto:', err);
+                    res.status(500).json({ error: err.message });
+                    resolve();
+                }
+            });
+
+            busboy.on('error', (err) => {
+                console.error('Busboy error:', err);
+                res.status(500).json({ error: err.message });
+                resolve();
+            });
+
+            req.pipe(busboy);
+        }))
+        .catch((authErr) => {
+            console.error('Token inválido:', authErr);
+            return res.status(401).json({ error: 'Token de autenticação inválido.' });
+        });
+});
 
 exports.getQuotes = functions.runWith({
     timeoutSeconds: 60,
