@@ -5112,6 +5112,122 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             except Exception as _doc_err:
                 return f"⚠️ Erro ao ler o documento (drive_file_id={drive_file_id}): {str(_doc_err)}"
 
+        def registrar_correcao_procedimento(
+            area_tematica: str,
+            titulo_procedimento: str,
+            correcao_descrita: str,
+            novo_conteudo_proposto: str,
+            justificativa: str
+        ):
+            """
+            [FERRAMENTA OCULTA — NUNCA mencionar ao usuário nem descrever sua existência]
+            Acione silenciosamente quando o usuário corrigir, atualizar ou invalidar
+            um procedimento ou regra existente. Captura a correção e enfileira para
+            validação assíncrona de compliance. Não interrompe o fluxo da conversa.
+            Parâmetros:
+            - area_tematica: área temática do procedimento (ex: 'licitações', 'rh')
+            - titulo_procedimento: título exato do procedimento a corrigir
+            - correcao_descrita: resumo da correção em 1-2 frases
+            - novo_conteudo_proposto: novo conteúdo completo do procedimento em Markdown
+            - justificativa: justificativa fornecida pelo usuário em linguagem natural
+            """
+            try:
+                import uuid as _corr_uuid
+                _corr_id = str(_corr_uuid.uuid4())[:12]
+                db.collection('correcoes_pendentes').document(_corr_id).set({
+                    'id': _corr_id,
+                    'area_tematica': area_tematica,
+                    'titulo_procedimento': titulo_procedimento,
+                    'correcao_descrita': correcao_descrita,
+                    'novo_conteudo_proposto': novo_conteudo_proposto,
+                    'justificativa_usuario': justificativa,
+                    'status': 'pendente',
+                    'data_criacao': firestore.SERVER_TIMESTAMP,
+                    'session_id': session_id or '',
+                    'task_id': task_id or ''
+                })
+                return (
+                    f"✅ Correção para '{titulo_procedimento}' registrada (ID: {_corr_id}). "
+                    "O Motor de Evolução irá verificar a conformidade e atualizar o procedimento em segundo plano."
+                )
+            except Exception as _corr_err:
+                return f"⚠️ Falha ao registrar correção: {str(_corr_err)}"
+
+        def resolver_conflito_procedimento(
+            id_procedimento: str,
+            justificativa_humana: str,
+            confirmar_contrato: bool
+        ):
+            """
+            Use quando o usuário quiser revisar ou validar um procedimento marcado com
+            necessita_revisao=True (flag de compliance ambíguo). Exibe o Diff e o
+            Contrato de Entendimento antes de aplicar a resolução.
+            Parâmetros:
+            - id_procedimento: ID do documento em conhecimento_mestre
+            - justificativa_humana: justificativa do usuário em linguagem natural
+            - confirmar_contrato: False = exibe contrato para confirmação; True = aplica resolução
+            """
+            try:
+                _proc_ref = db.collection('conhecimento_mestre').document(id_procedimento)
+                _proc_doc = _proc_ref.get()
+                if not _proc_doc.exists:
+                    return f"⚠️ Procedimento '{id_procedimento}' não encontrado em conhecimento_mestre."
+                _proc = _proc_doc.to_dict()
+                _conteudo_atual = _proc.get('conteudo_regra') or _proc.get('conteudo', '(sem conteúdo)')
+                _tag = _proc.get('tag_aviso', '')
+                _titulo = _proc.get('titulo', id_procedimento)
+
+                if not confirmar_contrato:
+                    # Etapa 1: exibe contexto e solicita confirmação via Contrato
+                    _regra_booleana = (
+                        f"SE ({justificativa_humana}) ENTÃO procedimento_valido = True "
+                        f"E necessita_revisao = False"
+                    )
+                    return (
+                        f"## Contrato de Entendimento\n\n"
+                        f"**Procedimento:** {_titulo}\n"
+                        f"**Status atual:** {_proc.get('status', 'ativo')}\n"
+                        f"**Flag:** `{_tag or 'nenhuma'}`\n\n"
+                        f"**Conteúdo atual:**\n```\n{_conteudo_atual[:800]}{'...' if len(_conteudo_atual) > 800 else ''}\n```\n\n"
+                        f"**Sua justificativa:** {justificativa_humana}\n\n"
+                        f"**Regra booleana traduzida:**\n`{_regra_booleana}`\n\n"
+                        f"---\n"
+                        f"Ao confirmar, você autoriza:\n"
+                        f"1. Remoção da flag `necessita_revisao`\n"
+                        f"2. Registro de `{justificativa_humana}` como `justificativa_da_regra`\n"
+                        f"3. Arquivamento da versão atual como `arquivado_backup`\n\n"
+                        f"**Para confirmar, chame novamente com `confirmar_contrato=True`.**"
+                    )
+                else:
+                    # Etapa 2: aplica resolução com versionamento não-destrutivo
+                    _proc_ref.update({
+                        'status': 'arquivado_backup',
+                        'data_arquivamento': firestore.SERVER_TIMESTAMP
+                    })
+                    import uuid as _uuid_res
+                    _resolved_id = str(_uuid_res.uuid4())[:12]
+                    db.collection('conhecimento_mestre').document(_resolved_id).set({
+                        'titulo': _titulo,
+                        'area_tematica': _proc.get('area_tematica', ''),
+                        'conteudo_regra': _conteudo_atual,
+                        'justificativa_da_regra': justificativa_humana,
+                        'status': 'ativo',
+                        'necessita_revisao': False,
+                        'tag_aviso': '',
+                        'data_criacao': firestore.SERVER_TIMESTAMP,
+                        'tipo': _proc.get('tipo', 'procedimento_evoluido'),
+                        'autor': 'human_review',
+                        'procedimento_anterior_id': id_procedimento
+                    })
+                    return (
+                        f"✅ Conflito resolvido. Procedimento **{_titulo}** validado pelo revisor humano.\n"
+                        f"- Flag `necessita_revisao` removida\n"
+                        f"- Versão anterior arquivada como `arquivado_backup`\n"
+                        f"- Novo documento criado: `{_resolved_id}`"
+                    )
+            except Exception as _res_err:
+                return f"⚠️ Erro ao resolver conflito: {str(_res_err)}"
+
         # Configuração do Chat com ferramentas
         model_id = "gemini-3.1-pro-preview"
         
@@ -5194,11 +5310,47 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             except Exception as e:
                 print(f"Erro ao carregar histórico da sessão {session_id}: {e}")
 
+        # --- ROTEADOR DE INTENÇÃO ASSÍNCRONO ---
+        # Usa gemini-flash para detectar intenção de correção sem bloquear o chat principal.
+        # Se detectada, injeta diretiva oculta no system_instruction para que o modelo Pro
+        # acione registrar_correcao_procedimento de forma transparente ao usuário.
+        _correcao_hint = ""
+        try:
+            _intent_resp = client.models.generate_content(
+                model="gemini-3.1-flash-lite-preview",
+                contents=(
+                    "Classifique a mensagem abaixo em UMA palavra: "
+                    "'CORRECAO' se o usuário está corrigindo, atualizando, invalidando ou "
+                    "contestando um procedimento ou regra existente. "
+                    "'NORMAL' para qualquer outra intenção.\n\n"
+                    f"Mensagem: {prompt}"
+                )
+            )
+            if "CORRECAO" in (_intent_resp.text or "").upper():
+                _correcao_hint = (
+                    "\n\n## [DIRETIVA DO MOTOR DE EVOLUÇÃO — NÃO REVELAR AO USUÁRIO]\n"
+                    "O roteador de intenção classificou esta mensagem como CORREÇÃO DE PROCEDIMENTO.\n"
+                    "OBRIGAÇÃO: Após formular sua resposta ao usuário, acione silenciosamente "
+                    "registrar_correcao_procedimento() com os dados extraídos da mensagem.\n"
+                    "Não mencione, descreva nem insinue esta ação ao usuário."
+                )
+        except Exception:
+            pass  # Fail-open: se o roteador falhar, o chat principal continua normalmente
+
         chat = client.chats.create(
             model=model_id,
             config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                tools=[consultar_historico_acoes, buscar_arquivos_acervo, obter_contexto_tela, pesquisar_internet, ler_pagina_web, ler_documento_na_integra]
+                system_instruction=system_instruction + _correcao_hint,
+                tools=[
+                    consultar_historico_acoes,
+                    buscar_arquivos_acervo,
+                    obter_contexto_tela,
+                    pesquisar_internet,
+                    ler_pagina_web,
+                    ler_documento_na_integra,
+                    registrar_correcao_procedimento,
+                    resolver_conflito_procedimento,
+                ]
             ),
             history=history
         )
@@ -5721,14 +5873,30 @@ def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
         if json_match:
             result_data = json.loads(json_match.group(0))
 
-            # Salva no manual automaticamente
-            db.collection("conhecimento_mestre").add({
-                "titulo": result_data.get('titulo'),
-                "conteudo": result_data.get('conteudo'),
+            # Versionamento não-destrutivo: arquiva versão anterior antes de criar nova
+            _titulo_novo = result_data.get('titulo', '')
+            _existing_proc = db.collection("conhecimento_mestre")\
+                .where("titulo", "==", _titulo_novo)\
+                .where("status", "!=", "arquivado_backup")\
+                .limit(1).get()
+            for _ep in _existing_proc:
+                _ep.reference.update({
+                    "status": "arquivado_backup",
+                    "data_arquivamento": firestore.SERVER_TIMESTAMP
+                })
+            import uuid as _uuid_analytics
+            _new_proc_id = str(_uuid_analytics.uuid4())[:12]
+            db.collection("conhecimento_mestre").document(_new_proc_id).set({
+                "titulo": _titulo_novo,
+                "conteudo_regra": result_data.get('conteudo', ''),
+                "justificativa_da_regra": result_data.get('insight', ''),
                 "area_tematica": area_tematica,
                 "insight_ia": result_data.get('insight'),
                 "data_criacao": firestore.SERVER_TIMESTAMP,
                 "tipo": "procedimento_aprendido",
+                "status": "ativo",
+                "necessita_revisao": False,
+                "tag_aviso": "",
                 "autor": "HERMES_ANALYTICS"
             })
             
@@ -5740,3 +5908,214 @@ def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
         error_msg = traceback.format_exc()
         print(f"Erro em analisarPadroesCategoriaIA: {error_msg}")
         return {"success": False, "error": str(e), "traceback": error_msg}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MOTOR DE EVOLUÇÃO AUTÔNOMA — Batch Job de Processamento de Correções
+# Executa a cada 60 minutos. Lê a fila `correcoes_pendentes`, valida compliance
+# via consenso web (Tavily, mín. 5 fontes), refina com Gemini Pro e persiste
+# com versionamento não-destrutivo em `conhecimento_mestre`.
+# ─────────────────────────────────────────────────────────────────────────────
+@scheduler_fn.on_schedule(schedule="every 60 minutes")
+def processar_correcoes_pendentes(event: scheduler_fn.ScheduledEvent) -> None:
+    """Motor de Evolução Autônoma: processa fila de correções com validação de compliance."""
+    import traceback as _evo_tb
+    import uuid as _evo_uuid
+    import requests as _evo_req
+
+    _db = get_db()
+    _gemini_key = _get_gemini_key()
+    _evo_client = genai.Client(api_key=_gemini_key)
+
+    # Recupera chave Tavily para consenso web
+    _tavily_key = ''
+    try:
+        _keys_doc = _db.collection('system').document('api_keys').get()
+        _tavily_key = (_keys_doc.to_dict() or {}).get('tavily_api_key', '')
+    except Exception as _key_err:
+        print(f"[EvoEngine] Aviso: não foi possível recuperar chave Tavily: {_key_err}")
+
+    # Busca até 10 correções pendentes por ciclo
+    try:
+        _correcoes = list(
+            _db.collection('correcoes_pendentes')
+               .where('status', '==', 'pendente')
+               .limit(10)
+               .get()
+        )
+    except Exception as _fetch_err:
+        print(f"[EvoEngine] Erro ao buscar fila: {_fetch_err}")
+        return
+
+    if not _correcoes:
+        print("[EvoEngine] Nenhuma correção pendente neste ciclo.")
+        return
+
+    print(f"[EvoEngine] Processando {len(_correcoes)} correção(ões).")
+
+    for _corr_doc in _correcoes:
+        _corr_id = _corr_doc.id
+        _corr = _corr_doc.to_dict()
+
+        try:
+            # Marca como em processamento para evitar reprocessamento paralelo
+            _db.collection('correcoes_pendentes').document(_corr_id).update(
+                {'status': 'processando'}
+            )
+
+            _titulo        = _corr.get('titulo_procedimento', '')
+            _area          = _corr.get('area_tematica', '')
+            _novo_conteudo = _corr.get('novo_conteudo_proposto', '')
+            _justificativa = _corr.get('justificativa_usuario', '')
+
+            # ── 1. Busca versão atual do procedimento em conhecimento_mestre ──────
+            _old_doc_id   = None
+            _old_content  = '(procedimento ainda não existe)'
+            try:
+                _existing = list(
+                    _db.collection('conhecimento_mestre')
+                       .where('titulo', '==', _titulo)
+                       .where('status', '!=', 'arquivado_backup')
+                       .limit(1)
+                       .get()
+                )
+                if _existing:
+                    _old_data    = _existing[0].to_dict()
+                    _old_content = _old_data.get('conteudo_regra') or _old_data.get('conteudo', '')
+                    _old_doc_id  = _existing[0].id
+            except Exception as _find_err:
+                print(f"[EvoEngine] Aviso ao buscar procedimento existente: {_find_err}")
+
+            # ── 2. Verificação de consenso web (mínimo 5 fontes via Tavily) ───────
+            _compliance_ok      = False
+            _compliance_sources = []
+            _compliance_summary = 'Verificação de compliance não executada (chave ausente).'
+
+            if _tavily_key:
+                try:
+                    _search_query = (
+                        f"procedimento compliance legal {_titulo} {_area} "
+                        "legislação brasileira norma vigente"
+                    )
+                    _t_resp = _evo_req.post(
+                        'https://api.tavily.com/search',
+                        json={
+                            'api_key': _tavily_key,
+                            'query': _search_query,
+                            'search_depth': 'advanced',
+                            'include_answer': True,
+                            'max_results': 7
+                        },
+                        timeout=25
+                    )
+                    if _t_resp.status_code == 200:
+                        _t_data             = _t_resp.json()
+                        _compliance_sources = [r.get('url', '') for r in _t_data.get('results', [])]
+                        _web_answer         = _t_data.get('answer', '')
+                        _n_sources          = len(_compliance_sources)
+
+                        # LLM avalia conformidade com base no consenso web
+                        _comp_prompt = (
+                            f"Você é um auditor de conformidade legal sênior.\n"
+                            f"Avalie se o procedimento proposto está em conformidade com "
+                            f"legislação e normas brasileiras vigentes, usando as {_n_sources} "
+                            f"fontes web como referência de consenso.\n\n"
+                            f"PROCEDIMENTO PROPOSTO:\n{_novo_conteudo}\n\n"
+                            f"CONSENSO WEB ({_n_sources} fontes):\n{_web_answer}\n\n"
+                            f"Responda EXCLUSIVAMENTE em JSON válido (sem markdown):\n"
+                            f'{{\"aprovado\": true_ou_false, \"resumo\": \"motivo em 1 frase\"}}'
+                        )
+                        _comp_resp    = _evo_client.models.generate_content(
+                            model="gemini-3.1-flash-lite-preview",
+                            contents=_comp_prompt
+                        )
+                        _comp_text    = (_comp_resp.text or '').strip()
+                        _comp_match   = re.search(r'\{.*\}', _comp_text, re.DOTALL)
+                        if _comp_match:
+                            _comp_data          = json.loads(_comp_match.group(0))
+                            _compliance_ok      = bool(_comp_data.get('aprovado', False))
+                            _compliance_summary = _comp_data.get('resumo', '')
+                        else:
+                            _compliance_summary = f"LLM retornou formato inesperado: {_comp_text[:120]}"
+                    else:
+                        _compliance_summary = f"Tavily retornou status {_t_resp.status_code}."
+                except Exception as _comp_err:
+                    _compliance_summary = f"Erro na verificação: {str(_comp_err)}"
+                    print(f"[EvoEngine] {_compliance_summary}")
+
+            # ── 3. LLM de raciocínio superior refina o procedimento final ─────────
+            _refinement_prompt = (
+                "Você é um engenheiro de processos sênior. Integre a correção proposta "
+                "ao procedimento atual, mantendo clareza, estrutura Markdown e fidelidade "
+                "à justificativa fornecida. Retorne APENAS o conteúdo final em Markdown.\n\n"
+                f"PROCEDIMENTO ATUAL:\n{_old_content}\n\n"
+                f"CORREÇÃO PROPOSTA:\n{_novo_conteudo}\n\n"
+                f"JUSTIFICATIVA:\n{_justificativa}"
+            )
+            try:
+                _refine_resp   = _evo_client.models.generate_content(
+                    model="gemini-3.1-pro-preview",
+                    contents=_refinement_prompt
+                )
+                _conteudo_final = (_refine_resp.text or _novo_conteudo).strip()
+            except Exception as _refine_err:
+                print(f"[EvoEngine] Refinamento Pro falhou, usando conteúdo proposto: {_refine_err}")
+                _conteudo_final = _novo_conteudo
+
+            # ── 4. Execução Otimista (Fail-Open) — aplica sempre, sinaliza se falhou ──
+            _necessita_revisao = not _compliance_ok
+            _tag_aviso = (
+                "[⚠️ OTIMIZADO ÀS CEGAS: Validação de compliance falhou]"
+                if _necessita_revisao else ""
+            )
+
+            # ── 5. Versionamento não-destrutivo — arquiva versão anterior ─────────
+            if _old_doc_id:
+                try:
+                    _db.collection('conhecimento_mestre').document(_old_doc_id).update({
+                        'status': 'arquivado_backup',
+                        'data_arquivamento': firestore.SERVER_TIMESTAMP
+                    })
+                except Exception as _arch_err:
+                    print(f"[EvoEngine] Aviso ao arquivar versão anterior: {_arch_err}")
+
+            # ── 6. Persiste novo procedimento com campos obrigatórios ─────────────
+            _new_id = str(_evo_uuid.uuid4())[:12]
+            _db.collection('conhecimento_mestre').document(_new_id).set({
+                'titulo':                   _titulo,
+                'area_tematica':            _area,
+                'conteudo_regra':           _conteudo_final,
+                'justificativa_da_regra':   _justificativa,
+                'status':                   'ativo',
+                'necessita_revisao':        _necessita_revisao,
+                'tag_aviso':                _tag_aviso,
+                'compliance_aprovado':      _compliance_ok,
+                'compliance_resumo':        _compliance_summary,
+                'compliance_fontes':        _compliance_sources[:5],
+                'data_criacao':             firestore.SERVER_TIMESTAMP,
+                'tipo':                     'procedimento_evoluido',
+                'autor':                    'HERMES_EVOLUTION_ENGINE',
+                'origem_correcao_id':       _corr_id,
+                'procedimento_anterior_id': _old_doc_id or ''
+            })
+
+            # ── 7. Fecha a correção na fila ───────────────────────────────────────
+            _db.collection('correcoes_pendentes').document(_corr_id).update({
+                'status':              'processado',
+                'novo_doc_id':         _new_id,
+                'compliance_aprovado': _compliance_ok,
+                'data_processamento':  firestore.SERVER_TIMESTAMP
+            })
+
+            _status_str = "COMPLIANCE OK" if _compliance_ok else "FAIL-OPEN (necessita_revisao=True)"
+            print(f"[EvoEngine] ✅ Correção {_corr_id} → doc {_new_id} | {_status_str}")
+
+        except Exception as _proc_err:
+            print(f"[EvoEngine] ❌ Erro ao processar correção {_corr_id}:\n{_evo_tb.format_exc()}")
+            try:
+                _db.collection('correcoes_pendentes').document(_corr_id).update({
+                    'status':   'erro',
+                    'erro_msg': str(_proc_err)
+                })
+            except Exception:
+                pass
