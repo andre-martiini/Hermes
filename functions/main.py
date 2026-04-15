@@ -5068,7 +5068,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     _tmp_path = _tmp.name
 
                 _gemini_file = client.files.upload(
-                    path=_tmp_path,
+                    file=_tmp_path,
                     config=types.UploadFileConfig(
                         mime_type=_mime,
                         display_name=_real_name
@@ -5244,7 +5244,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
                 # 4. Faz upload para a File API do Gemini
                 gemini_file = client.files.upload(
-                    path=tmp_path,
+                    file=tmp_path,
                     config=types.UploadFileConfig(
                         mime_type=real_mime_type,
                         display_name=real_file_name
