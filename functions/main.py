@@ -4913,6 +4913,80 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             except Exception as e:
                 return f"Erro ao obter contexto da tela: {e}"
 
+        def pesquisar_internet(query: str):
+            """
+            Busca informações recentes, notícias ou fatos atualizados na internet.
+            Use quando o usuário precisar de dados em tempo real, cotações, eventos recentes
+            ou qualquer informação que possa estar desatualizada no seu conhecimento.
+            Parâmetro: query — a frase de busca otimizada em português ou inglês.
+            """
+            import requests as _req
+            try:
+                keys_doc_web = db.collection('system').document('api_keys').get()
+                tavily_key = keys_doc_web.to_dict().get('tavily_api_key') if keys_doc_web.exists else None
+                if not tavily_key:
+                    return '{"error": "Tavily API key não configurada. Informe ao usuário que a busca na internet está indisponível no momento."}'
+
+                resp = _req.post(
+                    "https://api.tavily.com/search",
+                    json={
+                        "api_key": tavily_key,
+                        "query": query,
+                        "search_depth": "advanced",
+                        "include_answer": True,
+                        "include_raw_content": False,
+                        "max_results": 5
+                    },
+                    timeout=20
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+                parts = []
+                if data.get("answer"):
+                    parts.append(f"RESPOSTA DIRETA: {data['answer']}\n")
+                for r in data.get("results", []):
+                    parts.append(
+                        f"FONTE: {r.get('title', '')} ({r.get('url', '')})\n"
+                        f"{r.get('content', '')}"
+                    )
+                return "\n\n".join(parts) if parts else "Nenhum resultado encontrado para esta busca."
+
+            except _req.exceptions.Timeout:
+                return '{"error": "Timeout ao acessar a Tavily API. Informe ao usuário que a busca demorou demais e tente novamente."}'
+            except Exception as web_err:
+                return f'{{"error": "Falha na busca: {str(web_err)}. Informe ao usuário que não foi possível realizar a pesquisa."}}'
+
+        def ler_pagina_web(url: str):
+            """
+            Lê e extrai o conteúdo completo de uma página web em formato Markdown.
+            Use EXCLUSIVAMENTE quando o usuário fornecer uma URL específica e pedir para
+            ler, analisar, resumir ou extrair informações de uma página.
+            Parâmetro: url — o link exato informado pelo usuário.
+            """
+            import requests as _req
+            try:
+                jina_url = f"https://r.jina.ai/{url}"
+                resp = _req.get(
+                    jina_url,
+                    headers={"Accept": "text/markdown", "X-No-Cache": "true"},
+                    timeout=25
+                )
+                if resp.status_code in (403, 401, 429):
+                    return '{"error": "Falha de acesso: O servidor alvo bloqueou a leitura por questões de segurança (Cloudflare/Paywall/Rate-limit). Informe ao usuário de forma clara que não foi possível ler este conteúdo específico."}'
+                resp.raise_for_status()
+
+                content = resp.text.strip()
+                # Trunca para ~12k chars para não explodir o contexto
+                if len(content) > 12000:
+                    content = content[:12000] + "\n\n[...conteúdo truncado para caber no contexto...]"
+                return content if content else "A página foi carregada mas não contém conteúdo legível."
+
+            except _req.exceptions.Timeout:
+                return '{"error": "Timeout ao tentar ler a página. O servidor demorou demais para responder. Informe ao usuário."}'
+            except Exception as scrape_err:
+                return f'{{"error": "Falha ao ler a página: {str(scrape_err)}. Informe ao usuário que não foi possível acessar o conteúdo."}}'
+
         # Configuração do Chat com ferramentas
         model_id = "gemini-3.1-pro-preview"
         
@@ -4988,7 +5062,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             model=model_id,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
-                tools=[consultar_historico_acoes, buscar_arquivos_acervo, obter_contexto_tela]
+                tools=[consultar_historico_acoes, buscar_arquivos_acervo, obter_contexto_tela, pesquisar_internet, ler_pagina_web]
             ),
             history=history
         )
