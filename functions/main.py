@@ -4880,28 +4880,64 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
             lines = []
             for r in resultados:
-                origem_label = f"Tarefa {r['task_id']}" if r.get('task_id') else r.get('origem', 'Acervo')
+                # Rastreabilidade: expõe origem por tarefa, incluindo drive_file_id quando disponível
+                origem_raw = r.get('origem', {})
+                if isinstance(origem_raw, dict):
+                    modulo = origem_raw.get('modulo', '')
+                    id_origem = origem_raw.get('id_origem', '')
+                    if modulo == 'tarefa' and id_origem:
+                        origem_label = f"Tarefa {id_origem} (task_id={r.get('task_id', 'N/A')})"
+                    elif r.get('task_id'):
+                        origem_label = f"Tarefa {r['task_id']}"
+                    else:
+                        origem_label = 'Acervo Global'
+                elif r.get('task_id'):
+                    origem_label = f"Tarefa {r['task_id']}"
+                else:
+                    origem_label = r.get('origem', 'Acervo Global')
+
                 url_part = f" | LINK: {r['url_drive']}" if r.get('url_drive') else ""
+                drive_id_part = f" | DRIVE_FILE_ID: {r['drive_file_id']}" if r.get('drive_file_id') else ""
                 lines.append(
-                    f"DOC: {r['titulo']} | ORIGEM: {origem_label} | FONTE: {r['fonte']}{url_part}\n"
+                    f"DOC: {r['titulo']} | ORIGEM: {origem_label} | FONTE: {r['fonte']}{url_part}{drive_id_part}\n"
                     f"TRECHO: {r['trecho']}"
                 )
             return "\n\n".join(lines)
 
         def obter_contexto_tela(id_tarefa: str):
-            """Obtém o contexto completo da tarefa em foco, incluindo diário integral e plano de ação."""
+            """Obtém o contexto completo da tarefa em foco, incluindo diário integral, plano de ação e arquivos disponíveis para leitura profunda."""
             if not id_tarefa:
                 return "Nenhuma tarefa em foco no momento."
             try:
+                import re as _re
+                _DRIVE_ID_RE = _re.compile(r'/d/([a-zA-Z0-9_-]{10,})')
+
                 doc_snap = db.collection('tarefas').document(id_tarefa).get()
                 if not doc_snap.exists:
                     return "Tarefa não identificada no banco de dados."
                 t = doc_snap.to_dict()
                 
-                # Diário Integral conforme solicitado
+                # Diário Integral
                 diario_full = []
                 for e in sorted(t.get('acompanhamento', []), key=lambda x: x.get('data', '')):
                     diario_full.append(f"[{e.get('data')}] {e.get('nota')}")
+
+                # Mapeamento de arquivos para leitura profunda on-demand
+                # Retrocompatibilidade: tenta drive_file_id direto; se ausente, extrai da URL via regex
+                arquivos_disponiveis = []
+                for item in t.get('pool_dados', []):
+                    if item.get('tipo') != 'arquivo':
+                        continue
+                    fid = item.get('drive_file_id')
+                    if not fid:
+                        url_val = item.get('valor', '')
+                        match = _DRIVE_ID_RE.search(url_val)
+                        fid = match.group(1) if match else None
+                    if fid:
+                        arquivos_disponiveis.append({
+                            "nome": item.get('nome', 'Arquivo sem nome'),
+                            "drive_file_id": fid
+                        })
                 
                 context = {
                     "id": id_tarefa,
@@ -4909,9 +4945,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "area_tematica": t.get('area_tematica'),
                     "plano_atual": t.get('plano_acao', []),
                     "diario_integral": "\n".join(diario_full),
-                    "tags": t.get('tags', [])
+                    "tags": t.get('tags', []),
+                    "arquivos_disponiveis": arquivos_disponiveis
                 }
-                return json.dumps(context, indent=2)
+                return json.dumps(context, indent=2, ensure_ascii=False)
             except Exception as e:
                 return f"Erro ao obter contexto da tela: {e}"
 
@@ -4989,6 +5026,92 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             except Exception as scrape_err:
                 return f'{{"error": "Falha ao ler a página: {str(scrape_err)}. Informe ao usuário que não foi possível acessar o conteúdo."}}'
 
+        def ler_documento_na_integra(drive_file_id: str, query_especifica: str):
+            """
+            Use esta ferramenta APENAS quando o usuário perguntar sobre o CONTEÚDO EXATO
+            (valores, quantidades, itens, cláusulas, tabelas) de um arquivo listado em
+            'arquivos_disponiveis' no contexto da tarefa. Requer o drive_file_id do arquivo
+            e a pergunta exata a ser respondida (query_especifica).
+            Retorna APENAS a resposta filtrada — não o documento inteiro.
+            """
+            if not drive_file_id or not query_especifica:
+                return "⚠️ Parâmetros insuficientes: forneça drive_file_id e query_especifica."
+            try:
+                import io as _io
+                import os as _os
+                import tempfile as _tempfile
+
+                _drive_service = get_drive_service()
+
+                # 1. Busca metadados do arquivo no Drive
+                _file_meta = _drive_service.files().get(
+                    fileId=drive_file_id,
+                    fields='name,mimeType'
+                ).execute()
+                _real_name = _file_meta.get('name', 'documento')
+                _mime = _file_meta.get('mimeType', 'application/octet-stream')
+
+                # 2. Baixa o binário
+                _req_dl = _drive_service.files().get_media(fileId=drive_file_id)
+                _fh = _io.BytesIO()
+                from googleapiclient.http import MediaIoBaseDownload
+                _dl = MediaIoBaseDownload(_fh, _req_dl)
+                _done = False
+                while not _done:
+                    _, _done = _dl.next_chunk()
+                _fh.seek(0)
+
+                # 3. Salva temporariamente e envia para Gemini File API
+                _ext = _os.path.splitext(_real_name)[1] or '.bin'
+                with _tempfile.NamedTemporaryFile(delete=False, suffix=_ext) as _tmp:
+                    _tmp.write(_fh.read())
+                    _tmp_path = _tmp.name
+
+                _gemini_file = client.files.upload(
+                    path=_tmp_path,
+                    config=types.UploadFileConfig(
+                        mime_type=_mime,
+                        display_name=_real_name
+                    )
+                )
+                _os.unlink(_tmp_path)
+
+                try:
+                    # 4. Consulta focada — apenas a resposta, não o documento inteiro
+                    _extraction_prompt = (
+                        f"Você recebeu o arquivo '{_real_name}'. "
+                        f"Responda EXCLUSIVAMENTE à seguinte pergunta, baseando-se no conteúdo integral do documento:\n\n"
+                        f"PERGUNTA: {query_especifica}\n\n"
+                        "REGRAS:\n"
+                        "- Se a informação existir, responda de forma precisa e cite o trecho de origem.\n"
+                        "- Se a informação NÃO existir no documento, declare: 'A informação solicitada não foi encontrada neste documento.'\n"
+                        "- NUNCA invente ou complete com dados externos ao documento."
+                    )
+                    _response = client.models.generate_content(
+                        model=model_id,
+                        contents=[
+                            types.Content(parts=[
+                                types.Part.from_uri(
+                                    file_uri=_gemini_file.uri,
+                                    mime_type=_mime
+                                ),
+                                types.Part(text=_extraction_prompt)
+                            ])
+                        ]
+                    )
+                    _answer = (_response.text or "").strip()
+                    return f"[Leitura de '{_real_name}']\n{_answer}" if _answer else "Não foi possível extrair a resposta do documento."
+
+                finally:
+                    # Limpeza obrigatória — evita acúmulo na File API do Gemini
+                    try:
+                        client.files.delete(name=_gemini_file.name)
+                    except Exception:
+                        pass
+
+            except Exception as _doc_err:
+                return f"⚠️ Erro ao ler o documento (drive_file_id={drive_file_id}): {str(_doc_err)}"
+
         # Configuração do Chat com ferramentas
         model_id = "gemini-3.1-pro-preview"
         
@@ -5032,7 +5155,18 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "1. NÃO peça o ID ou Área Temática imediatamente.\n"
             "2. Use `consultar_historico_acoes(query='', data_limite_inicio='YYYY-MM-DD')` para filtrar por prazo/vencimento se o usuário mencionar datas.\n"
             "3. Se não houver data específica, use `query=''` para listar as tarefas mais recentes do sistema.\n"
-            "4. Analise os resultados e peça clarificação apenas se necessário."
+            "4. Analise os resultados e peça clarificação apenas se necessário.\n\n"
+            "## REGRA DE INTEGRIDADE DOCUMENTAL (CRÍTICO — PENA DE FALHA SISTÊMICA)\n"
+            "Se o usuário perguntar sobre valores, quantidades, itens ou cláusulas de um arquivo presente\n"
+            "no campo 'arquivos_disponiveis' do contexto da tarefa, você é ESTRITAMENTE PROIBIDO de:\n"
+            "  a) Deduzir a resposta com base no seu treinamento.\n"
+            "  b) Mesclar fragmentos de buscas vetoriais globais (buscar_arquivos_acervo) com dados deste arquivo.\n\n"
+            "PROTOCOLO OBRIGATÓRIO:\n"
+            "  1. Verifique se o arquivo está listado em 'arquivos_disponiveis' (via obter_contexto_tela).\n"
+            "  2. Chame ler_documento_na_integra(drive_file_id=<ID>, query_especifica=<pergunta exata do usuário>).\n"
+            "  3. Baseie sua resposta EXCLUSIVAMENTE no retorno desta ferramenta.\n"
+            "  4. Se a ferramenta declarar que a informação não existe, reproduza essa declaração sem inventar alternativas.\n"
+            "NUNCA misture dados numéricos (valores, itens, quantidades) de processos ou documentos distintos."
         )
 
         # --- RECUPERAÇÃO DE HISTÓRICO DA SESSÃO ---
@@ -5064,7 +5198,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             model=model_id,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
-                tools=[consultar_historico_acoes, buscar_arquivos_acervo, obter_contexto_tela, pesquisar_internet, ler_pagina_web]
+                tools=[consultar_historico_acoes, buscar_arquivos_acervo, obter_contexto_tela, pesquisar_internet, ler_pagina_web, ler_documento_na_integra]
             ),
             history=history
         )
@@ -5195,6 +5329,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                             'tipo': 'arquivo',
                             'valor': drive_link,
                             'nome': titulo_doc,
+                            'drive_file_id': drive_file_id,  # Salvo explicitamente para leitura profunda on-demand
                             'data_criacao': now_iso
                         }
                         diary_entry = {
