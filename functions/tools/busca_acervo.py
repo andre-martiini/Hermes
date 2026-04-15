@@ -29,40 +29,31 @@ def _sanitize_embedding(raw: list) -> list[float]:
 # ─── Geração de embedding de query ───────────────────────────────────────────
 def _gerar_embedding_query(texto: str) -> list[float]:
     """
-    Usa task_type RETRIEVAL_QUERY (assimétrico).
-    Usa o novo SDK google-genai compatível com o restante do projeto.
+    Gera embedding de query usando o mesmo modelo e dimensão do knowledge_graph.py:
+    gemini-embedding-001 com output_dimensionality=768.
+    Isso garante compatibilidade com todos os vetores gravados no indice_artefatos.
     """
     # 1. Recuperar chave do Firestore
     db = firestore.Client()
     keys_doc = db.collection('system').document('api_keys').get()
     api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
-    
+
     if not api_key:
         raise ValueError("Chave Gemini não encontrada em system/api_keys no Firestore.")
-        
+
     # 2. Configurar cliente
     client = genai.Client(api_key=api_key)
 
-    # 3. Gerar o embedding com tratamento de erro (fallback de modelo)
-    try:
-        # Tenta o modelo mais recente sugerido pelo especialista
-        resposta = client.models.embed_content(
-            model="text-embedding-004", 
-            contents=texto,
-            config=types.EmbedContentConfig(task_type="RETRIEVAL_QUERY")
+    # 3. Mesmo modelo e dimensão usados na indexação (knowledge_graph._get_embedding)
+    resposta = client.models.embed_content(
+        model="gemini-embedding-001",
+        contents=texto,
+        config=types.EmbedContentConfig(
+            task_type="RETRIEVAL_QUERY",
+            output_dimensionality=EMBEDDING_DIM  # 768 — obrigatório para compatibilidade
         )
-    except Exception as e:
-        # Se falhar (ex: 404), tenta o modelo que já sabemos que funciona no knowledge_graph.py
-        try:
-            resposta = client.models.embed_content(
-                model="gemini-embedding-001",
-                contents=texto,
-                config=types.EmbedContentConfig(task_type="RETRIEVAL_QUERY")
-            )
-        except Exception as e2:
-            raise ValueError(f"Falha ao gerar embedding com text-embedding-004 e gemini-embedding-001: {e2}")
-    
-    # O novo SDK retorna uma lista de embeddings (mesmo se for só um conteúdo)
+    )
+
     raw = resposta.embeddings[0].values
     return _sanitize_embedding(raw)
 
