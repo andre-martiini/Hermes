@@ -405,7 +405,13 @@ exports.uploadFileForCopiloto = functions.runWith({
                 resolve();
             });
 
-            req.pipe(busboy);
+            // Firebase Functions já consome o stream e expõe o body em req.rawBody.
+            // Usar req.pipe() resulta em "Unexpected end of form" pois a stream está vazia.
+            if (req.rawBody) {
+                busboy.end(req.rawBody);
+            } else {
+                req.pipe(busboy);
+            }
         }))
         .catch((authErr) => {
             console.error('Token inválido:', authErr);
