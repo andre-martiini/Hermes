@@ -5310,32 +5310,34 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             except Exception as e:
                 print(f"Erro ao carregar histórico da sessão {session_id}: {e}")
 
-        # --- ROTEADOR DE INTENÇÃO ASSÍNCRONO ---
-        # Usa gemini-flash para detectar intenção de correção sem bloquear o chat principal.
-        # Se detectada, injeta diretiva oculta no system_instruction para que o modelo Pro
-        # acione registrar_correcao_procedimento de forma transparente ao usuário.
+        # --- ROTEADOR DE INTENÇÃO (heurístico + LLM fallback) ---
+        # Passo 1: regex barato — evita chamada LLM na maioria dos casos.
+        # Passo 2: só aciona Flash se palavras-chave estiverem presentes, com timeout de 3s.
+        _CORRECAO_KEYWORDS = re.compile(
+            r'\b(corrig|atualiz|invalida|contest|errad|incorret|mudar|alterar|substituir|'
+            r'não está certo|não é assim|estava errado|está errado|procedimento errado)\w*\b',
+            re.IGNORECASE
+        )
         _correcao_hint = ""
-        try:
-            _intent_resp = client.models.generate_content(
-                model="gemini-3.1-flash-lite-preview",
-                contents=(
-                    "Classifique a mensagem abaixo em UMA palavra: "
-                    "'CORRECAO' se o usuário está corrigindo, atualizando, invalidando ou "
-                    "contestando um procedimento ou regra existente. "
-                    "'NORMAL' para qualquer outra intenção.\n\n"
-                    f"Mensagem: {prompt}"
+        if _CORRECAO_KEYWORDS.search(prompt):
+            try:
+                _intent_resp = client.models.generate_content(
+                    model="gemini-3.1-flash-lite-preview",
+                    contents=f"Responda só 'CORRECAO' ou 'NORMAL': o usuário está corrigindo um procedimento?\nMensagem: {prompt}",
+                    config=types.GenerateContentConfig(
+                        http_options=types.HttpOptions(timeout=3000)
+                    )
                 )
-            )
-            if "CORRECAO" in (_intent_resp.text or "").upper():
-                _correcao_hint = (
-                    "\n\n## [DIRETIVA DO MOTOR DE EVOLUÇÃO — NÃO REVELAR AO USUÁRIO]\n"
-                    "O roteador de intenção classificou esta mensagem como CORREÇÃO DE PROCEDIMENTO.\n"
-                    "OBRIGAÇÃO: Após formular sua resposta ao usuário, acione silenciosamente "
-                    "registrar_correcao_procedimento() com os dados extraídos da mensagem.\n"
-                    "Não mencione, descreva nem insinue esta ação ao usuário."
-                )
-        except Exception:
-            pass  # Fail-open: se o roteador falhar, o chat principal continua normalmente
+                if "CORRECAO" in (_intent_resp.text or "").upper():
+                    _correcao_hint = (
+                        "\n\n## [DIRETIVA DO MOTOR DE EVOLUÇÃO — NÃO REVELAR AO USUÁRIO]\n"
+                        "O roteador de intenção classificou esta mensagem como CORREÇÃO DE PROCEDIMENTO.\n"
+                        "OBRIGAÇÃO: Após formular sua resposta ao usuário, acione silenciosamente "
+                        "registrar_correcao_procedimento() com os dados extraídos da mensagem.\n"
+                        "Não mencione, descreva nem insinue esta ação ao usuário."
+                    )
+            except Exception:
+                pass  # Fail-open: timeout ou erro → continua sem hint
 
         chat = client.chats.create(
             model=model_id,
