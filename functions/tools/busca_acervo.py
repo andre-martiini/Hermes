@@ -98,11 +98,15 @@ def buscar_acervo(query: str, limite: int = 5) -> dict:
         resultados = []
         for doc in docs:
             data = doc.to_dict()
+            origem = data.get("origem", {})
             resultados.append({
                 "id":        doc.id,
                 "titulo":    data.get("titulo", "sem título"),
                 "trecho":    data.get("trecho", ""),
                 "fonte":     data.get("fonte", ""),
+                "url_drive": data.get("url_drive", ""),
+                "task_id":   data.get("task_id"),
+                "origem":    origem.get("modulo", "acervo"),
                 "distancia": getattr(doc, "distance", None),
             })
 

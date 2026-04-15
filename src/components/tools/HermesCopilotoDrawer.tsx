@@ -545,24 +545,6 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                         )}
 
                         <div className="flex gap-3 items-end">
-                            {/* Botão de clipe */}
-                            <button
-                                onClick={() => !isBlocked && fileInputRef.current?.click()}
-                                disabled={isBlocked}
-                                title="Anexar arquivo"
-                                className={`shrink-0 w-10 h-10 flex items-center justify-center rounded-2xl border transition-all ${
-                                    attachedFile
-                                        ? 'bg-blue-600 text-white border-blue-600'
-                                        : isDark
-                                            ? 'border-white/10 text-white/40 hover:text-white/80 hover:border-white/30'
-                                            : 'border-slate-200 text-slate-400 hover:text-slate-600 hover:border-slate-300'
-                                } disabled:opacity-30 disabled:cursor-not-allowed`}
-                            >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                                </svg>
-                            </button>
-
                             {/* Input de arquivo oculto */}
                             <input
                                 ref={fileInputRef}
@@ -572,25 +554,44 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                 onChange={handleFileSelect}
                             />
 
-                            <textarea
-                                ref={textareaRef}
-                                value={input}
-                                onChange={e => setInput(e.target.value)}
-                                onFocus={() => setIsFocused(true)}
-                                disabled={isBlocked}
-                                onKeyDown={e => {
-                                    if (e.key === 'Enter' && !e.shiftKey) {
-                                        e.preventDefault();
-                                        if (!currentSessionId) {
-                                            handleCreateSession(input);
-                                        } else {
-                                            sendMessage(input);
+                            {/* Textarea com botão de clipe embutido */}
+                            <div className="relative flex-1">
+                                <textarea
+                                    ref={textareaRef}
+                                    value={input}
+                                    onChange={e => setInput(e.target.value)}
+                                    onFocus={() => setIsFocused(true)}
+                                    disabled={isBlocked}
+                                    onKeyDown={e => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault();
+                                            if (!currentSessionId) {
+                                                handleCreateSession(input);
+                                            } else {
+                                                sendMessage(input);
+                                            }
                                         }
-                                    }
-                                }}
-                                placeholder={attachedFile ? 'Pergunte sobre o arquivo ou envie sem texto…' : 'Estrategize com Hermes…'}
-                                className={`flex-1 px-5 py-3.5 rounded-2xl text-sm font-medium outline-none border resize-none overflow-y-auto ${isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-blue-500' : 'bg-slate-50 border-slate-200 text-slate-700 placeholder:text-slate-400 focus:border-blue-500'} transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed`}
-                            />
+                                    }}
+                                    placeholder={attachedFile ? 'Pergunte sobre o arquivo ou envie sem texto…' : 'Estrategize com Hermes…'}
+                                    className={`w-full pl-4 pr-9 py-3.5 rounded-2xl text-sm font-medium outline-none border resize-none overflow-y-auto ${isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-blue-500' : 'bg-slate-50 border-slate-200 text-slate-700 placeholder:text-slate-400 focus:border-blue-500'} transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed`}
+                                />
+                                <button
+                                    onClick={() => !isBlocked && fileInputRef.current?.click()}
+                                    disabled={isBlocked}
+                                    title="Anexar arquivo"
+                                    className={`absolute right-2.5 bottom-3 transition-all ${
+                                        attachedFile
+                                            ? 'text-blue-500'
+                                            : isDark
+                                                ? 'text-white/30 hover:text-white/70'
+                                                : 'text-slate-300 hover:text-slate-500'
+                                    } disabled:opacity-30 disabled:cursor-not-allowed`}
+                                >
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                    </svg>
+                                </button>
+                            </div>
                             <button
                                 onClick={() => {
                                     if (!currentSessionId) {

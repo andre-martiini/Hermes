@@ -4880,8 +4880,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
             lines = []
             for r in resultados:
+                origem_label = f"Tarefa {r['task_id']}" if r.get('task_id') else r.get('origem', 'Acervo')
+                url_part = f" | LINK: {r['url_drive']}" if r.get('url_drive') else ""
                 lines.append(
-                    f"DOC: {r['titulo']} | FONTE: {r['fonte']}\n"
+                    f"DOC: {r['titulo']} | ORIGEM: {origem_label} | FONTE: {r['fonte']}{url_part}\n"
                     f"TRECHO: {r['trecho']}"
                 )
             return "\n\n".join(lines)
@@ -5162,21 +5164,50 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     embedding_floats = list(map(float, embedding))
 
                     artefato_id = str(_uuid.uuid4())[:12]
+                    drive_link = f"https://drive.google.com/file/d/{drive_file_id}/view"
+
+                    # Origem bifurcada: tarefa (se task_id ativo) ou acervo global
+                    origem_doc = (
+                        {'modulo': 'tarefa', 'id_origem': task_id, 'session_id': session_id or 'direto'}
+                        if task_id
+                        else {'modulo': 'copiloto', 'id_origem': session_id or 'direto'}
+                    )
                     db.collection('indice_artefatos').document(artefato_id).set({
                         'titulo': titulo_doc,
                         'trecho': resumo_doc,
                         'fonte': natureza_doc,
                         'embedding': Vector(embedding_floats),
                         'tipo_arquivo': real_mime_type.split('/')[-1],
-                        'url_drive': f"https://drive.google.com/file/d/{drive_file_id}/view",
+                        'url_drive': drive_link,
                         'data_criacao': firestore.SERVER_TIMESTAMP,
-                        'origem': {'modulo': 'copiloto', 'id_origem': session_id or 'direto'},
+                        'origem': origem_doc,
+                        'task_id': task_id or None,
                         'categoria': 'Copiloto Hermes'
                     })
                     print(f"[Copiloto] Artefato '{titulo_doc}' gravado em indice_artefatos (id={artefato_id})")
 
+                    # Dupla cidadania: vínculo físico e histórico à tarefa ativa
+                    if task_id:
+                        from datetime import datetime as _dt
+                        now_iso = _dt.now().isoformat()
+                        pool_item = {
+                            'id': artefato_id,
+                            'tipo': 'arquivo',
+                            'valor': drive_link,
+                            'nome': titulo_doc,
+                            'data_criacao': now_iso
+                        }
+                        diary_entry = {
+                            'data': now_iso,
+                            'nota': f"📎 [Copiloto] Arquivo '{titulo_doc}' ({natureza_doc}) carregado via Copiloto Hermes e indexado no acervo global."
+                        }
+                        db.collection('tarefas').document(task_id).update({
+                            'pool_dados': firestore.ArrayUnion([pool_item]),
+                            'acompanhamento': firestore.ArrayUnion([diary_entry])
+                        })
+                        print(f"[Copiloto] Arquivo '{titulo_doc}' vinculado à tarefa {task_id} (pool_dados + acompanhamento)")
+
                     # 7. Monta o bloco de contexto que será injetado no prompt final
-                    drive_link = f"https://drive.google.com/file/d/{drive_file_id}/view"
                     file_context = (
                         f"[CONTEXTO DO ARQUIVO ANEXADO]\n"
                         f"Nome: {real_file_name}\n"
@@ -5196,10 +5227,27 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         print(f"[Copiloto] Aviso: falha ao deletar arquivo Gemini '{gemini_file.name}': {del_err}")
 
             except Exception as file_err:
-                print(f"[Copiloto] Erro na ingestão documental: {file_err}")
-                import traceback
-                print(traceback.format_exc())
-                file_context = f"⚠️ Não foi possível processar o arquivo '{drive_file_name}': {file_err}"
+                import traceback as _tb
+                from datetime import datetime as _dt
+                err_str = str(file_err)
+                print(f"[Copiloto] Erro na ingestão documental: {err_str}")
+                print(_tb.format_exc())
+
+                # Telemetria estruturada — não suja o diário da tarefa
+                try:
+                    db.collection('quality_logs').add({
+                        'tipo': 'erro_ingestao_copiloto',
+                        'descricao': 'Falha ao extrair contexto de arquivo via Gemini File API',
+                        'evidencia': err_str,
+                        'arquivo_nome': drive_file_name,
+                        'task_id': task_id or None,
+                        'session_id': session_id or None,
+                        'data_criacao': _dt.now().isoformat()
+                    })
+                except Exception as log_err:
+                    print(f"[Copiloto] Falha ao gravar quality_log: {log_err}")
+
+                file_context = f"⚠️ Não foi possível processar o arquivo '{drive_file_name}': {err_str}"
         # ─────────────────────────────────────────────────────────────────────────
 
         # Injeta contexto inicial se houver task_id
