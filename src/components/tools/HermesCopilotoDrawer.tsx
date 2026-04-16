@@ -235,6 +235,28 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         setAttachedFile(null);
     };
 
+    // ── Quick replies (botões de confirmação de draft) ────────────────────────
+    const handleQuickReply = (text: string) => {
+        if (isLoading) return;
+        if (!currentSessionId) {
+            handleCreateSession(text);
+        } else {
+            sendMessage(text);
+        }
+    };
+
+    // Detecta o tipo de draft pendente numa mensagem do assistente.
+    // Só retorna não-nulo para o ÚLTIMO assistente — depois que o usuário
+    // responder, o índice muda e os botões somem automaticamente.
+    const getDraftType = (content: string, msgIndex: number): 'action' | 'plan' | null => {
+        if (isLoading) return null;
+        const lastAsstIdx = messages.reduce((last, m, i) => m.role === 'assistant' ? i : last, -1);
+        if (msgIndex !== lastAsstIdx) return null;
+        if (/confirma a cria[çc][aã]o desta a[çc][aã]o/i.test(content)) return 'action';
+        if (/confirma a atualiza[çc][aã]o do plano/i.test(content)) return 'plan';
+        return null;
+    };
+
     // ── Transcrição de áudio colado ───────────────────────────────────────────
     const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
         const files = Array.from(e.clipboardData.files);
@@ -590,6 +612,40 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                     >
                                         {msg.content}
                                     </ReactMarkdown>
+
+                                    {/* Botões de confirmação de draft */}
+                                    {msg.role === 'assistant' && (() => {
+                                        const draftType = getDraftType(msg.content, i);
+                                        if (!draftType) return null;
+                                        return (
+                                            <div className="mt-3 pt-3 border-t border-slate-200 flex flex-wrap gap-2">
+                                                <button
+                                                    onClick={() => handleQuickReply('Confirmo!')}
+                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-sm"
+                                                >
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                    Confirmar
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        setInput('Prefiro ajustar: ');
+                                                        setTimeout(() => textareaRef.current?.focus(), 50);
+                                                    }}
+                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-amber-700 border border-amber-300 text-[10px] font-black uppercase tracking-widest hover:bg-amber-50 transition-all shadow-sm"
+                                                >
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                    Ajustar
+                                                </button>
+                                                <button
+                                                    onClick={() => handleQuickReply('Cancelar, não quero prosseguir.')}
+                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-slate-400 border border-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 hover:text-slate-600 transition-all shadow-sm"
+                                                >
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                    Cancelar
+                                                </button>
+                                            </div>
+                                        );
+                                    })()}
 
                                     {msg.proposedPlan && (
                                         <div className="mt-4 p-4 bg-white rounded-xl border border-blue-200 shadow-sm">
