@@ -4493,11 +4493,28 @@ def diagnosticar_codigo(req: https_fn.CallableRequest):
 
             # Busca URL do repositório
             sistema_doc = db.collection('sistemas_detalhes').document(sistema_id).get()
+            
+            # Fallback robusto: busca case-insensitive ignorando prefixos como 'SISTEMA:'
+            if not sistema_doc.exists:
+                sistemas_all = db.collection('sistemas_detalhes').get()
+                target_id = sistema_id.strip().lower().replace('sistema:', '')
+                
+                for doc in sistemas_all:
+                    data = doc.to_dict() or {}
+                    # Normaliza IDs e Nomes para comparação
+                    doc_id_norm = doc.id.strip().lower().replace('sistema:', '')
+                    doc_name_norm = (data.get('nome') or "").strip().lower().replace('sistema:', '')
+                    
+                    if doc_id_norm == target_id or doc_name_norm == target_id:
+                        sistema_doc = doc
+                        break
+            
             if not sistema_doc.exists:
                 raise https_fn.HttpsError(
                     code=https_fn.FunctionsErrorCode.NOT_FOUND,
                     message=f"Sistema '{sistema_id}' não encontrado em sistemas_detalhes."
                 )
+            
             repo_url = (sistema_doc.to_dict() or {}).get('repositorio_principal', '').strip()
             if not repo_url:
                 raise https_fn.HttpsError(
@@ -5857,8 +5874,26 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         from datetime import datetime
         today_str = datetime.now().strftime("%Y-%m-%d")
 
+        # Busca catálogo de sistemas para o "de-para" exato que o usuário solicitou
+        try:
+            sistemas_docs = db.collection('sistemas_detalhes').get()
+            catalogo_sistemas = []
+            for s_doc in sistemas_docs:
+                s_data = s_doc.to_dict()
+                s_nome = s_data.get('nome', 'Sem Nome')
+                s_id = s_doc.id
+                catalogo_sistemas.append(f"- {s_nome}: {s_id}")
+            sistemas_str = "\n".join(catalogo_sistemas) if catalogo_sistemas else "Nenhum sistema cadastrado."
+        except Exception as e:
+            print(f"Erro ao buscar catálogo de sistemas: {e}")
+            sistemas_str = "Erro ao carregar catálogo."
+
         system_instruction = (
             f"Você é o Copiloto Hermes, estrategista sênior de processos. Hoje é {today_str}. "
+            f"{f'CONTEXTO TÉCNICO VINCULADO (OBRIGATÓRIO): sistemaId={system_id}, taskId={task_id}. ' if system_id or task_id else ''}"
+            "\n\nCATÁLOGO DE SISTEMAS (Mapeamento Exato de Nome para ID):\n"
+            f"{sistemas_str}\n\n"
+            "Ao realizar diagnósticos ou operações em sistemas, utilize SEMPRE o ID técnico do catálogo acima correspondente ao nome citado pelo usuário.\n\n"
             "Seu tom de voz: Consultivo, analítico e absurdamente conciso. "
             "Use bullet points para melhorar a legibilidade. "
             "\n\n"
@@ -5992,7 +6027,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "  - O problema é localizado e autocontido\n\n"
             "### ETAPA 1 — IDENTIFICAÇÃO E EMISSÃO DO BLOCO\n\n"
             "Emita o bloco [DIAGNOSIS]...[/DIAGNOSIS] com o JSON apropriado para o modo escolhido.\n\n"
-            "MODO REPO — JSON:\n"
+            "MODO REPO — JSON (Use o 'sistemaId' fornecido no contexto técnico se disponível):\n"
             '  [DIAGNOSIS]{"mode": "repo", "sistemaId": "id_do_sistema", "descricaoProblema": "descrição técnica concisa"}[/DIAGNOSIS]\n\n'
             "MODO SNIPPET — JSON (inclua o código extraído da mensagem do usuário, escapado como string JSON):\n"
             '  [DIAGNOSIS]{"mode": "snippet", "codeSnippet": "...código aqui...", "fileName": "nome_inferido.ext", "descricaoProblema": "descrição técnica concisa"}[/DIAGNOSIS]\n\n'
