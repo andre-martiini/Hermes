@@ -79,6 +79,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const progressTransition = useRef<string>('none');
     // Erro inline no footer (erros antes do Firestore não ficam visíveis no chat)
     const [footerError, setFooterError] = useState<string | null>(null);
+    // Estado de transcrição de áudio colado
+    const [isTranscribing, setIsTranscribing] = useState(false);
 
     // Auto-resize textarea logic
     useEffect(() => {
@@ -192,6 +194,51 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
     const handleRemoveFile = () => {
         setAttachedFile(null);
+    };
+
+    // ── Transcrição de áudio colado ───────────────────────────────────────────
+    const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+        const files = Array.from(e.clipboardData.files);
+        const audioFile = files.find(f => f.type.startsWith('audio/'));
+        if (!audioFile) return; // sem áudio: deixa o comportamento padrão acontecer
+
+        e.preventDefault();
+        setIsTranscribing(true);
+        setFooterError(null);
+
+        try {
+            const reader = new FileReader();
+            reader.readAsDataURL(audioFile);
+            reader.onloadend = async () => {
+                try {
+                    const b64 = (reader.result as string).split(',')[1];
+                    // Tenta extrair extensão do nome do arquivo, senão deriva do MIME
+                    const nameParts = audioFile.name.split('.');
+                    const ext = nameParts.length > 1
+                        ? '.' + nameParts.pop()
+                        : '.' + (audioFile.type.split('/')[1]?.split(';')[0] || 'm4a');
+
+                    const fn = httpsCallable(functions, 'transcreverAudio');
+                    const res = await fn({ audioBase64: b64, extension: ext });
+                    const data = res.data as { raw: string; refined: string };
+
+                    if (data.refined) {
+                        setInput(prev => prev + (prev ? '\n' : '') + data.refined);
+                    }
+                } catch (err: any) {
+                    setFooterError('Erro ao transcrever áudio: ' + (err?.message || 'Tente novamente.'));
+                } finally {
+                    setIsTranscribing(false);
+                }
+            };
+            reader.onerror = () => {
+                setFooterError('Não foi possível ler o arquivo de áudio colado.');
+                setIsTranscribing(false);
+            };
+        } catch (err: any) {
+            setFooterError('Erro ao transcrever áudio: ' + (err?.message || 'Tente novamente.'));
+            setIsTranscribing(false);
+        }
     };
 
     // ── Criação de sessão ─────────────────────────────────────────────────────
@@ -343,7 +390,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         processing: 'Extraindo contexto e atualizando Acervo...'
     };
 
-    const isBlocked = isLoading || uploadPhase !== 'idle';
+    const isBlocked = isLoading || uploadPhase !== 'idle' || isTranscribing;
 
     return (
         <div className={`fixed inset-y-0 right-0 z-[500] w-full md:w-[450px] shadow-2xl transition-transform duration-300 transform translate-x-0 flex flex-col ${isDark ? 'bg-[#0f0f1a] text-white' : 'bg-white text-slate-900 border-l border-slate-200'}`}>
@@ -571,6 +618,16 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                             </div>
                         )}
 
+                        {/* Banner de transcrição de áudio */}
+                        {isTranscribing && (
+                            <div className="flex items-center gap-2 mb-3 px-3 py-2.5 rounded-xl text-xs font-semibold bg-violet-50 text-violet-700 border border-violet-200">
+                                <svg className="w-4 h-4 shrink-0 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.343l-.707-.707" />
+                                </svg>
+                                <span>Transcrevendo áudio...</span>
+                            </div>
+                        )}
+
                         {/* Badge de arquivo anexado */}
                         {attachedFile && !isBlocked && (
                             <div className={`flex items-center gap-2 mb-3 px-3 py-2 rounded-xl text-xs font-semibold ${isDark ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
@@ -607,6 +664,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                     value={input}
                                     onChange={e => setInput(e.target.value)}
                                     onFocus={() => setIsFocused(true)}
+                                    onPaste={handlePaste}
                                     disabled={isBlocked}
                                     onKeyDown={e => {
                                         if (e.key === 'Enter' && !e.shiftKey) {
@@ -618,7 +676,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             }
                                         }
                                     }}
-                                    placeholder={attachedFile ? 'Pergunte sobre o arquivo ou envie sem texto…' : 'Estrategize com Hermes…'}
+                                    placeholder={isTranscribing ? 'Transcrevendo áudio...' : attachedFile ? 'Pergunte sobre o arquivo ou envie sem texto…' : 'Estrategize com Hermes…'}
                                     className={`w-full pl-4 pr-9 py-3.5 rounded-2xl text-sm font-medium outline-none border resize-none overflow-y-auto ${isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-blue-500' : 'bg-slate-50 border-slate-200 text-slate-700 placeholder:text-slate-400 focus:border-blue-500'} transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed`}
                                 />
                                 <button
