@@ -1,6 +1,7 @@
-﻿import React, { useState } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '@/firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { functions, db } from '@/firebase';
 import { SlideHistoryEntry } from '@/types';
 import { SLIDES_HISTORY_KEY } from '@/constants';
 import { AutoExpandingTextarea } from '../ui/UIComponents';
@@ -8,9 +9,20 @@ import { AutoExpandingTextarea } from '../ui/UIComponents';
 interface SlidesToolProps {
   onBack: () => void;
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
+  initialDraftId?: string;
 }
 
-export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast }) => {
+// Converte o schema do Firestore (slides_drafts) para o formato interno do editor
+const mapFirestoreSlide = (s: any) => ({
+  numero: s.ordem ?? 1,
+  layout: s.tipo_layout === 'Capa' ? 'capa' : 'titulo_e_conteudo',
+  titulo: s.titulo ?? '',
+  topicos: Array.isArray(s.topicos) ? s.topicos : [],
+  subtitulo: s.subtitulo ?? '',
+  prompt_imagem: s.sugestao_imagem ?? '',
+});
+
+export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initialDraftId }) => {
   const [rascunho, setRascunho] = useState('');
   const [qtdSlides, setQtdSlides] = useState(5);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -24,6 +36,30 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast }) => 
   const [history, setHistory] = useState<SlideHistoryEntry[]>(() => {
     try { return JSON.parse(localStorage.getItem(SLIDES_HISTORY_KEY) || '[]'); } catch { return []; }
   });
+
+  // Carrega draft do Firestore quando initialDraftId é fornecido (vindo do Copiloto)
+  useEffect(() => {
+    if (!initialDraftId) return;
+    const loadDraft = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'slides_drafts', initialDraftId));
+        if (!snap.exists()) { showToast('Apresentação não encontrada.', 'error'); return; }
+        const data = snap.data();
+        const mapped = { slides: (data.slides ?? []).map(mapFirestoreSlide) };
+        setPresentation(mapped);
+        setRascunho(data.tema_geral ?? '');
+        const id = saveToHistory(mapped, data.tema_geral ?? '', `draft_${initialDraftId}`);
+        setCurrentHistoryId(id);
+        setView('editor');
+        showToast('Apresentação carregada!', 'success');
+      } catch (e) {
+        console.error(e);
+        showToast('Erro ao carregar a apresentação.', 'error');
+      }
+    };
+    loadDraft();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialDraftId]);
 
   const saveToHistory = (data: any, draft: string, existingId?: string | null) => {
     const title = data?.slides?.[0]?.titulo || 'ApresentaÃ§ão';

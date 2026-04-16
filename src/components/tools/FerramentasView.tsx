@@ -9,8 +9,9 @@ import { TranscriptionTool } from './TranscriptionTool';
 import { ChoirRehearsalsTool } from './ChoirRehearsalsTool';
 import { MeetingTranscriptionTool } from './MeetingTranscriptionTool';
 import { WhatsAppAssistantTool } from './WhatsAppAssistantTool';
+import { DiagnosticoTool } from './DiagnosticoTool';
 
-type FerramentaAtiva = 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'whatsapp_assistant' | null;
+type FerramentaAtiva = 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'whatsapp_assistant' | 'diagnostico' | null;
 
 interface FerramentasViewProps {
   ideas: BrainstormIdea[];
@@ -28,6 +29,7 @@ interface FerramentasViewProps {
   showAlert: (title: string, msg: string) => void;
   knowledgeItems: ConhecimentoItem[];
   onUploadFile: (file: File) => Promise<ConhecimentoItem | null>;
+  initialDraftId?: string;
 }
 
 export const FerramentasView: React.FC<FerramentasViewProps> = ({
@@ -45,7 +47,8 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   showToast,
   showAlert,
   knowledgeItems,
-  onUploadFile
+  onUploadFile,
+  initialDraftId,
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [textInput, setTextInput] = useState('');
@@ -103,7 +106,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   };
 
   if (activeTool === 'slides') {
-    return <SlidesTool onBack={() => setActiveTool(null)} showToast={showToast} />;
+    return <SlidesTool onBack={() => setActiveTool(null)} showToast={showToast} initialDraftId={initialDraftId} />;
   }
 
   if (activeTool === 'shopping') {
@@ -129,6 +132,10 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
 
   if (activeTool === 'whatsapp_assistant') {
     return <WhatsAppAssistantTool onBack={() => setActiveTool(null)} showToast={showToast} />;
+  }
+
+  if (activeTool === 'diagnostico') {
+    return <DiagnosticoTool onBack={() => setActiveTool(null)} />;
   }
 
   const startRecording = async () => {
