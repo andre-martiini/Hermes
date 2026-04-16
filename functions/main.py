@@ -4768,7 +4768,7 @@ def askChatbot(req: https_fn.CallableRequest):
 @https_fn.on_call(
     cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
     memory=options.MemoryOption.GB_1,
-    timeout_sec=120
+    timeout_sec=540
 )
 def askCopilotoHermes(req: https_fn.CallableRequest):
     """

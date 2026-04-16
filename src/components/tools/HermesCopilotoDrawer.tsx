@@ -82,6 +82,45 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     // Estado de transcrição de áudio colado
     const [isTranscribing, setIsTranscribing] = useState(false);
 
+    // ── Redimensionamento do drawer ───────────────────────────────────────────
+    const DRAWER_MIN_WIDTH = 320;
+    const DRAWER_MAX_WIDTH = Math.round(window.innerWidth * 0.5);
+    const [drawerWidth, setDrawerWidth] = useState(450);
+    const isDragging = useRef(false);
+    const dragStartX = useRef(0);
+    const dragStartWidth = useRef(0);
+
+    const handleResizeMouseDown = (e: React.MouseEvent) => {
+        e.preventDefault();
+        isDragging.current = true;
+        dragStartX.current = e.clientX;
+        dragStartWidth.current = drawerWidth;
+        document.body.style.cursor = 'ew-resize';
+        document.body.style.userSelect = 'none';
+
+        const onMouseMove = (ev: MouseEvent) => {
+            if (!isDragging.current) return;
+            // arrastar para a esquerda aumenta a largura (drawer está à direita)
+            const delta = dragStartX.current - ev.clientX;
+            const newWidth = Math.min(
+                Math.max(dragStartWidth.current + delta, DRAWER_MIN_WIDTH),
+                Math.round(window.innerWidth * 0.5)
+            );
+            setDrawerWidth(newWidth);
+        };
+
+        const onMouseUp = () => {
+            isDragging.current = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onMouseUp);
+        };
+
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+    };
+
     // Auto-resize textarea logic
     useEffect(() => {
         const handleResize = () => {
@@ -393,7 +432,19 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const isBlocked = isLoading || uploadPhase !== 'idle' || isTranscribing;
 
     return (
-        <div className={`fixed inset-y-0 right-0 z-[500] w-full md:w-[450px] shadow-2xl transition-transform duration-300 transform translate-x-0 flex flex-col ${isDark ? 'bg-[#0f0f1a] text-white' : 'bg-white text-slate-900 border-l border-slate-200'}`}>
+        <div
+            className={`fixed inset-y-0 right-0 z-[500] shadow-2xl transition-transform duration-300 transform translate-x-0 flex flex-col ${isDark ? 'bg-[#0f0f1a] text-white' : 'bg-white text-slate-900 border-l border-slate-200'}`}
+            style={{ width: `${drawerWidth}px` }}
+        >
+            {/* Handle de redimensionamento — borda esquerda */}
+            <div
+                onMouseDown={handleResizeMouseDown}
+                className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize z-10 group"
+                title="Arrastar para redimensionar"
+            >
+                <div className="absolute inset-y-0 left-0 w-full bg-transparent group-hover:bg-blue-400/30 transition-colors duration-150 rounded-l" />
+                <div className="absolute top-1/2 -translate-y-1/2 left-0 w-1 h-10 rounded-full bg-slate-300 group-hover:bg-blue-400 transition-colors duration-150" />
+            </div>
 
             {/* Header */}
             <div className={`shrink-0 p-6 flex items-center justify-between border-b ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
