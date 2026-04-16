@@ -5234,9 +5234,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             area_tematica: str = "GERAL",
             data_limite: str = None,
             tipo_acao: str = "fast",
-            tags: list = [],
+            tags: list[str] = [],
             notas: str = "",
-            plano_acao: list = []
+            plano_acao: list[str] = []
         ):
             """
             Cria uma nova ação/tarefa no sistema Hermes após confirmação explícita do usuário.
@@ -5304,7 +5304,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
         def editar_plano_acao(
             task_id: str,
-            novo_plano: list,
+            novo_plano: list[dict],
             justificativa_diario: str
         ):
             """
