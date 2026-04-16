@@ -17,7 +17,23 @@ interface Message {
     proposedPlan?: any[];
     timestamp: any;
     type?: 'text' | 'plan_proposal';
+    toolsUsed?: string[];
 }
+
+const TOOL_LABELS: Record<string, string> = {
+    consultar_historico_acoes: 'Grafo de Execução',
+    buscar_arquivos_acervo: 'Acervo de Documentos',
+    obter_contexto_tela: 'Contexto da Tarefa',
+    pesquisar_internet: 'Internet',
+    ler_pagina_web: 'Leitura de Página',
+    ler_documento_na_integra: 'Leitura de Documento',
+    resolver_conflito_procedimento: 'Resolução de Conflito',
+    criar_acao_no_sistema: 'Criando Ação',
+    editar_plano_acao: 'Ajustando Plano...',
+};
+
+// Ferramentas de escrita/mutação — recebem estilo verde
+const WRITE_TOOLS = new Set(['criar_acao_no_sistema', 'editar_plano_acao']);
 
 interface Session {
     id: string;
@@ -414,10 +430,40 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                         {messages.map((msg, i) => (
                             <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                                <div className={`max-w-[90%] px-4 py-3 rounded-2xl text-xs font-medium leading-relaxed shadow-sm ${msg.role === 'user'
+                                <div className={`max-w-[90%] min-w-0 px-4 py-3 rounded-2xl text-xs font-medium leading-relaxed shadow-sm ${msg.role === 'user'
                                     ? 'bg-blue-600 text-white rounded-br-none'
                                     : 'bg-slate-100 text-slate-700 rounded-bl-none'
                                     }`}>
+                                    {msg.toolsUsed && msg.toolsUsed.length > 0 && (
+                                        <div className="flex flex-wrap gap-1 mb-2.5">
+                                            {msg.toolsUsed.map(tool => {
+                                                if (!TOOL_LABELS[tool]) return null;
+                                                const isWrite = WRITE_TOOLS.has(tool);
+                                                return (
+                                                    <span
+                                                        key={tool}
+                                                        className={`inline-flex items-center gap-1 text-[9px] font-bold rounded-full px-2 py-0.5 border ${
+                                                            isWrite
+                                                                ? 'text-emerald-600 bg-emerald-50 border-emerald-200'
+                                                                : 'text-slate-400 bg-white border-slate-200'
+                                                        }`}
+                                                    >
+                                                        {isWrite ? (
+                                                            <svg className="w-2.5 h-2.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+                                                            </svg>
+                                                        ) : (
+                                                            <svg className="w-2.5 h-2.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                            </svg>
+                                                        )}
+                                                        {TOOL_LABELS[tool]}
+                                                    </span>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
                                     <ReactMarkdown
                                         remarkPlugins={[remarkGfm]}
                                         components={{
@@ -440,7 +486,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                         </button>
                                                     );
                                                 }
-                                                return <a className="text-blue-600 underline hover:text-blue-800" target="_blank" rel="noopener noreferrer" {...props} />;
+                                                return <a className="text-blue-600 underline hover:text-blue-800 break-all" target="_blank" rel="noopener noreferrer" {...props} />;
                                             },
                                         }}
                                     >

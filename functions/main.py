@@ -5228,6 +5228,168 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             except Exception as _res_err:
                 return f"⚠️ Erro ao resolver conflito: {str(_res_err)}"
 
+        def criar_acao_no_sistema(
+            titulo: str,
+            descricao: str = "",
+            area_tematica: str = "GERAL",
+            data_limite: str = None,
+            tipo_acao: str = "fast",
+            tags: list = [],
+            notas: str = "",
+            plano_acao: list = []
+        ):
+            """
+            Cria uma nova ação/tarefa no sistema Hermes após confirmação explícita do usuário.
+            Use APENAS depois que o usuário confirmar o draft apresentado.
+            Parâmetros:
+            - titulo: título obrigatório da ação
+            - descricao: descrição detalhada (opcional)
+            - area_tematica: área temática (ex: 'LICITAÇÕES', 'RH', 'GERAL')
+            - data_limite: prazo no formato YYYY-MM-DD (opcional)
+            - tipo_acao: 'fast' para ações rápidas, 'deep' para trabalho profundo
+            - tags: lista de tags (opcional)
+            - notas: observações adicionais (opcional)
+            - plano_acao: lista de strings com os passos do plano (opcional)
+            Retorna o ID da tarefa criada ou mensagem de erro.
+            """
+            try:
+                import uuid as _uuid
+                from datetime import datetime as _dt, timezone as _tz
+
+                now_iso = _dt.now(_tz.utc).isoformat()
+                task_id = str(_uuid.uuid4())[:20]
+
+                # Converte lista de strings em array de objetos para o React
+                plano_convertido = [
+                    {
+                        "id": str(_uuid.uuid4())[:8],
+                        "text": str(passo),
+                        "completed": False
+                    }
+                    for passo in (plano_acao or [])
+                    if str(passo).strip()
+                ]
+
+                doc = {
+                    # Campos fornecidos pelo LLM
+                    "titulo": titulo.strip(),
+                    "descricao": descricao or "",
+                    "area_tematica": (area_tematica or "GERAL").upper(),
+                    "data_limite": data_limite or None,
+                    "tipo_acao": tipo_acao if tipo_acao in ("fast", "deep") else "fast",
+                    "tags": list(tags) if tags else [],
+                    "notas": notas or "",
+                    "plano_acao": plano_convertido,
+                    # Campos forçados (hidratação interna)
+                    "status": "em andamento",
+                    "origem": "copiloto",
+                    "projeto": "GERAL",
+                    "data_criacao": now_iso,
+                    "data_atualizacao": now_iso,
+                    "contabilizar_meta": True,
+                    "acompanhamento": [],
+                    "entregas_relacionadas": [],
+                    "pool_dados": [],
+                    "plano_acao_historico": [],
+                    "sync_status": "new",
+                }
+
+                db.collection("tarefas").document(task_id).set(doc)
+                print(f"[Copiloto] Ação criada: id={task_id}, titulo='{titulo}'")
+                return f"OK|{task_id}"
+
+            except Exception as _ce:
+                print(f"[Copiloto] Erro ao criar ação: {_ce}")
+                return f"ERRO|{str(_ce)}"
+
+        def editar_plano_acao(
+            task_id: str,
+            novo_plano: list,
+            justificativa_diario: str
+        ):
+            """
+            Substitui/atualiza o plano de ação de uma tarefa existente.
+            Usa fuzzy matching para preservar o status de conclusão dos passos já concluídos.
+            Use APENAS depois que o usuário confirmar o draft do novo plano apresentado.
+            Parâmetros:
+            - task_id: ID da tarefa no Firestore.
+            - novo_plano: Lista de dicionários no formato [{"id": "xyz", "text": "Passo 1"}, {"text": "Passo Novo sem id"}].
+            - justificativa_diario: Texto gerado pela IA explicando o motivo da alteração (será gravado no diário da tarefa).
+            Retorna 'OK' ou 'ERRO|{detalhe}'.
+            """
+            try:
+                import uuid as _uuid
+                from datetime import datetime as _dt, timezone as _tz
+                import difflib as _difflib
+
+                task_ref = db.collection('tarefas').document(task_id)
+                task_doc = task_ref.get()
+                if not task_doc.exists:
+                    return f"ERRO|Tarefa '{task_id}' não encontrada."
+
+                task_data = task_doc.to_dict()
+                plano_atual = task_data.get('plano_acao', [])
+                now_iso = _dt.now(_tz.utc).isoformat()
+
+                # Índice rápido por ID para Match Direto
+                plano_por_id = {p['id']: p for p in plano_atual if p.get('id')}
+                textos_originais = [p.get('text', p.get('texto', '')) for p in plano_atual]
+
+                plano_final = []
+                for item in (novo_plano or []):
+                    texto_novo = str(item.get('text') or item.get('texto') or '').strip()
+                    if not texto_novo:
+                        continue
+
+                    item_id = item.get('id', '')
+
+                    # Caminho 1: Match Direto por ID
+                    if item_id and item_id in plano_por_id:
+                        original = plano_por_id[item_id]
+                        plano_final.append({
+                            'id': item_id,
+                            'text': texto_novo,
+                            'completed': original.get('completed', False)
+                        })
+                        continue
+
+                    # Caminho 2: Fuzzy Match por texto (≥85% similaridade)
+                    matches = _difflib.get_close_matches(texto_novo, textos_originais, n=1, cutoff=0.85)
+                    if matches:
+                        idx = textos_originais.index(matches[0])
+                        original = plano_atual[idx]
+                        plano_final.append({
+                            'id': original.get('id', str(_uuid.uuid4())[:8]),
+                            'text': texto_novo,
+                            'completed': original.get('completed', False)
+                        })
+                        continue
+
+                    # Caminho 3: Inserção — novo passo sem correspondência
+                    plano_final.append({
+                        'id': str(_uuid.uuid4())[:8],
+                        'text': texto_novo,
+                        'completed': False
+                    })
+
+                diary_entry = {
+                    'data': now_iso,
+                    'nota': f"[Copiloto Hermes] Plano de ação atualizado: {justificativa_diario}"
+                }
+
+                task_ref.update({
+                    'plano_acao': plano_final,
+                    'data_atualizacao': now_iso,
+                    'acompanhamento': firestore.ArrayUnion([diary_entry])
+                })
+
+                print(f"[Copiloto] Plano de ação da tarefa {task_id} atualizado ({len(plano_final)} passos).")
+                return "OK"
+
+            except Exception as _ee:
+                print(f"[Copiloto] Erro ao editar plano: {_ee}")
+                return f"ERRO|{str(_ee)}"
+
         # Configuração do Chat com ferramentas
         model_id = "gemini-3.1-pro-preview"
         
@@ -5282,7 +5444,56 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "  2. Chame ler_documento_na_integra(drive_file_id=<ID>, query_especifica=<pergunta exata do usuário>).\n"
             "  3. Baseie sua resposta EXCLUSIVAMENTE no retorno desta ferramenta.\n"
             "  4. Se a ferramenta declarar que a informação não existe, reproduza essa declaração sem inventar alternativas.\n"
-            "NUNCA misture dados numéricos (valores, itens, quantidades) de processos ou documentos distintos."
+            "NUNCA misture dados numéricos (valores, itens, quantidades) de processos ou documentos distintos.\n\n"
+            "## CRIAÇÃO DE AÇÕES — PADRÃO DRAFT-THEN-COMMIT (CRÍTICO)\n\n"
+            "Quando o usuário solicitar a criação de uma ação/tarefa, siga OBRIGATORIAMENTE este protocolo:\n\n"
+            "ETAPA 1 — DRAFT (apresentar antes de criar):\n"
+            "Nunca chame criar_acao_no_sistema imediatamente. Primeiro, apresente um resumo estruturado:\n"
+            "  📋 **Draft da Ação**\n"
+            "  - **Título:** [título proposto]\n"
+            "  - **Área Temática:** [área]\n"
+            "  - **Prazo:** [data ou 'Sem prazo definido']\n"
+            "  - **Tipo:** [fast / deep]\n"
+            "  - **Plano de Ação:**\n"
+            "    1. [passo 1]\n"
+            "    2. [passo 2]\n"
+            "  Confirma a criação desta ação?\n\n"
+            "ETAPA 2 — CONFIRMAÇÃO:\n"
+            "Só chame criar_acao_no_sistema após receber confirmação explícita ('sim', 'confirma', 'pode criar', 'ok', etc.).\n"
+            "Se o usuário ajustar algum campo no draft, incorpore as correções antes de criar.\n\n"
+            "ETAPA 3 — COMMIT E LINK:\n"
+            "Após criar_acao_no_sistema retornar 'OK|{ID}', responda obrigatoriamente:\n"
+            "  ✅ Ação criada: [Título da Ação](task:{ID})\n"
+            "Se retornar 'ERRO|{detalhe}', responda:\n"
+            "  ⚠️ Erro ao criar ação: {detalhe}\n\n"
+            "EXTRAÇÃO DE CONTEXTO PARA O DRAFT:\n"
+            "- Se houver um taskId ativo, use obter_contexto_tela() para inferir área temática, tags e contexto.\n"
+            "- Deduza que a nova ação pode ser sub-tarefa ou relacionada ao contexto ativo.\n"
+            "- Use o histórico da conversa para preencher descricao e plano_acao automaticamente.\n\n"
+            "## EDIÇÃO DE PLANO DE AÇÃO — PADRÃO DRAFT-THEN-COMMIT (CRÍTICO)\n\n"
+            "Quando o usuário solicitar alteração, adição, remoção ou reestruturação de passos de um plano de ação:\n\n"
+            "ETAPA 0 — EXTRAÇÃO DE CONTEXTO OBRIGATÓRIA:\n"
+            "Chame obter_contexto_tela() para capturar o taskId e o plano de ação atual (com os IDs dos passos).\n"
+            "Nunca suponha IDs de passos — leia-os do resultado da ferramenta.\n\n"
+            "ETAPA 1 — DRAFT (apresentar antes de editar):\n"
+            "Nunca chame editar_plano_acao imediatamente. Primeiro, apresente o novo plano proposto:\n"
+            "  ✏️ **Novo Plano de Ação proposto**\n"
+            "  1. [passo 1]\n"
+            "  2. [passo 2]\n"
+            "  *(passos removidos, adicionados ou reordenados em relação ao plano atual)*\n"
+            "  Confirma a atualização do plano?\n\n"
+            "ETAPA 2 — CONFIRMAÇÃO:\n"
+            "Só chame editar_plano_acao após confirmação explícita do usuário ('sim', 'confirma', 'pode atualizar', etc.).\n"
+            "Ao montar novo_plano, inclua o campo 'id' para passos existentes (preserva status de conclusão via fuzzy match no backend).\n"
+            "Omita o 'id' apenas para passos genuinamente novos.\n\n"
+            "ETAPA 3 — COMMIT E CONFIRMAÇÃO:\n"
+            "Se editar_plano_acao retornar 'OK', responda:\n"
+            "  ✅ Plano de ação atualizado com sucesso.\n"
+            "Se retornar 'ERRO|{detalhe}', responda:\n"
+            "  ⚠️ Erro ao atualizar plano: {detalhe}\n\n"
+            "PARÂMETRO justificativa_diario:\n"
+            "Gere automaticamente uma frase concisa descrevendo o que foi alterado e por quê (ex: 'Adicionado passo de validação jurídica a pedido do usuário.').\n"
+            "O usuário não precisa aprovar este texto — é gravado silenciosamente no diário da tarefa."
         )
 
         # --- RECUPERAÇÃO DE HISTÓRICO DA SESSÃO ---
@@ -5339,6 +5550,22 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             except Exception:
                 pass  # Fail-open: timeout ou erro → continua sem hint
 
+        # Mapa nome → função para dispatch manual do loop de ferramentas
+        _function_map = {
+            'consultar_historico_acoes': consultar_historico_acoes,
+            'buscar_arquivos_acervo': buscar_arquivos_acervo,
+            'obter_contexto_tela': obter_contexto_tela,
+            'pesquisar_internet': pesquisar_internet,
+            'ler_pagina_web': ler_pagina_web,
+            'ler_documento_na_integra': ler_documento_na_integra,
+            'registrar_correcao_procedimento': registrar_correcao_procedimento,
+            'resolver_conflito_procedimento': resolver_conflito_procedimento,
+            'criar_acao_no_sistema': criar_acao_no_sistema,
+            'editar_plano_acao': editar_plano_acao,
+        }
+        # Ferramentas internas que não devem aparecer para o usuário
+        _HIDDEN_TOOLS = {'registrar_correcao_procedimento'}
+
         chat = client.chats.create(
             model=model_id,
             config=types.GenerateContentConfig(
@@ -5352,7 +5579,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     ler_documento_na_integra,
                     registrar_correcao_procedimento,
                     resolver_conflito_procedimento,
-                ]
+                    criar_acao_no_sistema,
+                    editar_plano_acao,
+                ],
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
             ),
             history=history
         )
@@ -5554,7 +5784,34 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         context_parts.append(f"USUÁRIO: {prompt}")
         final_prompt = "\n\n".join(context_parts)
         
+        # Loop manual de tool calling — intercepta cada chamada para rastrear ferramentas usadas
+        tools_used: list[str] = []
         response = chat.send_message(final_prompt)
+        _max_iter = 10
+        for _ in range(_max_iter):
+            fcs = response.function_calls
+            if not fcs:
+                break
+            function_response_parts = []
+            for fc in fcs:
+                fn = _function_map.get(fc.name)
+                if fn is None:
+                    result = f"Ferramenta '{fc.name}' não encontrada."
+                else:
+                    try:
+                        result = fn(**(fc.args or {}))
+                    except Exception as _fe:
+                        result = f"Erro ao executar {fc.name}: {_fe}"
+                if fc.name not in _HIDDEN_TOOLS and fc.name not in tools_used:
+                    tools_used.append(fc.name)
+                function_response_parts.append(
+                    types.Part.from_function_response(
+                        name=fc.name,
+                        response={"result": str(result)}
+                    )
+                )
+            response = chat.send_message(function_response_parts)
+
         result_text = response.text
         # Extração de Proposta [PROPOSAL]{...}[/PROPOSAL]
         proposal_data = None
@@ -5576,6 +5833,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "role": "assistant",
                     "content": clean_text,
                     "proposedPlan": proposal_data.get("items") if proposal_data else None,
+                    "toolsUsed": tools_used if tools_used else None,
                     "timestamp": firestore.SERVER_TIMESTAMP
                 })
                 # Atualiza timestamp da sessão
