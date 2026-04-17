@@ -4241,6 +4241,11 @@ const App: React.FC = () => {
     });
 
     if (buckets.concluidas.length > 0) {
+      buckets.concluidas.sort((a, b) => {
+        const tA = a.data_conclusao ? new Date(a.data_conclusao).getTime() : 0;
+        const tB = b.data_conclusao ? new Date(b.data_conclusao).getTime() : 0;
+        return tB - tA;
+      });
       finalGroups["Concluídas"] = buckets.concluidas;
     }
 
@@ -7809,11 +7814,17 @@ const App: React.FC = () => {
           taskId={selectedTask?.id || selectedWorkItem?.id}
           systemId={selectedSystemId}
           userId={user?.uid || ''}
-          onOpenTask={(id) => {
+          onOpenTask={async (id) => {
             const task = tarefas.find(t => t.id === id);
             if (task) {
               setSelectedTask(task);
               setTaskModalMode('execute');
+            } else {
+              const snap = await getDoc(doc(db, 'tarefas', id));
+              if (snap.exists()) {
+                setSelectedTask({ id: snap.id, ...snap.data() } as any);
+                setTaskModalMode('execute');
+              }
             }
           }}
         />

@@ -4924,6 +4924,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
                 # Mapeamento de arquivos para leitura profunda on-demand
                 # Retrocompatibilidade: tenta drive_file_id direto; se ausente, extrai da URL via regex
+                # Valida existência no Drive — arquivos deletados/na lixeira são omitidos do contexto
+                _ctx_drive = get_drive_service()
                 arquivos_disponiveis = []
                 for item in t.get('pool_dados', []):
                     if item.get('tipo') != 'arquivo':
@@ -4933,11 +4935,18 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         url_val = item.get('valor', '')
                         match = _DRIVE_ID_RE.search(url_val)
                         fid = match.group(1) if match else None
-                    if fid:
-                        arquivos_disponiveis.append({
-                            "nome": item.get('nome', 'Arquivo sem nome'),
-                            "drive_file_id": fid
-                        })
+                    if not fid:
+                        continue
+                    try:
+                        _meta = _ctx_drive.files().get(fileId=fid, fields='id,trashed').execute()
+                        if _meta.get('trashed'):
+                            continue
+                    except Exception:
+                        continue
+                    arquivos_disponiveis.append({
+                        "nome": item.get('nome', 'Arquivo sem nome'),
+                        "drive_file_id": fid
+                    })
                 
                 context = {
                     "id": id_tarefa,
@@ -5257,6 +5266,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 from datetime import datetime as _dt, timezone as _tz
 
                 now_iso = _dt.now(_tz.utc).isoformat()
+                today_brt = (_dt.now(_tz.utc) + timedelta(hours=-3)).date().isoformat()
+                if not data_limite:
+                    data_limite = today_brt
                 task_id = str(_uuid.uuid4())[:20]
 
                 # Converte lista de strings em array de objetos para o React
@@ -5390,6 +5402,205 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 print(f"[Copiloto] Erro ao editar plano: {_ee}")
                 return f"ERRO|{str(_ee)}"
 
+        def gerar_relatorio(
+            titulo: str,
+            tipo: str,
+            contexto: str,
+            secoes_customizadas: list = None
+        ):
+            """
+            Gera um relatório estruturado em Markdown e o salva no sistema.
+            Use quando o usuário solicitar um relatório formal, análise consolidada ou documento.
+
+            Parâmetros:
+            - titulo: título do relatório
+            - tipo: "executivo", "técnico", "analítico", "progresso" ou "situacional"
+            - contexto: contexto completo coletado (resultados de buscas, fatos, dados relevantes)
+            - secoes_customizadas: lista de nomes de seções específicas a incluir (opcional)
+
+            Retorna JSON com o ID do relatório gerado.
+            """
+            try:
+                from datetime import datetime as _dt, timezone as _tz
+                import uuid as _uuid
+
+                now_iso = _dt.now(_tz.utc).isoformat()
+                data_hoje = (_dt.now(_tz.utc) + timedelta(hours=-3)).strftime("%d/%m/%Y")
+                report_id = str(_uuid.uuid4())[:16]
+
+                # 1. Gera skeleton de seções via LLM
+                skeleton_prompt = (
+                    f'Você é um arquiteto de relatórios técnicos.\n'
+                    f'Crie um esqueleto de seções para um relatório {tipo} intitulado "{titulo}".\n'
+                    f'CONTEXTO (resumo):\n{contexto[:2500]}\n\n'
+                    f'Responda APENAS com JSON no formato:\n{{"secoes": ["Seção 1", "Seção 2", ...]}}\n\n'
+                    f'Regras:\n'
+                    f'- Entre 4 e 7 seções\n'
+                    f'- Primeira seção: "Sumário Executivo"\n'
+                    f'- Última seção: "Conclusão e Recomendações"\n'
+                    f'- Seções exclusivas, sem sobreposição\n'
+                )
+                if secoes_customizadas:
+                    skeleton_prompt += f'- Inclua obrigatoriamente: {secoes_customizadas}\n'
+
+                skeleton_resp = client.models.generate_content(
+                    model="gemini-3.1-flash-lite-preview",
+                    contents=skeleton_prompt
+                )
+                skeleton_text = skeleton_resp.text or ""
+                json_match = re.search(r'\{.*?\}', skeleton_text, re.DOTALL)
+                if json_match:
+                    parsed_sk = json.loads(json_match.group())
+                    secoes = parsed_sk.get("secoes", [])
+                else:
+                    secoes = ["Sumário Executivo", "Análise", "Dados e Evidências", "Conclusão e Recomendações"]
+
+                # 2. Gera conteúdo por seção com deduplicação progressiva
+                sections_content = {}
+                sections_already_covered = []
+
+                for secao in secoes:
+                    dedup_hint = ""
+                    if sections_already_covered:
+                        dedup_hint = f"\nASSUNTOS JÁ ABORDADOS (NÃO REPETIR): {', '.join(sections_already_covered)}"
+
+                    section_prompt = (
+                        f'Você é um redator técnico sênior escrevendo a seção "{secao}" '
+                        f'de um relatório {tipo} intitulado "{titulo}".\n'
+                        f'Data: {data_hoje}\n\n'
+                        f'CONTEXTO E DADOS:\n{contexto[:4000]}\n'
+                        f'{dedup_hint}\n\n'
+                        f'Escreva APENAS o conteúdo desta seção em Markdown.\n'
+                        f'- Use ## para subseções se necessário\n'
+                        f'- Use listas, tabelas e negritos para clareza\n'
+                        f'- Tom formal e objetivo\n'
+                        f'- NÃO inclua o título da seção (será adicionado automaticamente)\n'
+                        f'- Entre 150 e 400 palavras\n'
+                    )
+
+                    sect_resp = client.models.generate_content(
+                        model="gemini-3.1-pro-preview",
+                        contents=section_prompt
+                    )
+                    sections_content[secao] = sect_resp.text or "*(conteúdo indisponível)*"
+                    sections_already_covered.append(secao)
+
+                # 3. Compila Markdown final
+                tipo_label = tipo.capitalize()
+                md_parts = [
+                    f"# {titulo}",
+                    "",
+                    f"**Tipo:** Relatório {tipo_label}  ",
+                    f"**Data:** {data_hoje}  ",
+                    f"**Gerado por:** Hermes Copiloto  ",
+                    "",
+                    "---",
+                    "",
+                ]
+                for secao, content in sections_content.items():
+                    md_parts.append(f"## {secao}")
+                    md_parts.append("")
+                    md_parts.append(content)
+                    md_parts.append("")
+
+                final_markdown = "\n".join(md_parts)
+
+                # 4. Salva no Firestore (coleção relatorios)
+                db.collection('relatorios').document(report_id).set({
+                    "id": report_id,
+                    "titulo": titulo,
+                    "tipo": tipo,
+                    "markdown": final_markdown,
+                    "secoes": secoes,
+                    "session_id": session_id,
+                    "task_id": task_id,
+                    "createdAt": firestore.SERVER_TIMESTAMP,
+                    "driveFileId": None,
+                    "driveUrl": None
+                })
+
+                print(f"[Copiloto] Relatório '{titulo}' gerado ({len(secoes)} seções) — ID: {report_id}")
+                return json.dumps({
+                    "report_id": report_id,
+                    "titulo": titulo,
+                    "secoes": secoes,
+                    "status": "gerado"
+                }, ensure_ascii=False)
+
+            except Exception as _rep_err:
+                import traceback as _tb
+                print(f"[Copiloto] Erro ao gerar relatório: {_rep_err}\n{_tb.format_exc()}")
+                return f"⚠️ Erro ao gerar relatório: {str(_rep_err)}"
+
+        def preparar_edicao_acao(
+            task_id: str,
+            alteracoes: dict,
+            justificativa: str
+        ):
+            """
+            Prepara uma proposta de edição de ação para confirmação interativa do usuário.
+            NÃO realiza nenhuma mutação no banco de dados — apenas valida e retorna o payload.
+
+            Use SEMPRE antes de editar qualquer campo de uma ação existente.
+            O sistema renderiza um card visual para o usuário confirmar ou cancelar.
+
+            Parâmetros:
+            - task_id: ID da tarefa a ser editada
+            - alteracoes: dicionário com campos e novos valores.
+              Campos suportados: titulo, descricao, data_limite, status, tags, area_tematica, tipo_acao, notas
+              Exemplo: {"data_limite": "2026-05-15", "titulo": "Novo Título"}
+            - justificativa: frase curta explicando o motivo (gravada silenciosamente no diário)
+
+            Retorna JSON string com payload de confirmação ou string de erro.
+            """
+            try:
+                _ALLOWED_FIELDS = {'titulo', 'descricao', 'data_limite', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas'}
+
+                task_ref = db.collection('tarefas').document(task_id)
+                task_doc = task_ref.get()
+
+                if not task_doc.exists:
+                    return f"ERRO|Ação '{task_id}' não encontrada."
+
+                task_data = task_doc.to_dict()
+
+                if task_data.get('status') == 'concluído':
+                    return "ERRO|Esta ação já foi concluída e não pode ser editada."
+
+                # Monta o diff de campos (original vs. novo)
+                alteracoes_diff = {}
+                for campo, novo_valor in (alteracoes or {}).items():
+                    if campo not in _ALLOWED_FIELDS:
+                        continue
+                    original = task_data.get(campo)
+                    original_str = ', '.join(str(v) for v in original) if isinstance(original, list) else (str(original) if original is not None else '')
+                    novo_str = ', '.join(str(v) for v in novo_valor) if isinstance(novo_valor, list) else (str(novo_valor) if novo_valor is not None else '')
+                    alteracoes_diff[campo] = {
+                        'original': original_str,
+                        'novo': novo_str,
+                        'novo_raw': novo_valor
+                    }
+
+                if not alteracoes_diff:
+                    return "ERRO|Nenhum campo válido para editar."
+
+                snapshot_ts = task_data.get('data_atualizacao') or task_data.get('data_criacao', '')
+                payload = {
+                    'task_id': task_id,
+                    'titulo': task_data.get('titulo', ''),
+                    'alteracoes': alteracoes_diff,
+                    'justificativa': justificativa or '',
+                    'snapshot_ts': str(snapshot_ts),
+                    'status': 'pending'
+                }
+
+                print(f"[Copiloto] Edição preparada para task_id={task_id}: {list(alteracoes_diff.keys())}")
+                return json.dumps(payload, ensure_ascii=False)
+
+            except Exception as _pe:
+                print(f"[Copiloto] Erro ao preparar edição: {_pe}")
+                return f"ERRO|{str(_pe)}"
+
         # Configuração do Chat com ferramentas
         model_id = "gemini-3.1-pro-preview"
         
@@ -5452,7 +5663,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "  📋 **Draft da Ação**\n"
             "  - **Título:** [título proposto]\n"
             "  - **Área Temática:** [área]\n"
-            "  - **Prazo:** [data ou 'Sem prazo definido']\n"
+            "  - **Prazo:** [data no formato YYYY-MM-DD; se não informado, use a data de hoje]\n"
             "  - **Tipo:** [fast / deep]\n"
             "  - **Plano de Ação:**\n"
             "    1. [passo 1]\n"
@@ -5493,7 +5704,51 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "  ⚠️ Erro ao atualizar plano: {detalhe}\n\n"
             "PARÂMETRO justificativa_diario:\n"
             "Gere automaticamente uma frase concisa descrevendo o que foi alterado e por quê (ex: 'Adicionado passo de validação jurídica a pedido do usuário.').\n"
-            "O usuário não precisa aprovar este texto — é gravado silenciosamente no diário da tarefa."
+            "O usuário não precisa aprovar este texto — é gravado silenciosamente no diário da tarefa.\n\n"
+            "## EDIÇÃO DE CAMPOS DE AÇÕES — CARD DE CONFIRMAÇÃO (CRÍTICO)\n\n"
+            "Quando o usuário solicitar alteração de campos de uma ação existente (título, prazo, status,\n"
+            "área temática, tags, descrição, notas, tipo), siga OBRIGATORIAMENTE este protocolo:\n\n"
+            "ETAPA 0 — BUSCA OBRIGATÓRIA:\n"
+            "Use consultar_historico_acoes() para localizar a ação com precisão.\n"
+            "Nunca suponha um task_id sem buscar. Prefira a correspondência mais exata ao nome/contexto informado.\n"
+            "Se houver ambiguidade, apresente as opções ao usuário antes de prosseguir.\n\n"
+            "ETAPA 1 — PROPOSTA VIA FERRAMENTA:\n"
+            "Chame preparar_edicao_acao(task_id, alteracoes, justificativa) com:\n"
+            "- task_id: ID da ação encontrada\n"
+            "- alteracoes: dicionário com APENAS os campos que mudam. Ex: {\"data_limite\": \"2026-05-15\"}\n"
+            "- justificativa: frase curta explicando o motivo (gravada silenciosamente no diário)\n"
+            "Esta ferramenta NÃO faz mutação no banco. Ela prepara o payload para um card de confirmação visual.\n\n"
+            "ETAPA 2 — AGUARDAR O CARD:\n"
+            "Após chamar preparar_edicao_acao com sucesso, sua resposta de texto DEVE ser APENAS:\n"
+            "  ✏️ Preparei a edição para sua confirmação. Verifique o card abaixo e confirme ou cancele.\n"
+            "NÃO repita os dados da edição no texto — eles já estão no card visual.\n"
+            "NÃO chame nenhuma outra ferramenta de escrita nesta mensagem.\n\n"
+            "ETAPA 3 — APÓS CONFIRMAÇÃO:\n"
+            "A confirmação ocorre pelo clique no botão do card — não pelo chat de texto.\n"
+            "Se o usuário disser 'confirmo' ou 'pode fazer' no chat, explique:\n"
+            "  'A confirmação de segurança deve ser feita clicando no botão ✅ do card acima.'\n\n"
+            "CAMPOS SUPORTADOS: titulo, descricao, data_limite, status, tags, area_tematica, tipo_acao, notas.\n"
+            "Para alteração do plano de ação (passos), use o fluxo de EDIÇÃO DE PLANO DE AÇÃO acima.\n\n"
+            "## GERAÇÃO DE RELATÓRIOS — PROTOCOLO COLLECT-THEN-REPORT\n\n"
+            "Quando o usuário solicitar um relatório, análise formal, resumo executivo ou documento consolidado:\n\n"
+            "ETAPA 1 — COLETA DE CONTEXTO:\n"
+            "Antes de chamar gerar_relatorio, colete o máximo de contexto relevante usando as ferramentas disponíveis:\n"
+            "- consultar_historico_acoes() — tarefas e histórico de execução\n"
+            "- buscar_arquivos_acervo() — documentos e artefatos relevantes\n"
+            "- obter_contexto_tela() — contexto da tarefa em foco (se taskId disponível)\n"
+            "Consolide tudo em uma string de contexto densa para passar ao relatório.\n\n"
+            "ETAPA 2 — GERAÇÃO:\n"
+            "Chame gerar_relatorio(titulo, tipo, contexto) com:\n"
+            "- titulo: título claro e descritivo\n"
+            "- tipo: 'executivo', 'técnico', 'analítico', 'progresso' ou 'situacional'\n"
+            "- contexto: string com todos os dados coletados nas buscas\n\n"
+            "ETAPA 3 — RESPOSTA:\n"
+            "Após gerar_relatorio retornar sucesso, responda OBRIGATORIAMENTE:\n"
+            "  📄 **Relatório gerado com sucesso!**\n"
+            "  - **Título:** [titulo]\n"
+            "  - **Seções:** [lista das seções]\n"
+            "  Clique no botão abaixo para abrir o relatório completo.\n"
+            "NÃO reproduza o conteúdo do relatório no chat — ele está disponível no modal de leitura."
         )
 
         # --- RECUPERAÇÃO DE HISTÓRICO DA SESSÃO ---
@@ -5562,6 +5817,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'resolver_conflito_procedimento': resolver_conflito_procedimento,
             'criar_acao_no_sistema': criar_acao_no_sistema,
             'editar_plano_acao': editar_plano_acao,
+            'preparar_edicao_acao': preparar_edicao_acao,
+            'gerar_relatorio': gerar_relatorio,
         }
         # Ferramentas internas que não devem aparecer para o usuário
         _HIDDEN_TOOLS = {'registrar_correcao_procedimento'}
@@ -5581,6 +5838,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     resolver_conflito_procedimento,
                     criar_acao_no_sistema,
                     editar_plano_acao,
+                    preparar_edicao_acao,
+                    gerar_relatorio,
                 ],
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
             ),
@@ -5786,6 +6045,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         
         # Loop manual de tool calling — intercepta cada chamada para rastrear ferramentas usadas
         tools_used: list[str] = []
+        pending_edit_data = None
+        report_data = None
         response = chat.send_message(final_prompt)
         _max_iter = 10
         for _ in range(_max_iter):
@@ -5802,6 +6063,20 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         result = fn(**(fc.args or {}))
                     except Exception as _fe:
                         result = f"Erro ao executar {fc.name}: {_fe}"
+                # Captura payload de edição pendente gerado por preparar_edicao_acao
+                if fc.name == 'preparar_edicao_acao' and isinstance(result, str) and result.startswith('{'):
+                    try:
+                        pending_edit_data = json.loads(result)
+                    except Exception:
+                        pass
+                # Captura metadados do relatório gerado por gerar_relatorio
+                if fc.name == 'gerar_relatorio' and isinstance(result, str) and result.startswith('{'):
+                    try:
+                        parsed_rep = json.loads(result)
+                        if parsed_rep.get('report_id'):
+                            report_data = parsed_rep
+                    except Exception:
+                        pass
                 if fc.name not in _HIDDEN_TOOLS and fc.name not in tools_used:
                     tools_used.append(fc.name)
                 function_response_parts.append(
@@ -5834,6 +6109,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "content": clean_text,
                     "proposedPlan": proposal_data.get("items") if proposal_data else None,
                     "toolsUsed": tools_used if tools_used else None,
+                    "pendingEdit": pending_edit_data,
+                    "reportId": report_data.get('report_id') if report_data else None,
                     "timestamp": firestore.SERVER_TIMESTAMP
                 })
                 # Atualiza timestamp da sessão
@@ -5851,7 +6128,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         return {
             "result": clean_text,
             "proposedPlan": proposal_data.get("items") if proposal_data else None,
-            "suggestedTitle": suggested_title
+            "suggestedTitle": suggested_title,
+            "pendingEdit": pending_edit_data,
+            "reportId": report_data.get('report_id') if report_data else None
         }
 
     except Exception as e:
@@ -5862,6 +6141,119 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             code=https_fn.FunctionsErrorCode.INTERNAL,
             message=str(e)
         )
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=30
+)
+def confirmarEdicaoAcao(req: https_fn.CallableRequest):
+    """
+    Confirma e executa uma edição de ação pendente gerada pelo Copiloto Hermes.
+    Aplica validação lazy antes de mutar: verifica que a ação não foi modificada
+    desde a geração do card de confirmação.
+    """
+    data = req.data or {}
+    session_id = data.get('sessionId')
+    message_id = data.get('messageId')
+    task_id = data.get('taskId')
+    alteracoes = data.get('alteracoes', {})
+    snapshot_ts = data.get('snapshotTs', '')
+
+    if not task_id or not alteracoes:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="taskId e alteracoes são obrigatórios."
+        )
+
+    def _set_card_status(db_ref, status, error_msg=None):
+        if not session_id or not message_id:
+            return
+        try:
+            update_payload = {'pendingEdit.status': status}
+            if error_msg:
+                update_payload['pendingEdit.errorMessage'] = error_msg
+            db_ref.collection('sessoes_copiloto').document(session_id)\
+                .collection('mensagens').document(message_id)\
+                .update(update_payload)
+        except Exception as _ue:
+            print(f"[confirmarEdicaoAcao] Falha ao atualizar status do card: {_ue}")
+
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+
+        db_ref = get_db()
+        task_ref = db_ref.collection('tarefas').document(task_id)
+        task_doc = task_ref.get()
+
+        # Validação 1: ação existe?
+        if not task_doc.exists:
+            msg = 'Edição bloqueada: Esta ação não existe mais.'
+            _set_card_status(db_ref, 'invalidated', msg)
+            return {'status': 'invalidated', 'message': msg}
+
+        task_data = task_doc.to_dict()
+
+        # Validação 2: ação já concluída?
+        if task_data.get('status') == 'concluído':
+            msg = 'Edição bloqueada: Esta ação já foi concluída.'
+            _set_card_status(db_ref, 'invalidated', msg)
+            return {'status': 'invalidated', 'message': msg}
+
+        # Validação 3 (lazy): ação foi modificada desde a geração do card?
+        current_ts = task_data.get('data_atualizacao') or task_data.get('data_criacao', '')
+        if snapshot_ts and current_ts and str(current_ts) != str(snapshot_ts):
+            msg = 'Edição bloqueada: Esta ação foi modificada após a geração deste card.'
+            _set_card_status(db_ref, 'invalidated', msg)
+            return {'status': 'invalidated', 'message': msg}
+
+        # Aplica mudanças — somente campos whitelistados
+        _ALLOWED = {'titulo', 'descricao', 'data_limite', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas'}
+        updates = {}
+        for campo, novo_valor in alteracoes.items():
+            if campo not in _ALLOWED:
+                continue
+            if campo == 'status' and novo_valor not in ('em andamento', 'stand-by', 'concluído'):
+                continue
+            updates[campo] = novo_valor
+
+        if not updates:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+                message="Nenhum campo válido para atualizar."
+            )
+
+        now_iso = _dt.now(_tz.utc).isoformat()
+        updates['data_atualizacao'] = now_iso
+
+        campos_desc = ', '.join(k for k in updates if k != 'data_atualizacao')
+        diary_entry = {
+            'data': now_iso,
+            'nota': f"[Copiloto Hermes] Ação editada via card de confirmação. Campos alterados: {campos_desc}."
+        }
+
+        task_ref.update({
+            **updates,
+            'acompanhamento': firestore.ArrayUnion([diary_entry])
+        })
+
+        _set_card_status(db_ref, 'completed')
+        print(f"[confirmarEdicaoAcao] task_id={task_id} atualizado: {list(updates.keys())}")
+        return {'status': 'completed'}
+
+    except https_fn.HttpsError:
+        raise
+    except Exception as e:
+        print(f"Erro em confirmarEdicaoAcao: {e}")
+        try:
+            _set_card_status(get_db(), 'error', str(e))
+        except Exception:
+            pass
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=str(e)
+        )
+
 
 def buscar_procedimento_internal(query_text: str, area_tematica: str = None):
     # Wrapper interno para chamar a lógica de buscar_procedimento sem o overhead do Callable HTTPS
@@ -6379,3 +6771,124 @@ def processar_correcoes_pendentes(event: scheduler_fn.ScheduledEvent) -> None:
                 })
             except Exception:
                 pass
+
+
+# ─── Salvar Relatório no Google Drive ────────────────────────────────────────
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=120
+)
+def salvarRelatorioNoDrive(req: https_fn.CallableRequest):
+    """
+    Converte um relatório Markdown para HTML e faz upload no Google Drive
+    como Google Doc editável nativo.
+    """
+    data = req.data or {}
+    relatorio_id = data.get('relatorioId')
+
+    if not relatorio_id:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="relatorioId é obrigatório."
+        )
+
+    try:
+        db = get_db()
+
+        # 1. Busca o relatório no Firestore
+        rel_doc = db.collection('relatorios').document(relatorio_id).get()
+        if not rel_doc.exists:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.NOT_FOUND,
+                message=f"Relatório '{relatorio_id}' não encontrado."
+            )
+
+        rel = rel_doc.to_dict()
+        titulo = rel.get('titulo', 'Relatório Hermes')
+        markdown_text = rel.get('markdown', '')
+
+        # 2. Converte Markdown → HTML (conversor inline sem dependências externas)
+        def _md_to_html(md: str) -> str:
+            lines = md.split('\n')
+            html = []
+            in_ul = False
+
+            for line in lines:
+                s = line.rstrip()
+                if s.startswith('### '):
+                    if in_ul: html.append('</ul>'); in_ul = False
+                    html.append(f'<h3>{s[4:]}</h3>')
+                elif s.startswith('## '):
+                    if in_ul: html.append('</ul>'); in_ul = False
+                    html.append(f'<h2>{s[3:]}</h2>')
+                elif s.startswith('# '):
+                    if in_ul: html.append('</ul>'); in_ul = False
+                    html.append(f'<h1>{s[2:]}</h1>')
+                elif s == '---':
+                    if in_ul: html.append('</ul>'); in_ul = False
+                    html.append('<hr/>')
+                elif s.startswith('- ') or s.startswith('* '):
+                    if not in_ul:
+                        html.append('<ul>')
+                        in_ul = True
+                    html.append(f'<li>{s[2:]}</li>')
+                elif not s:
+                    if in_ul:
+                        html.append('</ul>')
+                        in_ul = False
+                    html.append('<br/>')
+                else:
+                    if in_ul:
+                        html.append('</ul>')
+                        in_ul = False
+                    html.append(f'<p>{s}</p>')
+
+            if in_ul:
+                html.append('</ul>')
+
+            body = '\n'.join(html)
+            body = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', body)
+            body = re.sub(r'\*(.+?)\*', r'<em>\1</em>', body)
+            body = re.sub(r'`(.+?)`', r'<code>\1</code>', body)
+            return f'<html><head><meta charset="utf-8"/></head><body>{body}</body></html>'
+
+        html_content = _md_to_html(markdown_text)
+
+        # 3. Upload para o Drive como Google Doc nativo
+        drive_service = get_drive_service()
+        from googleapiclient.http import MediaInMemoryUpload
+
+        media = MediaInMemoryUpload(
+            html_content.encode('utf-8'),
+            mimetype='text/html',
+            resumable=False
+        )
+        uploaded = drive_service.files().create(
+            body={'name': titulo, 'mimeType': 'application/vnd.google-apps.document'},
+            media_body=media,
+            fields='id,webViewLink'
+        ).execute()
+
+        drive_file_id = uploaded.get('id')
+        drive_url = uploaded.get('webViewLink')
+
+        # 4. Atualiza Firestore com dados do Drive
+        db.collection('relatorios').document(relatorio_id).update({
+            'driveFileId': drive_file_id,
+            'driveUrl': drive_url
+        })
+
+        print(f"[Relatorio] '{titulo}' salvo no Drive — fileId: {drive_file_id}")
+        return {"driveFileId": drive_file_id, "driveUrl": drive_url}
+
+    except https_fn.HttpsError:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"[Relatorio] Erro ao salvar no Drive: {e}\n{traceback.format_exc()}")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=str(e)
+        )

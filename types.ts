@@ -759,6 +759,19 @@ export interface KnowledgeEdge {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+export interface Relatorio {
+    id: string;
+    titulo: string;
+    tipo: string;
+    markdown: string;
+    secoes: string[];
+    session_id?: string;
+    task_id?: string;
+    createdAt: any;
+    driveFileId?: string | null;
+    driveUrl?: string | null;
+}
+
 export interface Servico {
     id: string;
     titulo: string;

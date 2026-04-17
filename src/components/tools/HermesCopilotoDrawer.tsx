@@ -6,11 +6,29 @@ import { collection, onSnapshot, query, orderBy, where, addDoc, doc, updateDoc, 
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { formatDate } from '@/types';
+import { ReportModal } from './ReportModal';
 
 // URL do endpoint HTTP de upload (Node.js Functions)
 const UPLOAD_ENDPOINT = 'https://us-central1-gestao-hermes.cloudfunctions.net/uploadFileForCopiloto';
 
+interface FieldChange {
+    original: string;
+    novo: string;
+    novo_raw?: any;
+}
+
+interface PendingEdit {
+    task_id: string;
+    titulo: string;
+    alteracoes: Record<string, FieldChange>;
+    justificativa: string;
+    snapshot_ts: string;
+    status: 'pending' | 'completed' | 'invalidated' | 'cancelled' | 'error';
+    errorMessage?: string;
+}
+
 interface Message {
+    id?: string;
     role: 'user' | 'assistant';
     content: string;
     isArtifact?: boolean;
@@ -18,6 +36,8 @@ interface Message {
     timestamp: any;
     type?: 'text' | 'plan_proposal';
     toolsUsed?: string[];
+    pendingEdit?: PendingEdit;
+    reportId?: string;
 }
 
 const TOOL_LABELS: Record<string, string> = {
@@ -30,10 +50,23 @@ const TOOL_LABELS: Record<string, string> = {
     resolver_conflito_procedimento: 'Resolução de Conflito',
     criar_acao_no_sistema: 'Criando Ação',
     editar_plano_acao: 'Ajustando Plano...',
+    preparar_edicao_acao: 'Preparando Edição',
+    gerar_relatorio: 'Gerando Relatório',
+};
+
+const FIELD_LABELS: Record<string, string> = {
+    titulo: 'Título',
+    descricao: 'Descrição',
+    data_limite: 'Prazo',
+    status: 'Status',
+    tags: 'Tags',
+    area_tematica: 'Área Temática',
+    tipo_acao: 'Tipo de Ação',
+    notas: 'Notas',
 };
 
 // Ferramentas de escrita/mutação — recebem estilo verde
-const WRITE_TOOLS = new Set(['criar_acao_no_sistema', 'editar_plano_acao']);
+const WRITE_TOOLS = new Set(['criar_acao_no_sistema', 'editar_plano_acao', 'preparar_edicao_acao']);
 
 interface Session {
     id: string;
@@ -69,6 +102,27 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
+    // ── Estado do modal de relatório ─────────────────────────────────────────
+    const [reportModalOpen, setReportModalOpen] = useState(false);
+    const [activeReport, setActiveReport] = useState<{ id: string; titulo: string; markdown: string } | null>(null);
+    const [isLoadingReport, setIsLoadingReport] = useState(false);
+
+    const handleOpenReport = async (reportId: string) => {
+        setIsLoadingReport(true);
+        setReportModalOpen(true);
+        try {
+            const reportDoc = await getDoc(doc(db, 'relatorios', reportId));
+            if (reportDoc.exists()) {
+                const data = reportDoc.data();
+                setActiveReport({ id: reportId, titulo: data.titulo, markdown: data.markdown });
+            }
+        } catch (err) {
+            console.error('[ReportModal] Erro ao carregar relatório:', err);
+        } finally {
+            setIsLoadingReport(false);
+        }
+    };
+
     const [isFocused, setIsFocused] = useState(false);
 
     // Estado de anexo
@@ -81,6 +135,13 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const [footerError, setFooterError] = useState<string | null>(null);
     // Estado de transcrição de áudio colado
     const [isTranscribing, setIsTranscribing] = useState(false);
+
+    // ── Gravação de áudio por microfone ───────────────────────────────────────
+    const [isRecording, setIsRecording] = useState(false);
+    const [isProcessingMic, setIsProcessingMic] = useState(false);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const audioChunksRef = useRef<Blob[]>([]);
+    const micStreamRef = useRef<MediaStream | null>(null);
 
     // ── Redimensionamento do drawer ───────────────────────────────────────────
     const DRAWER_MIN_WIDTH = 320;
@@ -179,7 +240,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         );
 
         return onSnapshot(q, (snapshot) => {
-            const msgList = snapshot.docs.map(doc => doc.data()) as Message[];
+            const msgList = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Message[];
             setMessages(msgList);
         });
     }, [currentSessionId]);
@@ -257,6 +318,52 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         return null;
     };
 
+    // Estado para rastrear qual card de edição está em processamento
+    const [loadingEditId, setLoadingEditId] = useState<string | null>(null);
+
+    const handleConfirmEdit = async (messageId: string, pendingEdit: PendingEdit) => {
+        if (!currentSessionId || loadingEditId) return;
+        setLoadingEditId(messageId);
+        try {
+            const alteracoes = Object.fromEntries(
+                Object.entries(pendingEdit.alteracoes).map(([campo, change]) => [
+                    campo,
+                    change.novo_raw !== undefined ? change.novo_raw : change.novo
+                ])
+            );
+            const fn = httpsCallable(functions, 'confirmarEdicaoAcao');
+            const result = await fn({
+                sessionId: currentSessionId,
+                messageId,
+                taskId: pendingEdit.task_id,
+                alteracoes,
+                snapshotTs: pendingEdit.snapshot_ts,
+            }) as { data: { status: string; message?: string } };
+            // Firestore onSnapshot atualiza o card automaticamente após o backend mudar o status
+            if (result.data.status === 'invalidated') {
+                // Card já foi atualizado no Firestore pelo backend — nada a fazer localmente
+            }
+        } catch (err: any) {
+            // Em falhas transitórias o card permanece pending; erro grave → backend já gravou status error
+            console.error('[EditCard] Erro ao confirmar edição:', err);
+        } finally {
+            setLoadingEditId(null);
+        }
+    };
+
+    const handleCancelEdit = async (messageId: string) => {
+        if (!currentSessionId || loadingEditId) return;
+        setLoadingEditId(messageId);
+        try {
+            const msgRef = doc(db, 'sessoes_copiloto', currentSessionId, 'mensagens', messageId);
+            await updateDoc(msgRef, { 'pendingEdit.status': 'cancelled' });
+        } catch (err) {
+            console.error('[EditCard] Erro ao cancelar edição:', err);
+        } finally {
+            setLoadingEditId(null);
+        }
+    };
+
     // ── Transcrição de áudio colado ───────────────────────────────────────────
     const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
         const files = Array.from(e.clipboardData.files);
@@ -301,6 +408,52 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             setIsTranscribing(false);
         }
     };
+
+    const startRecording = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            micStreamRef.current = stream;
+            const mr = new MediaRecorder(stream);
+            mediaRecorderRef.current = mr;
+            audioChunksRef.current = [];
+            mr.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+            mr.onstop = async () => {
+                const blob = new Blob(audioChunksRef.current, { type: 'audio/m4a' });
+                if (micStreamRef.current) { micStreamRef.current.getTracks().forEach(t => t.stop()); micStreamRef.current = null; }
+                setIsProcessingMic(true);
+                try {
+                    const reader = new FileReader();
+                    reader.readAsDataURL(blob);
+                    reader.onloadend = async () => {
+                        try {
+                            const b64 = (reader.result as string).split(',')[1];
+                            const fn = httpsCallable(functions, 'transcreverAudio');
+                            const res = await fn({ audioBase64: b64, extension: '.m4a' });
+                            const data = res.data as { raw: string; refined: string };
+                            if (data.refined) setInput(prev => prev + (prev ? '\n' : '') + data.refined);
+                        } catch { setFooterError('Erro ao transcrever áudio do microfone.'); }
+                        finally { setIsProcessingMic(false); }
+                    };
+                } catch { setIsProcessingMic(false); }
+            };
+            mr.start();
+            setIsRecording(true);
+        } catch { setFooterError('Erro ao acessar microfone. Verifique as permissões.'); }
+    };
+
+    const stopRecording = () => {
+        if (mediaRecorderRef.current && isRecording) {
+            mediaRecorderRef.current.stop();
+            setIsRecording(false);
+        }
+    };
+
+    useEffect(() => {
+        return () => {
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop();
+            if (micStreamRef.current) { micStreamRef.current.getTracks().forEach(t => t.stop()); micStreamRef.current = null; }
+        };
+    }, []);
 
     // ── Criação de sessão ─────────────────────────────────────────────────────
     const handleCreateSession = async (initialPrompt?: string) => {
@@ -444,6 +597,19 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
     if (!isOpen) return null;
 
+    // ── Modal de relatório (renderizado fora do drawer, sobre tudo) ──────────
+    if (reportModalOpen) {
+        return (
+            <ReportModal
+                isOpen={reportModalOpen}
+                onClose={() => { setReportModalOpen(false); setActiveReport(null); }}
+                reportId={activeReport?.id ?? ''}
+                titulo={activeReport?.titulo ?? (isLoadingReport ? 'Carregando...' : 'Relatório')}
+                markdown={activeReport?.markdown ?? (isLoadingReport ? '' : '')}
+            />
+        );
+    }
+
     // ── Labels da barra de status por fase ───────────────────────────────────
     const uploadPhaseLabel: Record<UploadPhase, string> = {
         idle: '',
@@ -451,7 +617,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         processing: 'Extraindo contexto e atualizando Acervo...'
     };
 
-    const isBlocked = isLoading || uploadPhase !== 'idle' || isTranscribing;
+    const isBlocked = isLoading || uploadPhase !== 'idle' || isTranscribing || isProcessingMic;
 
     return (
         <div
@@ -647,6 +813,26 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         );
                                     })()}
 
+                                    {/* Botão Abrir Relatório */}
+                                    {msg.role === 'assistant' && msg.reportId && (
+                                        <div className="mt-3 pt-3 border-t border-slate-200">
+                                            <button
+                                                onClick={() => handleOpenReport(msg.reportId!)}
+                                                disabled={isLoadingReport}
+                                                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                            >
+                                                {isLoadingReport ? (
+                                                    <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                                ) : (
+                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                    </svg>
+                                                )}
+                                                Abrir Relatório
+                                            </button>
+                                        </div>
+                                    )}
+
                                     {msg.proposedPlan && (
                                         <div className="mt-4 p-4 bg-white rounded-xl border border-blue-200 shadow-sm">
                                             <p className="text-[10px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-2 mb-3">
@@ -667,6 +853,100 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             </div>
                                         </div>
                                     )}
+
+                                    {/* Card de confirmação de edição de ação */}
+                                    {msg.pendingEdit && msg.id && (() => {
+                                        const pe = msg.pendingEdit!;
+                                        const mid = msg.id!;
+                                        const isProcessing = loadingEditId === mid;
+
+                                        if (pe.status === 'completed') {
+                                            return (
+                                                <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700 flex items-center gap-1.5 mb-2">
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                        Edição confirmada
+                                                    </p>
+                                                    <p className="text-[10px] text-emerald-700 font-semibold truncate">{pe.titulo}</p>
+                                                    <div className="mt-1.5 space-y-1">
+                                                        {Object.entries(pe.alteracoes).map(([campo, change]) => (
+                                                            <div key={campo} className="text-[9px] text-emerald-600 flex gap-1 flex-wrap">
+                                                                <span className="font-black">{FIELD_LABELS[campo] ?? campo}:</span>
+                                                                <span className="line-through opacity-60">{change.original || '—'}</span>
+                                                                <span>→</span>
+                                                                <span className="font-semibold">{change.novo || '—'}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            );
+                                        }
+
+                                        if (pe.status === 'invalidated' || pe.status === 'error') {
+                                            return (
+                                                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl">
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-red-600 flex items-center gap-1.5 mb-1">
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                                                        {pe.status === 'error' ? 'Erro na edição' : 'Edição bloqueada'}
+                                                    </p>
+                                                    <p className="text-[10px] text-red-600">{pe.errorMessage ?? 'Operação indisponível.'}</p>
+                                                </div>
+                                            );
+                                        }
+
+                                        if (pe.status === 'cancelled') {
+                                            return (
+                                                <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                        Edição cancelada
+                                                    </p>
+                                                </div>
+                                            );
+                                        }
+
+                                        // status === 'pending'
+                                        return (
+                                            <div className="mt-3 p-3 bg-white border border-amber-200 rounded-xl shadow-sm">
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-amber-700 flex items-center gap-1.5 mb-2">
+                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                    Edição pendente
+                                                </p>
+                                                <p className="text-[10px] font-semibold text-slate-700 truncate mb-2">{pe.titulo}</p>
+                                                <div className="space-y-1.5 mb-3">
+                                                    {Object.entries(pe.alteracoes).map(([campo, change]) => (
+                                                        <div key={campo} className="grid grid-cols-[80px_1fr_1fr] gap-1 text-[9px]">
+                                                            <span className="font-black text-slate-500 uppercase">{FIELD_LABELS[campo] ?? campo}</span>
+                                                            <span className="text-slate-400 truncate line-through">{change.original || '—'}</span>
+                                                            <span className="text-emerald-700 font-semibold truncate">{change.novo || '—'}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <div className="flex gap-2 pt-2 border-t border-amber-100">
+                                                    <button
+                                                        onClick={() => handleConfirmEdit(mid, pe)}
+                                                        disabled={isProcessing}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                    >
+                                                        {isProcessing ? (
+                                                            <span className="w-2.5 h-2.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                                        ) : (
+                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                        )}
+                                                        Confirmar
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleCancelEdit(mid)}
+                                                        disabled={isProcessing}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-slate-400 border border-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                    >
+                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                        Cancelar
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
                             </div>
                         ))}
@@ -783,7 +1063,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             }
                                         }
                                     }}
-                                    placeholder={isTranscribing ? 'Transcrevendo áudio...' : attachedFile ? 'Pergunte sobre o arquivo ou envie sem texto…' : 'Estrategize com Hermes…'}
+                                    placeholder={isRecording ? '🎙 Gravando… clique no microfone para parar' : isProcessingMic ? 'Transcrevendo áudio...' : isTranscribing ? 'Transcrevendo áudio...' : attachedFile ? 'Pergunte sobre o arquivo ou envie sem texto…' : 'Estrategize com Hermes…'}
                                     className={`w-full pl-4 pr-9 py-3.5 rounded-2xl text-sm font-medium outline-none border resize-none overflow-y-auto ${isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-blue-500' : 'bg-slate-50 border-slate-200 text-slate-700 placeholder:text-slate-400 focus:border-blue-500'} transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed`}
                                 />
                                 <button
@@ -803,6 +1083,27 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                     </svg>
                                 </button>
                             </div>
+                            <button
+                                onClick={() => isRecording ? stopRecording() : startRecording()}
+                                disabled={isBlocked && !isRecording}
+                                title={isRecording ? 'Parar gravação' : 'Gravar Áudio'}
+                                className={`w-12 h-12 shrink-0 flex items-center justify-center rounded-2xl transition-all active:scale-90 shadow-sm ${
+                                    isRecording
+                                        ? 'bg-red-500 text-white animate-pulse hover:bg-red-600'
+                                        : isDark
+                                            ? 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white disabled:opacity-30'
+                                            : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700 disabled:opacity-30'
+                                } disabled:cursor-not-allowed`}
+                            >
+                                {isProcessingMic ? (
+                                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                                ) : (
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 10v2a7 7 0 01-14 0v-2m14 0h2m-16 0H3m9 10v3m-3 0h6" />
+                                    </svg>
+                                )}
+                            </button>
                             <button
                                 onClick={() => {
                                     if (!currentSessionId) {
