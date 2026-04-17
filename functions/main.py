@@ -4584,9 +4584,10 @@ def diagnosticar_codigo(req: https_fn.CallableRequest):
             file_list_text = '\n'.join(filtered_files[:400])
             selection_prompt = (
                 f"Você é um engenheiro sênior analisando o repositório GitHub `{owner}/{repo}`.\n\n"
-                f"Problema relatado: {descricao_problema}\n\n"
+                f"Objetivo/Problema: {descricao_problema}\n\n"
                 f"Lista de arquivos:\n{file_list_text}\n\n"
-                "Selecione os arquivos mais relevantes (máx. 8). "
+                "Selecione os arquivos mais relevantes para resolver o problema ou implementar o recurso (máx. 10).\n"
+                "Priorize arquivos de lógica (services, controllers, components) em vez de configurações.\n"
                 "Retorne APENAS um JSON válido (sem markdown):\n"
                 '{"arquivos": ["path/file1"], "justificativa": "breve explicação"}'
             )
@@ -4594,23 +4595,47 @@ def diagnosticar_codigo(req: https_fn.CallableRequest):
                 model="gemini-2.0-flash", contents=selection_prompt
             )
             sel_text = sel_resp.text.strip()
-            if '```json' in sel_text:
-                sel_text = sel_text.split('```json')[1].split('```')[0].strip()
-            elif '```' in sel_text:
-                sel_text = sel_text.split('```')[1].split('```')[0].strip()
-            selected_files = json.loads(sel_text).get('arquivos', [])[:8]
+            
+            # Extração robusta de JSON
+            def extract_json(text):
+                if '```json' in text:
+                    return text.split('```json')[1].split('```')[0].strip()
+                if '```' in text:
+                    return text.split('```')[1].split('```')[0].strip()
+                # Tenta localizar por chaves se não houver markdown
+                start = text.find('{')
+                end = text.rfind('}')
+                if start != -1 and end != -1:
+                    return text[start:end+1]
+                return text
 
-            # Baixa conteúdo (máx. 50 KB cada)
+            sel_text = extract_json(sel_text)
+            
+            try:
+                selected_files = json.loads(sel_text).get('arquivos', [])[:8]
+            except Exception as e:
+                print(f"Erro ao parsear arquivos selecionados: {e}")
+                print(f"Texto original: {sel_text}")
+                selected_files = []
+
+            # Baixa conteúdo (máx. 50 KB cada) via API de Content (suporta repos privados)
             files_content = {}
             for fp in selected_files:
                 try:
-                    raw_url = f'https://raw.githubusercontent.com/{owner}/{repo}/{default_branch}/{fp}'
-                    raw_resp = http_requests.get(raw_url, headers=gh_headers, timeout=15)
+                    # Usamos a API de contents com header raw para suportar tokens em repos privados
+                    raw_api_url = f'https://api.github.com/repos/{owner}/{repo}/contents/{fp}?ref={default_branch}'
+                    raw_resp = http_requests.get(
+                        raw_api_url, 
+                        headers={**gh_headers, 'Accept': 'application/vnd.github.v3.raw'}, 
+                        timeout=15
+                    )
                     if raw_resp.status_code == 200:
                         content = raw_resp.text
                         if len(content) > 50000:
                             content = content[:50000] + '\n... [TRUNCADO]'
                         files_content[fp] = content
+                    else:
+                        print(f"Falha ao baixar {fp} ({raw_api_url}): Status {raw_resp.status_code}")
                 except Exception as fetch_err:
                     print(f"Erro ao baixar {fp}: {fetch_err}")
 
@@ -4621,36 +4646,39 @@ def diagnosticar_codigo(req: https_fn.CallableRequest):
             task_ctx = f'\nContexto de tarefa (ID): {task_id}' if task_id else ''
 
             diagnosis_prompt = (
-                "Você é um engenheiro de software sênior especialista em diagnóstico de código.\n\n"
+                "Você é um engenheiro de software sênior especialista em arquitetura e implementação.\n\n"
                 f"## CONTEXTO\nRepositório: {owner}/{repo}{task_ctx}\n"
-                f"Problema relatado: {descricao_problema}\n\n"
-                f"## ARQUIVOS ANALISADOS\n{files_context}\n\n"
+                f"Demanda/Problema: {descricao_problema}\n\n"
+                f"## CÓDIGO FONTE ATUAL\n{files_context}\n\n"
                 "## TAREFA\n"
+                "Analise o código e proponha a solução/correção.\n"
+                "Se for um bug, identifique a causa raiz. Se for um recurso novo, identifique os pontos de inserção.\n"
                 "Retorne APENAS um JSON válido (sem markdown):\n"
                 '{\n'
-                '  "diagnostico": "causa raiz em 2-4 parágrafos",\n'
+                '  "diagnostico": "análise técnica em 2-4 parágrafos (causa raiz ou plano de implementação)",\n'
                 '  "arquivos_impactados": ["path/file.py"],\n'
-                '  "alerta_impacto": "riscos de quebra em outros módulos",\n'
+                '  "alerta_impacto": "riscos de quebra ou dependências necessárias",\n'
                 '  "blocos_sr": [{\n'
                 '    "arquivo": "path/file.py",\n'
-                '    "descricao": "o que esta correção faz",\n'
-                '    "search": "código original EXATO com 2-3 linhas de contexto",\n'
-                '    "replace": "código corrigido completo"\n'
+                '    "descricao": "breve descrição da alteração neste bloco",\n'
+                '    "search": "código original EXATO (2-3 linhas de contexto para âncora)",\n'
+                '    "replace": "código completo corrigido/atualizado (mantenha indentação)"\n'
                 '  }]\n'
                 '}\n\n'
-                "Regras: search copiado LITERALMENTE; inclua contexto para âncora única; "
-                "replace mantém indentação; omita arquivos sem correção."
+                "REGRAS CRÍTICAS:\n"
+                "1. O campo 'search' deve ser ABSOLUTAMENTE IDÊNTICO ao conteúdo original nos arquivos acima.\n"
+                "2. Se for criar código novo dentro de uma classe/função, inclua as linhas vizinhas no 'search'.\n"
+                "3. Se for um arquivo novo ou se não houver código para substituir, omita o bloco ou use uma âncora clara."
             )
             diag_resp = client.models.generate_content(
                 model="gemini-2.0-flash", contents=diagnosis_prompt
             )
-            diag_text = diag_resp.text.strip()
-            if '```json' in diag_text:
-                diag_text = diag_text.split('```json')[1].split('```')[0].strip()
-            elif '```' in diag_text:
-                diag_text = diag_text.split('```')[1].split('```')[0].strip()
-
-            diag_data = json.loads(diag_text)
+            diag_text = extract_json(diag_resp.text.strip())
+            try:
+                diag_data = json.loads(diag_text)
+            except Exception as e:
+                print(f"Erro ao parsear diagnóstico: {e}")
+                diag_data = {}
             blocos_sr = diag_data.get('blocos_sr', [])
             files_analyzed = list(files_content.keys())
 
