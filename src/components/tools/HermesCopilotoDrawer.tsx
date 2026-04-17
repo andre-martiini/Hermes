@@ -112,6 +112,102 @@ const FIELD_LABELS: Record<string, string> = {
 // Ferramentas de escrita/mutação — recebem estilo verde
 const WRITE_TOOLS = new Set(['criar_acao_no_sistema', 'editar_plano_acao', 'preparar_edicao_acao']);
 
+const sanitizeDiagnosisFilePart = (value?: string) =>
+    (value || 'diagnostico')
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 40) || 'diagnostico';
+
+const buildDiagnosisMarkdown = (diagnosis: DiagnosisRecord) => {
+    if (diagnosis.markdownContent?.trim()) return diagnosis.markdownContent;
+
+    const lines = [
+        '# Hermes - Diagnostico de Codigo',
+        diagnosis.nomeRepositorio ? `**Repositorio:** \`${diagnosis.nomeRepositorio}\`  ` : '',
+        diagnosis.sistemaId ? `**Sistema:** \`${diagnosis.sistemaId}\`  ` : '',
+        `**Problema:** ${diagnosis.descricaoProblema}`,
+        '',
+        '---',
+        '',
+        '## Diagnostico da Falha',
+        '',
+        diagnosis.diagnostico || '',
+        '',
+        '---',
+        '',
+        '## Arquivos Impactados',
+        '',
+        ...(diagnosis.arquivosAnalisados || []).map((file) => `- \`${file}\``),
+        '',
+        '---',
+        '',
+        '## Instrucoes de Refatoracao',
+        '',
+    ];
+
+    (diagnosis.blocosSR || []).forEach((block, index) => {
+        lines.push(
+            `### Correcao ${index + 1}: ${block.descricao || 'Atualizacao'}`,
+            '',
+            `**Arquivo:** \`${block.arquivo || ''}\``,
+            '',
+            '<<<<<<< SEARCH',
+            block.search || '',
+            '=======',
+            block.replace || '',
+            '>>>>>>> REPLACE',
+            '',
+            '---',
+            ''
+        );
+    });
+
+    if (diagnosis.alertaImpacto) {
+        lines.push('## Alerta de Impacto', '', diagnosis.alertaImpacto, '', '---', '');
+    }
+
+    return lines.join('\n').trim();
+};
+
+const buildDiagnosisAiPackage = (diagnosis: DiagnosisRecord) => {
+    const markdown = buildDiagnosisMarkdown(diagnosis);
+    return [
+        '# Pacote de Aplicacao para IA',
+        '',
+        'Aplique as alteracoes abaixo diretamente no codigo.',
+        'Priorize os blocos SEARCH/REPLACE como fonte de verdade.',
+        'Se um bloco nao casar exatamente, localize o trecho equivalente no mesmo arquivo e adapte com o menor diff possivel.',
+        'Nao reescreva arquivos inteiros sem necessidade.',
+        '',
+        '## Metadados',
+        diagnosis.nomeRepositorio ? `- Repositorio: ${diagnosis.nomeRepositorio}` : null,
+        diagnosis.sistemaId ? `- Sistema: ${diagnosis.sistemaId}` : null,
+        `- Problema: ${diagnosis.descricaoProblema}`,
+        '',
+        '## Conteudo do Diagnostico',
+        '',
+        markdown,
+        '',
+        '## Instrucao Sugerida para a IA',
+        '',
+        'Aplique exatamente os blocos SEARCH/REPLACE acima, preserve a indentacao,',
+        'faça apenas as mudancas necessarias e ao final resuma os arquivos alterados.',
+    ]
+        .filter(Boolean)
+        .join('\n');
+};
+
+const downloadDiagnosisContent = (filename: string, content: string, mimeType = 'text/markdown;charset=utf-8') => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+};
+
 interface Session {
     id: string;
     title: string;
@@ -157,6 +253,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const [diagnosisModalOpen, setDiagnosisModalOpen] = useState(false);
     const [activeDiagnosis, setActiveDiagnosis] = useState<DiagnosisRecord | null>(null);
     const [isLoadingDiagnosis, setIsLoadingDiagnosis] = useState(false);
+    const [diagnosisCopyDone, setDiagnosisCopyDone] = useState(false);
 
     const handleOpenReport = async (reportId: string) => {
         setIsLoadingReport(true);
@@ -454,6 +551,32 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         }
     };
 
+    const handleDownloadDiagnosisMarkdown = (diagnosis: DiagnosisRecord) => {
+        const baseName = `hermes_diagnostico_${sanitizeDiagnosisFilePart(diagnosis.sistemaId || diagnosis.nomeRepositorio)}_${diagnosis.id.slice(0, 6)}`;
+        downloadDiagnosisContent(`${baseName}.md`, buildDiagnosisMarkdown(diagnosis));
+    };
+
+    const handleDownloadDiagnosisAiPackage = (diagnosis: DiagnosisRecord) => {
+        const baseName = `hermes_apply_${sanitizeDiagnosisFilePart(diagnosis.sistemaId || diagnosis.nomeRepositorio)}_${diagnosis.id.slice(0, 6)}`;
+        downloadDiagnosisContent(`${baseName}.md`, buildDiagnosisAiPackage(diagnosis));
+    };
+
+    const handleCopyDiagnosisAiPackage = async (diagnosis: DiagnosisRecord) => {
+        const content = buildDiagnosisAiPackage(diagnosis);
+        try {
+            await navigator.clipboard.writeText(content);
+        } catch {
+            const el = document.createElement('textarea');
+            el.value = content;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+        }
+        setDiagnosisCopyDone(true);
+        window.setTimeout(() => setDiagnosisCopyDone(false), 2000);
+    };
+
     // ── Quick replies (botões de confirmação de draft) ────────────────────────
     const handleQuickReply = (text: string) => {
         if (isLoading) return;
@@ -486,6 +609,20 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         if (messageId) setDiagnosingId(messageId);
         
         try {
+            let resolvedSystemId = diagnosis.sistemaId?.trim() || systemId?.trim() || '';
+            if (diagnosis.mode === 'repo' && !resolvedSystemId && taskId) {
+                try {
+                    const taskSnap = await getDoc(doc(db, 'tarefas', taskId));
+                    const taskSystemId = taskSnap.exists() ? String(taskSnap.data()?.sistema_id || '').trim() : '';
+                    if (taskSystemId) resolvedSystemId = taskSystemId;
+                } catch (lookupErr) {
+                    console.warn('[HermesCopiloto] Falha ao resolver sistemaId da tarefa para diagnostico:', lookupErr);
+                }
+            }
+            if (diagnosis.mode === 'repo' && !resolvedSystemId) {
+                setFooterError('Erro ao iniciar diagnostico: sistemaId nao pode ser resolvido para esta tarefa.');
+                return;
+            }
             const diagnosticarCodigo = httpsCallable(functions, 'diagnosticar_codigo', { timeout: 300000 });
             await diagnosticarCodigo({
                 sessionId: currentSessionId,
@@ -495,7 +632,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 // repo mode — usa sistemaId do diagnóstico ou, como fallback, o systemId
                 // recebido via props do drawer (evita erro "sistemaId é obrigatório")
                 ...(diagnosis.mode === 'repo' && {
-                    sistemaId: diagnosis.sistemaId ?? systemId ?? '',
+                    sistemaId: resolvedSystemId,
                 }),
                 // snippet mode
                 ...(diagnosis.mode === 'snippet' && {
@@ -858,6 +995,32 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                         )}
                         {!isLoadingDiagnosis && activeDiagnosis && (
                             <>
+                                <div className={`rounded-2xl border p-4 ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-white'}`}>
+                                    <p className={`text-[10px] font-black uppercase tracking-widest mb-3 ${isDark ? 'text-white/50' : 'text-slate-400'}`}>Ações para IA</p>
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            onClick={() => handleDownloadDiagnosisMarkdown(activeDiagnosis)}
+                                            className={`px-3 py-2 rounded-xl text-[11px] font-black transition-all ${isDark ? 'bg-white/10 hover:bg-white/15 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
+                                        >
+                                            Exportar Markdown
+                                        </button>
+                                        <button
+                                            onClick={() => handleDownloadDiagnosisAiPackage(activeDiagnosis)}
+                                            className={`px-3 py-2 rounded-xl text-[11px] font-black transition-all ${isDark ? 'bg-blue-500/20 hover:bg-blue-500/30 text-blue-100' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
+                                        >
+                                            Exportar Pacote IA
+                                        </button>
+                                        <button
+                                            onClick={() => handleCopyDiagnosisAiPackage(activeDiagnosis)}
+                                            className={`px-3 py-2 rounded-xl text-[11px] font-black transition-all ${isDark ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-100' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700'}`}
+                                        >
+                                            {diagnosisCopyDone ? 'Copiado!' : 'Copiar para IA'}
+                                        </button>
+                                    </div>
+                                    <p className={`text-[11px] mt-3 leading-5 ${isDark ? 'text-white/55' : 'text-slate-500'}`}>
+                                        O pacote para IA inclui contexto e blocos <span className="font-mono">SEARCH/REPLACE</span> em formato pronto para colar em agentes de código.
+                                    </p>
+                                </div>
                                 <div className={`rounded-2xl border p-5 ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-white'}`}>
                                     <div className="flex flex-wrap items-center gap-2 mb-3">
                                         {activeDiagnosis.sistemaId && <span className="text-[10px] font-black uppercase tracking-widest text-blue-600 bg-blue-50 px-2 py-1 rounded-full">{activeDiagnosis.sistemaId}</span>}

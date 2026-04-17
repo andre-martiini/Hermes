@@ -4412,6 +4412,7 @@ def diagnosticar_codigo(req: https_fn.CallableRequest):
 
     try:
         from google import genai
+        from google.genai import types
 
         db = get_db()
 
@@ -4427,6 +4428,86 @@ def diagnosticar_codigo(req: https_fn.CallableRequest):
             )
 
         client = genai.Client(api_key=gemini_api_key)
+
+        def extract_json(text):
+            if not text:
+                return ""
+            cleaned = text.strip()
+            if '```json' in cleaned:
+                return cleaned.split('```json', 1)[1].split('```', 1)[0].strip()
+            if '```' in cleaned:
+                return cleaned.split('```', 1)[1].split('```', 1)[0].strip()
+            start = cleaned.find('{')
+            end = cleaned.rfind('}')
+            if start != -1 and end != -1 and end > start:
+                return cleaned[start:end + 1]
+            return cleaned
+
+        def normalize_diag_data(raw_text, parsed_data, fallback_files):
+            parsed_data = parsed_data if isinstance(parsed_data, dict) else {}
+
+            diagnostico = parsed_data.get('diagnostico')
+            if not isinstance(diagnostico, str):
+                diagnostico = ''
+            diagnostico = diagnostico.strip()
+
+            raw_text = (raw_text or '').strip()
+            extracted_text = extract_json(raw_text)
+            raw_without_json = raw_text if raw_text == extracted_text else raw_text.replace(extracted_text, '').strip()
+
+            arquivos_impactados = parsed_data.get('arquivos_impactados')
+            if not isinstance(arquivos_impactados, list):
+                arquivos_impactados = []
+            arquivos_impactados = [str(item).strip() for item in arquivos_impactados if str(item).strip()]
+            if not arquivos_impactados:
+                arquivos_impactados = list(fallback_files)
+
+            blocos_sr = parsed_data.get('blocos_sr')
+            if not isinstance(blocos_sr, list):
+                blocos_sr = []
+            blocos_sr_normalizados = []
+            for bloco in blocos_sr:
+                if not isinstance(bloco, dict):
+                    continue
+                bloco_norm = {
+                    'arquivo': str(bloco.get('arquivo', '')).strip(),
+                    'descricao': str(bloco.get('descricao', '')).strip(),
+                    'search': str(bloco.get('search', '')).strip('\n'),
+                    'replace': str(bloco.get('replace', '')).strip('\n'),
+                }
+                if any(bloco_norm.values()):
+                    blocos_sr_normalizados.append(bloco_norm)
+
+            alerta_impacto = parsed_data.get('alerta_impacto')
+            if not isinstance(alerta_impacto, str):
+                alerta_impacto = ''
+            alerta_impacto = alerta_impacto.strip()
+
+            if not diagnostico:
+                if raw_without_json:
+                    diagnostico = raw_without_json
+                elif raw_text:
+                    diagnostico = raw_text
+                elif blocos_sr_normalizados:
+                    diagnostico = (
+                        "O modelo retornou sugestoes de alteracao, mas nao preencheu o campo "
+                        "'diagnostico' em formato estruturado."
+                    )
+                else:
+                    diagnostico = (
+                        "Nao foi possivel estruturar a analise automatica em texto. "
+                        "Revise os arquivos impactados e tente gerar o diagnostico novamente."
+                    )
+
+            if not alerta_impacto:
+                alerta_impacto = 'Verifique os modulos dependentes antes de aplicar.'
+
+            return {
+                'diagnostico': diagnostico,
+                'arquivos_impactados': arquivos_impactados,
+                'alerta_impacto': alerta_impacto,
+                'blocos_sr': blocos_sr_normalizados,
+            }
 
         # ══════════════════════════════════════════════════════════════════════
         # MODO SNIPPET — analisa código colado diretamente, sem acesso ao repo
@@ -4464,15 +4545,16 @@ def diagnosticar_codigo(req: https_fn.CallableRequest):
             )
 
             snip_resp = client.models.generate_content(
-                model="gemini-2.0-flash", contents=snippet_prompt
+                model="gemini-3-flash-preview",
+                contents=snippet_prompt,
+                config=types.GenerateContentConfig(response_mime_type="application/json")
             )
-            snip_text = snip_resp.text.strip()
-            if '```json' in snip_text:
-                snip_text = snip_text.split('```json')[1].split('```')[0].strip()
-            elif '```' in snip_text:
-                snip_text = snip_text.split('```')[1].split('```')[0].strip()
-
-            diag_data = json.loads(snip_text)
+            snip_text = (snip_resp.text or '').strip()
+            try:
+                diag_data = normalize_diag_data(snip_text, json.loads(extract_json(snip_text)), [file_name])
+            except Exception as e:
+                print(f"Erro ao parsear diagnostico de snippet: {e}")
+                diag_data = normalize_diag_data(snip_text, {}, [file_name])
             blocos_sr = diag_data.get('blocos_sr', [])
             files_analyzed = [file_name]
 
@@ -4594,9 +4676,11 @@ def diagnosticar_codigo(req: https_fn.CallableRequest):
                 '{"arquivos": ["path/file1"], "justificativa": "breve explicação"}'
             )
             sel_resp = client.models.generate_content(
-                model="gemini-2.0-flash", contents=selection_prompt
+                model="gemini-3-flash-preview",
+                contents=selection_prompt,
+                config=types.GenerateContentConfig(response_mime_type="application/json")
             )
-            sel_text = sel_resp.text.strip()
+            sel_text = (sel_resp.text or '').strip()
             
             # Extração robusta de JSON
             def extract_json(text):
@@ -4673,14 +4757,17 @@ def diagnosticar_codigo(req: https_fn.CallableRequest):
                 "3. Se for um arquivo novo ou se não houver código para substituir, omita o bloco ou use uma âncora clara."
             )
             diag_resp = client.models.generate_content(
-                model="gemini-2.0-flash", contents=diagnosis_prompt
+                model="gemini-3-flash-preview",
+                contents=diagnosis_prompt,
+                config=types.GenerateContentConfig(response_mime_type="application/json")
             )
-            diag_text = extract_json(diag_resp.text.strip())
+            diag_text = (diag_resp.text or '').strip()
             try:
-                diag_data = json.loads(diag_text)
+                diag_data = normalize_diag_data(diag_text, json.loads(extract_json(diag_text)), list(files_content.keys()))
             except Exception as e:
                 print(f"Erro ao parsear diagnóstico: {e}")
-                diag_data = {}
+                print(f"Texto bruto do diagnÃ³stico: {diag_text}")
+                diag_data = normalize_diag_data(diag_text, {}, list(files_content.keys()))
             blocos_sr = diag_data.get('blocos_sr', [])
             files_analyzed = list(files_content.keys())
 

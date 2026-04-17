@@ -3324,6 +3324,53 @@ const App: React.FC = () => {
     }
   };
 
+  const generateDynamicTagsForTask = async (
+    taskId: string,
+    taskData: Partial<Tarefa>,
+    options?: { suppressSuccessToast?: boolean }
+  ) => {
+    const prompt =
+      `Analise a seguinte tarefa e forneca ate 5 tags curtas e altamente relevantes ` +
+      `(1 a 2 palavras) para caracteriza-la. Use o formato de resposta estrito: ` +
+      `[TAGS] tag1, tag2, tag3 [/TAGS].\n\n` +
+      `Titulo: ${taskData.titulo || ''}\n` +
+      `Descricao: ${taskData.descricao || ''}\n` +
+      `Area Tematica: ${taskData.area_tematica || ''}`;
+
+    const fn = httpsCallable(functions, 'askTaskAssistant');
+    const res = await fn({
+      prompt,
+      area_tematica: taskData.area_tematica,
+      ragContext: taskData.base_conhecimento,
+      extraContextId: taskData.extra_context_id,
+      knowledgeItemIds: taskData.knowledge_item_ids || [],
+    });
+
+    const result = (res.data as any).result || '';
+    const tagsMatch = result.match(/\[TAGS\]([\s\S]*?)\[\/TAGS\]/);
+    if (!tagsMatch) throw new Error('Formato de tags invalido.');
+
+    const existingTags = Array.isArray(taskData.tags) ? taskData.tags : [];
+    const generatedTags = tagsMatch[1]
+      .split(',')
+      .map((tag: string) => tag.trim().replace(/^#/, ''))
+      .filter((tag: string) => tag.length > 0);
+
+    if (generatedTags.length === 0) throw new Error('Nenhuma tag foi retornada.');
+
+    const mergedTags = Array.from(new Set([...existingTags, ...generatedTags]));
+    await updateDoc(doc(db, 'tarefas', taskId), {
+      tags: mergedTags,
+      data_atualizacao: new Date().toISOString(),
+    });
+
+    if (!options?.suppressSuccessToast) {
+      showToast('Tags dinâmicas geradas com sucesso!', 'success');
+    }
+
+    return mergedTags;
+  };
+
   const handleDeleteIdea = async (id: string) => {
     try {
       await deleteDoc(doc(db, 'brainstorm_ideas', id));
@@ -3360,6 +3407,14 @@ const App: React.FC = () => {
       );
 
       const docRef = await addDoc(collection(db, 'tarefas'), sanitizedPayload);
+      let finalTaskPayload: Record<string, any> = { ...taskPayload };
+
+      try {
+        const generatedTags = await generateDynamicTagsForTask(docRef.id, taskPayload, { suppressSuccessToast: true });
+        finalTaskPayload = { ...finalTaskPayload, tags: generatedTags };
+      } catch (tagErr) {
+        console.warn("Erro ao gerar tags dinâmicas automaticamente:", tagErr);
+      }
 
       if (convertingIdea) {
         await deleteDoc(doc(db, 'brainstorm_ideas', convertingIdea.id));
@@ -3372,7 +3427,7 @@ const App: React.FC = () => {
         onClick: () => {
           setSelectedTask({
             id: docRef.id,
-            ...taskPayload
+            ...finalTaskPayload
           } as Tarefa);
           setTaskModalMode('execute');
         }
@@ -7859,7 +7914,7 @@ const App: React.FC = () => {
           isOpen={isCopilotoOpen}
           onClose={() => setIsCopilotoOpen(false)}
           taskId={selectedTask?.id || selectedWorkItem?.id}
-          systemId={selectedSystemId}
+          systemId={selectedSystemId || selectedTask?.sistema_id || selectedWorkItem?.sistema_id}
           userId={user?.uid || ''}
           onOpenTask={async (id) => {
             const task = tarefas.find(t => t.id === id);
