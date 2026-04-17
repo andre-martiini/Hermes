@@ -4580,7 +4580,7 @@ def _format_pending_memory_conflict(conflict_data: dict | None) -> str:
 
 @scheduler_fn.on_schedule(
     schedule="0 4 * * *",
-    time_zone="America/Sao_Paulo",
+    timezone="America/Sao_Paulo",
     memory=options.MemoryOption.MB_512,
     timeout_sec=180,
 )
