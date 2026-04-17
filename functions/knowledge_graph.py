@@ -446,6 +446,7 @@ def _write_to_indice_artefatos(
     origem: str,
     task_id: Optional[str] = None,
     acervo_id: Optional[str] = None,
+    texto_bruto: Optional[str] = None,
 ) -> None:
     """Grava entrada no índice vetorial unificado (indice_artefatos)."""
     doc_id = str(uuid.uuid4())[:16]
@@ -463,6 +464,9 @@ def _write_to_indice_artefatos(
         entry["task_id"] = task_id
     if acervo_id:
         entry["acervo_id"] = acervo_id
+    if texto_bruto:
+        # Limite defensivo: o upstream já trunca em ARTEFATO_CHAR_CAP, mas garantimos aqui.
+        entry["texto_bruto"] = texto_bruto[:ARTEFATO_CHAR_CAP]
     db.collection("indice_artefatos").document(doc_id).set(entry)
     print(f"[KG IndiceArtefatos] Entrada gravada: {nome} ({origem})")
 
@@ -1021,7 +1025,8 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
             pass
         if emb:
             _write_to_indice_artefatos(
-                db, nome, url, tipo_mime, resumo, emb, tags, "tarefa", task_id=task_id
+                db, nome, url, tipo_mime, resumo, emb, tags, "tarefa",
+                task_id=task_id, texto_bruto=texto_cap,
             )
     else:  # acervo
         existing_tags = _fetch_tag_vocabulary(db)
@@ -1029,7 +1034,8 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
         _update_acervo_doc(db, acervo_id, status_final, resumo, tags, emb)
         if emb:
             _write_to_indice_artefatos(
-                db, nome, url, tipo_mime, resumo, emb, tags, "acervo", acervo_id=acervo_id
+                db, nome, url, tipo_mime, resumo, emb, tags, "acervo",
+                acervo_id=acervo_id, texto_bruto=texto_cap,
             )
         # Sincroniza novas tags no vocabulário centralizado
         if tags:
@@ -1463,3 +1469,425 @@ def crystallize_task_manual(req: https_fn.CallableRequest):
             code=https_fn.FunctionsErrorCode.INTERNAL,
             message=str(e),
         )
+
+
+# ─── Smart Search (KnowledgeView 2.0) ────────────────────────────────────────
+
+SMART_SEARCH_TOP_N = 10
+SMART_SEARCH_KNN_CANDIDATES = 50  # candidatos vetoriais puros antes do post-filtering
+
+
+def _parse_iso_date(value) -> Optional[datetime]:
+    """Tolerante a None, Timestamp do Firestore, string ISO ou datetime."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    try:
+        s = str(value).replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _in_date_window(
+    candidate: Optional[datetime],
+    start: Optional[datetime],
+    end: Optional[datetime],
+) -> bool:
+    """True se a data cair na janela (bordas inclusivas). Sem data → passa (não penaliza)."""
+    if candidate is None:
+        return True
+    if start and candidate < start:
+        return False
+    if end and candidate > end:
+        return False
+    return True
+
+
+def _tags_match(item_tags: list, required: set[str]) -> bool:
+    """Interseção: requer que pelo menos uma tag pedida esteja presente (case-insensitive)."""
+    if not required:
+        return True
+    item_set = {str(t).strip().lower() for t in (item_tags or []) if t}
+    return bool(item_set & required)
+
+
+def _route_intent(query: str, api_key: str) -> str:
+    """Roteia para BUSCA_SIMPLES ou SINTESE_PROFUNDA via LLM. Fallback: BUSCA_SIMPLES."""
+    client = _gemini_client(api_key)
+    prompt = f"""Classifique a intenção da consulta do usuário em UMA das duas categorias:
+
+BUSCA_SIMPLES — o usuário quer encontrar documentos, arquivos ou tarefas específicas (palavras-chave, títulos, nomes). Exemplos: "Relatórios 2025", "contrato PNAE", "dispensa de licitação".
+
+SINTESE_PROFUNDA — o usuário quer uma explicação, um passo-a-passo, um "como fazer", um resumo ou uma comparação que exige raciocínio sobre múltiplas fontes. Exemplos: "Como elaboramos o relatório de gestão de 2025?", "Qual o procedimento para dispensa?", "O que decidimos sobre o edital X?".
+
+Consulta: "{query}"
+
+Responda APENAS com uma das duas palavras: BUSCA_SIMPLES ou SINTESE_PROFUNDA."""
+    try:
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview", contents=prompt
+        )
+        raw = (response.text or "").strip().upper()
+        if "SINTESE" in raw:
+            return "SINTESE_PROFUNDA"
+        return "BUSCA_SIMPLES"
+    except Exception as exc:
+        print(f"[smart_search_kg] Falha no roteador: {exc} — fallback BUSCA_SIMPLES")
+        return "BUSCA_SIMPLES"
+
+
+def _search_nodes(
+    db,
+    query_emb: list[float],
+    area_tematica: Optional[str],
+    tags_set: set[str],
+    date_start: Optional[datetime],
+    date_end: Optional[datetime],
+) -> list[dict]:
+    """Busca em knowledge_nodes: filtra em memória (área, tags via task_ids, data) e ranqueia por similaridade."""
+    base = db.collection("knowledge_nodes")
+    if area_tematica:
+        stream = base.where("area_tematica", "==", area_tematica).stream()
+    else:
+        stream = base.stream()
+
+    scored: list[dict] = []
+    for ndoc in stream:
+        nd = ndoc.to_dict() or {}
+        node_emb = nd.get("embedding")
+        if not node_emb:
+            continue
+
+        # Filtro de data: usa data_atualizacao (fallback data_criacao)
+        node_date = _parse_iso_date(nd.get("data_atualizacao") or nd.get("data_criacao"))
+        if not _in_date_window(node_date, date_start, date_end):
+            continue
+
+        # Filtro de tags: nó não tem tags próprias; reusa interseção com texto do nó
+        # OU herda tags das tarefas vinculadas (consulta pontual, só se há filtro)
+        if tags_set:
+            node_text = (nd.get("titulo", "") + " " + nd.get("resumo", "")).lower()
+            direct_match = any(t in node_text for t in tags_set)
+            if not direct_match:
+                # Busca tags das tarefas vinculadas como fallback
+                inherited: set[str] = set()
+                for tid in (nd.get("task_ids") or [])[:5]:  # amostra
+                    try:
+                        tdoc = db.collection("tarefas").document(tid).get()
+                        if tdoc.exists:
+                            for t in (tdoc.to_dict() or {}).get("kg_tags", []):
+                                inherited.add(str(t).strip().lower())
+                    except Exception:
+                        continue
+                if not (inherited & tags_set):
+                    continue
+
+        sim = _cosine_similarity(query_emb, node_emb)
+        scored.append({
+            "id": ndoc.id,
+            "type": "node",
+            "title": nd.get("titulo", ""),
+            "snippet": (nd.get("resumo") or "")[:400],
+            "resumo_semantico": nd.get("resumo") or "",
+            "tags": [],
+            "date": (nd.get("data_atualizacao") or nd.get("data_criacao") or ""),
+            "area_tematica": nd.get("area_tematica", ""),
+            "task_ids": nd.get("task_ids", []),
+            "score": sim,
+            "n_tasks": nd.get("n_tasks", 0),
+        })
+
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return scored
+
+
+def _search_artefatos(
+    db,
+    query_emb: list[float],
+    tags_set: set[str],
+    date_start: Optional[datetime],
+    date_end: Optional[datetime],
+    tipo_filter: str,
+) -> list[dict]:
+    """
+    Busca vetorial em indice_artefatos com post-filtering em memória.
+    Usa find_nearest com limit maior e aplica filtros locais — evita Composite Vector Indexes no GCP.
+    """
+    try:
+        stream = (
+            db.collection("indice_artefatos")
+            .find_nearest(
+                vector_field="embedding",
+                query_vector=Vector(query_emb),
+                distance_measure=DistanceMeasure.COSINE,
+                limit=SMART_SEARCH_KNN_CANDIDATES,
+            )
+            .get()
+        )
+    except Exception as exc:
+        print(f"[smart_search_kg] FindNearest falhou: {exc}")
+        return []
+
+    filtered: list[dict] = []
+    for adoc in stream:
+        ad = adoc.to_dict() or {}
+        if not ad.get("resumo_semantico"):
+            continue
+
+        # Filtro de tags
+        if not _tags_match(ad.get("tags", []), tags_set):
+            continue
+
+        # Filtro de data
+        art_date = _parse_iso_date(ad.get("indexed_at"))
+        if not _in_date_window(art_date, date_start, date_end):
+            continue
+
+        filtered.append({
+            "id": adoc.id,
+            "type": "artefato",
+            "title": ad.get("nome", "Documento"),
+            "snippet": (ad.get("resumo_semantico") or "")[:400],
+            "resumo_semantico": ad.get("resumo_semantico") or "",
+            "tags": ad.get("tags", []),
+            "date": ad.get("indexed_at", ""),
+            "area_tematica": "",
+            "drive_url": ad.get("url", ""),
+            "drive_file_id": _extract_drive_id(ad.get("url", "")),
+            "tipo_mime": ad.get("tipo_mime", ""),
+            "origem": ad.get("origem", ""),
+            "task_id": ad.get("task_id", ""),
+            "acervo_id": ad.get("acervo_id", ""),
+            # distance não é exposta pelo SDK por padrão; usamos a ordem retornada como score
+            "score": 1.0,
+        })
+
+    return filtered
+
+
+def _serialize_date(value) -> str:
+    """Converte Timestamp/datetime/string em ISO string para o payload JSON."""
+    if value is None or value == "":
+        return ""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    # Firestore DatetimeWithNanoseconds possui isoformat
+    try:
+        return value.isoformat()
+    except Exception:
+        return str(value)
+
+
+def _build_synthesis(
+    query: str,
+    results: list[dict],
+    api_key: str,
+) -> str:
+    """Gera síntese em linguagem natural com citações [1], [2] mapeadas à ordem de `results`."""
+    if not results:
+        return ""
+
+    fontes_lines: list[str] = []
+    for i, r in enumerate(results, 1):
+        tipo_label = "Nó Conceitual" if r["type"] == "node" else "Documento"
+        fontes_lines.append(
+            f"[{i}] {tipo_label}: \"{r['title']}\"\n    Resumo: {r['resumo_semantico'][:500]}"
+        )
+    fontes = "\n\n".join(fontes_lines)
+
+    prompt = f"""Você é o motor de respostas do sistema Hermes. Responda à pergunta do usuário APENAS com base nas fontes abaixo.
+
+PERGUNTA: "{query}"
+
+FONTES DISPONÍVEIS:
+{fontes}
+
+REGRAS OBRIGATÓRIAS:
+1. Redija uma resposta direta, técnica e objetiva (máximo 8 frases).
+2. SEMPRE cite as fontes usando marcadores [1], [2], etc., exatamente como aparecem acima.
+3. Cada afirmação substantiva deve ter pelo menos uma citação.
+4. Se as fontes não cobrem a pergunta, diga isso explicitamente — NÃO invente.
+5. Não repita os títulos das fontes como preâmbulo; vá direto à resposta.
+
+Resposta:"""
+
+    try:
+        client = _gemini_client(api_key)
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview", contents=prompt
+        )
+        return (response.text or "").strip()
+    except Exception as exc:
+        print(f"[smart_search_kg] Falha na síntese: {exc}")
+        return ""
+
+
+@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=120)
+def smart_search_kg(req: https_fn.CallableRequest):
+    """
+    Motor de respostas do KnowledgeView 2.0.
+
+    Roteia a intenção (BUSCA_SIMPLES vs SINTESE_PROFUNDA), executa busca híbrida
+    (Nós Conceituais + Acervo via KNN com post-filtering) e, se necessário,
+    sintetiza a resposta com citações [1], [2].
+
+    Input:
+      {
+        query: str,
+        filtros?: {
+          area_tematica?: str,
+          tags?: list[str],
+          data_inicio?: str (ISO),
+          data_fim?: str (ISO),
+          tipo?: "all" | "node" | "artefato"
+        }
+      }
+
+    Output:
+      {
+        intent: "BUSCA_SIMPLES" | "SINTESE_PROFUNDA",
+        synthesis?: str,
+        results: list[{id, type, title, snippet, resumo_semantico, tags, date,
+                       area_tematica, drive_url?, drive_file_id?, task_ids?, ...}]
+      }
+    """
+    data = req.data or {}
+    query = (data.get("query") or "").strip()
+    if not query:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="query é obrigatório.",
+        )
+
+    filtros = data.get("filtros") or {}
+    area_tematica = (filtros.get("area_tematica") or "").strip() or None
+    tags_set = {str(t).strip().lower() for t in (filtros.get("tags") or []) if t}
+    date_start = _parse_iso_date(filtros.get("data_inicio"))
+    date_end = _parse_iso_date(filtros.get("data_fim"))
+    tipo_filter = (filtros.get("tipo") or "all").lower()
+
+    db = _get_db()
+    api_key = _get_api_key(db)
+    if not api_key:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+            message="Chave Gemini não configurada.",
+        )
+
+    # ── Passo 1: Roteador de intenção ─────────────────────────────────────────
+    intent = _route_intent(query, api_key)
+
+    # ── Passo 2: Busca híbrida ────────────────────────────────────────────────
+    try:
+        query_emb = _get_embedding(query, api_key, task_type="RETRIEVAL_QUERY")
+    except Exception as exc:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=f"Falha ao gerar embedding da query: {exc}",
+        )
+
+    node_results: list[dict] = []
+    artefato_results: list[dict] = []
+
+    if tipo_filter in ("all", "node"):
+        node_results = _search_nodes(
+            db, query_emb, area_tematica, tags_set, date_start, date_end
+        )
+    if tipo_filter in ("all", "artefato"):
+        artefato_results = _search_artefatos(
+            db, query_emb, tags_set, date_start, date_end, tipo_filter
+        )
+
+    # Merge intercalado: prioriza melhores scores mantendo diversidade de tipos
+    node_results.sort(key=lambda x: x["score"], reverse=True)
+    merged: list[dict] = []
+    i, j = 0, 0
+    while len(merged) < SMART_SEARCH_TOP_N and (i < len(node_results) or j < len(artefato_results)):
+        if i < len(node_results) and (j >= len(artefato_results) or len(merged) % 2 == 0):
+            merged.append(node_results[i])
+            i += 1
+        elif j < len(artefato_results):
+            merged.append(artefato_results[j])
+            j += 1
+
+    # Sanitiza o payload: remove campos internos e serializa datas
+    for r in merged:
+        r.pop("score", None)
+        r["date"] = _serialize_date(r.get("date"))
+
+    # ── Passo 3: Síntese condicional ──────────────────────────────────────────
+    synthesis = ""
+    if intent == "SINTESE_PROFUNDA" and merged:
+        synthesis = _build_synthesis(query, merged, api_key)
+
+    response: dict = {
+        "intent": intent,
+        "results": merged,
+    }
+    if synthesis:
+        response["synthesis"] = synthesis
+
+    return response
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=30)
+def get_artefato_raw_text(req: https_fn.CallableRequest):
+    """
+    Lazy-load do texto bruto de um item (Raio-X da IA).
+
+    Input:  { id: str, tipo: "node" | "artefato" }
+    Output: { texto_bruto: str, truncated: bool }
+
+    Para 'node': retorna o resumo técnico (nós não guardam texto bruto).
+    Para 'artefato': lê `texto_bruto` de indice_artefatos. Entradas antigas sem
+    esse campo retornam string vazia com aviso em `texto_bruto`.
+    """
+    data = req.data or {}
+    item_id = (data.get("id") or "").strip()
+    tipo = (data.get("tipo") or "").strip().lower()
+
+    if not item_id or tipo not in ("node", "artefato"):
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="id e tipo ('node' | 'artefato') são obrigatórios.",
+        )
+
+    db = _get_db()
+
+    if tipo == "node":
+        snap = db.collection("knowledge_nodes").document(item_id).get()
+        if not snap.exists:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.NOT_FOUND,
+                message="Nó Conceitual não encontrado.",
+            )
+        nd = snap.to_dict() or {}
+        return {
+            "texto_bruto": nd.get("resumo") or "",
+            "truncated": False,
+        }
+
+    # tipo == "artefato"
+    snap = db.collection("indice_artefatos").document(item_id).get()
+    if not snap.exists:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.NOT_FOUND,
+            message="Artefato não encontrado no índice.",
+        )
+    ad = snap.to_dict() or {}
+    texto = ad.get("texto_bruto") or ""
+    if not texto:
+        return {
+            "texto_bruto": "",
+            "truncated": False,
+            "aviso": "Este artefato foi indexado antes da ativação do Raio-X. Reprocesse para disponibilizar o texto bruto.",
+        }
+
+    truncated = len(texto) > ARTEFATO_CHAR_CAP
+    return {
+        "texto_bruto": texto[:ARTEFATO_CHAR_CAP],
+        "truncated": truncated,
+    }
