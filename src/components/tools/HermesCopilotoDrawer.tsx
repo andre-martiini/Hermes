@@ -5,7 +5,7 @@ import { httpsCallable } from 'firebase/functions';
 import { collection, onSnapshot, query, orderBy, where, addDoc, doc, updateDoc, getDoc, limit, Timestamp } from 'firebase/firestore';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { formatDate } from '@/types';
+import { formatDate, PoolItem } from '@/types';
 import { ReportModal } from './ReportModal';
 
 // URL do endpoint HTTP de upload (Node.js Functions)
@@ -161,6 +161,16 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     // Estado de transcrição de áudio colado
     const [isTranscribing, setIsTranscribing] = useState(false);
 
+    // ── Mention (@) popup ─────────────────────────────────────────────────────
+    const [taskPoolItems, setTaskPoolItems] = useState<PoolItem[]>([]);
+    const [mention, setMention] = useState<{
+        visible: boolean;
+        query: string;
+        atIndex: number;
+        filtered: PoolItem[];
+        selectedIndex: number;
+    }>({ visible: false, query: '', atIndex: -1, filtered: [], selectedIndex: 0 });
+
     // ── Gravação de áudio por microfone ───────────────────────────────────────
     const [isRecording, setIsRecording] = useState(false);
     const [isProcessingMic, setIsProcessingMic] = useState(false);
@@ -232,6 +242,18 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
         return () => window.removeEventListener('mousedown', handleClickOutside);
     }, [input, isFocused]);
+
+    // Load pool_dados from active task for @ mentions
+    useEffect(() => {
+        if (!taskId) { setTaskPoolItems([]); return; }
+        return onSnapshot(doc(db, 'tarefas', taskId), (snap) => {
+            if (snap.exists()) {
+                const items = ((snap.data().pool_dados as PoolItem[]) || [])
+                    .filter(item => item.tipo !== 'telefone');
+                setTaskPoolItems(items);
+            }
+        });
+    }, [taskId]);
 
     // Load Sessions
     useEffect(() => {
@@ -426,6 +448,23 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         } finally {
             setLoadingEditId(null);
         }
+    };
+
+    // ── Seleção de item do mention popup ─────────────────────────────────────
+    const selectMention = (item: PoolItem) => {
+        const before = input.slice(0, mention.atIndex);
+        const after = input.slice(mention.atIndex + 1 + mention.query.length);
+        let ref = '';
+        if (item.tipo === 'arquivo' && item.drive_file_id) {
+            ref = `📎 "${item.nome || 'arquivo'}" (drive_id:${item.drive_file_id})`;
+        } else if (item.tipo === 'link') {
+            ref = `🔗 "${item.nome || item.valor}" (${item.valor})`;
+        } else {
+            ref = `"${item.nome || item.valor}"`;
+        }
+        setInput(before + ref + after);
+        setMention(prev => ({ ...prev, visible: false }));
+        setTimeout(() => textareaRef.current?.focus(), 0);
     };
 
     // ── Transcrição de áudio colado ───────────────────────────────────────────
@@ -1233,14 +1272,61 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                             {/* Textarea com botão de clipe embutido */}
                             <div className="relative flex-1">
+                                {/* Mention popup */}
+                                {mention.visible && (
+                                    <div className="absolute bottom-full left-0 mb-2 w-full max-h-52 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl z-50">
+                                        <div className="px-3 py-1.5 border-b border-slate-100 sticky top-0 bg-white">
+                                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Referenciar do Diário de Bordo</span>
+                                        </div>
+                                        {mention.filtered.map((item, idx) => (
+                                            <button
+                                                key={item.id}
+                                                onMouseDown={e => { e.preventDefault(); selectMention(item); }}
+                                                className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${idx === mention.selectedIndex ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
+                                            >
+                                                <span className="text-base shrink-0">
+                                                    {item.tipo === 'arquivo' ? '📄' : '🔗'}
+                                                </span>
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="text-xs font-semibold text-slate-800 truncate">{item.nome || item.valor}</p>
+                                                    <p className="text-[10px] text-slate-400 truncate">{item.tipo === 'arquivo' ? 'Arquivo' : item.valor}</p>
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                                 <textarea
                                     ref={textareaRef}
                                     value={input}
-                                    onChange={e => setInput(e.target.value)}
+                                    onChange={e => {
+                                        const val = e.target.value;
+                                        setInput(val);
+                                        if (taskPoolItems.length === 0) return;
+                                        const cursor = e.target.selectionStart ?? val.length;
+                                        const textBefore = val.slice(0, cursor);
+                                        const atMatch = textBefore.match(/@([\w ]*)$/);
+                                        if (atMatch) {
+                                            const query = atMatch[1].toLowerCase().trim();
+                                            const filtered = taskPoolItems.filter(item =>
+                                                !query || (item.nome || item.valor || '').toLowerCase().includes(query)
+                                            );
+                                            if (filtered.length > 0) {
+                                                setMention({ visible: true, query: atMatch[1], atIndex: cursor - atMatch[0].length, filtered, selectedIndex: 0 });
+                                                return;
+                                            }
+                                        }
+                                        setMention(prev => ({ ...prev, visible: false }));
+                                    }}
                                     onFocus={() => setIsFocused(true)}
                                     onPaste={handlePaste}
                                     disabled={isBlocked}
                                     onKeyDown={e => {
+                                        if (mention.visible) {
+                                            if (e.key === 'ArrowDown') { e.preventDefault(); setMention(prev => ({ ...prev, selectedIndex: Math.min(prev.selectedIndex + 1, prev.filtered.length - 1) })); return; }
+                                            if (e.key === 'ArrowUp') { e.preventDefault(); setMention(prev => ({ ...prev, selectedIndex: Math.max(prev.selectedIndex - 1, 0) })); return; }
+                                            if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); if (mention.filtered[mention.selectedIndex]) selectMention(mention.filtered[mention.selectedIndex]); return; }
+                                            if (e.key === 'Escape') { setMention(prev => ({ ...prev, visible: false })); return; }
+                                        }
                                         if (e.key === 'Enter' && !e.shiftKey) {
                                             e.preventDefault();
                                             if (!currentSessionId) {
