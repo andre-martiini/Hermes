@@ -11,6 +11,34 @@ import { isInternalAppHref, navigateWithinApp } from '../../utils/internalNaviga
 
 // URL do endpoint HTTP de upload (Node.js Functions)
 const UPLOAD_ENDPOINT = 'https://us-central1-gestao-hermes.cloudfunctions.net/uploadFileForCopiloto';
+const COPILOTO_SUPPORTED_FILE_EXTENSIONS = [
+    '.pdf',
+    '.doc',
+    '.docx',
+    '.xls',
+    '.xlsx',
+    '.csv',
+    '.txt',
+    '.json',
+    '.xml',
+    '.eml',
+    '.md',
+    '.markdown',
+    '.html',
+    '.htm',
+    '.pptx',
+    '.png',
+    '.jpg',
+    '.jpeg',
+    '.webp',
+] as const;
+const COPILOTO_FILE_ACCEPT = COPILOTO_SUPPORTED_FILE_EXTENSIONS.join(',');
+const COPILOTO_SUPPORTED_FORMATS_LABEL = 'PDF, DOC/DOCX, XLS/XLSX, CSV, TXT, JSON, XML, EML, Markdown, HTML, PPTX e imagens';
+
+const isCopilotoFileSupported = (file: File) => {
+    const fileName = file.name.toLowerCase();
+    return COPILOTO_SUPPORTED_FILE_EXTENSIONS.some((extension) => fileName.endsWith(extension));
+};
 
 interface SlideItem {
     ordem: number;
@@ -487,6 +515,20 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     // ── Seleção de arquivo ────────────────────────────────────────────────────
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0] ?? null;
+        if (!file) {
+            setAttachedFile(null);
+            e.target.value = '';
+            return;
+        }
+
+        if (!isCopilotoFileSupported(file)) {
+            setAttachedFile(null);
+            setFooterError(`Formato ainda não suportado no copiloto. Use ${COPILOTO_SUPPORTED_FORMATS_LABEL}.`);
+            e.target.value = '';
+            return;
+        }
+
+        setFooterError(null);
         setAttachedFile(file);
         // Reset o input para permitir re-selecionar o mesmo arquivo
         e.target.value = '';
@@ -1683,7 +1725,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                             <input
                                 ref={fileInputRef}
                                 type="file"
-                                accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.png,.jpg,.jpeg,.webp"
+                                accept={COPILOTO_FILE_ACCEPT}
                                 className="hidden"
                                 onChange={handleFileSelect}
                             />

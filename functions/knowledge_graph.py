@@ -64,9 +64,19 @@ ARTEFATO_CHAR_CAP     = ARTEFATO_TOKEN_CAP * CHARS_PER_TOKEN  # ≈ 60 000 chars
 ARTEFATO_PUBSUB_TOPIC = "hermes-artefato-kg"
 SUPPORTED_MIMES = frozenset({
     "application/pdf",
+    "application/msword",
+    "application/json",
+    "application/xml",
+    "message/rfc822",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "text/csv",
+    "text/xml",
+    "text/plain",
+    "text/markdown",
+    "text/html",
 })
 _DRIVE_ID_RE = re.compile(
     r"(?:drive\.google\.com/(?:file/d/|open\?id=)|docs\.google\.com/\w+/d/)([a-zA-Z0-9_-]{20,})"
@@ -207,9 +217,18 @@ def _infer_mime(nome: str) -> str:
     """Infere MIME type pela extensão do arquivo."""
     n = nome.lower()
     if n.endswith(".pdf"):  return "application/pdf"
+    if n.endswith(".doc"):  return "application/msword"
     if n.endswith(".docx"): return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    if n.endswith(".xls"):  return "application/vnd.ms-excel"
     if n.endswith(".xlsx"): return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    if n.endswith(".pptx"): return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     if n.endswith(".csv"):  return "text/csv"
+    if n.endswith(".txt"):  return "text/plain"
+    if n.endswith(".json"): return "application/json"
+    if n.endswith(".xml"):  return "application/xml"
+    if n.endswith(".eml"):  return "message/rfc822"
+    if n.endswith(".md") or n.endswith(".markdown"): return "text/markdown"
+    if n.endswith(".html") or n.endswith(".htm"): return "text/html"
     return "application/octet-stream"
 
 
@@ -322,9 +341,25 @@ def _aggregate_artefatos(task_data: dict, db) -> list[dict]:
                 if tipo == "pdf":
                     mime = "application/pdf"
                 elif tipo in ("doc", "docx"):
-                    mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                elif tipo in ("xlsx", "csv"):
-                    mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    mime = "application/msword" if tipo == "doc" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                elif tipo in ("xls", "xlsx"):
+                    mime = "application/vnd.ms-excel" if tipo == "xls" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                elif tipo == "csv":
+                    mime = "text/csv"
+                elif tipo == "pptx":
+                    mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                elif tipo in ("txt", "text", "plain"):
+                    mime = "text/plain"
+                elif tipo == "json":
+                    mime = "application/json"
+                elif tipo == "xml":
+                    mime = "application/xml"
+                elif tipo == "eml":
+                    mime = "message/rfc822"
+                elif tipo in ("md", "markdown"):
+                    mime = "text/markdown"
+                elif tipo in ("html", "htm"):
+                    mime = "text/html"
                 else:
                     mime = _infer_mime(nome)
                 _add(nome, url, mime, _extract_drive_id(url))
