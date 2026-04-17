@@ -174,6 +174,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                     >
                         <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
+                            urlTransform={(url) => url}
                             components={{
                                 h1: ({ node, ...props }) => (
                                     <h1 className="text-3xl font-black text-slate-900 mb-2 mt-0 pb-3 border-b-2 border-slate-200" {...props} />

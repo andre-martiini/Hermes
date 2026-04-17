@@ -898,7 +898,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                 {activeDiagnosis.markdownContent && (
                                     <div className={`rounded-2xl border p-5 ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-white'}`}>
                                         <p className={`text-[10px] font-black uppercase tracking-widest mb-3 ${isDark ? 'text-white/50' : 'text-slate-400'}`}>Relatório Completo</p>
-                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeDiagnosis.markdownContent}</ReactMarkdown>
+                                        <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={(url) => url}>{activeDiagnosis.markdownContent}</ReactMarkdown>
                                     </div>
                                 )}
                             </>
@@ -1082,6 +1082,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                     )}
                                     <ReactMarkdown
                                         remarkPlugins={[remarkGfm]}
+                                        urlTransform={(url) => url}
                                         components={{
                                             p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
                                             ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-2" {...props} />,
