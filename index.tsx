@@ -5799,23 +5799,7 @@ const App: React.FC = () => {
                 ) : viewMode === 'knowledge' ? (
                   <div className="fixed inset-0 z-[50] bg-slate-50 md:relative md:inset-auto md:z-0 md:bg-transparent">
                     <KnowledgeView
-                      items={knowledgeItems}
-                      knowledgeBases={knowledgeBases}
-                      onDeleteItem={async (id) => { await deleteDoc(doc(db, 'conhecimento', id)); }}
-                      onUploadFile={handleUploadKnowledgeFile}
-                      onAddLink={handleAddKnowledgeLink}
-                      onSaveItem={handleSaveKnowledgeItem}
-                      onRenameAction={handleRenameActionFromKnowledge}
-                      onProcessWithAI={handleProcessWithAI}
-                      onGenerateSlides={handleGenerateSlides}
-                      showConfirm={showAlert}
-                      allTasks={tarefas}
-                      allWorkItems={workItems}
-                      masterKnowledge={masterKnowledge}
                       onNavigateToOrigin={handleNavigateToOrigin}
-                      onCreateBase={handleCreateBase}
-                      onUpdateBase={handleUpdateBase}
-                      onDeleteBase={handleDeleteBase}
                     />
                     <button
                       onClick={() => setViewMode('dashboard')}
