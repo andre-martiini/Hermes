@@ -78,6 +78,18 @@ interface PendingEdit {
     errorMessage?: string;
 }
 
+interface PendingMemoryConflict {
+    memory_id: string;
+    categoria_existente?: string;
+    existing_text: string;
+    proposed_text: string;
+    similarity?: number;
+    status?: 'conflict';
+    status_ui?: 'pending' | 'resolved' | 'kept';
+    decisao_final?: 'manter_existente' | 'substituir_pelo_novo';
+    resolvedAt?: any;
+}
+
 interface DiagnosisBlock {
     arquivo: string;
     descricao: string;
@@ -109,6 +121,7 @@ interface Message {
     type?: 'text' | 'plan_proposal';
     toolsUsed?: string[];
     pendingEdit?: PendingEdit;
+    pendingMemoryConflict?: PendingMemoryConflict;
     reportId?: string;
 }
 
@@ -119,6 +132,8 @@ const TOOL_LABELS: Record<string, string> = {
     pesquisar_internet: 'Internet',
     ler_pagina_web: 'Leitura de Página',
     ler_documento_na_integra: 'Leitura de Documento',
+    salvar_memoria_global: 'Memória Atualizada',
+    atualizar_personalidade: 'Personalidade Ajustada',
     resolver_conflito_procedimento: 'Resolução de Conflito',
     criar_acao_no_sistema: 'Criando Ação',
     editar_plano_acao: 'Ajustando Plano...',
@@ -138,7 +153,13 @@ const FIELD_LABELS: Record<string, string> = {
 };
 
 // Ferramentas de escrita/mutação — recebem estilo verde
-const WRITE_TOOLS = new Set(['criar_acao_no_sistema', 'editar_plano_acao', 'preparar_edicao_acao']);
+const WRITE_TOOLS = new Set([
+    'criar_acao_no_sistema',
+    'editar_plano_acao',
+    'preparar_edicao_acao',
+    'salvar_memoria_global',
+    'atualizar_personalidade',
+]);
 
 const sanitizeDiagnosisFilePart = (value?: string) =>
     (value || 'diagnostico')
@@ -700,6 +721,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
     // Estado para rastrear qual card de edição está em processamento
     const [loadingEditId, setLoadingEditId] = useState<string | null>(null);
+    const [loadingMemoryConflictId, setLoadingMemoryConflictId] = useState<string | null>(null);
 
     const handleConfirmEdit = async (messageId: string, pendingEdit: PendingEdit) => {
         if (!currentSessionId || loadingEditId) return;
@@ -741,6 +763,31 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             console.error('[EditCard] Erro ao cancelar edição:', err);
         } finally {
             setLoadingEditId(null);
+        }
+    };
+
+    const handleResolveMemoryConflict = async (
+        messageId: string,
+        conflict: PendingMemoryConflict,
+        decisao: 'manter_existente' | 'substituir_pelo_novo'
+    ) => {
+        if (!currentSessionId || loadingMemoryConflictId) return;
+        setLoadingMemoryConflictId(messageId);
+        try {
+            const fn = httpsCallable(functions, 'confirmarConflitoMemoria');
+            await fn({
+                sessionId: currentSessionId,
+                messageId,
+                memoriaId: conflict.memory_id,
+                decisao,
+                fatoAtualizado: conflict.proposed_text,
+                categoria: conflict.categoria_existente || 'fato_isolado',
+            });
+        } catch (err: any) {
+            console.error('[MemoryConflict] Erro ao resolver conflito:', err);
+            setFooterError('Erro ao resolver conflito de memória: ' + (err?.message || 'Tente novamente.'));
+        } finally {
+            setLoadingMemoryConflictId(null);
         }
     };
 
@@ -1523,6 +1570,80 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                     >
                                                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
                                                         Cancelar
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {msg.pendingMemoryConflict && msg.id && (() => {
+                                        const conflict = msg.pendingMemoryConflict!;
+                                        const mid = msg.id!;
+                                        const isProcessing = loadingMemoryConflictId === mid;
+
+                                        if (conflict.status_ui === 'resolved') {
+                                            return (
+                                                <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700 flex items-center gap-1.5 mb-2">
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                        Conflito resolvido
+                                                    </p>
+                                                    <p className="text-[10px] text-emerald-700 font-semibold">
+                                                        A nova memória substituiu a versão anterior.
+                                                    </p>
+                                                </div>
+                                            );
+                                        }
+
+                                        if (conflict.status_ui === 'kept') {
+                                            return (
+                                                <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-1.5 mb-2">
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                        Conflito encerrado
+                                                    </p>
+                                                    <p className="text-[10px] text-slate-600 font-semibold">
+                                                        A memória antiga foi mantida como fonte de verdade.
+                                                    </p>
+                                                </div>
+                                            );
+                                        }
+
+                                        return (
+                                            <div className="mt-3 p-3 bg-white border border-violet-200 rounded-xl shadow-sm">
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-violet-700 flex items-center gap-1.5 mb-2">
+                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                                                    Conflito de Memória
+                                                </p>
+                                                <p className="text-[10px] text-slate-600 mb-3">
+                                                    O Hermes encontrou duas versões muito parecidas e precisa de uma decisão explícita.
+                                                </p>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                                                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">Versão Antiga</p>
+                                                        <p className="text-[11px] text-slate-700 leading-relaxed whitespace-pre-wrap">{conflict.existing_text}</p>
+                                                    </div>
+                                                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                                                        <p className="text-[9px] font-black uppercase tracking-widest text-emerald-700 mb-2">Versão Nova</p>
+                                                        <p className="text-[11px] text-emerald-900 leading-relaxed whitespace-pre-wrap">{conflict.proposed_text}</p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex flex-wrap gap-2 pt-2 border-t border-violet-100">
+                                                    <button
+                                                        onClick={() => handleResolveMemoryConflict(mid, conflict, 'manter_existente')}
+                                                        disabled={isProcessing}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-slate-700 border border-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                    >
+                                                        {isProcessing ? <span className="w-2.5 h-2.5 border-2 border-slate-300 border-t-slate-700 rounded-full animate-spin" /> : null}
+                                                        Manter Antiga
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleResolveMemoryConflict(mid, conflict, 'substituir_pelo_novo')}
+                                                        disabled={isProcessing}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                    >
+                                                        {isProcessing ? <span className="w-2.5 h-2.5 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : null}
+                                                        Manter Nova
                                                     </button>
                                                 </div>
                                             </div>

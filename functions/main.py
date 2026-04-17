@@ -6,6 +6,7 @@ from firebase_admin import initialize_app, firestore, messaging, get_app
 import json
 import base64
 from datetime import datetime, timedelta, timezone
+import math
 import time
 import re
 import io
@@ -84,6 +85,14 @@ def get_embedding(text: str, api_key: str = None, task_type: str = "RETRIEVAL_DO
     response.raise_for_status()
     return response.json()["embedding"]["values"]
 
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(x * x for x in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
 
 
 def get_db():
@@ -4111,6 +4120,574 @@ def on_arquivo_adicionado(event: firestore_fn.Event[firestore_fn.DocumentSnapsho
 
 
 
+COPILOT_SOUL_DEFAULT = {
+    "tone": "Consultivo, analítico e objetivo.",
+    "detail_level": "Alto o suficiente para orientar execução, sem prolixidade.",
+    "interaction_style": "Clareza, transparência sobre incertezas e foco em próximos passos concretos.",
+}
+
+MEMORY_NODE_TYPES = {"regra_global", "fato_isolado"}
+MEMORY_SIMILARITY_CREATE_THRESHOLD = 0.90
+MEMORY_SIMILARITY_DUPLICATE_THRESHOLD = 0.965
+MEMORY_MIN_FACT_LENGTH = 24
+
+
+def _iso_now_utc() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _normalize_memory_category(value: str | None) -> str:
+    raw = (value or "").strip().lower()
+    aliases = {
+        "regra": "regra_global",
+        "regra_global": "regra_global",
+        "regra global": "regra_global",
+        "policy": "regra_global",
+        "fato": "fato_isolado",
+        "fato_isolado": "fato_isolado",
+        "fato isolado": "fato_isolado",
+        "fact": "fato_isolado",
+    }
+    return aliases.get(raw, "fato_isolado")
+
+
+def _normalize_text_for_match(text: str | None) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip().lower())
+
+
+def _get_copilot_core(db):
+    doc = db.collection("system").document("copilot_core").get()
+    if doc.exists:
+        data = doc.to_dict() or {}
+        if data.get("content"):
+            return data
+    return {
+        "content": (
+            "NUNCA exponha segredos, chaves de API, tokens, credenciais ou dados sensíveis. "
+            "Nunca invente fatos. Se houver conflito entre memórias, exponha a divergência e peça validação explícita do usuário. "
+            "Use apenas JSON válido quando uma ferramenta exigir JSON."
+        ),
+        "source": "default",
+    }
+
+
+def _get_copilot_soul(db):
+    ref = db.collection("system").document("copilot_soul")
+    doc = ref.get()
+    if doc.exists:
+        data = doc.to_dict() or {}
+        if any(data.get(key) for key in ("tone", "detail_level", "interaction_style", "content")):
+            return data
+
+    payload = {
+        **COPILOT_SOUL_DEFAULT,
+        "content": (
+            f"Tom: {COPILOT_SOUL_DEFAULT['tone']} "
+            f"Nível de detalhamento: {COPILOT_SOUL_DEFAULT['detail_level']} "
+            f"Estilo: {COPILOT_SOUL_DEFAULT['interaction_style']}"
+        ),
+        "updated_at": firestore.SERVER_TIMESTAMP,
+        "created_by": "system_bootstrap",
+    }
+    try:
+        ref.set(payload, merge=True)
+    except Exception:
+        pass
+    return payload
+
+
+def _bootstrap_user_ai_profile(db, uid: str | None):
+    if not uid:
+        return {}
+
+    user_ref = db.collection("usuarios").document(uid)
+    snap = user_ref.get()
+    base_data = snap.to_dict() if snap.exists else {}
+    ai_profile = dict((base_data or {}).get("ai_profile") or {})
+    changed = False
+
+    if not ai_profile.get("uid"):
+        ai_profile["uid"] = uid
+        changed = True
+
+    if base_data:
+        for src_key, dst_key in (
+            ("nome", "nome"),
+            ("cargo", "cargo"),
+            ("setor", "setor"),
+            ("email", "email"),
+        ):
+            if base_data.get(src_key) and not ai_profile.get(dst_key):
+                ai_profile[dst_key] = base_data.get(src_key)
+                changed = True
+
+    if not ai_profile.get("preferences"):
+        ai_profile["preferences"] = {
+            "response_style": "objetivo",
+            "memory_capture": "automatico_com_validacao",
+        }
+        changed = True
+
+    if changed:
+        ai_profile["updated_at"] = firestore.SERVER_TIMESTAMP
+        user_ref.set({"ai_profile": ai_profile}, merge=True)
+
+    return ai_profile
+
+
+def _format_ai_profile_for_prompt(ai_profile: dict) -> str:
+    if not ai_profile:
+        return "(perfil de usuário ainda não bootstrapado)"
+
+    lines = []
+    for key in ("nome", "cargo", "setor", "email"):
+        value = ai_profile.get(key)
+        if value:
+            lines.append(f"- {key}: {value}")
+
+    prefs = ai_profile.get("preferences") or {}
+    if prefs:
+        lines.append(f"- preferencias: {json.dumps(prefs, ensure_ascii=False)}")
+
+    history = ai_profile.get("historico_deduzido") or []
+    if history:
+        lines.append(f"- historico_deduzido: {json.dumps(history[:5], ensure_ascii=False)}")
+
+    return "\n".join(lines) if lines else "(perfil sem atributos relevantes)"
+
+
+def _find_similar_memory_nodes(db, fato: str, api_key: str, limit: int = 5):
+    fato = (fato or "").strip()
+    if not fato:
+        return []
+
+    try:
+        query_embedding = list(map(float, get_embedding(fato, api_key=api_key, task_type="RETRIEVAL_QUERY")))
+    except Exception as exc:
+        print(f"[Memoria] Falha ao gerar embedding da consulta: {exc}")
+        return []
+
+    candidates = []
+    for snap in db.collection("knowledge_nodes").stream():
+        data = snap.to_dict() or {}
+        if data.get("tipo") not in MEMORY_NODE_TYPES:
+            continue
+        node_embedding = data.get("embedding")
+        if not node_embedding:
+            continue
+        try:
+            similarity = _cosine_similarity(query_embedding, list(node_embedding))
+        except Exception:
+            continue
+        candidates.append({
+            "id": snap.id,
+            "similarity": similarity,
+            "data": data,
+        })
+
+    candidates.sort(key=lambda item: item["similarity"], reverse=True)
+    return candidates[:limit]
+
+
+def _build_memory_context(db, api_key: str, user_prompt: str, limit: int = 4) -> str:
+    candidates = _find_similar_memory_nodes(db, user_prompt, api_key, limit=limit)
+    if not candidates:
+        return ""
+
+    lines = []
+    for item in candidates:
+        data = item["data"]
+        content = (
+            data.get("texto_memoria")
+            or data.get("resumo")
+            or data.get("titulo")
+            or ""
+        ).strip()
+        if not content:
+            continue
+        tipo = data.get("tipo", "fato_isolado")
+        lines.append(
+            f"- [{tipo}] {content[:350]} (id={item['id']}, similaridade={item['similarity']:.3f})"
+        )
+    if not lines:
+        return ""
+    return "[MEMÓRIAS GLOBAIS RELEVANTES]\n" + "\n".join(lines)
+
+
+def _save_user_profile_signal(db, uid: str | None, prompt_text: str, task_id: str | None, system_id: str | None):
+    if not uid or not prompt_text:
+        return
+    profile_ref = db.collection("usuarios").document(uid)
+    doc = profile_ref.get()
+    ai_profile = dict((doc.to_dict() or {}).get("ai_profile") or {})
+    history = list(ai_profile.get("historico_deduzido") or [])
+    snippet = prompt_text.strip().replace("\n", " ")
+    if len(snippet) > 180:
+        snippet = snippet[:177] + "..."
+    entry = {
+        "texto": snippet,
+        "taskId": task_id or None,
+        "systemId": system_id or None,
+        "at": _iso_now_utc(),
+    }
+    if not history or history[-1].get("texto") != entry["texto"]:
+        history.append(entry)
+    ai_profile["historico_deduzido"] = history[-10:]
+    ai_profile["last_task_id"] = task_id or ai_profile.get("last_task_id")
+    ai_profile["last_system_id"] = system_id or ai_profile.get("last_system_id")
+    ai_profile["updated_at"] = firestore.SERVER_TIMESTAMP
+    profile_ref.set({"ai_profile": ai_profile}, merge=True)
+
+
+def _should_consider_memory_by_heuristic(fato: str, categoria: str) -> tuple[bool, str]:
+    text = (fato or "").strip()
+    lower = text.lower()
+    categoria_norm = _normalize_memory_category(categoria)
+
+    if len(text) < MEMORY_MIN_FACT_LENGTH:
+        return False, "too_short"
+
+    noisy_prefixes = (
+        "ok",
+        "obrigado",
+        "valeu",
+        "bom dia",
+        "boa tarde",
+        "boa noite",
+        "segue",
+        "pode fazer",
+        "confirmo",
+        "cancelar",
+        "teste",
+    )
+    if lower in noisy_prefixes:
+        return False, "casual_reply"
+
+    noisy_substrings = (
+        "kkkk",
+        "haha",
+        "rsrs",
+        "por favor",
+        "obrigad",
+        "bom trabalho",
+        "isso mesmo",
+        "pode seguir",
+    )
+    if any(token in lower for token in noisy_substrings):
+        return False, "small_talk"
+
+    transient_signals = (
+        "hoje",
+        "amanhã",
+        "ontem",
+        "agora",
+        "daqui a pouco",
+        "nesta conversa",
+        "nessa conversa",
+        "neste chat",
+        "anexo",
+        "arquivo enviado",
+        "mensagem acima",
+    )
+    if categoria_norm == "fato_isolado" and any(token in lower for token in transient_signals):
+        return False, "transient_context"
+
+    durable_signals = (
+        "sempre",
+        "nunca",
+        "regra",
+        "procedimento",
+        "padrão",
+        "preferência",
+        "preferencia",
+        "convencao",
+        "convenção",
+        "fonte de verdade",
+        "passamos a operar",
+        "a partir de agora",
+        "deve ser",
+        "deve usar",
+    )
+    if categoria_norm == "regra_global" and any(token in lower for token in durable_signals):
+        return True, "durable_rule_signal"
+
+    return True, "heuristic_pass"
+
+
+def _classify_memory_candidate(api_key: str, fato: str, categoria: str) -> dict:
+    heuristic_ok, heuristic_reason = _should_consider_memory_by_heuristic(fato, categoria)
+    if not heuristic_ok:
+        return {
+            "should_save": False,
+            "reason": heuristic_reason,
+            "confidence": 0.95,
+            "normalized_category": _normalize_memory_category(categoria),
+        }
+
+    try:
+        client = get_genai_module().Client(api_key=api_key)
+        prompt = (
+            "Você é um filtro de retenção cognitiva do Hermes.\n"
+            "Decida se um fato deve ser salvo como memória global de longo prazo.\n"
+            "Salve APENAS itens duráveis: regras de negócio, preferências operacionais estáveis, convenções permanentes ou fatos reutilizáveis.\n"
+            "NÃO salve: small talk, confirmações momentâneas, contexto transitório, conteúdo efêmero de uma conversa, mensagens vagas ou ruído.\n"
+            "Retorne APENAS JSON válido no formato:\n"
+            "{\"should_save\":true|false,\"reason\":\"...\",\"confidence\":0.0,\"normalized_category\":\"regra_global|fato_isolado\"}\n\n"
+            f"Categoria proposta: {_normalize_memory_category(categoria)}\n"
+            f"Fato candidato: {fato}"
+        )
+        response = client.models.generate_content(
+            model="gemini-3.1-flash-lite-preview",
+            contents=prompt
+        )
+        raw_text = (response.text or "").strip()
+        json_match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+        parsed = json.loads(json_match.group(0) if json_match else raw_text)
+        return {
+            "should_save": bool(parsed.get("should_save")),
+            "reason": str(parsed.get("reason") or "llm_decision"),
+            "confidence": float(parsed.get("confidence") or 0.0),
+            "normalized_category": _normalize_memory_category(parsed.get("normalized_category") or categoria),
+        }
+    except Exception as exc:
+        print(f"[Memoria] Fallback no classificador de retenção: {exc}")
+        return {
+            "should_save": True,
+            "reason": heuristic_reason,
+            "confidence": 0.51,
+            "normalized_category": _normalize_memory_category(categoria),
+        }
+
+
+def _save_memory_node(
+    db,
+    api_key: str,
+    fato: str,
+    categoria: str,
+    session_id: str | None = None,
+    user_uid: str | None = None,
+    force_update_id: str | None = None,
+):
+    fato = (fato or "").strip()
+    if not fato:
+        return {"status": "ignored", "reason": "empty_fact"}
+
+    categoria_norm = _normalize_memory_category(categoria)
+    fato_norm = _normalize_text_for_match(fato)
+    embedding = list(map(float, get_embedding(fato, api_key=api_key, task_type="RETRIEVAL_DOCUMENT")))
+    now = _iso_now_utc()
+
+    if force_update_id:
+        ref = db.collection("knowledge_nodes").document(force_update_id)
+        snap = ref.get()
+        if not snap.exists:
+            return {"status": "error", "reason": "memory_not_found", "memory_id": force_update_id}
+        current = snap.to_dict() or {}
+        title = (fato[:72] + "...") if len(fato) > 72 else fato
+        ref.set({
+            "id": force_update_id,
+            "titulo": title,
+            "tipo": categoria_norm,
+            "resumo": fato[:600],
+            "texto_memoria": fato,
+            "embedding": embedding,
+            "data_atualizacao": now,
+            "origem_memoria": "copiloto",
+            "ultima_sessao_id": session_id,
+            "ultimo_usuario_id": user_uid,
+            "memoria_status": "ativa",
+            "updated_from_conflict": True,
+        }, merge=True)
+        return {
+            "status": "updated",
+            "memory_id": force_update_id,
+            "categoria": categoria_norm,
+            "previous_text": current.get("texto_memoria") or current.get("resumo") or "",
+        }
+
+    candidates = _find_similar_memory_nodes(db, fato, api_key, limit=3)
+    best = candidates[0] if candidates else None
+    if best and best["similarity"] >= MEMORY_SIMILARITY_CREATE_THRESHOLD:
+        best_data = best["data"]
+        best_text = _normalize_text_for_match(best_data.get("texto_memoria") or best_data.get("resumo") or "")
+        if best["similarity"] >= MEMORY_SIMILARITY_DUPLICATE_THRESHOLD or best_text == fato_norm:
+            ref = db.collection("knowledge_nodes").document(best["id"])
+            ref.set({
+                "data_atualizacao": now,
+                "ultima_sessao_id": session_id,
+                "ultimo_usuario_id": user_uid,
+                "ultimo_fato_observado": fato,
+            }, merge=True)
+            return {
+                "status": "ignored",
+                "reason": "duplicate",
+                "memory_id": best["id"],
+                "categoria": best_data.get("tipo") or categoria_norm,
+                "similarity": round(best["similarity"], 4),
+            }
+
+        return {
+            "status": "conflict",
+            "memory_id": best["id"],
+            "categoria_existente": best_data.get("tipo") or categoria_norm,
+            "existing_text": best_data.get("texto_memoria") or best_data.get("resumo") or "",
+            "similarity": round(best["similarity"], 4),
+            "proposed_text": fato,
+        }
+
+    memory_id = str(uuid.uuid4())[:12]
+    title = (fato[:72] + "...") if len(fato) > 72 else fato
+    db.collection("knowledge_nodes").document(memory_id).set({
+        "id": memory_id,
+        "titulo": title,
+        "tipo": categoria_norm,
+        "resumo": fato[:600],
+        "texto_memoria": fato,
+        "embedding": embedding,
+        "area_tematica": "GLOBAL",
+        "n_tasks": 0,
+        "task_ids": [],
+        "data_criacao": now,
+        "data_atualizacao": now,
+        "origem_memoria": "copiloto",
+        "ultima_sessao_id": session_id,
+        "ultimo_usuario_id": user_uid,
+        "memoria_status": "ativa",
+    })
+    return {
+        "status": "saved",
+        "memory_id": memory_id,
+        "categoria": categoria_norm,
+    }
+
+
+def _format_pending_memory_conflict(conflict_data: dict | None) -> str:
+    if not conflict_data:
+        return ""
+    existing_text = (conflict_data.get("existing_text") or "").strip()
+    proposed_text = (conflict_data.get("proposed_text") or "").strip()
+    if not existing_text or not proposed_text:
+        return ""
+    return (
+        "[CONFLITO DE MEMÓRIA PENDENTE]\n"
+        f"- memoria_id: {conflict_data.get('memory_id', '')}\n"
+        f"- versao_existente: {existing_text}\n"
+        f"- versao_proposta: {proposed_text}\n"
+        "Se o usuário decidir, use resolver_conflito_memoria(memoria_id, decisao, fato_atualizado, categoria).\n"
+        "decisao = 'manter_existente' ou 'substituir_pelo_novo'.\n"
+    )
+
+
+@scheduler_fn.on_schedule(
+    schedule="0 4 * * *",
+    time_zone="America/Sao_Paulo",
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=180,
+)
+def consolidar_memorias_copiloto(event: scheduler_fn.ScheduledEvent):
+    db = get_db()
+    try:
+        keys_doc = db.collection("system").document("api_keys").get()
+        gemini_key = keys_doc.to_dict().get("gemini_api_key") if keys_doc.exists else None
+        if not gemini_key:
+            print("[Memoria] gemini_api_key indisponível; consolidação ignorada.")
+            return
+
+        client = get_genai_module().Client(api_key=gemini_key)
+        nodes = []
+        for snap in db.collection("knowledge_nodes").stream():
+            data = snap.to_dict() or {}
+            if data.get("tipo") not in MEMORY_NODE_TYPES:
+                continue
+            if data.get("memoria_status") == "consolidada":
+                continue
+            updated_at = data.get("data_atualizacao") or data.get("data_criacao") or ""
+            nodes.append({"id": snap.id, "data": data, "updated_at": updated_at})
+
+        processed_ids = set()
+        merges = 0
+        for current in nodes:
+            if current["id"] in processed_ids:
+                continue
+            current_text = (current["data"].get("texto_memoria") or current["data"].get("resumo") or "").strip()
+            if not current_text:
+                continue
+            similar = _find_similar_memory_nodes(db, current_text, gemini_key, limit=4)
+            merge_candidates = []
+            for candidate in similar:
+                if candidate["id"] == current["id"]:
+                    continue
+                if candidate["similarity"] < 0.975:
+                    continue
+                candidate_text = (candidate["data"].get("texto_memoria") or candidate["data"].get("resumo") or "").strip()
+                if not candidate_text:
+                    continue
+                merge_candidates.append({
+                    "id": candidate["id"],
+                    "tipo": candidate["data"].get("tipo") or current["data"].get("tipo") or "fato_isolado",
+                    "texto": candidate_text,
+                })
+
+            if not merge_candidates:
+                continue
+
+            group = [{
+                "id": current["id"],
+                "tipo": current["data"].get("tipo") or "fato_isolado",
+                "texto": current_text,
+            }] + merge_candidates[:2]
+
+            prompt = (
+                "Você é um curador cognitivo do Hermes. Receberá memórias quase duplicadas.\n"
+                "Una as memórias em UMA versão consolidada, removendo redundância e preservando a regra/fato mais útil.\n"
+                "Retorne APENAS JSON válido no formato:\n"
+                "{\"titulo\":\"...\",\"texto_memoria\":\"...\",\"tipo\":\"regra_global|fato_isolado\",\"ids_fundidos\":[\"id1\",\"id2\"]}\n\n"
+                f"Memórias:\n{json.dumps(group, ensure_ascii=False)}"
+            )
+            response = client.models.generate_content(
+                model="gemini-3.1-flash-lite-preview",
+                contents=prompt
+            )
+            raw_text = (response.text or "").strip()
+            json_match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+            merged = json.loads(json_match.group(0) if json_match else raw_text)
+            fused_ids = [mid for mid in merged.get("ids_fundidos", []) if isinstance(mid, str)]
+            if current["id"] not in fused_ids:
+                fused_ids.insert(0, current["id"])
+
+            keep_id = fused_ids[0]
+            merged_text = (merged.get("texto_memoria") or current_text).strip()
+            merged_tipo = _normalize_memory_category(merged.get("tipo"))
+            merged_title = (merged.get("titulo") or merged_text[:72] or "Memória global").strip()
+            merged_embedding = list(map(float, get_embedding(merged_text, api_key=gemini_key, task_type="RETRIEVAL_DOCUMENT")))
+
+            db.collection("knowledge_nodes").document(keep_id).set({
+                "titulo": merged_title[:80],
+                "tipo": merged_tipo,
+                "texto_memoria": merged_text,
+                "resumo": merged_text[:600],
+                "embedding": merged_embedding,
+                "data_atualizacao": _iso_now_utc(),
+                "consolidado_em": firestore.SERVER_TIMESTAMP,
+                "origem_curadoria": "llm_cron",
+            }, merge=True)
+
+            for drop_id in fused_ids[1:]:
+                db.collection("knowledge_nodes").document(drop_id).set({
+                    "memoria_status": "consolidada",
+                    "consolidado_no_id": keep_id,
+                    "data_atualizacao": _iso_now_utc(),
+                }, merge=True)
+                processed_ids.add(drop_id)
+
+            processed_ids.add(keep_id)
+            merges += max(0, len(fused_ids) - 1)
+
+        print(f"[Memoria] Consolidação concluída. merges={merges}")
+    except Exception as exc:
+        print(f"[Memoria] Falha na consolidação: {exc}")
+
+
 @https_fn.on_call(
 
     cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
@@ -5380,6 +5957,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
     session_id = data.get('sessionId')
     drive_file_id = data.get('driveFileId')
     drive_file_name = (data.get('driveFileName') or 'documento').strip()
+    user_uid = req.auth.uid if req.auth else None
 
     # Ingestão muda: arquivo sem texto → prompt padrão de catalogação
     if not prompt and drive_file_id:
@@ -5403,6 +5981,23 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             )
 
         client = genai.Client(api_key=gemini_key)
+        copilot_core = _get_copilot_core(db)
+        copilot_soul = _get_copilot_soul(db)
+        ai_profile = _bootstrap_user_ai_profile(db, user_uid)
+        _save_user_profile_signal(db, user_uid, prompt, task_id, system_id)
+        memory_context = _build_memory_context(db, gemini_key, prompt, limit=4)
+        session_conflict_context = ""
+        session_ref = None
+        if session_id:
+            session_ref = db.collection('sessoes_copiloto').document(session_id)
+            try:
+                session_doc = session_ref.get()
+                if session_doc.exists:
+                    session_conflict_context = _format_pending_memory_conflict(
+                        (session_doc.to_dict() or {}).get("pendingMemoryConflict")
+                    )
+            except Exception as session_err:
+                print(f"[Memoria] Falha ao ler conflito pendente da sessão {session_id}: {session_err}")
 
         # --- DEFINIÇÃO DE FERRAMENTAS ---
         def consultar_historico_acoes(query: str, area_tematica: str = None, data_limite_inicio: str = None, data_limite_fim: str = None):
@@ -5756,6 +6351,114 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 )
             except Exception as _corr_err:
                 return f"⚠️ Falha ao registrar correção: {str(_corr_err)}"
+
+        def salvar_memoria_global(fato: str, categoria: str):
+            """
+            Ferramenta de retenção de memória global do Copiloto Hermes.
+            Use apenas para fatos duráveis, preferências estáveis do ambiente ou regras de negócio
+            que possam ser úteis em conversas futuras. Nunca use para ruído transitório.
+            """
+            try:
+                retention = _classify_memory_candidate(
+                    api_key=gemini_key,
+                    fato=fato,
+                    categoria=categoria,
+                )
+                if not retention.get("should_save"):
+                    return json.dumps({
+                        "status": "ignored",
+                        "reason": retention.get("reason", "retention_filter"),
+                        "categoria": retention.get("normalized_category", _normalize_memory_category(categoria)),
+                        "confidence": retention.get("confidence", 0.0),
+                    }, ensure_ascii=False)
+                result = _save_memory_node(
+                    db=db,
+                    api_key=gemini_key,
+                    fato=fato,
+                    categoria=retention.get("normalized_category", categoria),
+                    session_id=session_id,
+                    user_uid=user_uid,
+                )
+                result["retention_reason"] = retention.get("reason")
+                result["retention_confidence"] = retention.get("confidence")
+                return json.dumps(result, ensure_ascii=False)
+            except Exception as mem_err:
+                return json.dumps({
+                    "status": "error",
+                    "reason": str(mem_err),
+                }, ensure_ascii=False)
+
+        def resolver_conflito_memoria(
+            memoria_id: str,
+            decisao: str,
+            fato_atualizado: str = "",
+            categoria: str = "fato_isolado"
+        ):
+            """
+            Resolve um conflito explícito de memória após confirmação do usuário.
+            decisao aceita: manter_existente, substituir_pelo_novo.
+            """
+            try:
+                decisao_norm = (decisao or "").strip().lower()
+                if decisao_norm == "manter_existente":
+                    db.collection("knowledge_nodes").document(memoria_id).set({
+                        "data_atualizacao": _iso_now_utc(),
+                        "conflito_resolvido_em": firestore.SERVER_TIMESTAMP,
+                        "ultima_decisao_humana": "manter_existente",
+                    }, merge=True)
+                    return json.dumps({
+                        "status": "resolved",
+                        "decision": "kept_existing",
+                        "memory_id": memoria_id,
+                    }, ensure_ascii=False)
+
+                if decisao_norm != "substituir_pelo_novo":
+                    return json.dumps({
+                        "status": "error",
+                        "reason": "decisao_invalida",
+                    }, ensure_ascii=False)
+
+                result = _save_memory_node(
+                    db=db,
+                    api_key=gemini_key,
+                    fato=fato_atualizado,
+                    categoria=categoria,
+                    session_id=session_id,
+                    user_uid=user_uid,
+                    force_update_id=memoria_id,
+                )
+                result["decision"] = "replaced_existing"
+                return json.dumps(result, ensure_ascii=False)
+            except Exception as resolve_err:
+                return json.dumps({
+                    "status": "error",
+                    "reason": str(resolve_err),
+                }, ensure_ascii=False)
+
+        def atualizar_personalidade(
+            nova_personalidade: str,
+            motivo: str = ""
+        ):
+            """
+            Ferramenta silenciosa para atualizar a personalidade dinâmica do copiloto
+            quando o usuário pedir mudança de tom, estilo ou nível de detalhamento.
+            """
+            try:
+                novo_texto = (nova_personalidade or "").strip()
+                if not novo_texto:
+                    return json.dumps({"status": "ignored", "reason": "empty_personality"}, ensure_ascii=False)
+
+                soul_ref = db.collection("system").document("copilot_soul")
+                soul_ref.set({
+                    "content": novo_texto,
+                    "last_reason": (motivo or "").strip(),
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                    "updated_by_uid": user_uid,
+                    "source": "copiloto",
+                }, merge=True)
+                return json.dumps({"status": "updated", "content": novo_texto[:300]}, ensure_ascii=False)
+            except Exception as soul_err:
+                return json.dumps({"status": "error", "reason": str(soul_err)}, ensure_ascii=False)
 
         def resolver_conflito_procedimento(
             id_procedimento: str,
@@ -6219,6 +6922,12 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         system_instruction = (
             f"Você é o Copiloto Hermes, estrategista sênior de processos. Hoje é {today_str}. "
             f"{f'CONTEXTO TÉCNICO VINCULADO (OBRIGATÓRIO): sistemaId={system_id}, taskId={task_id}. ' if system_id or task_id else ''}"
+            "\n\n## CORE ESTÁTICO DO COPILOTO\n"
+            f"{copilot_core.get('content', '')}\n\n"
+            "## PERSONALIDADE DINÂMICA ATUAL\n"
+            f"{copilot_soul.get('content') or json.dumps(copilot_soul, ensure_ascii=False)}\n\n"
+            "## PERFIL OPERACIONAL DO USUÁRIO\n"
+            f"{_format_ai_profile_for_prompt(ai_profile)}\n\n"
             "\n\nCATÁLOGO DE SISTEMAS (Mapeamento Exato de Nome para ID):\n"
             f"{sistemas_str}\n\n"
             "Ao realizar diagnósticos ou operações em sistemas, utilize SEMPRE o ID técnico do catálogo acima correspondente ao nome citado pelo usuário.\n\n"
@@ -6327,6 +7036,16 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "Use consultar_historico_acoes() para localizar a ação com precisão.\n"
             "Nunca suponha um task_id sem buscar. Prefira a correspondência mais exata ao nome/contexto informado.\n"
             "Se houver ambiguidade, apresente as opções ao usuário antes de prosseguir.\n\n"
+            "## MEMÓRIA E COGNIÇÃO AUTÔNOMA\n"
+            "Quando identificar uma regra de negócio durável, uma preferência operacional estável ou um fato global útil em conversas futuras, "
+            "acione salvar_memoria_global(fato, categoria) silenciosamente.\n"
+            "Categorias válidas: 'regra_global' e 'fato_isolado'.\n"
+            "Nunca grave memória para ruído passageiro, opiniões momentâneas, mensagens genéricas ou detalhes descartáveis.\n"
+            "Também NÃO grave saudações, confirmações simples, contexto efêmero desta conversa, anexos transitórios ou decisões ainda não estabilizadas.\n"
+            "Prefira gravar apenas convenções permanentes, preferências recorrentes, regras operacionais, fontes de verdade e fatos reutilizáveis.\n"
+            "Se salvar_memoria_global retornar status='conflict', interrompa a automação e pergunte explicitamente ao usuário qual versão deve permanecer verdadeira.\n"
+            "Após o usuário decidir, use resolver_conflito_memoria() para convergir a fonte de verdade.\n"
+            "Se o usuário pedir mudança de tom, estilo, profundidade ou comportamento, use atualizar_personalidade() para reescrever a personalidade dinâmica.\n\n"
             "ETAPA 1 — PROPOSTA VIA FERRAMENTA:\n"
             "Chame preparar_edicao_acao(task_id, alteracoes, justificativa) com:\n"
             "- task_id: ID da ação encontrada\n"
@@ -6478,6 +7197,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'ler_pagina_web': ler_pagina_web,
             'ler_documento_na_integra': ler_documento_na_integra,
             'registrar_correcao_procedimento': registrar_correcao_procedimento,
+            'salvar_memoria_global': salvar_memoria_global,
+            'resolver_conflito_memoria': resolver_conflito_memoria,
+            'atualizar_personalidade': atualizar_personalidade,
             'resolver_conflito_procedimento': resolver_conflito_procedimento,
             'criar_acao_no_sistema': criar_acao_no_sistema,
             'editar_plano_acao': editar_plano_acao,
@@ -6485,7 +7207,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'gerar_relatorio': gerar_relatorio,
         }
         # Ferramentas internas que não devem aparecer para o usuário
-        _HIDDEN_TOOLS = {'registrar_correcao_procedimento'}
+        _HIDDEN_TOOLS = {'registrar_correcao_procedimento', 'resolver_conflito_memoria'}
 
         chat = client.chats.create(
             model=model_id,
@@ -6499,6 +7221,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     ler_pagina_web,
                     ler_documento_na_integra,
                     registrar_correcao_procedimento,
+                    salvar_memoria_global,
+                    resolver_conflito_memoria,
+                    atualizar_personalidade,
                     resolver_conflito_procedimento,
                     criar_acao_no_sistema,
                     editar_plano_acao,
@@ -6702,6 +7427,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         context_parts = []
         if initial_context:
             context_parts.append(initial_context)
+        if memory_context:
+            context_parts.append(memory_context)
+        if session_conflict_context:
+            context_parts.append(session_conflict_context)
         if file_context:
             context_parts.append(file_context)
         context_parts.append(f"USUÁRIO: {prompt}")
@@ -6710,6 +7439,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         # Loop manual de tool calling — intercepta cada chamada para rastrear ferramentas usadas
         tools_used: list[str] = []
         pending_edit_data = None
+        pending_memory_conflict = None
         report_data = None
         response = chat.send_message(final_prompt)
         _max_iter = 10
@@ -6739,6 +7469,34 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         parsed_rep = json.loads(result)
                         if parsed_rep.get('report_id'):
                             report_data = parsed_rep
+                    except Exception:
+                        pass
+                if fc.name == 'salvar_memoria_global' and isinstance(result, str) and result.startswith('{'):
+                    try:
+                        parsed_mem = json.loads(result)
+                        if parsed_mem.get('status') == 'conflict':
+                            parsed_mem.setdefault('status_ui', 'pending')
+                            pending_memory_conflict = parsed_mem
+                        if session_ref:
+                            if parsed_mem.get('status') == 'conflict':
+                                session_ref.set({
+                                    "pendingMemoryConflict": parsed_mem,
+                                    "lastMemoryConflictAt": firestore.SERVER_TIMESTAMP,
+                                }, merge=True)
+                            elif parsed_mem.get('status') in {'saved', 'ignored'}:
+                                session_ref.set({
+                                    "pendingMemoryConflict": firestore.DELETE_FIELD,
+                                }, merge=True)
+                    except Exception:
+                        pass
+                if fc.name == 'resolver_conflito_memoria' and isinstance(result, str) and result.startswith('{'):
+                    try:
+                        parsed_resolution = json.loads(result)
+                        if session_ref and parsed_resolution.get('status') in {'resolved', 'updated'}:
+                            session_ref.set({
+                                "pendingMemoryConflict": firestore.DELETE_FIELD,
+                                "lastMemoryConflictResolutionAt": firestore.SERVER_TIMESTAMP,
+                            }, merge=True)
                     except Exception:
                         pass
                 if fc.name not in _HIDDEN_TOOLS and fc.name not in tools_used:
@@ -6800,6 +7558,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "proposedDiagnosis": diagnosis_request_data if diagnosis_request_data else None,
                     "toolsUsed": tools_used if tools_used else None,
                     "pendingEdit": pending_edit_data,
+                    "pendingMemoryConflict": pending_memory_conflict,
                     "reportId": report_data.get('report_id') if report_data else None,
                     "timestamp": firestore.SERVER_TIMESTAMP
                 })
@@ -6820,6 +7579,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "proposedPlan": proposal_data.get("items") if proposal_data else None,
             "proposedPresentation": presentation_data if presentation_data else None,
             "proposedDiagnosis": diagnosis_request_data if diagnosis_request_data else None,
+            "pendingMemoryConflict": pending_memory_conflict,
             "suggestedTitle": suggested_title,
             "pendingEdit": pending_edit_data,
             "reportId": report_data.get('report_id') if report_data else None
@@ -6941,6 +7701,81 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
             _set_card_status(get_db(), 'error', str(e))
         except Exception:
             pass
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=str(e)
+        )
+
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.MB_256,
+    timeout_sec=60
+)
+def confirmarConflitoMemoria(req: https_fn.CallableRequest):
+    data = req.data or {}
+    session_id = data.get('sessionId')
+    message_id = data.get('messageId')
+    memoria_id = data.get('memoriaId')
+    decisao = data.get('decisao')
+    fato_atualizado = data.get('fatoAtualizado') or ''
+    categoria = data.get('categoria') or 'fato_isolado'
+
+    if not session_id or not message_id or not memoria_id or not decisao:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="sessionId, messageId, memoriaId e decisao são obrigatórios."
+        )
+
+    try:
+        db = get_db()
+        keys_doc = db.collection('system').document('api_keys').get()
+        gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+        if not gemini_key:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                message="Chave Gemini não configurada."
+            )
+
+        user_uid = req.auth.uid if req.auth else None
+        result = _save_memory_node(
+            db=db,
+            api_key=gemini_key,
+            fato=fato_atualizado,
+            categoria=categoria,
+            session_id=session_id,
+            user_uid=user_uid,
+            force_update_id=memoria_id if decisao == 'substituir_pelo_novo' else None,
+        ) if decisao == 'substituir_pelo_novo' else {
+            "status": "resolved",
+            "decision": "kept_existing",
+            "memory_id": memoria_id,
+        }
+
+        msg_ref = db.collection('sessoes_copiloto').document(session_id).collection('mensagens').document(message_id)
+        update_payload = {
+            'pendingMemoryConflict.status_ui': 'resolved' if decisao == 'substituir_pelo_novo' else 'kept',
+            'pendingMemoryConflict.decisao_final': decisao,
+            'pendingMemoryConflict.resolvedAt': firestore.SERVER_TIMESTAMP,
+        }
+        if decisao == 'substituir_pelo_novo':
+            update_payload['pendingMemoryConflict.proposed_text'] = fato_atualizado
+        msg_ref.update(update_payload)
+
+        db.collection('sessoes_copiloto').document(session_id).set({
+            'pendingMemoryConflict': firestore.DELETE_FIELD,
+            'lastMemoryConflictResolutionAt': firestore.SERVER_TIMESTAMP,
+        }, merge=True)
+
+        return {
+            "status": result.get("status", "resolved"),
+            "decision": decisao,
+            "memoryId": memoria_id,
+        }
+    except https_fn.HttpsError:
+        raise
+    except Exception as e:
+        print(f"Erro em confirmarConflitoMemoria: {e}")
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.INTERNAL,
             message=str(e)

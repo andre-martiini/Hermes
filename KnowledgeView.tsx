@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
 import {
     smartSearchKG,
     getArtefatoRawText,
@@ -6,6 +7,7 @@ import {
     type KnowledgeFilters,
     type KnowledgeIntent,
 } from './src/services/knowledgeService';
+import { db } from './firebase';
 
 interface KnowledgeViewProps {
     onNavigateToOrigin?: (modulo: string, id: string) => void;
@@ -25,6 +27,15 @@ const TYPE_LABEL: Record<string, string> = {
     node: 'Nó',
     artefato: 'Documento',
 };
+
+interface MemoryAuditItem {
+    id: string;
+    titulo: string;
+    tipo: 'regra_global' | 'fato_isolado';
+    texto_memoria: string;
+    data_atualizacao?: string;
+    memoria_status?: string;
+}
 
 // Formata datas ISO/Timestamp em pt-BR; retorna string vazia se inválida.
 function formatResultDate(raw: unknown): string {
@@ -474,6 +485,7 @@ const KnowledgeDrawer: React.FC<{
 // ─── KnowledgeView ───────────────────────────────────────────────────────────
 
 const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => {
+    const [mode, setMode] = useState<'search' | 'audit'>('search');
     const [query, setQuery] = useState('');
     const [filtros, setFiltros] = useState<KnowledgeFilters>({ tipo: 'all' });
     const [tagInput, setTagInput] = useState('');
@@ -487,8 +499,18 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
 
     const [drawerItem, setDrawerItem] = useState<KnowledgeResult | null>(null);
     const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
+    const [memoryNodes, setMemoryNodes] = useState<MemoryAuditItem[]>([]);
+    const [selectedMemoryId, setSelectedMemoryId] = useState<string | null>(null);
+    const [memoryDraft, setMemoryDraft] = useState('');
+    const [soulDraft, setSoulDraft] = useState('');
+    const [auditStatus, setAuditStatus] = useState<string | null>(null);
 
     const inputRef = useRef<HTMLInputElement>(null);
+
+    const selectedMemory = useMemo(
+        () => memoryNodes.find((item) => item.id === selectedMemoryId) || null,
+        [memoryNodes, selectedMemoryId]
+    );
 
     // Rotação de mensagens de loading
     useEffect(() => {
@@ -498,6 +520,37 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
         }, 1400);
         return () => window.clearInterval(timer);
     }, [loading]);
+
+    useEffect(() => {
+        const unsubNodes = onSnapshot(collection(db, 'knowledge_nodes'), (snapshot) => {
+            const items = snapshot.docs
+                .map((snap) => ({ id: snap.id, ...(snap.data() as any) }))
+                .filter((item) => item.tipo === 'regra_global' || item.tipo === 'fato_isolado')
+                .sort((a, b) =>
+                    String(b.data_atualizacao || b.data_criacao || '').localeCompare(
+                        String(a.data_atualizacao || a.data_criacao || '')
+                    )
+                ) as MemoryAuditItem[];
+            setMemoryNodes(items);
+            if (!selectedMemoryId && items.length > 0) {
+                setSelectedMemoryId(items[0].id);
+            }
+        });
+
+        const unsubSoul = onSnapshot(doc(db, 'system', 'copilot_soul'), (snap) => {
+            const data = snap.data() as any;
+            setSoulDraft((data?.content as string) || '');
+        });
+
+        return () => {
+            unsubNodes();
+            unsubSoul();
+        };
+    }, []);
+
+    useEffect(() => {
+        setMemoryDraft(selectedMemory?.texto_memoria || '');
+    }, [selectedMemory]);
 
     const runSearch = useCallback(async () => {
         const q = query.trim();
@@ -560,6 +613,43 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
         setFiltros({ ...filtros, area_tematica: area });
     };
 
+    const saveSoul = useCallback(async () => {
+        await setDoc(
+            doc(db, 'system', 'copilot_soul'),
+            {
+                content: soulDraft.trim(),
+                updated_at: new Date().toISOString(),
+                source: 'knowledge_view_manual',
+            },
+            { merge: true }
+        );
+        setAuditStatus('Personalidade dinâmica atualizada.');
+    }, [soulDraft]);
+
+    const saveMemory = useCallback(async () => {
+        if (!selectedMemoryId) return;
+        await setDoc(
+            doc(db, 'knowledge_nodes', selectedMemoryId),
+            {
+                texto_memoria: memoryDraft.trim(),
+                resumo: memoryDraft.trim().slice(0, 600),
+                titulo: memoryDraft.trim().slice(0, 72) || 'Memória global',
+                data_atualizacao: new Date().toISOString(),
+                origem_memoria: 'knowledge_view_manual',
+            },
+            { merge: true }
+        );
+        setAuditStatus('Memória global salva manualmente.');
+    }, [memoryDraft, selectedMemoryId]);
+
+    const deleteMemory = useCallback(async () => {
+        if (!selectedMemoryId) return;
+        await deleteDoc(doc(db, 'knowledge_nodes', selectedMemoryId));
+        setSelectedMemoryId(null);
+        setMemoryDraft('');
+        setAuditStatus('Memória removida.');
+    }, [selectedMemoryId]);
+
     return (
         <div className="w-full h-full bg-slate-50 overflow-y-auto">
             <div className="max-w-6xl mx-auto px-4 md:px-8 py-8 md:py-12 pb-32">
@@ -572,221 +662,354 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
                         Pergunte ou busque por documentos, procedimentos e tarefas já cristalizadas.
                     </p>
                 </div>
-
-                {/* Omnibox */}
-                <div className="mb-4">
-                    <div className="relative">
-                        <svg
-                            className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2.5"
-                        >
-                            <circle cx="11" cy="11" r="7" />
-                            <path d="M21 21l-4.3-4.3" />
-                        </svg>
-                        <input
-                            ref={inputRef}
-                            type="text"
-                            value={query}
-                            onChange={(e) => setQuery(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') runSearch();
-                            }}
-                            placeholder='Ex.: "Como elaboramos o relatório de gestão 2025?" ou "dispensa licitação PNAE"'
-                            className="w-full h-14 md:h-16 pl-14 pr-28 rounded-2xl bg-white border border-slate-200 text-sm md:text-base font-medium tracking-tight text-slate-900 placeholder-slate-400 shadow-sm focus:outline-none focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10 transition-all"
-                        />
-                        <button
-                            onClick={runSearch}
-                            disabled={loading || !query.trim()}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 px-5 h-10 md:h-11 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95"
-                        >
-                            Buscar
-                        </button>
-                    </div>
+                <div className="mb-6 flex gap-2">
+                    <Chip active={mode === 'search'} onClick={() => setMode('search')}>
+                        Busca Semântica
+                    </Chip>
+                    <Chip active={mode === 'audit'} onClick={() => setMode('audit')}>
+                        Auditoria de Memória
+                    </Chip>
                 </div>
 
-                {/* Filter chips */}
-                <div className="mb-8 flex flex-wrap items-center gap-2">
-                    <span className="text-[9px] font-black uppercase tracking-[0.25em] text-slate-400 mr-1">
-                        Tipo
-                    </span>
-                    <Chip active={filtros.tipo === 'all' || !filtros.tipo} onClick={() => setTipo('all')}>
-                        Todos
-                    </Chip>
-                    <Chip active={filtros.tipo === 'node'} onClick={() => setTipo('node')}>
-                        Nós
-                    </Chip>
-                    <Chip active={filtros.tipo === 'artefato'} onClick={() => setTipo('artefato')}>
-                        Documentos
-                    </Chip>
-
-                    <span className="text-[9px] font-black uppercase tracking-[0.25em] text-slate-400 ml-3 mr-1">
-                        Área
-                    </span>
-                    <Chip active={!filtros.area_tematica} onClick={() => setArea(undefined)}>
-                        Todas
-                    </Chip>
-                    {AREAS_TEMATICAS.map((a) => (
-                        <Chip key={a} active={filtros.area_tematica === a} onClick={() => setArea(a)}>
-                            {a}
-                        </Chip>
-                    ))}
-
-                    <span className="text-[9px] font-black uppercase tracking-[0.25em] text-slate-400 ml-3 mr-1">
-                        Data
-                    </span>
-                    <input
-                        type="date"
-                        value={filtros.data_inicio || ''}
-                        onChange={(e) =>
-                            setFiltros({ ...filtros, data_inicio: e.target.value || undefined })
-                        }
-                        className="px-3 py-1.5 rounded-full bg-white border border-slate-200 text-[10px] font-bold text-slate-700 focus:outline-none focus:border-slate-900"
-                    />
-                    <span className="text-[10px] text-slate-400 font-black">→</span>
-                    <input
-                        type="date"
-                        value={filtros.data_fim || ''}
-                        onChange={(e) => setFiltros({ ...filtros, data_fim: e.target.value || undefined })}
-                        className="px-3 py-1.5 rounded-full bg-white border border-slate-200 text-[10px] font-bold text-slate-700 focus:outline-none focus:border-slate-900"
-                    />
-                </div>
-
-                {/* Tags adicionadas */}
-                {(filtros.tags?.length || 0) > 0 && (
-                    <div className="mb-6 flex flex-wrap items-center gap-2">
-                        <span className="text-[9px] font-black uppercase tracking-[0.25em] text-slate-400 mr-1">
-                            Tags ativas
-                        </span>
-                        {filtros.tags?.map((t) => (
-                            <span
-                                key={t}
-                                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase tracking-widest"
-                            >
-                                {t}
-                                <button
-                                    onClick={() => handleRemoveTag(t)}
-                                    className="hover:text-emerald-900"
-                                    aria-label={`Remover tag ${t}`}
+                {mode === 'search' ? (
+                    <>
+                        <div className="mb-4">
+                            <div className="relative">
+                                <svg
+                                    className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2.5"
                                 >
+                                    <circle cx="11" cy="11" r="7" />
+                                    <path d="M21 21l-4.3-4.3" />
+                                </svg>
+                                <input
+                                    ref={inputRef}
+                                    type="text"
+                                    value={query}
+                                    onChange={(e) => setQuery(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') runSearch();
+                                    }}
+                                    placeholder='Ex.: "Como elaboramos o relatório de gestão 2025?" ou "dispensa licitação PNAE"'
+                                    className="w-full h-14 md:h-16 pl-14 pr-28 rounded-2xl bg-white border border-slate-200 text-sm md:text-base font-medium tracking-tight text-slate-900 placeholder-slate-400 shadow-sm focus:outline-none focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10 transition-all"
+                                />
+                                <button
+                                    onClick={runSearch}
+                                    disabled={loading || !query.trim()}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 px-5 h-10 md:h-11 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95"
+                                >
+                                    Buscar
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="mb-8 flex flex-wrap items-center gap-2">
+                            <span className="text-[9px] font-black uppercase tracking-[0.25em] text-slate-400 mr-1">
+                                Tipo
+                            </span>
+                            <Chip active={filtros.tipo === 'all' || !filtros.tipo} onClick={() => setTipo('all')}>
+                                Todos
+                            </Chip>
+                            <Chip active={filtros.tipo === 'node'} onClick={() => setTipo('node')}>
+                                Nós
+                            </Chip>
+                            <Chip active={filtros.tipo === 'artefato'} onClick={() => setTipo('artefato')}>
+                                Documentos
+                            </Chip>
+
+                            <span className="text-[9px] font-black uppercase tracking-[0.25em] text-slate-400 ml-3 mr-1">
+                                Área
+                            </span>
+                            <Chip active={!filtros.area_tematica} onClick={() => setArea(undefined)}>
+                                Todas
+                            </Chip>
+                            {AREAS_TEMATICAS.map((a) => (
+                                <Chip key={a} active={filtros.area_tematica === a} onClick={() => setArea(a)}>
+                                    {a}
+                                </Chip>
+                            ))}
+
+                            <span className="text-[9px] font-black uppercase tracking-[0.25em] text-slate-400 ml-3 mr-1">
+                                Data
+                            </span>
+                            <input
+                                type="date"
+                                value={filtros.data_inicio || ''}
+                                onChange={(e) =>
+                                    setFiltros({ ...filtros, data_inicio: e.target.value || undefined })
+                                }
+                                className="px-3 py-1.5 rounded-full bg-white border border-slate-200 text-[10px] font-bold text-slate-700 focus:outline-none focus:border-slate-900"
+                            />
+                            <span className="text-[10px] text-slate-400 font-black">→</span>
+                            <input
+                                type="date"
+                                value={filtros.data_fim || ''}
+                                onChange={(e) => setFiltros({ ...filtros, data_fim: e.target.value || undefined })}
+                                className="px-3 py-1.5 rounded-full bg-white border border-slate-200 text-[10px] font-bold text-slate-700 focus:outline-none focus:border-slate-900"
+                            />
+                        </div>
+
+                        {(filtros.tags?.length || 0) > 0 && (
+                            <div className="mb-6 flex flex-wrap items-center gap-2">
+                                <span className="text-[9px] font-black uppercase tracking-[0.25em] text-slate-400 mr-1">
+                                    Tags ativas
+                                </span>
+                                {filtros.tags?.map((t) => (
+                                    <span
+                                        key={t}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase tracking-widest"
+                                    >
+                                        {t}
+                                        <button
+                                            onClick={() => handleRemoveTag(t)}
+                                            className="hover:text-emerald-900"
+                                            aria-label={`Remover tag ${t}`}
+                                        >
+                                            <svg
+                                                className="w-3 h-3"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                strokeWidth="3"
+                                            >
+                                                <path d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                        </button>
+                                    </span>
+                                ))}
+                            </div>
+                        )}
+                        <div className="mb-8 flex items-center gap-2">
+                            <input
+                                type="text"
+                                value={tagInput}
+                                onChange={(e) => setTagInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleAddTag();
+                                    }
+                                }}
+                                placeholder="+ adicionar tag"
+                                className="px-3 py-1.5 rounded-full bg-white border border-slate-200 text-[10px] font-bold text-slate-700 placeholder-slate-400 focus:outline-none focus:border-slate-900"
+                            />
+                            <button
+                                onClick={handleAddTag}
+                                disabled={!tagInput.trim()}
+                                className="px-3 py-1.5 rounded-full bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-30 transition-all active:scale-95"
+                            >
+                                Adicionar
+                            </button>
+                        </div>
+
+                        {loading && (
+                            <div className="bg-white rounded-2xl border border-slate-200 p-8 mb-6 flex items-center gap-4 shadow-sm">
+                                <div className="w-6 h-6 rounded-full border-2 border-slate-200 border-t-slate-900 animate-spin flex-shrink-0" />
+                                <div>
+                                    <div className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-400 mb-1">
+                                        Processando
+                                    </div>
+                                    <div className="text-sm font-bold text-slate-900">
+                                        {LOADING_MESSAGES[loadingMsgIdx]}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {error && !loading && (
+                            <div className="bg-rose-50 border border-rose-200 rounded-2xl p-5 mb-6">
+                                <p className="text-sm font-bold text-rose-700">{error}</p>
+                            </div>
+                        )}
+
+                        {!loading && synthesis && (
+                            <div className="mb-8">
+                                <SynthesisBlock text={synthesis} onCitationClick={handleCitationClick} />
+                            </div>
+                        )}
+
+                        {!loading && results.length > 0 && (
+                            <div>
+                                <div className="flex items-center justify-between mb-4">
+                                    <h2 className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-500">
+                                        {results.length} resultado{results.length === 1 ? '' : 's'}
+                                        {intent && (
+                                            <span className="ml-2 px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
+                                                {intent === 'SINTESE_PROFUNDA' ? 'síntese' : 'busca'}
+                                            </span>
+                                        )}
+                                    </h2>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                    {results.map((r, i) => (
+                                        <KnowledgeCard
+                                            key={r.id}
+                                            result={r}
+                                            index={i}
+                                            focused={focusedIdx === i}
+                                            onClick={() => {
+                                                setDrawerItem(r);
+                                                setFocusedIdx(i);
+                                            }}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {!loading && !error && results.length === 0 && (
+                            <div className="text-center py-16 md:py-24">
+                                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-100 flex items-center justify-center">
                                     <svg
-                                        className="w-3 h-3"
+                                        className="w-8 h-8 text-slate-400"
                                         viewBox="0 0 24 24"
                                         fill="none"
                                         stroke="currentColor"
-                                        strokeWidth="3"
+                                        strokeWidth="2"
                                     >
-                                        <path d="M6 18L18 6M6 6l12 12" />
+                                        <circle cx="11" cy="11" r="7" />
+                                        <path d="M21 21l-4.3-4.3" />
                                     </svg>
-                                </button>
-                            </span>
-                        ))}
-                    </div>
-                )}
-                <div className="mb-8 flex items-center gap-2">
-                    <input
-                        type="text"
-                        value={tagInput}
-                        onChange={(e) => setTagInput(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                                e.preventDefault();
-                                handleAddTag();
-                            }
-                        }}
-                        placeholder="+ adicionar tag"
-                        className="px-3 py-1.5 rounded-full bg-white border border-slate-200 text-[10px] font-bold text-slate-700 placeholder-slate-400 focus:outline-none focus:border-slate-900"
-                    />
-                    <button
-                        onClick={handleAddTag}
-                        disabled={!tagInput.trim()}
-                        className="px-3 py-1.5 rounded-full bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-30 transition-all active:scale-95"
-                    >
-                        Adicionar
-                    </button>
-                </div>
-
-                {/* Loading state */}
-                {loading && (
-                    <div className="bg-white rounded-2xl border border-slate-200 p-8 mb-6 flex items-center gap-4 shadow-sm">
-                        <div className="w-6 h-6 rounded-full border-2 border-slate-200 border-t-slate-900 animate-spin flex-shrink-0" />
-                        <div>
-                            <div className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-400 mb-1">
-                                Processando
+                                </div>
+                                <p className="text-sm text-slate-500 font-medium">
+                                    {query
+                                        ? 'Nenhum resultado encontrado. Ajuste a consulta ou os filtros.'
+                                        : 'Faça uma pergunta ou busque por palavras-chave.'}
+                                </p>
                             </div>
-                            <div className="text-sm font-bold text-slate-900">
-                                {LOADING_MESSAGES[loadingMsgIdx]}
+                        )}
+                    </>
+                ) : (
+                    <div className="grid grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)] gap-6">
+                        <section className="bg-white rounded-3xl border border-slate-200 p-4 shadow-sm">
+                            <div className="mb-4">
+                                <h2 className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-500">
+                                    Memórias globais
+                                </h2>
+                                <p className="text-xs text-slate-400 mt-1">
+                                    Regras e fatos retidos pelo copiloto.
+                                </p>
                             </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* Error */}
-                {error && !loading && (
-                    <div className="bg-rose-50 border border-rose-200 rounded-2xl p-5 mb-6">
-                        <p className="text-sm font-bold text-rose-700">{error}</p>
-                    </div>
-                )}
-
-                {/* Synthesis */}
-                {!loading && synthesis && (
-                    <div className="mb-8">
-                        <SynthesisBlock text={synthesis} onCitationClick={handleCitationClick} />
-                    </div>
-                )}
-
-                {/* Results */}
-                {!loading && results.length > 0 && (
-                    <div>
-                        <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-500">
-                                {results.length} resultado{results.length === 1 ? '' : 's'}
-                                {intent && (
-                                    <span className="ml-2 px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
-                                        {intent === 'SINTESE_PROFUNDA' ? 'síntese' : 'busca'}
-                                    </span>
+                            <div className="space-y-2 max-h-[65vh] overflow-y-auto pr-1">
+                                {memoryNodes.map((item) => (
+                                    <button
+                                        key={item.id}
+                                        onClick={() => setSelectedMemoryId(item.id)}
+                                        className={`w-full text-left rounded-2xl border p-3 transition-all ${
+                                            selectedMemoryId === item.id
+                                                ? 'border-emerald-400 bg-emerald-50'
+                                                : 'border-slate-200 hover:border-slate-300 bg-white'
+                                        }`}
+                                    >
+                                        <div className="flex items-center justify-between gap-2 mb-2">
+                                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">
+                                                {item.tipo === 'regra_global' ? 'Regra Global' : 'Fato Isolado'}
+                                            </span>
+                                            <span className="text-[9px] text-slate-400 font-bold">
+                                                {formatResultDate(item.data_atualizacao)}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs font-bold text-slate-800 line-clamp-2">
+                                            {item.titulo || '(sem título)'}
+                                        </p>
+                                        <p className="text-xs text-slate-500 line-clamp-3 mt-1">
+                                            {item.texto_memoria}
+                                        </p>
+                                    </button>
+                                ))}
+                                {memoryNodes.length === 0 && (
+                                    <p className="text-sm text-slate-400 py-8 text-center">
+                                        Nenhuma memória global auditável ainda.
+                                    </p>
                                 )}
-                            </h2>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {results.map((r, i) => (
-                                <KnowledgeCard
-                                    key={r.id}
-                                    result={r}
-                                    index={i}
-                                    focused={focusedIdx === i}
-                                    onClick={() => {
-                                        setDrawerItem(r);
-                                        setFocusedIdx(i);
-                                    }}
-                                />
-                            ))}
-                        </div>
-                    </div>
-                )}
+                            </div>
+                        </section>
 
-                {/* Empty state */}
-                {!loading && !error && results.length === 0 && (
-                    <div className="text-center py-16 md:py-24">
-                        <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-100 flex items-center justify-center">
-                            <svg
-                                className="w-8 h-8 text-slate-400"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                            >
-                                <circle cx="11" cy="11" r="7" />
-                                <path d="M21 21l-4.3-4.3" />
-                            </svg>
-                        </div>
-                        <p className="text-sm text-slate-500 font-medium">
-                            {query
-                                ? 'Nenhum resultado encontrado. Ajuste a consulta ou os filtros.'
-                                : 'Faça uma pergunta ou busque por palavras-chave.'}
-                        </p>
+                        <section className="space-y-6">
+                            <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+                                <div className="flex items-center justify-between gap-4 mb-4">
+                                    <div>
+                                        <h2 className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-500">
+                                            Copilot Soul
+                                        </h2>
+                                        <p className="text-xs text-slate-400 mt-1">
+                                            Personalidade dinâmica editável pelo sistema ou manualmente.
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={saveSoul}
+                                        className="px-4 py-2 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest"
+                                    >
+                                        Salvar Soul
+                                    </button>
+                                </div>
+                                <textarea
+                                    value={soulDraft}
+                                    onChange={(e) => setSoulDraft(e.target.value)}
+                                    className="w-full min-h-[180px] rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 focus:outline-none focus:border-slate-900"
+                                    placeholder="Descreva o tom, o estilo e o nível de detalhamento desejados para o copiloto."
+                                />
+                            </div>
+
+                            <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+                                <div className="flex items-center justify-between gap-4 mb-4">
+                                    <div>
+                                        <h2 className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-500">
+                                            Memória Selecionada
+                                        </h2>
+                                        <p className="text-xs text-slate-400 mt-1">
+                                            Edição manual da fonte de verdade global.
+                                        </p>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={saveMemory}
+                                            disabled={!selectedMemoryId}
+                                            className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
+                                        >
+                                            Salvar Memória
+                                        </button>
+                                        <button
+                                            onClick={deleteMemory}
+                                            disabled={!selectedMemoryId}
+                                            className="px-4 py-2 rounded-xl bg-rose-600 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
+                                        >
+                                            Excluir
+                                        </button>
+                                    </div>
+                                </div>
+                                <textarea
+                                    value={memoryDraft}
+                                    onChange={(e) => setMemoryDraft(e.target.value)}
+                                    className="w-full min-h-[220px] rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 focus:outline-none focus:border-slate-900"
+                                    placeholder="Selecione uma memória para editar o conteúdo consolidado."
+                                />
+                                {selectedMemory && (
+                                    <div className="mt-4 flex flex-wrap gap-2">
+                                        <span className="px-3 py-1 rounded-full bg-slate-100 text-[10px] font-black uppercase tracking-widest text-slate-600">
+                                            {selectedMemory.id}
+                                        </span>
+                                        <span className="px-3 py-1 rounded-full bg-emerald-100 text-[10px] font-black uppercase tracking-widest text-emerald-700">
+                                            {selectedMemory.tipo === 'regra_global' ? 'Regra Global' : 'Fato Isolado'}
+                                        </span>
+                                        {selectedMemory.memoria_status && (
+                                            <span className="px-3 py-1 rounded-full bg-amber-100 text-[10px] font-black uppercase tracking-widest text-amber-700">
+                                                {selectedMemory.memoria_status}
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            {auditStatus && (
+                                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-700">
+                                    {auditStatus}
+                                </div>
+                            )}
+                        </section>
                     </div>
                 )}
             </div>
