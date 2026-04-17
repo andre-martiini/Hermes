@@ -4505,7 +4505,7 @@ def diagnosticar_codigo(req: https_fn.CallableRequest):
                     doc_id_norm = doc.id.strip().lower().replace('sistema:', '')
                     doc_name_norm = (data.get('nome') or "").strip().lower().replace('sistema:', '')
                     
-                    if doc_id_norm == target_id or doc_name_norm == target_id:
+                    if doc_id_norm == target_id or doc_name_norm == target_id or target_id in (data.get('repositorio_principal') or "").lower():
                         sistema_doc = doc
                         break
             
@@ -5884,7 +5884,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             titulo: str,
             tipo: str,
             contexto: str,
-            secoes_customizadas: list = None
+            secoes_customizadas: list[str] = None
         ):
             """
             Gera um relatório estruturado em Markdown e o salva no sistema.
@@ -6134,6 +6134,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "Para que o usuário possa gerir as ações, você DEVE SEMPRE transformar o nome de qualquer tarefa citada em um link clicável.\n"
             "FORMATO OBRIGATÓRIO: `[Nome da Tarefa](task:ID)`\n"
             "Exemplo: 'Verifiquei que a ação [Analisar Edital](task:xyz123) está atrasada.'\n"
+            "PROIBIÇÃO: Você NUNCA deve gerar links com `https://` ou URLs de sites externos para se referir a ações do sistema. Use APENAS o prefixo `task:`.\n"
             "Use os IDs retornados pelas ferramentas `consultar_historico_acoes` ou `obter_contexto_tela`.\n\n"
             "## BUSCA PROATIVA DE CONTEXTO\n"
             "Se o usuário pedir algo genérico (ex: 'o que temos hoje' ou 'status das atividades') e você não tiver uma tarefa em foco:\n"
@@ -6171,6 +6172,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "ETAPA 3 — COMMIT E LINK:\n"
             "Após criar_acao_no_sistema retornar 'OK|{ID}', responda obrigatoriamente:\n"
             "  ✅ Ação criada: [Título da Ação](task:{ID})\n"
+            "  Você também pode clicar no link acima para abrir a sala de operações imediatamente.\n"
             "Se retornar 'ERRO|{detalhe}', responda:\n"
             "  ⚠️ Erro ao criar ação: {detalhe}\n\n"
             "EXTRAÇÃO DE CONTEXTO PARA O DRAFT:\n"
@@ -7387,45 +7389,93 @@ def salvarRelatorioNoDrive(req: https_fn.CallableRequest):
             lines = md.split('\n')
             html = []
             in_ul = False
+            in_table = False
+            table_header_parsed = False
+
+            def flush_lists():
+                nonlocal in_ul
+                if in_ul:
+                    html.append('</ul>')
+                    in_ul = False
+
+            def flush_table():
+                nonlocal in_table
+                if in_table:
+                    html.append('</table>')
+                    in_table = False
 
             for line in lines:
-                s = line.rstrip()
-                if s.startswith('### '):
-                    if in_ul: html.append('</ul>'); in_ul = False
-                    html.append(f'<h3>{s[4:]}</h3>')
-                elif s.startswith('## '):
-                    if in_ul: html.append('</ul>'); in_ul = False
-                    html.append(f'<h2>{s[3:]}</h2>')
-                elif s.startswith('# '):
-                    if in_ul: html.append('</ul>'); in_ul = False
-                    html.append(f'<h1>{s[2:]}</h1>')
-                elif s == '---':
-                    if in_ul: html.append('</ul>'); in_ul = False
+                s = line.strip()
+                
+                # TABLE DETECTION
+                if (s.startswith('|') or (in_table and s.count('|') >= 1)) and s.endswith('|'):
+                    flush_lists()
+                    if not in_table:
+                        html.append('<table border="1" style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">')
+                        in_table = True
+                        table_header_parsed = False
+                    
+                    if re.match(r'^\|[\s:-|]+\|$', s):
+                        table_header_parsed = True
+                        continue
+                    
+                    # Basic cell extraction
+                    cells = [c.strip() for c in line.strip('|').split('|')]
+                    tag = 'th' if not table_header_parsed else 'td'
+                    html.append('  <tr>')
+                    for cell in cells:
+                        # Inline formatting for cells
+                        c_html = cell
+                        c_html = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', c_html)
+                        c_html = re.sub(r'\*(.+?)\*', r'<em>\1</em>', c_html)
+                        c_html = re.sub(r'`(.+?)`', r'<code>\1</code>', c_html)
+                        html.append(f'    <{tag} style="padding: 10px; border: 1px solid #ccc; text-align: left;">{c_html}</{tag}>')
+                    html.append('  </tr>')
+                    continue
+                else:
+                    flush_table()
+
+                s_orig = line.rstrip()
+                if not s_orig.strip():
+                    flush_lists()
+                    html.append('<br/>')
+                    continue
+
+                if s_orig.startswith('### '):
+                    flush_lists()
+                    html.append(f'<h3>{s_orig[4:]}</h3>')
+                elif s_orig.startswith('## '):
+                    flush_lists()
+                    html.append(f'<h2>{s_orig[3:]}</h2>')
+                elif s_orig.startswith('# '):
+                    flush_lists()
+                    html.append(f'<h1>{s_orig[2:]}</h1>')
+                elif s_orig == '---':
+                    flush_lists()
                     html.append('<hr/>')
-                elif s.startswith('- ') or s.startswith('* '):
+                elif s_orig.startswith('- ') or s_orig.startswith('* '):
                     if not in_ul:
                         html.append('<ul>')
                         in_ul = True
-                    html.append(f'<li>{s[2:]}</li>')
-                elif not s:
-                    if in_ul:
-                        html.append('</ul>')
-                        in_ul = False
-                    html.append('<br/>')
+                    # Inline formatting for list items
+                    li_text = s_orig[2:]
+                    li_text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', li_text)
+                    li_text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', li_text)
+                    html.append(f'  <li>{li_text}</li>')
                 else:
-                    if in_ul:
-                        html.append('</ul>')
-                        in_ul = False
-                    html.append(f'<p>{s}</p>')
+                    flush_lists()
+                    # Regular paragraph with inline formatting
+                    p_text = s_orig
+                    p_text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', p_text)
+                    p_text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', p_text)
+                    p_text = re.sub(r'`(.+?)`', r'<code>\1</code>', p_text)
+                    html.append(f'<p>{p_text}</p>')
 
-            if in_ul:
-                html.append('</ul>')
+            flush_lists()
+            flush_table()
 
             body = '\n'.join(html)
-            body = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', body)
-            body = re.sub(r'\*(.+?)\*', r'<em>\1</em>', body)
-            body = re.sub(r'`(.+?)`', r'<code>\1</code>', body)
-            return f'<html><head><meta charset="utf-8"/></head><body>{body}</body></html>'
+            return f'<html><head><meta charset="utf-8"/></head><body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">{body}</body></html>'
 
         html_content = _md_to_html(markdown_text)
 

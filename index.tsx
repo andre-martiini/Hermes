@@ -1804,6 +1804,50 @@ const App: React.FC = () => {
       };
     }
   }, []);
+  
+  // Escuta abertura de tarefa via URL (?task=ID)
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const taskId = urlParams.get('task');
+    if (taskId) {
+      const loadTask = async () => {
+        // Tenta achar na lista local primeiro
+        const local = tarefas.find(t => t.id === taskId);
+        if (local) {
+          setSelectedTask(local);
+          setTaskModalMode('execute');
+        } else {
+          // Busca no Firestore
+          try {
+            const snap = await getDoc(doc(db, 'tarefas', taskId));
+            if (snap.exists()) {
+              const data = snap.data();
+              setSelectedTask({ 
+                id: snap.id, 
+                ...data,
+                area_tematica: data.area_tematica || data.categoria,
+                data_limite: data.data_limite || data.data_inicio || '',
+                data_inicio: data.data_limite || data.data_inicio || '',
+              } as Tarefa);
+              setTaskModalMode('execute');
+            }
+          } catch (err) {
+            console.error("Erro ao carregar tarefa da URL:", err);
+          }
+        }
+        // Limpa a URL sem dar reload para não reabrir ao atualizar
+        window.history.replaceState({}, document.title, window.location.pathname);
+      };
+      
+      // Se tarefas já carregou, executa. Se não, espera um pouco para garantir que o onSnapshot rodou.
+      if (tarefas.length > 0) {
+        loadTask();
+      } else {
+        const timer = setTimeout(loadTask, 2000);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [tarefas.length > 0]);
 
   const handleDashboardNavigate = (view: 'gallery' | 'finance' | 'saude' | 'sistemas-dev') => {
     setViewMode(view);

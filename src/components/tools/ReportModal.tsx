@@ -1,5 +1,5 @@
-
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { httpsCallable } from 'firebase/functions';
@@ -11,6 +11,7 @@ interface ReportModalProps {
     reportId: string;
     titulo: string;
     markdown: string;
+    onOpenTask?: (id: string) => void;
 }
 
 export const ReportModal: React.FC<ReportModalProps> = ({
@@ -19,6 +20,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
     reportId,
     titulo,
     markdown,
+    onOpenTask,
 }) => {
     const [isSavingDrive, setIsSavingDrive] = useState(false);
     const [driveSaved, setDriveSaved] = useState(false);
@@ -68,7 +70,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
         }
     };
 
-    return (
+    return createPortal(
         <>
             {/* Print CSS — oculta tudo exceto o relatório */}
             <style>{`
@@ -87,7 +89,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
             {/* Overlay */}
             <div
                 id="hermes-report-print-root"
-                className="fixed inset-0 z-[9999] flex flex-col bg-white"
+                className="fixed inset-0 z-[9999] flex flex-col bg-white overflow-hidden"
                 style={{ fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}
             >
                 {/* Header — no-print */}
@@ -225,6 +227,26 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                                 blockquote: ({ node, ...props }) => (
                                     <blockquote className="border-l-4 border-blue-300 pl-4 italic text-slate-600 my-4" {...props} />
                                 ),
+                                a: ({ node, ...props }) => {
+                                    const href = props.href || '';
+                                    if (href.startsWith('task:')) {
+                                        const id = href.split(':')[1];
+                                        return (
+                                            <button
+                                                onClick={() => {
+                                                    onOpenTask?.(id);
+                                                    onClose();
+                                                }}
+                                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors font-bold text-[13px] border border-blue-100 align-baseline"
+                                                title="Abrir Ação"
+                                            >
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+                                                {props.children}
+                                            </button>
+                                        );
+                                    }
+                                    return <a className="text-blue-600 underline hover:text-blue-800 break-all" target="_blank" rel="noopener noreferrer" {...props} />;
+                                }
                             }}
                         >
                             {markdown}
@@ -232,6 +254,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                     </div>
                 </div>
             </div>
-        </>
+        </>,
+        document.body
     );
 };

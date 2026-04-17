@@ -161,6 +161,9 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     // Estado de transcrição de áudio colado
     const [isTranscribing, setIsTranscribing] = useState(false);
 
+    // Estado para rastrear qual diagnóstico está em processamento
+    const [diagnosingId, setDiagnosingId] = useState<string | null>(null);
+
     // ── Mention (@) popup ─────────────────────────────────────────────────────
     const [taskPoolItems, setTaskPoolItems] = useState<PoolItem[]>([]);
     const [mention, setMention] = useState<{
@@ -359,7 +362,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const handleConfirmPresentation = async (presentation: ProposedPresentation) => {
         if (!currentSessionId) return;
         try {
-            const criarApresentacao = httpsCallable(functions, 'criar_apresentacao_slides');
+            const criarApresentacao = httpsCallable(functions, 'criar_apresentacao_slides', { timeout: 300000 });
             await criarApresentacao({
                 sessionId: currentSessionId,
                 temaGeral: presentation.temaGeral,
@@ -370,10 +373,12 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         }
     };
 
-    const handleConfirmDiagnosis = async (diagnosis: DiagnosisRequest) => {
-        if (!currentSessionId) return;
+    const handleConfirmDiagnosis = async (diagnosis: DiagnosisRequest, messageId?: string) => {
+        if (!currentSessionId || diagnosingId) return;
+        if (messageId) setDiagnosingId(messageId);
+        
         try {
-            const diagnosticarCodigo = httpsCallable(functions, 'diagnosticar_codigo');
+            const diagnosticarCodigo = httpsCallable(functions, 'diagnosticar_codigo', { timeout: 300000 });
             await diagnosticarCodigo({
                 sessionId: currentSessionId,
                 mode: diagnosis.mode,
@@ -392,6 +397,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             });
         } catch (err: any) {
             setFooterError('Erro ao iniciar diagnóstico: ' + (err?.message || 'Tente novamente.'));
+        } finally {
+            setDiagnosingId(null);
         }
     };
 
@@ -642,7 +649,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             });
 
             // 2. Chama a Cloud Function
-            const askCopiloto = httpsCallable(functions, 'askCopilotoHermes');
+            const askCopiloto = httpsCallable(functions, 'askCopilotoHermes', { timeout: 300000 });
             const response = await askCopiloto({
                 sessionId: sId,
                 prompt: text.trim() || (hasFile ? '' : text),
@@ -709,6 +716,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 reportId={activeReport?.id ?? ''}
                 titulo={activeReport?.titulo ?? (isLoadingReport ? 'Carregando...' : 'Relatório')}
                 markdown={activeReport?.markdown ?? (isLoadingReport ? '' : '')}
+                onOpenTask={onOpenTask}
             />
         );
     }
@@ -865,7 +873,10 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                     const id = href.split(':')[1];
                                                     return (
                                                         <button
-                                                            onClick={() => onOpenTask?.(id)}
+                                                            onClick={() => {
+                                                                onOpenTask?.(id);
+                                                                onClose?.();
+                                                            }}
                                                             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-blue-600 hover:text-white text-blue-400 rounded-xl border border-blue-500/30 transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm group/btn"
                                                         >
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
@@ -1109,11 +1120,16 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             </div>
                                             <div className="flex gap-2">
                                                 <button
-                                                    onClick={() => handleConfirmDiagnosis(msg.proposedDiagnosis!)}
-                                                    className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all flex items-center justify-center gap-1.5"
+                                                    onClick={() => handleConfirmDiagnosis(msg.proposedDiagnosis!, msg.id)}
+                                                    disabled={diagnosingId === msg.id}
+                                                    className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-1.5"
                                                 >
-                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                    {msg.proposedDiagnosis.mode === 'snippet' ? 'Analisar Snippet' : 'Analisar Repositório'}
+                                                    {diagnosingId === msg.id ? (
+                                                        <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                                    ) : (
+                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                    )}
+                                                    {diagnosingId === msg.id ? 'Analisando...' : (msg.proposedDiagnosis.mode === 'snippet' ? 'Analisar Snippet' : 'Analisar Repositório')}
                                                 </button>
                                                 <button
                                                     onClick={() => { setInput(`Ajustar diagnóstico: `); setTimeout(() => textareaRef.current?.focus(), 50); }}
