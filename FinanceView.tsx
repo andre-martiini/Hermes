@@ -45,22 +45,27 @@ interface FinanceViewProps {
     setIsSettingsOpen: (isOpen: boolean) => void;
 }
 
-const FinanceSection = ({ title, children, defaultExpanded = true }: { title: string, children: React.ReactNode, defaultExpanded?: boolean }) => {
+const FinanceSection = ({ title, children, defaultExpanded = true, disableCollapse = false }: { title: string, children: React.ReactNode, defaultExpanded?: boolean, disableCollapse?: boolean }) => {
     const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+    const showChildren = disableCollapse || isExpanded;
 
     return (
         <div className="bg-white p-6 md:p-8 rounded-none md:rounded-[2rem] border-b md:border border-slate-200 shadow-none md:shadow-lg">
-            <button
-                onClick={() => setIsExpanded(!isExpanded)}
-                className="w-full flex items-center justify-between group"
-            >
-                <h4 className="text-lg font-black text-slate-900">{title}</h4>
-                <svg className={`w-5 h-5 text-slate-300 group-hover:text-slate-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
-                </svg>
-            </button>
-            {isExpanded && (
-                <div className="mt-6 animate-in slide-in-from-top-2 duration-300">
+            {!disableCollapse ? (
+                <button
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    className="w-full flex items-center justify-between group"
+                >
+                    <h4 className="text-lg font-black text-slate-900">{title}</h4>
+                    <svg className={`w-5 h-5 text-slate-300 group-hover:text-slate-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
+                    </svg>
+                </button>
+            ) : (
+                <h4 className="text-lg font-black text-slate-900 mb-6">{title}</h4>
+            )}
+            {showChildren && (
+                <div className={`${!disableCollapse ? 'mt-6' : ''} animate-in slide-in-from-top-2 duration-300`}>
                     {children}
                 </div>
             )}
@@ -669,7 +674,7 @@ const FinanceView = ({
 
                         {/* TRANSACTIONS (LEFT COLUMN) */}
                         <div className="order-2 md:order-1 h-full">
-                            <FinanceSection title={`Lançamentos de ${new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}`}>
+                            <FinanceSection title={`Lançamentos de ${new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}`} disableCollapse>
                                 <div className="flex justify-end mb-4">
                                     <button
                                         onClick={() => {
@@ -822,7 +827,7 @@ const FinanceView = ({
                             </div>
 
                             <div className="">
-                                <FinanceSection title="Metas em Cascata">
+                                <FinanceSection title="Metas em Cascata" disableCollapse>
                                     <div className="flex justify-end mb-4">
                                         <button
                                             onClick={() => {
@@ -1345,94 +1350,94 @@ const FinanceView = ({
                         </div>
 
                         {false && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {/* Rubricas de Renda Pendentes */}
-                            {incomeRubrics
-                                .filter(rubric => !incomeEntries.some(entry =>
-                                    entry.rubricId === rubric.id &&
-                                    entry.month === currentMonth &&
-                                    entry.year === currentYear
-                                ))
-                                .map(rubric => (
-                                    <div key={rubric.id} className="bg-slate-800 p-6 rounded-none md:rounded-[2rem] border-2 border-dashed border-slate-700 shadow-2xl transition-all group hover:bg-slate-900 border-emerald-500/30">
-                                        <div className="text-[10px] font-black uppercase tracking-widest mb-2 px-3 py-1 rounded-full w-fit bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">{rubric.category}</div>
-                                        <h5 className="text-lg font-black text-white leading-tight">{rubric.description}</h5>
-                                        <div className="mt-4 text-[10px] font-black text-slate-400 uppercase tracking-widest italic mb-4 flex items-center gap-2">
-                                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                                            Aguardando recebimento
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {/* Rubricas de Renda Pendentes */}
+                                {incomeRubrics
+                                    .filter(rubric => !incomeEntries.some(entry =>
+                                        entry.rubricId === rubric.id &&
+                                        entry.month === currentMonth &&
+                                        entry.year === currentYear
+                                    ))
+                                    .map(rubric => (
+                                        <div key={rubric.id} className="bg-slate-800 p-6 rounded-none md:rounded-[2rem] border-2 border-dashed border-slate-700 shadow-2xl transition-all group hover:bg-slate-900 border-emerald-500/30">
+                                            <div className="text-[10px] font-black uppercase tracking-widest mb-2 px-3 py-1 rounded-full w-fit bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">{rubric.category}</div>
+                                            <h5 className="text-lg font-black text-white leading-tight">{rubric.description}</h5>
+                                            <div className="mt-4 text-[10px] font-black text-slate-400 uppercase tracking-widest italic mb-4 flex items-center gap-2">
+                                                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                                                Aguardando recebimento
+                                            </div>
+                                            <button
+                                                onClick={() => {
+                                                    setNewIncome({
+                                                        description: rubric.description,
+                                                        category: rubric.category,
+                                                        day: rubric.expectedDay,
+                                                        amount: rubric.defaultAmount,
+                                                        rubricId: rubric.id,
+                                                        isReceived: false
+                                                    });
+                                                    setIsAddingIncome(true);
+                                                }}
+                                                className="w-full bg-white text-slate-900 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center gap-2 shadow-sm"
+                                            >
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+                                                Lançar Recebimento
+                                            </button>
                                         </div>
-                                        <button
-                                            onClick={() => {
-                                                setNewIncome({
-                                                    description: rubric.description,
-                                                    category: rubric.category,
-                                                    day: rubric.expectedDay,
-                                                    amount: rubric.defaultAmount,
-                                                    rubricId: rubric.id,
-                                                    isReceived: false
-                                                });
-                                                setIsAddingIncome(true);
-                                            }}
-                                            className="w-full bg-white text-slate-900 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center gap-2 shadow-sm"
-                                        >
-                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-                                            Lançar Recebimento
-                                        </button>
-                                    </div>
-                                ))
-                            }
+                                    ))
+                                }
 
-                            {/* Rendas Efetivadas (Compactas) */}
-                            {incomeEntries
-                                .filter(e => e.month === currentMonth && e.year === currentYear)
-                                .map(entry => {
-                                    const prevEntry = incomeEntries.find(e =>
-                                        e.description === entry.description &&
-                                        e.month === (currentMonth === 0 ? 11 : currentMonth - 1) &&
-                                        e.year === (currentMonth === 0 ? currentYear - 1 : currentYear)
-                                    );
-                                    const diff = prevEntry ? entry.amount - prevEntry.amount : 0;
+                                {/* Rendas Efetivadas (Compactas) */}
+                                {incomeEntries
+                                    .filter(e => e.month === currentMonth && e.year === currentYear)
+                                    .map(entry => {
+                                        const prevEntry = incomeEntries.find(e =>
+                                            e.description === entry.description &&
+                                            e.month === (currentMonth === 0 ? 11 : currentMonth - 1) &&
+                                            e.year === (currentMonth === 0 ? currentYear - 1 : currentYear)
+                                        );
+                                        const diff = prevEntry ? entry.amount - prevEntry.amount : 0;
 
-                                    return (
-                                        <div key={entry.id} className="bg-white p-4 rounded-lg md:rounded-2xl border border-emerald-50 shadow-sm flex items-center justify-between group">
-                                            <div className="flex items-center gap-4">
-                                                <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600">
-                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-                                                </div>
-                                                <div>
-                                                    <div className="text-[10px] font-black text-emerald-600/50 uppercase tracking-widest mb-0.5">{entry.category || 'Renda'}</div>
-                                                    <div className="text-sm font-black text-slate-800 leading-none">{entry.description}</div>
-                                                    <div className="text-[10px] text-slate-400 font-bold mt-1 flex items-center gap-2">
-                                                        {entry.isReceived ? 'Recebido' : 'Previsto'} dia {entry.day}
-                                                        <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${entry.isReceived ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
-                                                            {entry.isReceived ? 'Recebido' : 'Pendente'}
-                                                        </span>
-                                                        {diff !== 0 && (
-                                                            <span className={`text-[8px] font-black ${diff > 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                                                {diff > 0 ? '↑' : '↓'} R$ {Math.abs(diff).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        return (
+                                            <div key={entry.id} className="bg-white p-4 rounded-lg md:rounded-2xl border border-emerald-50 shadow-sm flex items-center justify-between group">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600">
+                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-[10px] font-black text-emerald-600/50 uppercase tracking-widest mb-0.5">{entry.category || 'Renda'}</div>
+                                                        <div className="text-sm font-black text-slate-800 leading-none">{entry.description}</div>
+                                                        <div className="text-[10px] text-slate-400 font-bold mt-1 flex items-center gap-2">
+                                                            {entry.isReceived ? 'Recebido' : 'Previsto'} dia {entry.day}
+                                                            <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${entry.isReceived ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                                                                {entry.isReceived ? 'Recebido' : 'Pendente'}
                                                             </span>
-                                                        )}
+                                                            {diff !== 0 && (
+                                                                <span className={`text-[8px] font-black ${diff > 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                                                                    {diff > 0 ? '↑' : '↓'} R$ {Math.abs(diff).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                     </div>
                                                 </div>
+                                                <div className="flex items-center gap-4">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={entry.isReceived}
+                                                        onChange={() => onUpdateIncomeEntry({ ...entry, isReceived: !entry.isReceived })}
+                                                        className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                                        title={entry.isReceived ? 'Marcar como nao recebido' : 'Marcar como recebido'}
+                                                    />
+                                                    <div className="text-lg font-black text-emerald-600 tracking-tighter">R$ {entry.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                                                    <button onClick={() => handleTwoStepDelete(`income_entry_${entry.id}`, () => onDeleteIncomeEntry(entry.id))} className={`p-2 rounded-lg transition-colors opacity-0 group-hover:opacity-100 ${pendingDeleteKey === `income_entry_${entry.id}` ? 'bg-rose-500 text-white opacity-100' : 'text-slate-200 hover:text-rose-400'}`}>
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                    </button>
+                                                </div>
                                             </div>
-                                            <div className="flex items-center gap-4">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={entry.isReceived}
-                                                    onChange={() => onUpdateIncomeEntry({ ...entry, isReceived: !entry.isReceived })}
-                                                    className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                                                    title={entry.isReceived ? 'Marcar como nao recebido' : 'Marcar como recebido'}
-                                                />
-                                                <div className="text-lg font-black text-emerald-600 tracking-tighter">R$ {entry.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                                                <button onClick={() => handleTwoStepDelete(`income_entry_${entry.id}`, () => onDeleteIncomeEntry(entry.id))} className={`p-2 rounded-lg transition-colors opacity-0 group-hover:opacity-100 ${pendingDeleteKey === `income_entry_${entry.id}` ? 'bg-rose-500 text-white opacity-100' : 'text-slate-200 hover:text-rose-400'}`}>
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                </button>
-                                            </div>
-                                        </div>
-                                    );
-                                })
-                            }
-                        </div>
+                                        );
+                                    })
+                                }
+                            </div>
                         )}
                     </FinanceSection>
 

@@ -4287,6 +4287,484 @@ def gerarSlidesIA(req: https_fn.CallableRequest):
 
 
 
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.GB_1,
+)
+def criar_apresentacao_slides(req: https_fn.CallableRequest):
+    """
+    Persiste o esqueleto de apresentação confirmado pelo usuário no Firestore
+    (coleção slides_drafts) e injeta o link tool:slides:{draftId} no histórico
+    da sessão do Copiloto. Não invoca nenhum modelo de linguagem.
+    """
+    import json
+
+    uid = req.auth.uid if req.auth else None
+    if not uid:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
+            message="Usuário não autenticado."
+        )
+
+    data = req.data or {}
+    session_id = data.get('sessionId')
+    tema_geral = (data.get('temaGeral') or '').strip()
+    slides = data.get('slides')
+
+    if not slides or not isinstance(slides, list):
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="Campo 'slides' é obrigatório e deve ser uma lista."
+        )
+    if not tema_geral:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="Campo 'temaGeral' é obrigatório."
+        )
+
+    try:
+        db = get_db()
+
+        # 1. Persiste o draft na coleção slides_drafts
+        draft_ref = db.collection('slides_drafts').add({
+            "userId": uid,
+            "sessionId": session_id or None,
+            "tema_geral": tema_geral,
+            "slides": slides,
+            "timestamp": firestore.SERVER_TIMESTAMP,
+        })
+        draft_id = draft_ref[1].id
+
+        # 2. Injeta mensagem com o link no histórico da sessão
+        if session_id:
+            db.collection('sessoes_copiloto').document(session_id).collection('mensagens').add({
+                "role": "assistant",
+                "content": f"✅ Apresentação gerada com sucesso!\n\n[Abrir Apresentação](tool:slides:{draft_id})",
+                "timestamp": firestore.SERVER_TIMESTAMP,
+            })
+            db.collection('sessoes_copiloto').document(session_id).update({
+                "lastMessageAt": firestore.SERVER_TIMESTAMP
+            })
+
+        return {"draftId": draft_id}
+
+    except Exception as e:
+        print(f"Erro em criar_apresentacao_slides: {e}")
+        import traceback
+        print(traceback.format_exc())
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=str(e)
+        )
+
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=300,
+)
+def diagnosticar_codigo(req: https_fn.CallableRequest):
+    """
+    Dois modos roteados pela IA:
+      - 'repo'    : acessa o repositório GitHub do sistema, seleciona arquivos relevantes
+                    e gera diagnóstico com contexto completo do projeto.
+      - 'snippet' : analisa diretamente o código colado pelo usuário, sem acesso ao repo.
+    Ambos os modos produzem blocos SEARCH/REPLACE e um arquivo hermes_refactor.md.
+    """
+    import requests as http_requests
+    import json
+    import re
+
+    uid = req.auth.uid if req.auth else None
+    if not uid:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
+            message="Autenticação necessária."
+        )
+
+    session_id = req.data.get('sessionId')
+    task_id = req.data.get('taskId')
+    descricao_problema = req.data.get('descricaoProblema', '').strip()
+    mode = req.data.get('mode', 'repo')  # 'repo' | 'snippet'
+
+    # Campos específicos por modo
+    sistema_id = req.data.get('sistemaId', '').strip()
+    code_snippet = req.data.get('codeSnippet', '').strip()
+    file_name = req.data.get('fileName', 'snippet').strip() or 'snippet'
+
+    if not descricao_problema:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="descricaoProblema é obrigatório."
+        )
+    if mode == 'repo' and not sistema_id:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="sistemaId é obrigatório no modo repo."
+        )
+    if mode == 'snippet' and not code_snippet:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="codeSnippet é obrigatório no modo snippet."
+        )
+
+    try:
+        from google import genai
+
+        db = get_db()
+
+        # ── Credenciais comuns ─────────────────────────────────────────────────
+        keys_doc = db.collection('system').document('api_keys').get()
+        keys = keys_doc.to_dict() if keys_doc.exists else {}
+        gemini_api_key = keys.get('gemini_api_key')
+
+        if not gemini_api_key:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                message="Chave Gemini não configurada."
+            )
+
+        client = genai.Client(api_key=gemini_api_key)
+
+        # ══════════════════════════════════════════════════════════════════════
+        # MODO SNIPPET — analisa código colado diretamente, sem acesso ao repo
+        # ══════════════════════════════════════════════════════════════════════
+        if mode == 'snippet':
+            task_ctx = f'\nContexto de tarefa (ID): {task_id}' if task_id else ''
+            snippet_label = f'snippet · {file_name}'
+
+            snippet_prompt = (
+                "Você é um engenheiro de software sênior especialista em diagnóstico e refatoração.\n\n"
+                f"## CONTEXTO{task_ctx}\n"
+                f"Arquivo: {file_name}\n"
+                f"Problema relatado: {descricao_problema}\n\n"
+                f"## CÓDIGO FORNECIDO\n```\n{code_snippet}\n```\n\n"
+                "## TAREFA\n"
+                "Analise o código e gere um diagnóstico técnico completo.\n"
+                "Retorne APENAS um JSON válido (sem markdown) com esta estrutura exata:\n"
+                '{\n'
+                '  "diagnostico": "causa raiz em 2-4 parágrafos",\n'
+                '  "arquivos_impactados": ["' + file_name + '"],\n'
+                '  "alerta_impacto": "riscos de quebra ao aplicar a correção",\n'
+                '  "blocos_sr": [\n'
+                '    {\n'
+                f'      "arquivo": "{file_name}",\n'
+                '      "descricao": "o que esta correção faz",\n'
+                '      "search": "trecho original EXATO com 2-3 linhas de contexto antes e depois",\n'
+                '      "replace": "trecho corrigido completo"\n'
+                '    }\n'
+                '  ]\n'
+                '}\n\n'
+                "Regras para SEARCH/REPLACE:\n"
+                "1. O bloco search deve ser copiado LITERALMENTE do código fornecido\n"
+                "2. Inclua 2-3 linhas de contexto para âncora única\n"
+                "3. O bloco replace contém o código corrigido (mantenha indentação)"
+            )
+
+            snip_resp = client.models.generate_content(
+                model="gemini-2.0-flash", contents=snippet_prompt
+            )
+            snip_text = snip_resp.text.strip()
+            if '```json' in snip_text:
+                snip_text = snip_text.split('```json')[1].split('```')[0].strip()
+            elif '```' in snip_text:
+                snip_text = snip_text.split('```')[1].split('```')[0].strip()
+
+            diag_data = json.loads(snip_text)
+            blocos_sr = diag_data.get('blocos_sr', [])
+            files_analyzed = [file_name]
+
+            md_header = [
+                "# Hermes — Diagnóstico de Código (Snippet)",
+                f"**Arquivo:** `{file_name}`  ",
+                f"**Problema:** {descricao_problema}",
+            ]
+
+        # ══════════════════════════════════════════════════════════════════════
+        # MODO REPO — acessa GitHub, seleciona arquivos, analisa com contexto
+        # ══════════════════════════════════════════════════════════════════════
+        else:
+            github_token = keys.get('github_token')
+            if not github_token:
+                raise https_fn.HttpsError(
+                    code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                    message="GitHub token não configurado em system/api_keys."
+                )
+
+            # Busca URL do repositório
+            sistema_doc = db.collection('sistemas_detalhes').document(sistema_id).get()
+            
+            # Fallback robusto: busca case-insensitive ignorando prefixos como 'SISTEMA:'
+            if not sistema_doc.exists:
+                sistemas_all = db.collection('sistemas_detalhes').get()
+                target_id = sistema_id.strip().lower().replace('sistema:', '')
+                
+                for doc in sistemas_all:
+                    data = doc.to_dict() or {}
+                    # Normaliza IDs e Nomes para comparação
+                    doc_id_norm = doc.id.strip().lower().replace('sistema:', '')
+                    doc_name_norm = (data.get('nome') or "").strip().lower().replace('sistema:', '')
+                    
+                    if doc_id_norm == target_id or doc_name_norm == target_id:
+                        sistema_doc = doc
+                        break
+            
+            if not sistema_doc.exists:
+                raise https_fn.HttpsError(
+                    code=https_fn.FunctionsErrorCode.NOT_FOUND,
+                    message=f"Sistema '{sistema_id}' não encontrado em sistemas_detalhes."
+                )
+            
+            repo_url = (sistema_doc.to_dict() or {}).get('repositorio_principal', '').strip()
+            if not repo_url:
+                raise https_fn.HttpsError(
+                    code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                    message="Campo 'repositorio_principal' não configurado para este sistema."
+                )
+
+            match = re.match(r'https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$', repo_url)
+            if not match:
+                raise https_fn.HttpsError(
+                    code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+                    message=f"URL de repositório inválida: {repo_url}"
+                )
+            owner, repo = match.group(1), match.group(2)
+            snippet_label = f'{owner}/{repo}'
+
+            gh_headers = {
+                'Authorization': f'token {github_token}',
+                'Accept': 'application/vnd.github.v3+json',
+            }
+
+            # Branch padrão
+            repo_info = http_requests.get(
+                f'https://api.github.com/repos/{owner}/{repo}',
+                headers=gh_headers, timeout=30
+            )
+            if repo_info.status_code != 200:
+                raise https_fn.HttpsError(
+                    code=https_fn.FunctionsErrorCode.INTERNAL,
+                    message=f"Erro ao acessar repositório GitHub ({repo_info.status_code})."
+                )
+            default_branch = repo_info.json().get('default_branch', 'main')
+
+            # Árvore completa
+            tree_resp = http_requests.get(
+                f'https://api.github.com/repos/{owner}/{repo}/git/trees/{default_branch}?recursive=1',
+                headers=gh_headers, timeout=30
+            )
+            if tree_resp.status_code != 200:
+                raise https_fn.HttpsError(
+                    code=https_fn.FunctionsErrorCode.INTERNAL,
+                    message=f"Erro ao buscar árvore do repositório ({tree_resp.status_code})."
+                )
+
+            ignore_patterns = (
+                'node_modules/', '.git/', 'dist/', 'build/', '__pycache__/',
+                '.pytest_cache/', 'venv/', '.venv/', '.next/', 'coverage/',
+            )
+            code_extensions = {
+                '.py', '.ts', '.tsx', '.js', '.jsx', '.css', '.json', '.html',
+                '.md', '.yaml', '.yml', '.sh', '.sql', '.go', '.rs', '.java',
+                '.kt', '.swift', '.dart', '.env.example', '.toml', '.cfg',
+            }
+            all_blobs = [
+                f['path'] for f in tree_resp.json().get('tree', [])
+                if f.get('type') == 'blob'
+            ]
+            filtered_files = []
+            for fp in all_blobs:
+                if any(ign in fp for ign in ignore_patterns):
+                    continue
+                ext = '.' + fp.split('.')[-1].lower() if '.' in fp.split('/')[-1] else ''
+                if ext in code_extensions:
+                    filtered_files.append(fp)
+
+            # Gemini seleciona arquivos relevantes
+            file_list_text = '\n'.join(filtered_files[:400])
+            selection_prompt = (
+                f"Você é um engenheiro sênior analisando o repositório GitHub `{owner}/{repo}`.\n\n"
+                f"Problema relatado: {descricao_problema}\n\n"
+                f"Lista de arquivos:\n{file_list_text}\n\n"
+                "Selecione os arquivos mais relevantes (máx. 8). "
+                "Retorne APENAS um JSON válido (sem markdown):\n"
+                '{"arquivos": ["path/file1"], "justificativa": "breve explicação"}'
+            )
+            sel_resp = client.models.generate_content(
+                model="gemini-2.0-flash", contents=selection_prompt
+            )
+            sel_text = sel_resp.text.strip()
+            if '```json' in sel_text:
+                sel_text = sel_text.split('```json')[1].split('```')[0].strip()
+            elif '```' in sel_text:
+                sel_text = sel_text.split('```')[1].split('```')[0].strip()
+            selected_files = json.loads(sel_text).get('arquivos', [])[:8]
+
+            # Baixa conteúdo (máx. 50 KB cada)
+            files_content = {}
+            for fp in selected_files:
+                try:
+                    raw_url = f'https://raw.githubusercontent.com/{owner}/{repo}/{default_branch}/{fp}'
+                    raw_resp = http_requests.get(raw_url, headers=gh_headers, timeout=15)
+                    if raw_resp.status_code == 200:
+                        content = raw_resp.text
+                        if len(content) > 50000:
+                            content = content[:50000] + '\n... [TRUNCADO]'
+                        files_content[fp] = content
+                except Exception as fetch_err:
+                    print(f"Erro ao baixar {fp}: {fetch_err}")
+
+            files_context = '\n\n'.join(
+                f'### {path}\n```\n{content}\n```'
+                for path, content in files_content.items()
+            )
+            task_ctx = f'\nContexto de tarefa (ID): {task_id}' if task_id else ''
+
+            diagnosis_prompt = (
+                "Você é um engenheiro de software sênior especialista em diagnóstico de código.\n\n"
+                f"## CONTEXTO\nRepositório: {owner}/{repo}{task_ctx}\n"
+                f"Problema relatado: {descricao_problema}\n\n"
+                f"## ARQUIVOS ANALISADOS\n{files_context}\n\n"
+                "## TAREFA\n"
+                "Retorne APENAS um JSON válido (sem markdown):\n"
+                '{\n'
+                '  "diagnostico": "causa raiz em 2-4 parágrafos",\n'
+                '  "arquivos_impactados": ["path/file.py"],\n'
+                '  "alerta_impacto": "riscos de quebra em outros módulos",\n'
+                '  "blocos_sr": [{\n'
+                '    "arquivo": "path/file.py",\n'
+                '    "descricao": "o que esta correção faz",\n'
+                '    "search": "código original EXATO com 2-3 linhas de contexto",\n'
+                '    "replace": "código corrigido completo"\n'
+                '  }]\n'
+                '}\n\n'
+                "Regras: search copiado LITERALMENTE; inclua contexto para âncora única; "
+                "replace mantém indentação; omita arquivos sem correção."
+            )
+            diag_resp = client.models.generate_content(
+                model="gemini-2.0-flash", contents=diagnosis_prompt
+            )
+            diag_text = diag_resp.text.strip()
+            if '```json' in diag_text:
+                diag_text = diag_text.split('```json')[1].split('```')[0].strip()
+            elif '```' in diag_text:
+                diag_text = diag_text.split('```')[1].split('```')[0].strip()
+
+            diag_data = json.loads(diag_text)
+            blocos_sr = diag_data.get('blocos_sr', [])
+            files_analyzed = list(files_content.keys())
+
+            md_header = [
+                "# Hermes — Diagnóstico de Código",
+                f"**Repositório:** `{owner}/{repo}`  ",
+                f"**Sistema:** `{sistema_id}`  ",
+                f"**Problema:** {descricao_problema}",
+            ]
+
+        # ── Geração do Markdown de handoff (comum a ambos os modos) ──────────
+        md_lines = md_header + [
+            "",
+            "---",
+            "",
+            "## Diagnóstico da Falha",
+            "",
+            diag_data.get('diagnostico', ''),
+            "",
+            "---",
+            "",
+            "## Arquivos Impactados",
+            "",
+        ]
+        for f in diag_data.get('arquivos_impactados', []):
+            md_lines.append(f"- `{f}`")
+        md_lines += [
+            "",
+            "---",
+            "",
+            "## Instruções de Refatoração",
+            "",
+            "> **Como usar:** Arraste este arquivo para o chat da sua IA no VS Code "
+            "(Cursor, GitHub Copilot, Aider) e instrua: "
+            "_\"Aplique as correções contidas neste arquivo\"_",
+            "",
+        ]
+        for i, bloco in enumerate(blocos_sr, 1):
+            md_lines += [
+                f"### Correção {i}: {bloco.get('descricao', '')}",
+                "",
+                f"**Arquivo:** `{bloco.get('arquivo', '')}`",
+                "",
+                "<<<<<<< SEARCH",
+                bloco.get('search', ''),
+                "=======",
+                bloco.get('replace', ''),
+                ">>>>>>> REPLACE",
+                "",
+                "---",
+                "",
+            ]
+        md_lines += [
+            "## Alerta de Impacto",
+            "",
+            f"⚠️ {diag_data.get('alerta_impacto', 'Verifique os módulos dependentes antes de aplicar.')}",
+            "",
+            "---",
+            f"_Gerado pelo Hermes Copiloto · modo {mode}_",
+        ]
+        md_content = '\n'.join(md_lines)
+
+        # ── Persiste em diagnosticos_codigo ───────────────────────────────────
+        diag_ref = db.collection('diagnosticos_codigo').add({
+            'uid': uid,
+            'sessionId': session_id,
+            'taskId': task_id,
+            'mode': mode,
+            'sistemaId': sistema_id or None,
+            'nomeRepositorio': snippet_label,
+            'descricaoProblema': descricao_problema,
+            'arquivosAnalisados': files_analyzed,
+            'diagnostico': diag_data.get('diagnostico', ''),
+            'blocosSR': blocos_sr,
+            'alertaImpacto': diag_data.get('alerta_impacto', ''),
+            'markdownContent': md_content,
+            'criadoEm': firestore.SERVER_TIMESTAMP,
+        })
+        diag_id = diag_ref[1].id
+
+        # ── Injeta mensagem na sessão ─────────────────────────────────────────
+        if session_id:
+            try:
+                modo_label = "snippet" if mode == "snippet" else f"repositório `{snippet_label}`"
+                db.collection('sessoes_copiloto').document(session_id).collection('mensagens').add({
+                    'role': 'assistant',
+                    'content': (
+                        f'✅ **Diagnóstico concluído!** '
+                        f'{len(blocos_sr)} correção(ões) em {len(files_analyzed)} arquivo(s) '
+                        f'({modo_label}).\n\n'
+                        f'[Abrir Diagnóstico](tool:diagnosis:{diag_id})'
+                    ),
+                    'timestamp': firestore.SERVER_TIMESTAMP,
+                })
+                db.collection('sessoes_copiloto').document(session_id).update({
+                    'lastMessageAt': firestore.SERVER_TIMESTAMP,
+                })
+            except Exception as msg_err:
+                print(f"Erro ao injetar mensagem de diagnóstico: {msg_err}")
+
+        return {'diagId': diag_id}
+
+    except https_fn.HttpsError:
+        raise
+    except Exception as e:
+        print(f"Erro em diagnosticar_codigo: {e}")
+        import traceback
+        print(traceback.format_exc())
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=str(e)
+        )
+
+
 @https_fn.on_call(memory=options.MemoryOption.GB_1)
 
 def processInvoiceOCR(req: https_fn.CallableRequest):
@@ -5607,8 +6085,26 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         from datetime import datetime
         today_str = datetime.now().strftime("%Y-%m-%d")
 
+        # Busca catálogo de sistemas para o "de-para" exato que o usuário solicitou
+        try:
+            sistemas_docs = db.collection('sistemas_detalhes').get()
+            catalogo_sistemas = []
+            for s_doc in sistemas_docs:
+                s_data = s_doc.to_dict()
+                s_nome = s_data.get('nome', 'Sem Nome')
+                s_id = s_doc.id
+                catalogo_sistemas.append(f"- {s_nome}: {s_id}")
+            sistemas_str = "\n".join(catalogo_sistemas) if catalogo_sistemas else "Nenhum sistema cadastrado."
+        except Exception as e:
+            print(f"Erro ao buscar catálogo de sistemas: {e}")
+            sistemas_str = "Erro ao carregar catálogo."
+
         system_instruction = (
             f"Você é o Copiloto Hermes, estrategista sênior de processos. Hoje é {today_str}. "
+            f"{f'CONTEXTO TÉCNICO VINCULADO (OBRIGATÓRIO): sistemaId={system_id}, taskId={task_id}. ' if system_id or task_id else ''}"
+            "\n\nCATÁLOGO DE SISTEMAS (Mapeamento Exato de Nome para ID):\n"
+            f"{sistemas_str}\n\n"
+            "Ao realizar diagnósticos ou operações em sistemas, utilize SEMPRE o ID técnico do catálogo acima correspondente ao nome citado pelo usuário.\n\n"
             "Seu tom de voz: Consultivo, analítico e absurdamente conciso. "
             "Use bullet points para melhorar a legibilidade. "
             "\n\n"
@@ -5748,7 +6244,56 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "  - **Título:** [titulo]\n"
             "  - **Seções:** [lista das seções]\n"
             "  Clique no botão abaixo para abrir o relatório completo.\n"
-            "NÃO reproduza o conteúdo do relatório no chat — ele está disponível no modal de leitura."
+            "NÃO reproduza o conteúdo do relatório no chat — ele está disponível no modal de leitura.\n\n"
+            "## GERAÇÃO DE APRESENTAÇÃO DE SLIDES — PADRÃO DRAFT-FIRST (CRÍTICO)\n\n"
+            "Quando o usuário solicitar uma apresentação de slides, siga OBRIGATORIAMENTE este protocolo:\n\n"
+            "ETAPA 1 — ESQUELETO (Preview):\n"
+            "Nunca gere o arquivo imediatamente. Apresente um esqueleto estruturado e emita o bloco [PRESENTATION]...[/PRESENTATION].\n"
+            "Inclua no texto da resposta (ANTES do bloco):\n"
+            "  📊 **Proposta de Apresentação: [tema]**\n"
+            "  ⏱️ Tempo estimado: [X–Y minutos] (calcule dinamicamente pela densidade do conteúdo)\n\n"
+            "O bloco [PRESENTATION] deve conter um objeto JSON com esta estrutura exata:\n"
+            "  [PRESENTATION]{\"temaGeral\": \"string\", \"slides\": [{\"ordem\": 1, \"tipo_layout\": \"Capa\", \"titulo\": \"string\", \"subtitulo\": \"string\", \"topicos\": [], \"sugestao_imagem\": \"string\"}, ...]}\n"
+            "[/PRESENTATION]\n\n"
+            "Regras para o esqueleto:\n"
+            "  - tipo_layout deve ser 'Capa' (apenas slide 1) ou 'Conteudo'\n"
+            "  - topicos: lista de strings curtas (máx. 4 por slide)\n"
+            "  - subtitulo: string vazia se não aplicável\n"
+            "  - sugestao_imagem: descrição em português de imagem corporativa minimalista\n"
+            "  - Use contexto da tarefa ativa (obter_contexto_tela) se taskId estiver presente; caso contrário, use estritamente o prompt/anexo\n\n"
+            "ETAPA 2 — ITERAÇÃO (Ajustar):\n"
+            "Se o usuário pedir ajuste na estrutura, regere o bloco [PRESENTATION] com as modificações solicitadas.\n"
+            "Mantenha o mesmo formato. Não execute nenhuma ferramenta de persistência nesta etapa.\n\n"
+            "ETAPA 3 — CONFIRMAÇÃO:\n"
+            "Após confirmação do usuário ('confirmar', 'ok', 'gerar', etc.), o FRONTEND chama criar_apresentacao_slides diretamente.\n"
+            "Você NÃO chama nenhuma ferramenta nesta etapa — apenas oriente o usuário a clicar em 'Confirmar'.\n"
+            "Após o link tool:slides:{id} aparecer no chat, responda:\n"
+            "  ✅ Apresentação pronta! Clique em **Abrir Apresentação** para editar e exportar.\n\n"
+            "## DIAGNÓSTICO DE CÓDIGO — PADRÃO DRAFT-FIRST (CRÍTICO)\n\n"
+            "Quando o usuário relatar um bug ou cole código para análise, VOCÊ decide o modo correto e emite o bloco [DIAGNOSIS].\n\n"
+            "### ROTEAMENTO AUTOMÁTICO DE MODO\n\n"
+            "MODO REPO — use quando:\n"
+            "  - O usuário menciona um sistema específico OU taskId está presente (consulte obter_contexto_tela)\n"
+            "  - O bug é sistêmico, envolve múltiplos arquivos ou integração entre módulos\n"
+            "  - O usuário quer análise completa do repositório\n\n"
+            "MODO SNIPPET — use quando:\n"
+            "  - O usuário colou código diretamente no chat (bloco de código presente na mensagem)\n"
+            "  - Não há sistema identificado no contexto\n"
+            "  - O problema é localizado e autocontido\n\n"
+            "### ETAPA 1 — IDENTIFICAÇÃO E EMISSÃO DO BLOCO\n\n"
+            "Emita o bloco [DIAGNOSIS]...[/DIAGNOSIS] com o JSON apropriado para o modo escolhido.\n\n"
+            "MODO REPO — JSON (Use o 'sistemaId' fornecido no contexto técnico se disponível):\n"
+            '  [DIAGNOSIS]{"mode": "repo", "sistemaId": "id_do_sistema", "descricaoProblema": "descrição técnica concisa"}[/DIAGNOSIS]\n\n'
+            "MODO SNIPPET — JSON (inclua o código extraído da mensagem do usuário, escapado como string JSON):\n"
+            '  [DIAGNOSIS]{"mode": "snippet", "codeSnippet": "...código aqui...", "fileName": "nome_inferido.ext", "descricaoProblema": "descrição técnica concisa"}[/DIAGNOSIS]\n\n'
+            "Texto ANTES do bloco deve conter:\n"
+            "  Modo repo:    🔍 **Diagnóstico Solicitado: [nome do sistema]** — Repositório será analisado. Confirme para iniciar.\n"
+            "  Modo snippet: 🔍 **Diagnóstico de Snippet** — Código recebido. Confirme para analisar.\n\n"
+            "### ETAPA 2 — ITERAÇÃO\n"
+            "Se o usuário ajustar o problema, o sistema ou o código, regere o bloco [DIAGNOSIS] com as modificações.\n\n"
+            "### ETAPA 3 — CONFIRMAÇÃO\n"
+            "Após confirmação, o FRONTEND chama diagnosticar_codigo diretamente.\n"
+            "Você NÃO chama nenhuma ferramenta. Aguarde o link tool:diagnosis:{id} aparecer no chat."
         )
 
         # --- RECUPERAÇÃO DE HISTÓRICO DA SESSÃO ---
@@ -6101,6 +6646,30 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             except Exception as e:
                 print(f"Erro ao extrair proposta: {e}")
 
+        # Extração de Esqueleto de Apresentação [PRESENTATION]{...}[/PRESENTATION]
+        presentation_data = None
+        if "[PRESENTATION]" in clean_text:
+            try:
+                pres_parts = clean_text.split("[PRESENTATION]")
+                pres_raw = pres_parts[1].split("[/PRESENTATION]")[0]
+                presentation_data = json.loads(pres_raw)
+                clean_text = pres_parts[0] + (pres_parts[1].split("[/PRESENTATION]")[1] if "[/PRESENTATION]" in pres_parts[1] else "")
+                clean_text = clean_text.strip()
+            except Exception as e:
+                print(f"Erro ao extrair apresentação: {e}")
+
+        # Extração de Solicitação de Diagnóstico [DIAGNOSIS]{...}[/DIAGNOSIS]
+        diagnosis_request_data = None
+        if "[DIAGNOSIS]" in clean_text:
+            try:
+                diag_parts = clean_text.split("[DIAGNOSIS]")
+                diag_raw = diag_parts[1].split("[/DIAGNOSIS]")[0]
+                diagnosis_request_data = json.loads(diag_raw)
+                clean_text = diag_parts[0] + (diag_parts[1].split("[/DIAGNOSIS]")[1] if "[/DIAGNOSIS]" in diag_parts[1] else "")
+                clean_text = clean_text.strip()
+            except Exception as e:
+                print(f"Erro ao extrair diagnóstico: {e}")
+
         # Salva a resposta do assistente no Firestore para o histórico
         if session_id:
             try:
@@ -6108,6 +6677,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "role": "assistant",
                     "content": clean_text,
                     "proposedPlan": proposal_data.get("items") if proposal_data else None,
+                    "proposedPresentation": presentation_data if presentation_data else None,
+                    "proposedDiagnosis": diagnosis_request_data if diagnosis_request_data else None,
                     "toolsUsed": tools_used if tools_used else None,
                     "pendingEdit": pending_edit_data,
                     "reportId": report_data.get('report_id') if report_data else None,
@@ -6128,6 +6699,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         return {
             "result": clean_text,
             "proposedPlan": proposal_data.get("items") if proposal_data else None,
+            "proposedPresentation": presentation_data if presentation_data else None,
+            "proposedDiagnosis": diagnosis_request_data if diagnosis_request_data else None,
             "suggestedTitle": suggested_title,
             "pendingEdit": pending_edit_data,
             "reportId": report_data.get('report_id') if report_data else None
