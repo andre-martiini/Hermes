@@ -1725,7 +1725,11 @@ Resposta:"""
         return ""
 
 
-@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=120)
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=120,
+)
 def smart_search_kg(req: https_fn.CallableRequest):
     """
     Motor de respostas do KnowledgeView 2.0.
@@ -1833,7 +1837,11 @@ def smart_search_kg(req: https_fn.CallableRequest):
     return response
 
 
-@https_fn.on_call(memory=options.MemoryOption.MB_256, timeout_sec=30)
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.MB_256,
+    timeout_sec=30,
+)
 def get_artefato_raw_text(req: https_fn.CallableRequest):
     """
     Lazy-load do texto bruto de um item (Raio-X da IA).

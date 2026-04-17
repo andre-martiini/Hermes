@@ -1,4 +1,5 @@
 import React from 'react';
+import { isInternalAppHref, navigateWithinApp } from '../../utils/internalNavigation';
 
 type MarkdownBlock =
   | { type: 'paragraph'; text: string }
@@ -10,8 +11,42 @@ type MarkdownBlock =
   | { type: 'spacer' };
 
 const INLINE_PATTERN =
-  /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|`([^`]+)`|\*\*([^*]+)\*\*|\*([^*]+)\*/g;
+  /\[([^\]]+)\]\(([^)\s]+)\)|`([^`]+)`|\*\*([^*]+)\*\*|\*([^*]+)\*/g;
 const URL_PATTERN = /(https?:\/\/[^\s]+)/g;
+
+const renderLinkNode = (
+  href: string,
+  key: string,
+  children: React.ReactNode,
+): React.ReactNode => {
+  if (isInternalAppHref(href)) {
+    return (
+      <a
+        key={key}
+        href={href}
+        onClick={(event) => {
+          event.preventDefault();
+          navigateWithinApp(href);
+        }}
+        className="font-semibold text-blue-700 underline decoration-blue-200 underline-offset-2 hover:text-blue-900"
+      >
+        {children}
+      </a>
+    );
+  }
+
+  return (
+    <a
+      key={key}
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="font-semibold text-blue-700 underline decoration-blue-200 underline-offset-2 hover:text-blue-900"
+    >
+      {children}
+    </a>
+  );
+};
 
 const pushTextWithAutoLinks = (
   value: string,
@@ -29,17 +64,7 @@ const pushTextWithAutoLinks = (
     }
 
     if (/^https?:\/\//.test(part)) {
-      nodes.push(
-        <a
-          key={`${keyPrefix}_url_${index}`}
-          href={part}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="font-semibold text-blue-700 underline decoration-blue-200 underline-offset-2 hover:text-blue-900"
-        >
-          {part}
-        </a>,
-      );
+      nodes.push(renderLinkNode(part, `${keyPrefix}_url_${index}`, part));
       return;
     }
 
@@ -59,17 +84,7 @@ const renderInlineMarkdown = (text: string, keyPrefix: string): React.ReactNode[
     }
 
     if (match[1] && match[2]) {
-      nodes.push(
-        <a
-          key={`${keyPrefix}_${match.index}`}
-          href={match[2]}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="font-semibold text-blue-700 underline decoration-blue-200 underline-offset-2 hover:text-blue-900"
-        >
-          {match[1]}
-        </a>,
-      );
+      nodes.push(renderLinkNode(match[2], `${keyPrefix}_${match.index}`, match[1]));
     } else if (match[3]) {
       nodes.push(
         <code

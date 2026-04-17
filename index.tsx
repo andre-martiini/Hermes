@@ -26,6 +26,7 @@ import KnowledgeView from './KnowledgeView';
 import ProjectsView from './ProjectsView';
 import RAGBasesView from './src/views/RAGBasesView';
 import { ServicesView } from './src/views/ServicesView';
+import { INTERNAL_NAVIGATION_EVENT } from './src/utils/internalNavigation';
 
 // Importações dos módulos extraídos pelo split.js
 import {
@@ -877,14 +878,28 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
 };
 
 const App: React.FC = () => {
+  const [routeTick, setRouteTick] = useState(0);
+  const pathname = window.location.pathname;
+
+  useEffect(() => {
+    const syncRoute = () => setRouteTick((current) => current + 1);
+    window.addEventListener('popstate', syncRoute);
+    window.addEventListener(INTERNAL_NAVIGATION_EVENT, syncRoute as EventListener);
+    return () => {
+      window.removeEventListener('popstate', syncRoute);
+      window.removeEventListener(INTERNAL_NAVIGATION_EVENT, syncRoute as EventListener);
+    };
+  }, []);
+
   // Public Route Interception
-  if (window.location.pathname.startsWith('/join/')) {
+  void routeTick;
+  if (pathname.startsWith('/join/')) {
     return <PublicScholarshipRegistration />;
   }
-  if (window.location.pathname.startsWith('/gastos-externos')) {
+  if (pathname.startsWith('/gastos-externos')) {
     return <PublicFinancePortal />;
   }
-  if (window.location.pathname.startsWith('/compras-externas')) {
+  if (pathname.startsWith('/compras-externas')) {
     return <PublicShoppingPortal />;
   }
 

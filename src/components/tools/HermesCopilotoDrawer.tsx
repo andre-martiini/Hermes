@@ -2,11 +2,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db, functions, auth } from '@/firebase';
 import { httpsCallable } from 'firebase/functions';
-import { collection, onSnapshot, query, orderBy, where, addDoc, doc, updateDoc, getDoc, limit, Timestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, where, addDoc, doc, updateDoc, getDoc, getDocs, writeBatch, deleteDoc, limit, Timestamp } from 'firebase/firestore';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { formatDate, PoolItem } from '@/types';
 import { ReportModal } from './ReportModal';
+import { isInternalAppHref, navigateWithinApp } from '../../utils/internalNavigation';
 
 // URL do endpoint HTTP de upload (Node.js Functions)
 const UPLOAD_ENDPOINT = 'https://us-central1-gestao-hermes.cloudfunctions.net/uploadFileForCopiloto';
@@ -47,6 +48,25 @@ interface PendingEdit {
     snapshot_ts: string;
     status: 'pending' | 'completed' | 'invalidated' | 'cancelled' | 'error';
     errorMessage?: string;
+}
+
+interface DiagnosisBlock {
+    arquivo: string;
+    descricao: string;
+    search: string;
+    replace: string;
+}
+
+interface DiagnosisRecord {
+    id: string;
+    sistemaId?: string;
+    nomeRepositorio?: string;
+    descricaoProblema: string;
+    diagnostico: string;
+    arquivosAnalisados?: string[];
+    blocosSR?: DiagnosisBlock[];
+    alertaImpacto?: string;
+    markdownContent?: string;
 }
 
 interface Message {
@@ -113,6 +133,7 @@ interface HermesCopilotoDrawerProps {
 }
 
 type UploadPhase = 'idle' | 'uploading' | 'processing';
+const MOBILE_BREAKPOINT = 768;
 
 export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     isOpen, onClose, taskId, systemId, isDark = false, userId, onOpenTask, onOpenTool
@@ -123,6 +144,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [showHistory, setShowHistory] = useState(false);
+    const [sessionPendingDeleteId, setSessionPendingDeleteId] = useState<string | null>(null);
+    const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
     const chatEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -131,6 +154,9 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const [reportModalOpen, setReportModalOpen] = useState(false);
     const [activeReport, setActiveReport] = useState<{ id: string; titulo: string; markdown: string } | null>(null);
     const [isLoadingReport, setIsLoadingReport] = useState(false);
+    const [diagnosisModalOpen, setDiagnosisModalOpen] = useState(false);
+    const [activeDiagnosis, setActiveDiagnosis] = useState<DiagnosisRecord | null>(null);
+    const [isLoadingDiagnosis, setIsLoadingDiagnosis] = useState(false);
 
     const handleOpenReport = async (reportId: string) => {
         setIsLoadingReport(true);
@@ -183,13 +209,16 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
     // ── Redimensionamento do drawer ───────────────────────────────────────────
     const DRAWER_MIN_WIDTH = 320;
-    const DRAWER_MAX_WIDTH = Math.round(window.innerWidth * 0.5);
-    const [drawerWidth, setDrawerWidth] = useState(450);
+    const [drawerWidth, setDrawerWidth] = useState(675);
+    const [isMobileViewport, setIsMobileViewport] = useState(() => window.innerWidth < MOBILE_BREAKPOINT);
     const isDragging = useRef(false);
     const dragStartX = useRef(0);
     const dragStartWidth = useRef(0);
 
     const handleResizeMouseDown = (e: React.MouseEvent) => {
+        if (window.innerWidth < MOBILE_BREAKPOINT) {
+            return;
+        }
         e.preventDefault();
         isDragging.current = true;
         dragStartX.current = e.clientX;
@@ -219,6 +248,24 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         window.addEventListener('mousemove', onMouseMove);
         window.addEventListener('mouseup', onMouseUp);
     };
+
+    useEffect(() => {
+        const syncViewportState = () => {
+            const mobile = window.innerWidth < MOBILE_BREAKPOINT;
+            setIsMobileViewport(mobile);
+
+            if (!mobile) {
+                setDrawerWidth((currentWidth) => Math.min(
+                    Math.max(currentWidth, DRAWER_MIN_WIDTH),
+                    Math.round(window.innerWidth * 0.5)
+                ));
+            }
+        };
+
+        syncViewportState();
+        window.addEventListener('resize', syncViewportState);
+        return () => window.removeEventListener('resize', syncViewportState);
+    }, []);
 
     // Auto-resize textarea logic
     useEffect(() => {
@@ -295,6 +342,12 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         });
     }, [currentSessionId]);
 
+    useEffect(() => {
+        if (sessionPendingDeleteId && !sessions.some((session) => session.id === sessionPendingDeleteId)) {
+            setSessionPendingDeleteId(null);
+        }
+    }, [sessions, sessionPendingDeleteId]);
+
     // Scroll to bottom
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -344,6 +397,61 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
     const handleRemoveFile = () => {
         setAttachedFile(null);
+    };
+
+    const handleDeleteSession = async (sessionId: string) => {
+        if (deletingSessionId) return;
+        if (sessionPendingDeleteId !== sessionId) {
+            setSessionPendingDeleteId(sessionId);
+            return;
+        }
+
+        setDeletingSessionId(sessionId);
+        setSessionPendingDeleteId(null);
+        try {
+            const messagesRef = collection(db, 'sessoes_copiloto', sessionId, 'mensagens');
+            const messagesSnapshot = await getDocs(messagesRef);
+            const batch = writeBatch(db);
+            messagesSnapshot.docs.forEach((messageDoc) => {
+                batch.delete(messageDoc.ref);
+            });
+            if (!messagesSnapshot.empty) {
+                await batch.commit();
+            }
+
+            await deleteDoc(doc(db, 'sessoes_copiloto', sessionId));
+
+            if (currentSessionId === sessionId) {
+                const nextSession = sessions.find((session) => session.id !== sessionId);
+                setCurrentSessionId(nextSession?.id ?? null);
+            }
+        } catch (err) {
+            console.error('[Copiloto] Erro ao excluir sessão:', err);
+            setFooterError('Erro ao excluir sessão do histórico. Tente novamente.');
+        } finally {
+            setDeletingSessionId(null);
+        }
+    };
+
+    const handleOpenDiagnosis = async (diagnosisId: string) => {
+        setIsLoadingDiagnosis(true);
+        setDiagnosisModalOpen(true);
+        try {
+            const diagnosisDoc = await getDoc(doc(db, 'diagnosticos_codigo', diagnosisId));
+            if (diagnosisDoc.exists()) {
+                const data = diagnosisDoc.data() as Omit<DiagnosisRecord, 'id'>;
+                setActiveDiagnosis({ id: diagnosisId, ...data });
+            } else {
+                setActiveDiagnosis(null);
+                setFooterError('Diagnóstico não encontrado.');
+            }
+        } catch (err) {
+            console.error('[DiagnosisModal] Erro ao carregar diagnóstico:', err);
+            setActiveDiagnosis(null);
+            setFooterError('Erro ao carregar diagnóstico.');
+        } finally {
+            setIsLoadingDiagnosis(false);
+        }
     };
 
     // ── Quick replies (botões de confirmação de draft) ────────────────────────
@@ -722,6 +830,85 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     }
 
     // ── Labels da barra de status por fase ───────────────────────────────────
+    if (diagnosisModalOpen) {
+        return (
+            <div className="fixed inset-0 z-[700] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className={`w-full max-w-4xl max-h-[92vh] overflow-hidden rounded-[2rem] shadow-2xl border ${isDark ? 'bg-[#0f0f1a] border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+                    <div className={`flex items-center justify-between gap-4 px-6 py-4 border-b ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+                        <div className="min-w-0">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-blue-500">Diagnóstico de Código</p>
+                            <p className="text-sm font-black truncate">{activeDiagnosis?.descricaoProblema || (isLoadingDiagnosis ? 'Carregando diagnóstico...' : 'Diagnóstico')}</p>
+                        </div>
+                        <button onClick={() => { setDiagnosisModalOpen(false); setActiveDiagnosis(null); }} className={`p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}>
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div className={`overflow-y-auto max-h-[calc(92vh-88px)] p-6 space-y-5 ${isDark ? 'bg-[#0f0f1a]' : 'bg-slate-50'}`}>
+                        {isLoadingDiagnosis && (
+                            <div className="flex items-center justify-center py-16">
+                                <div className="w-6 h-6 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin" />
+                            </div>
+                        )}
+                        {!isLoadingDiagnosis && !activeDiagnosis && (
+                            <div className={`rounded-2xl border p-5 text-sm ${isDark ? 'border-white/10 bg-white/5 text-white/70' : 'border-slate-200 bg-white text-slate-500'}`}>
+                                Não foi possível carregar este diagnóstico.
+                            </div>
+                        )}
+                        {!isLoadingDiagnosis && activeDiagnosis && (
+                            <>
+                                <div className={`rounded-2xl border p-5 ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-white'}`}>
+                                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                                        {activeDiagnosis.sistemaId && <span className="text-[10px] font-black uppercase tracking-widest text-blue-600 bg-blue-50 px-2 py-1 rounded-full">{activeDiagnosis.sistemaId}</span>}
+                                        {activeDiagnosis.nomeRepositorio && <span className={`text-[10px] font-mono px-2 py-1 rounded-full ${isDark ? 'bg-white/10 text-white/70' : 'bg-slate-100 text-slate-500'}`}>{activeDiagnosis.nomeRepositorio}</span>}
+                                        {activeDiagnosis.arquivosAnalisados && <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full ${isDark ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-50 text-emerald-700'}`}>{activeDiagnosis.arquivosAnalisados.length} arquivo(s)</span>}
+                                    </div>
+                                    <p className={`text-[11px] font-black uppercase tracking-widest mb-2 ${isDark ? 'text-white/50' : 'text-slate-400'}`}>Diagnóstico</p>
+                                    <p className={`text-sm leading-7 whitespace-pre-wrap ${isDark ? 'text-white/80' : 'text-slate-700'}`}>{activeDiagnosis.diagnostico}</p>
+                                </div>
+                                {activeDiagnosis.blocosSR && activeDiagnosis.blocosSR.length > 0 && (
+                                    <div className="space-y-3">
+                                        {activeDiagnosis.blocosSR.map((bloco, index) => (
+                                            <div key={`${activeDiagnosis.id}_${index}`} className={`rounded-2xl border overflow-hidden ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-white'}`}>
+                                                <div className={`px-4 py-3 border-b ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-100 bg-slate-50'}`}>
+                                                    <p className="text-[11px] font-black">{index + 1}. {bloco.descricao}</p>
+                                                    <p className={`text-[10px] font-mono mt-1 ${isDark ? 'text-white/50' : 'text-slate-400'}`}>{bloco.arquivo}</p>
+                                                </div>
+                                                <div className="p-4 grid gap-4 md:grid-cols-2">
+                                                    <div>
+                                                        <p className="text-[10px] font-black uppercase tracking-widest text-rose-500 mb-2">Search</p>
+                                                        <pre className={`text-[11px] leading-6 overflow-x-auto rounded-xl p-3 ${isDark ? 'bg-rose-500/10 text-white/80' : 'bg-rose-50 text-slate-700'}`}>{bloco.search}</pre>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 mb-2">Replace</p>
+                                                        <pre className={`text-[11px] leading-6 overflow-x-auto rounded-xl p-3 ${isDark ? 'bg-emerald-500/10 text-white/80' : 'bg-emerald-50 text-slate-700'}`}>{bloco.replace}</pre>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                {activeDiagnosis.alertaImpacto && (
+                                    <div className={`rounded-2xl border p-4 ${isDark ? 'border-amber-400/20 bg-amber-500/10 text-amber-100' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+                                        <p className="text-[10px] font-black uppercase tracking-widest mb-2">Alerta de Impacto</p>
+                                        <p className="text-sm leading-6">{activeDiagnosis.alertaImpacto}</p>
+                                    </div>
+                                )}
+                                {activeDiagnosis.markdownContent && (
+                                    <div className={`rounded-2xl border p-5 ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-white'}`}>
+                                        <p className={`text-[10px] font-black uppercase tracking-widest mb-3 ${isDark ? 'text-white/50' : 'text-slate-400'}`}>Relatório Completo</p>
+                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeDiagnosis.markdownContent}</ReactMarkdown>
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     const uploadPhaseLabel: Record<UploadPhase, string> = {
         idle: '',
         uploading: 'Enviando arquivo seguro para o servidor...',
@@ -729,16 +916,17 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     };
 
     const isBlocked = isLoading || uploadPhase !== 'idle' || isTranscribing || isProcessingMic;
+    const effectiveDrawerWidth = isMobileViewport ? '100%' : `${drawerWidth}px`;
 
     return (
         <div
             className={`fixed inset-y-0 right-0 z-[500] shadow-2xl transition-transform duration-300 transform translate-x-0 flex flex-col ${isDark ? 'bg-[#0f0f1a] text-white' : 'bg-white text-slate-900 border-l border-slate-200'}`}
-            style={{ width: `${drawerWidth}px` }}
+            style={{ width: effectiveDrawerWidth, maxWidth: isMobileViewport ? '100vw' : undefined }}
         >
             {/* Handle de redimensionamento — borda esquerda */}
             <div
                 onMouseDown={handleResizeMouseDown}
-                className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize z-10 group"
+                className={`absolute left-0 top-0 bottom-0 w-1.5 z-10 group ${isMobileViewport ? 'pointer-events-none opacity-0' : 'cursor-ew-resize'}`}
                 title="Arrastar para redimensionar"
             >
                 <div className="absolute inset-y-0 left-0 w-full bg-transparent group-hover:bg-blue-400/30 transition-colors duration-150 rounded-l" />
@@ -786,21 +974,47 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             <div className="flex-1 overflow-hidden flex relative">
                 {/* History Sidebar */}
                 {showHistory && (
-                    <div className="absolute inset-0 z-10 bg-inherit flex flex-col border-r border-slate-200/50">
-                        <div className="p-4 border-b border-slate-100/50 flex items-center justify-between">
+                    <div className="absolute inset-0 z-10 flex flex-col border-r border-slate-200 bg-white">
+                        <div className="p-4 border-b border-slate-100 bg-white flex items-center justify-between">
                             <span className="text-[10px] font-black uppercase tracking-widest">Histórico de Sessões</span>
                             <button onClick={() => handleCreateSession()} className="text-[10px] bg-blue-600 text-white px-3 py-1.5 rounded-lg font-black uppercase tracking-widest">+ Nova</button>
                         </div>
-                        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                        <div className="flex-1 overflow-y-auto bg-white p-4 space-y-2">
                             {sessions.map(s => (
-                                <button
+                                <div
                                     key={s.id}
-                                    onClick={() => { setCurrentSessionId(s.id); setShowHistory(false); }}
-                                    className={`w-full text-left p-4 rounded-2xl border transition-all ${currentSessionId === s.id ? 'bg-blue-50 border-blue-200' : 'bg-white border-transparent hover:border-slate-200'}`}
+                                    className={`group flex items-center gap-2 rounded-2xl border p-2 transition-all ${currentSessionId === s.id ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-100 hover:border-slate-200'}`}
                                 >
-                                    <p className="text-xs font-bold truncate">{s.title}</p>
-                                    <p className="text-[9px] text-slate-400 mt-1">{s.lastMessageAt?.toDate()?.toLocaleDateString()}</p>
-                                </button>
+                                    <button
+                                        onClick={() => { setCurrentSessionId(s.id); setShowHistory(false); }}
+                                        className="min-w-0 flex-1 text-left rounded-xl px-2 py-2"
+                                    >
+                                        <p className="text-xs font-bold truncate">{s.title}</p>
+                                        <p className="text-[9px] text-slate-400 mt-1">{s.lastMessageAt?.toDate()?.toLocaleDateString()}</p>
+                                    </button>
+                                    <button
+                                        onClick={() => void handleDeleteSession(s.id)}
+                                        disabled={Boolean(deletingSessionId && deletingSessionId !== s.id)}
+                                        title={sessionPendingDeleteId === s.id ? 'Clique novamente para excluir' : 'Excluir sessão'}
+                                        className={`shrink-0 rounded-xl border px-2.5 py-2 text-[9px] font-black uppercase tracking-widest transition-all ${sessionPendingDeleteId === s.id
+                                                ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100'
+                                                : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300 hover:text-red-600'
+                                            } disabled:cursor-not-allowed disabled:opacity-40`}
+                                    >
+                                        {deletingSessionId === s.id ? (
+                                            <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                            </svg>
+                                        ) : sessionPendingDeleteId === s.id ? (
+                                            <span>Excluir</span>
+                                        ) : (
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16" />
+                                            </svg>
+                                        )}
+                                    </button>
+                                </div>
                             ))}
                         </div>
                     </div>
@@ -832,16 +1046,21 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                     : 'bg-slate-100 text-slate-700 rounded-bl-none'
                                     }`}>
                                     {msg.toolsUsed && msg.toolsUsed.length > 0 && (
-                                        <div className="flex flex-wrap gap-1 mb-2.5">
+                                        <div className="mb-2.5">
+                                            <div className="mb-1 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.75 3a.75.75 0 01.75.75V5a.75.75 0 01-1.5 0V3.75A.75.75 0 019.75 3zm4.5 0a.75.75 0 01.75.75V5a.75.75 0 01-1.5 0V3.75a.75.75 0 01.75-.75zM12 8.25A3.75 3.75 0 108.25 12 3.75 3.75 0 0012 8.25zm7.5 3a.75.75 0 010 1.5H18.25a.75.75 0 010-1.5zM5.75 12a.75.75 0 01-.75.75H3.75a.75.75 0 010-1.5H5a.75.75 0 01.75.75zm10.364 5.614a.75.75 0 011.06 0l.884.884a.75.75 0 11-1.06 1.06l-.884-.883a.75.75 0 010-1.061zm-9.288 0a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.883-.884a.75.75 0 011.061 0zm11.172-11.228a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.883-.884a.75.75 0 011.061 0zm-11.172 0l.884.884a.75.75 0 11-1.06 1.06l-.884-.883a.75.75 0 011.06-1.061zM9.75 19a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-1.25a.75.75 0 01.75-.75zm4.5 0a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-1.25a.75.75 0 01.75-.75z" /></svg>
+                                                Ferramentas usadas
+                                            </div>
+                                            <div className="flex flex-wrap gap-1">
                                             {msg.toolsUsed.map(tool => {
                                                 if (!TOOL_LABELS[tool]) return null;
                                                 const isWrite = WRITE_TOOLS.has(tool);
                                                 return (
                                                     <span
                                                         key={tool}
-                                                        className={`inline-flex items-center gap-1 text-[9px] font-bold rounded-full px-2 py-0.5 border ${isWrite
-                                                                ? 'text-emerald-600 bg-emerald-50 border-emerald-200'
-                                                                : 'text-slate-400 bg-white border-slate-200'
+                                                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.08em] border ${isWrite
+                                                                ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                                                                : 'text-slate-500 bg-white/90 border-slate-200'
                                                             }`}
                                                     >
                                                         {isWrite ? (
@@ -858,6 +1077,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                     </span>
                                                 );
                                             })}
+                                            </div>
                                         </div>
                                     )}
                                     <ReactMarkdown
@@ -870,6 +1090,22 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             a: ({ node, ...props }) => {
                                                 const href = props.href || '';
                                                 console.log("[HermesCopiloto] Link clicked:", href);
+
+                                                if (isInternalAppHref(href)) {
+                                                    return (
+                                                        <a
+                                                            className="text-blue-600 underline hover:text-blue-800 break-all"
+                                                            href={href}
+                                                            onClick={(event) => {
+                                                                event.preventDefault();
+                                                                navigateWithinApp(href);
+                                                                onClose?.();
+                                                            }}
+                                                        >
+                                                            {props.children}
+                                                        </a>
+                                                    );
+                                                }
 
                                                 if (href.includes('task:')) {
                                                     const id = href.split('task:')[1];
@@ -903,7 +1139,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                     const diagId = href.split('tool:diagnosis:')[1];
                                                     return (
                                                         <button
-                                                            onClick={() => onOpenTool?.('diagnostico', diagId)}
+                                                            onClick={() => handleOpenDiagnosis(diagId)}
                                                             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm"
                                                         >
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
@@ -911,7 +1147,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                         </button>
                                                     );
                                                 }
-                                                return <a className="text-blue-600 underline hover:text-blue-800 break-all" target={href.startsWith('http') ? "_blank" : "_self"} rel="noopener noreferrer" {...props} />;
+                                                return <a className="text-blue-600 underline hover:text-blue-800 break-all" target="_blank" rel="noopener noreferrer" {...props} />;
                                             },
                                         }}
                                     >
