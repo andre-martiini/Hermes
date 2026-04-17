@@ -1082,6 +1082,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                     )}
                                     <ReactMarkdown
                                         remarkPlugins={[remarkGfm]}
+                                        urlTransform={(url) => url}
                                         components={{
                                             p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
                                             ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-2" {...props} />,
