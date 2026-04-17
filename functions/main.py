@@ -64,26 +64,26 @@ def get_genai_module():
 
 
 def get_embedding(text: str, api_key: str = None, task_type: str = "RETRIEVAL_DOCUMENT") -> list:
-    """Get text embedding via Gemini REST API v1beta.
+    """Get text embedding via Gemini SDK (gemini-embedding-001, 768 dims).
     task_type should be RETRIEVAL_DOCUMENT for indexing and RETRIEVAL_QUERY for searching."""
-    import requests as req_lib
+    from google import genai
+    from google.genai import types
     if not api_key:
         db = get_db()
         keys_doc = db.collection('system').document('api_keys').get()
         api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
     if not api_key:
         raise ValueError("Chave Gemini não configurada.")
-    url = "https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent"
-    headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
-    payload = {
-        "model": "models/text-embedding-004",
-        "content": {"parts": [{"text": text[:8000]}]},
-        "taskType": task_type,
-        "output_dimensionality": 768
-    }
-    response = req_lib.post(url, json=payload, headers=headers, timeout=30)
-    response.raise_for_status()
-    return response.json()["embedding"]["values"]
+    client = genai.Client(api_key=api_key)
+    response = client.models.embed_content(
+        model="gemini-embedding-001",
+        contents=text[:8000],
+        config=types.EmbedContentConfig(
+            task_type=task_type,
+            output_dimensionality=768  # trava dimensional: compatível com vetores existentes no Firestore
+        )
+    )
+    return response.embeddings[0].values
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:

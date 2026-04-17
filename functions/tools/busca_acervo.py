@@ -6,7 +6,7 @@ from google.cloud.firestore_v1.vector import Vector
 from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
 
 # ─── Constantes ──────────────────────────────────────────────────────────────
-EMBEDDING_MODEL   = "models/text-embedding-004"   # 768 dims
+EMBEDDING_MODEL   = "gemini-embedding-001"          # 768 dims (output_dimensionality=768)
 EMBEDDING_DIM     = 768
 ACERVO_COLLECTION = "indice_artefatos"
 EMBEDDING_FIELD   = "embedding"
