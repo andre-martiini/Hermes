@@ -24,11 +24,12 @@ interface DiagnosticoItem {
 
 interface DiagnosticoToolProps {
     onBack: () => void;
+    initialDiagnosisId?: string;
 }
 
-export const DiagnosticoTool: React.FC<DiagnosticoToolProps> = ({ onBack }) => {
+export const DiagnosticoTool: React.FC<DiagnosticoToolProps> = ({ onBack, initialDiagnosisId }) => {
     const [diagnosticos, setDiagnosticos] = useState<DiagnosticoItem[]>([]);
-    const [expandedId, setExpandedId] = useState<string | null>(null);
+    const [expandedId, setExpandedId] = useState<string | null>(initialDiagnosisId || null);
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {

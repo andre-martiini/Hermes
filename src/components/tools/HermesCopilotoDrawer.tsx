@@ -869,8 +869,10 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             strong: ({ node, ...props }) => <strong className="font-bold text-blue-600" {...props} />,
                                             a: ({ node, ...props }) => {
                                                 const href = props.href || '';
-                                                if (href.startsWith('task:')) {
-                                                    const id = href.split(':')[1];
+                                                console.log("[HermesCopiloto] Link clicked:", href);
+
+                                                if (href.includes('task:')) {
+                                                    const id = href.split('task:')[1];
                                                     return (
                                                         <button
                                                             onClick={() => {
@@ -885,8 +887,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                         </button>
                                                     );
                                                 }
-                                                if (href.startsWith('tool:slides:')) {
-                                                    const draftId = href.replace('tool:slides:', '');
+                                                if (href.includes('tool:slides:')) {
+                                                    const draftId = href.split('tool:slides:')[1];
                                                     return (
                                                         <button
                                                             onClick={() => onOpenTool?.('slides', draftId)}
@@ -897,8 +899,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                         </button>
                                                     );
                                                 }
-                                                if (href.startsWith('tool:diagnosis:')) {
-                                                    const diagId = href.replace('tool:diagnosis:', '');
+                                                if (href.includes('tool:diagnosis:')) {
+                                                    const diagId = href.split('tool:diagnosis:')[1];
                                                     return (
                                                         <button
                                                             onClick={() => onOpenTool?.('diagnostico', diagId)}
@@ -909,7 +911,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                         </button>
                                                     );
                                                 }
-                                                return <a className="text-blue-600 underline hover:text-blue-800 break-all" target="_blank" rel="noopener noreferrer" {...props} />;
+                                                return <a className="text-blue-600 underline hover:text-blue-800 break-all" target={href.startsWith('http') ? "_blank" : "_self"} rel="noopener noreferrer" {...props} />;
                                             },
                                         }}
                                     >

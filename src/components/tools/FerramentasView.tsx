@@ -30,6 +30,7 @@ interface FerramentasViewProps {
   knowledgeItems: ConhecimentoItem[];
   onUploadFile: (file: File) => Promise<ConhecimentoItem | null>;
   initialDraftId?: string;
+  initialDiagnosisId?: string;
 }
 
 export const FerramentasView: React.FC<FerramentasViewProps> = ({
@@ -49,6 +50,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   knowledgeItems,
   onUploadFile,
   initialDraftId,
+  initialDiagnosisId,
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [textInput, setTextInput] = useState('');
@@ -135,7 +137,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   }
 
   if (activeTool === 'diagnostico') {
-    return <DiagnosticoTool onBack={() => setActiveTool(null)} />;
+    return <DiagnosticoTool onBack={() => setActiveTool(null)} initialDiagnosisId={initialDiagnosisId} />;
   }
 
   const startRecording = async () => {

@@ -1009,7 +1009,9 @@ const App: React.FC = () => {
   const [isImportPlanOpen, setIsImportPlanOpen] = useState(false);
   const [isCompletedTasksOpen, setIsCompletedTasksOpen] = useState(false);
   const [brainstormIdeas, setBrainstormIdeas] = useState<BrainstormIdea[]>([]);
-  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'whatsapp_assistant' | null>(null);
+  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'whatsapp_assistant' | 'diagnostico' | null>(null);
+  const [initialDraftId, setInitialDraftId] = useState<string | undefined>(undefined);
+  const [initialDiagnosisId, setInitialDiagnosisId] = useState<string | undefined>(undefined);
   const [isBrainstormingAddingText, setIsBrainstormingAddingText] = useState(false);
   const [confirmDeleteLogId, setConfirmDeleteLogId] = useState<string | null>(null);
   const [convertingIdea, setConvertingIdea] = useState<BrainstormIdea | null>(null);
@@ -5694,6 +5696,8 @@ const App: React.FC = () => {
                     showAlert={showAlert}
                     knowledgeItems={knowledgeItems}
                     onUploadFile={handleUploadKnowledgeFile}
+                    initialDraftId={initialDraftId}
+                    initialDiagnosisId={initialDiagnosisId}
                   />
                 ) : viewMode === 'services' ? (
                   <ServicesView
@@ -7869,6 +7873,17 @@ const App: React.FC = () => {
                 setSelectedTask({ id: snap.id, ...snap.data() } as any);
                 setTaskModalMode('execute');
               }
+            }
+          }}
+          onOpenTool={(tool, id) => {
+            setActiveModule('acoes');
+            setViewMode('ferramentas');
+            if (tool === 'slides') {
+              setActiveFerramenta('slides');
+              setInitialDraftId(id);
+            } else if (tool === 'diagnostico') {
+              setActiveFerramenta('diagnostico');
+              setInitialDiagnosisId(id);
             }
           }}
         />
