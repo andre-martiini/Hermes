@@ -4939,11 +4939,6 @@ def criar_apresentacao_slides(req: https_fn.CallableRequest):
 
 @https_fn.on_call(
     cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
-    memory=options.MemoryOption.GB_1,
-    timeout_sec=300,
-)
-@https_fn.on_call(
-    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
     memory=options.MemoryOption.MB_512,
     timeout_sec=120,
 )
@@ -5094,6 +5089,11 @@ def criar_formulario_google(req: https_fn.CallableRequest):
             code=https_fn.FunctionsErrorCode.INTERNAL,
             message=str(e)
         )
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=300,
+)
 def diagnosticar_codigo(req: https_fn.CallableRequest):
     """
     Dois modos roteados pela IA:
