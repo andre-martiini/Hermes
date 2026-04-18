@@ -54,7 +54,26 @@ interface ProposedPresentation {
     slides: SlideItem[];
 }
 
+
+interface FormQuestion {
+    tipo: 'texto_curto' | 'paragrafo' | 'multipla_escolha' | 'caixas_selecao' | 'lista_suspensa' | 'escala_linear';
+    texto: string;
+    opcoes?: string[];
+    escala_min?: number;
+    escala_max?: number;
+    rotulo_min?: string;
+    rotulo_max?: string;
+    obrigatoria: boolean;
+}
+
+interface ProposedForm {
+    titulo: string;
+    descricao?: string;
+    perguntas: FormQuestion[];
+}
+
 interface DiagnosisRequest {
+
     mode: 'repo' | 'snippet';
     sistemaId?: string;
     codeSnippet?: string;
@@ -117,6 +136,7 @@ interface Message {
     proposedPlan?: any[];
     proposedPresentation?: ProposedPresentation;
     proposedDiagnosis?: DiagnosisRequest;
+    proposedForm?: ProposedForm;
     timestamp: any;
     type?: 'text' | 'plan_proposal';
     toolsUsed?: string[];
@@ -335,6 +355,40 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
     // Estado para rastrear qual diagnóstico está em processamento
     const [diagnosingId, setDiagnosingId] = useState<string | null>(null);
+
+    const [creatingFormId, setCreatingFormId] = useState<string | null>(null);
+
+    const handleConfirmForm = async (form: ProposedForm, messageId?: string) => {
+        if (!currentSessionId || creatingFormId) return;
+        if (messageId) setCreatingFormId(messageId);
+
+        try {
+            const criarFormulario = httpsCallable(functions, 'criar_formulario_google', { timeout: 300000 });
+            const result = await criarFormulario({
+                sessionId: currentSessionId,
+                form: form,
+            });
+            const data = result.data as any;
+
+            // Sucesso - Injeta a mensagem no chat localmente para evitar chamar o LLM novamente (Zero-LLM Flow)
+            if (data.responderUri) {
+                await addDoc(collection(db, 'sessoes_copiloto', currentSessionId, 'mensagens'), {
+                    role: 'assistant',
+                    content: `✅ Formulário criado com sucesso! Acesse aqui: [URL do Formulário](${data.responderUri})`,
+                    timestamp: Timestamp.now()
+                });
+
+                await updateDoc(doc(db, 'sessoes_copiloto', currentSessionId), {
+                    lastMessageAt: Timestamp.now()
+                });
+            }
+        } catch (err: any) {
+            setFooterError('Erro ao criar formulário: ' + (err?.message || 'Tente novamente.'));
+        } finally {
+            setCreatingFormId(null);
+        }
+    };
+
 
     // ── Mention (@) popup ─────────────────────────────────────────────────────
     const [taskPoolItems, setTaskPoolItems] = useState<PoolItem[]>([]);
@@ -1706,6 +1760,78 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             </div>
                                         </div>
                                     )}
+
+
+                                    {/* Proposta de Rascunho de Formulário */}
+                                    {msg.proposedForm && (() => {
+                                        // "State Lock": only enable if this is the LAST form draft in the entire session.
+                                        // That means we find the last message index that has a proposedForm.
+                                        const lastFormIndex = messages.reduce((acc, m, idx) => m.proposedForm ? idx : acc, -1);
+                                        const isLatestForm = i === lastFormIndex;
+                                        const isProcessing = creatingFormId === msg.id;
+
+                                        return (
+                                        <div className="mt-4 p-4 bg-white rounded-xl border border-emerald-200 shadow-sm">
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 flex items-center gap-2 mb-1">
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                                                Rascunho de Formulário
+                                            </p>
+                                            <p className="text-[11px] font-bold text-slate-700 mb-1 truncate">{msg.proposedForm.titulo}</p>
+                                            {msg.proposedForm.descricao && <p className="text-[10px] text-slate-500 mb-3">{msg.proposedForm.descricao}</p>}
+                                            <div className="space-y-2 mb-4 max-h-52 overflow-y-auto pr-1">
+                                                {msg.proposedForm.perguntas.map((q, idx) => (
+                                                    <div key={idx} className="p-2 rounded-lg bg-emerald-50 border border-emerald-100">
+                                                        <div className="flex items-center gap-1.5 mb-1">
+                                                            <span className="text-[9px] font-black text-emerald-500 uppercase">{q.tipo.replace('_', ' ')}</span>
+                                                            {q.obrigatoria && <span className="text-[9px] text-red-500 font-bold">*</span>}
+                                                        </div>
+                                                        <p className="text-[10px] font-bold text-slate-700 leading-tight">{q.texto}</p>
+                                                        {q.opcoes && q.opcoes.length > 0 && (
+                                                            <ul className="mt-1 space-y-0.5">
+                                                                {q.opcoes.map((opt, optIdx) => (
+                                                                    <li key={optIdx} className="text-[9px] text-slate-500 flex gap-1">
+                                                                        <span className="text-emerald-400">•</span>{opt}
+                                                                    </li>
+                                                                ))}
+                                                            </ul>
+                                                        )}
+                                                        {q.tipo === 'escala_linear' && (
+                                                            <p className="text-[9px] text-slate-500 mt-1">Escala de {q.escala_min || 1} a {q.escala_max || 5}</p>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            {isLatestForm ? (
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        onClick={() => handleConfirmForm(msg.proposedForm!, msg.id)}
+                                                        disabled={isProcessing}
+                                                        className="flex-1 bg-emerald-600 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-1.5"
+                                                    >
+                                                        {isProcessing ? (
+                                                            <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                                        ) : (
+                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                        )}
+                                                        Confirmar e Gerar Link
+                                                    </button>
+                                                    <button
+                                                        onClick={() => { setInput('Ajustar formulário: '); setTimeout(() => textareaRef.current?.focus(), 50); }}
+                                                        disabled={isProcessing}
+                                                        className="flex-1 bg-slate-100 text-slate-500 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 disabled:opacity-50 transition-all flex items-center justify-center gap-1.5"
+                                                    >
+                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                        Ajustar
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <div className="text-center p-2 rounded-lg bg-slate-50 border border-slate-100">
+                                                    <p className="text-[10px] font-bold text-slate-400">Esta versão foi superada por um rascunho mais recente.</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                        );
+                                    })()}
 
                                     {/* Proposta de Apresentação de Slides */}
                                     {msg.proposedPresentation && (

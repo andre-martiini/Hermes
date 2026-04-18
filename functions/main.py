@@ -4942,6 +4942,158 @@ def criar_apresentacao_slides(req: https_fn.CallableRequest):
     memory=options.MemoryOption.GB_1,
     timeout_sec=300,
 )
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=120,
+)
+def criar_formulario_google(req: https_fn.CallableRequest):
+    """
+    Cria um formulário no Google Forms a partir de um schema JSON validado
+    (Draft-and-Approve) gerado pelo Copiloto e confirmado pelo usuário.
+    Garante permissão pública por padrão via Google Drive API.
+    """
+    from googleapiclient.discovery import build
+
+    uid = req.auth.uid if req.auth else None
+    if not uid:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
+            message="Usuário não autenticado."
+        )
+
+    data = req.data or {}
+    session_id = data.get('sessionId')
+    form_data = data.get('form')
+
+    if not form_data or not isinstance(form_data, dict):
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="O campo 'form' é obrigatório e deve ser um objeto JSON."
+        )
+
+    titulo = form_data.get('titulo')
+    if not titulo:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="O formulário precisa ter um título ('titulo')."
+        )
+
+    descricao = form_data.get('descricao', '')
+    perguntas = form_data.get('perguntas', [])
+
+    try:
+        creds = get_google_creds()
+        forms_service = build('forms', 'v1', credentials=creds)
+        drive_service = build('drive', 'v3', credentials=creds)
+
+        # 1. Cria o formulário inicial vazio (retorna um ID)
+        new_form = {
+            "info": {
+                "title": titulo,
+                "documentTitle": titulo
+            }
+        }
+        form_result = forms_service.forms().create(body=new_form).execute()
+        form_id = form_result.get('formId')
+        responder_uri = form_result.get('responderUri')
+
+        # 2. Configura a permissão do Drive para acesso público a respondentes
+        try:
+            drive_service.permissions().create(
+                fileId=form_id,
+                body={
+                    'type': 'anyone',
+                    'role': 'reader'
+                }
+            ).execute()
+        except Exception as perm_err:
+            print(f"[Forms] Aviso: Falha ao setar permissão pública via Drive API: {perm_err}")
+            # Não falhamos toda a operação apenas por erro de permissão (ex: restrições do workspace)
+
+        # 3. Monta as requisições em lote para popular o formulário
+        requests = []
+
+        # Adiciona a descrição
+        if descricao:
+            requests.append({
+                "updateFormInfo": {
+                    "info": {
+                        "description": descricao
+                    },
+                    "updateMask": "description"
+                }
+            })
+
+        # Processa as perguntas
+        for i, q in enumerate(perguntas):
+            tipo = q.get('tipo', 'texto_curto')
+            texto = q.get('texto', 'Pergunta sem título')
+            obrigatoria = bool(q.get('obrigatoria', False))
+
+            question_item = {
+                "question": {
+                    "required": obrigatoria,
+                }
+            }
+
+            if tipo == 'texto_curto':
+                question_item["question"]["textQuestion"] = {"paragraph": False}
+            elif tipo == 'paragrafo':
+                question_item["question"]["textQuestion"] = {"paragraph": True}
+            elif tipo in ['multipla_escolha', 'caixas_selecao', 'lista_suspensa']:
+                opcoes = q.get('opcoes', ['Opção 1'])
+                options_list = [{"value": opt} for opt in opcoes]
+
+                choice_type = "RADIO"
+                if tipo == 'caixas_selecao':
+                    choice_type = "CHECKBOX"
+                elif tipo == 'lista_suspensa':
+                    choice_type = "DROP_DOWN"
+
+                question_item["question"]["choiceQuestion"] = {
+                    "type": choice_type,
+                    "options": options_list
+                }
+            elif tipo == 'escala_linear':
+                question_item["question"]["scaleQuestion"] = {
+                    "low": q.get('escala_min', 1),
+                    "high": q.get('escala_max', 5),
+                    "lowLabel": q.get('rotulo_min', ''),
+                    "highLabel": q.get('rotulo_max', '')
+                }
+            else:
+                # Fallback
+                question_item["question"]["textQuestion"] = {"paragraph": False}
+
+            requests.append({
+                "createItem": {
+                    "item": {
+                        "title": texto,
+                        "questionItem": question_item
+                    },
+                    "location": {
+                        "index": i
+                    }
+                }
+            })
+
+        if requests:
+            forms_service.forms().batchUpdate(
+                formId=form_id,
+                body={"requests": requests}
+            ).execute()
+
+        return {"formId": form_id, "responderUri": responder_uri}
+
+    except Exception as e:
+        print(f"Erro em criar_formulario_google: {e}")
+        import traceback
+        print(traceback.format_exc())
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=str(e)
+        )
 def diagnosticar_codigo(req: https_fn.CallableRequest):
     """
     Dois modos roteados pela IA:
@@ -6830,6 +6982,14 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 print(f"[Copiloto] Erro ao gerar relatório: {_rep_err}\n{_tb.format_exc()}")
                 return f"⚠️ Erro ao gerar relatório: {str(_rep_err)}"
 
+
+        def gerar_rascunho_formulario(titulo: str, descricao: str, perguntas: list[dict]):
+            """
+            NÃO CHAME ESTA FERRAMENTA DIRETAMENTE SE VOCÊ JÁ EMITIR O BLOCO [FORM]...[/FORM].
+            Ferramenta auxiliar para forçar o LLM a emitir a estrutura do formulário de forma estruturada.
+            """
+            pass
+
         def preparar_edicao_acao(
             task_id: str,
             alteracoes: dict,
@@ -7132,6 +7292,25 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "### ETAPA 3 — CONFIRMAÇÃO\n"
             "Após confirmação, o FRONTEND chama diagnosticar_codigo diretamente.\n"
             "Você NÃO chama nenhuma ferramenta. Aguarde o link tool:diagnosis:{id} aparecer no chat."
+
+            "## GERAÇÃO DE FORMULÁRIO GOOGLE — PADRÃO DRAFT-FIRST (CRÍTICO)\n\n"
+            "Quando o usuário solicitar a criação de um formulário, questionário ou pesquisa de qualquer tipo, siga OBRIGATORIAMENTE este protocolo:\n\n"
+            "ETAPA 1 — ESQUELETO (Preview):\n"
+            "Nunca chame APIs externas. Emita o bloco [FORM]...[/FORM] para exibir um rascunho visual ao usuário.\n"
+            "Inclua no texto da resposta (ANTES do bloco):\n"
+            "  📝 **Proposta de Formulário: [título]**\n\n"
+            "O bloco [FORM] deve conter um objeto JSON com esta estrutura exata:\n"
+            "  [FORM]{\"titulo\": \"string\", \"descricao\": \"string (opcional)\", \"perguntas\": [{\"tipo\": \"texto_curto\" | \"paragrafo\" | \"multipla_escolha\" | \"caixas_selecao\" | \"lista_suspensa\" | \"escala_linear\", \"texto\": \"string\", \"opcoes\": [\"opt1\", \"opt2\"] (se aplicável), \"escala_min\": 1, \"escala_max\": 5, \"rotulo_min\": \"string\", \"rotulo_max\": \"string\", \"obrigatoria\": true}]}[/FORM]\n\n"
+            "Regras para as perguntas:\n"
+            "  - tipo: DEVE ser exatamente um destes: 'texto_curto', 'paragrafo', 'multipla_escolha', 'caixas_selecao', 'lista_suspensa', 'escala_linear'.\n"
+            "  - opcoes: obrigatório apenas para os tipos: 'multipla_escolha', 'caixas_selecao', 'lista_suspensa'.\n"
+            "  - atributos de escala (escala_min, escala_max, rotulo_min, rotulo_max): obrigatórios apenas para 'escala_linear'.\n\n"
+            "ETAPA 2 — ITERAÇÃO (Ajustar):\n"
+            "Se o usuário pedir ajuste, regere o bloco [FORM] com as modificações solicitadas.\n"
+            "Não execute nenhuma ferramenta de persistência nesta etapa.\n\n"
+            "ETAPA 3 — CONFIRMAÇÃO:\n"
+            "Após confirmação do usuário, o FRONTEND chamará a Cloud Function criar_formulario_google e inserirá o link de sucesso diretamente no chat.\n"
+            "Você NÃO chama nenhuma ferramenta nesta etapa — apenas oriente o usuário a clicar em 'Confirmar e Gerar Link' no card de rascunho de formulário.\n\n"
         )
 
         # --- RECUPERAÇÃO DE HISTÓRICO DA SESSÃO ---
@@ -7205,6 +7384,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'editar_plano_acao': editar_plano_acao,
             'preparar_edicao_acao': preparar_edicao_acao,
             'gerar_relatorio': gerar_relatorio,
+            'gerar_rascunho_formulario': gerar_rascunho_formulario,
         }
         # Ferramentas internas que não devem aparecer para o usuário
         _HIDDEN_TOOLS = {'registrar_correcao_procedimento', 'resolver_conflito_memoria'}
@@ -7229,6 +7409,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     editar_plano_acao,
                     preparar_edicao_acao,
                     gerar_relatorio,
+                    gerar_rascunho_formulario,
                 ],
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
             ),
@@ -7535,6 +7716,19 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             except Exception as e:
                 print(f"Erro ao extrair apresentação: {e}")
 
+
+        # Extração de Formulário [FORM]{...}[/FORM]
+        form_data = None
+        if "[FORM]" in clean_text:
+            try:
+                form_parts = clean_text.split("[FORM]")
+                form_raw = form_parts[1].split("[/FORM]")[0]
+                form_data = json.loads(form_raw)
+                clean_text = form_parts[0] + (form_parts[1].split("[/FORM]")[1] if "[/FORM]" in form_parts[1] else "")
+                clean_text = clean_text.strip()
+            except Exception as e:
+                print(f"Erro ao extrair formulário: {e}")
+
         # Extração de Solicitação de Diagnóstico [DIAGNOSIS]{...}[/DIAGNOSIS]
         diagnosis_request_data = None
         if "[DIAGNOSIS]" in clean_text:
@@ -7556,6 +7750,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "proposedPlan": proposal_data.get("items") if proposal_data else None,
                     "proposedPresentation": presentation_data if presentation_data else None,
                     "proposedDiagnosis": diagnosis_request_data if diagnosis_request_data else None,
+                    "proposedForm": form_data if form_data else None,
                     "toolsUsed": tools_used if tools_used else None,
                     "pendingEdit": pending_edit_data,
                     "pendingMemoryConflict": pending_memory_conflict,
