@@ -6114,7 +6114,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
     # Ingestão muda: arquivo sem texto → prompt padrão de catalogação
     if not prompt and drive_file_id:
-        prompt = "Gere um resumo executivo deste documento e catalogue sua utilidade."
+        prompt = (
+            "Analise o arquivo anexado, identifique o que ele mostra e explique "
+            "como isso se relaciona com a ação em contexto."
+        )
 
     if not prompt:
         raise https_fn.HttpsError(
@@ -7439,6 +7442,22 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 ).execute()
                 real_file_name = file_meta.get('name', drive_file_name)
                 real_mime_type = file_meta.get('mimeType', 'application/octet-stream')
+                is_image_file = real_mime_type.startswith('image/')
+                task_context_summary = ""
+                if task_id:
+                    try:
+                        task_doc = db.collection('tarefas').document(task_id).get()
+                        if task_doc.exists:
+                            task_data = task_doc.to_dict() or {}
+                            plano = task_data.get('plano_acao', []) or []
+                            task_context_summary = (
+                                f"Tarefa atual: {task_data.get('titulo', 'Sem título')}\n"
+                                f"Área temática: {task_data.get('area_tematica', 'Não informada')}\n"
+                                f"Descrição: {task_data.get('descricao', '')[:1200]}\n"
+                                f"Plano atual: {' | '.join(plano[:5]) if plano else 'Não definido'}"
+                            )
+                    except Exception as task_ctx_err:
+                        print(f"[Copiloto] Aviso: falha ao montar contexto resumido da tarefa {task_id}: {task_ctx_err}")
 
                 # 2. Baixa o binário para memória volátil
                 request_dl = drive_service.files().get_media(fileId=drive_file_id)
@@ -7471,16 +7490,42 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 # Sem isso cada upload acumularia dados até estourar a cota de 2GB.
                 try:
                     # 5. Extrai metadados com truncamento semântico de ~8.000 tokens
-                    extraction_prompt = (
-                        f"Você recebeu o arquivo '{real_file_name}'. "
-                        "Leia no máximo os primeiros 8.000 tokens de conteúdo. "
-                        "Retorne EXCLUSIVAMENTE um JSON válido, sem markdown, sem texto extra:\n"
-                        '{"titulo": "...", "natureza": "...", "resumo": "..."}\n'
-                        "Onde:\n"
-                        "- titulo: nome/título do documento\n"
-                        "- natureza: categoria (ex: Edital, Contrato, Relatório, Manual, Planilha, etc.)\n"
-                        "- resumo: resumo executivo em 3 a 5 frases sobre conteúdo e utilidade"
-                    )
+                    if is_image_file:
+                        extraction_prompt = (
+                            f"Você recebeu a imagem '{real_file_name}'. "
+                            "Analise o conteúdo visual integral e retorne EXCLUSIVAMENTE um JSON válido, "
+                            "sem markdown, sem texto extra, com esta estrutura:\n"
+                            '{"titulo": "...", "natureza": "...", "resumo": "...", '
+                            '"ocr": "...", "descricao_visual": "...", '
+                            '"elementos_chave": ["..."], "evidencias": ["..."], '
+                            '"relacao_com_acao": "...", "utilidade_pratica": "..."}\n'
+                            "Regras:\n"
+                            "- titulo: nome curto e útil do anexo.\n"
+                            "- natureza: classifique a imagem com precisão (ex: print de sistema, comprovante, gráfico, documento fotografado, quadro, planilha capturada, foto de ambiente).\n"
+                            "- resumo: resumo executivo em 3 a 5 frases.\n"
+                            "- ocr: transcreva o texto visível mais relevante. Se não houver, use string vazia.\n"
+                            "- descricao_visual: descreva objetivamente o que aparece na imagem.\n"
+                            "- elementos_chave: liste de 3 a 8 elementos centrais percebidos.\n"
+                            "- evidencias: liste fatos observáveis que sustentam sua leitura.\n"
+                            "- relacao_com_acao: explique como a imagem se conecta com a tarefa em foco. Se não houver contexto suficiente, diga isso explicitamente.\n"
+                            "- utilidade_pratica: diga como o Hermes deve usar esta imagem para apoiar a ação.\n"
+                            f"\nCONTEXTO DA AÇÃO:\n{task_context_summary or 'Nenhuma tarefa ativa foi fornecida.'}"
+                        )
+                    else:
+                        extraction_prompt = (
+                            f"Você recebeu o arquivo '{real_file_name}'. "
+                            "Leia no máximo os primeiros 8.000 tokens de conteúdo. "
+                            "Retorne EXCLUSIVAMENTE um JSON válido, sem markdown, sem texto extra, com esta estrutura:\n"
+                            '{"titulo": "...", "natureza": "...", "resumo": "...", '
+                            '"relacao_com_acao": "...", "utilidade_pratica": "..."}\n'
+                            "Onde:\n"
+                            "- titulo: nome/título do documento\n"
+                            "- natureza: categoria (ex: Edital, Contrato, Relatório, Manual, Planilha, etc.)\n"
+                            "- resumo: resumo executivo em 3 a 5 frases sobre conteúdo e utilidade\n"
+                            "- relacao_com_acao: explique a conexão do arquivo com a tarefa atual; se não houver contexto suficiente, diga isso explicitamente\n"
+                            "- utilidade_pratica: diga como o Hermes deve usar este arquivo para apoiar a ação\n"
+                            f"\nCONTEXTO DA AÇÃO:\n{task_context_summary or 'Nenhuma tarefa ativa foi fornecida.'}"
+                        )
                     extraction_response = client.models.generate_content(
                         model=model_id,
                         contents=[
@@ -7504,10 +7549,34 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     titulo_doc = meta.get('titulo', real_file_name)
                     natureza_doc = meta.get('natureza', 'Documento')
                     resumo_doc = meta.get('resumo', '')
+                    relacao_com_acao = meta.get('relacao_com_acao', '')
+                    utilidade_pratica = meta.get('utilidade_pratica', '')
+                    ocr_doc = meta.get('ocr', '') if is_image_file else ''
+                    descricao_visual = meta.get('descricao_visual', '') if is_image_file else ''
+                    elementos_chave = meta.get('elementos_chave', []) if is_image_file else []
+                    evidencias = meta.get('evidencias', []) if is_image_file else []
+                    if not isinstance(elementos_chave, list):
+                        elementos_chave = [str(elementos_chave)]
+                    if not isinstance(evidencias, list):
+                        evidencias = [str(evidencias)]
 
                     # 6. Vetoriza e grava no indice_artefatos
                     from knowledge_graph import _get_embedding
-                    embed_text = f"{titulo_doc} | {natureza_doc} | {resumo_doc}"
+                    embed_text_parts = [
+                        titulo_doc,
+                        natureza_doc,
+                        resumo_doc,
+                        relacao_com_acao,
+                        utilidade_pratica,
+                    ]
+                    if is_image_file:
+                        embed_text_parts.extend([
+                            descricao_visual,
+                            ocr_doc,
+                            " | ".join(elementos_chave[:8]),
+                            " | ".join(evidencias[:8]),
+                        ])
+                    embed_text = " | ".join(part for part in embed_text_parts if part)
                     embedding = _get_embedding(embed_text, gemini_key)
                     embedding_floats = list(map(float, embedding))
 
@@ -7526,11 +7595,19 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         'fonte': natureza_doc,
                         'embedding': Vector(embedding_floats),
                         'tipo_arquivo': real_mime_type.split('/')[-1],
+                        'mime_type': real_mime_type,
                         'url_drive': drive_link,
+                        'drive_file_id': drive_file_id,
                         'data_criacao': firestore.SERVER_TIMESTAMP,
                         'origem': origem_doc,
                         'task_id': task_id or None,
-                        'categoria': 'Copiloto Hermes'
+                        'categoria': 'Copiloto Hermes',
+                        'relacao_com_acao': relacao_com_acao,
+                        'utilidade_pratica': utilidade_pratica,
+                        'ocr': ocr_doc,
+                        'descricao_visual': descricao_visual,
+                        'elementos_chave': elementos_chave[:8],
+                        'evidencias': evidencias[:8],
                     })
                     print(f"[Copiloto] Artefato '{titulo_doc}' gravado em indice_artefatos (id={artefato_id})")
 
@@ -7560,9 +7637,16 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     file_context = (
                         f"[CONTEXTO DO ARQUIVO ANEXADO]\n"
                         f"Nome: {real_file_name}\n"
+                        f"Tipo MIME: {real_mime_type}\n"
                         f"Título extraído: {titulo_doc}\n"
                         f"Natureza: {natureza_doc}\n"
                         f"Resumo: {resumo_doc}\n"
+                        f"Relação com a ação: {relacao_com_acao or 'Não inferida.'}\n"
+                        f"Utilidade prática: {utilidade_pratica or 'Não inferida.'}\n"
+                        f"OCR relevante: {ocr_doc[:2500] if ocr_doc else 'Sem texto legível relevante.'}\n"
+                        f"Descrição visual: {descricao_visual or 'Não aplicável.'}\n"
+                        f"Elementos-chave: {', '.join(elementos_chave[:8]) if elementos_chave else 'Nenhum listado.'}\n"
+                        f"Evidências observáveis: {', '.join(evidencias[:8]) if evidencias else 'Nenhuma listada.'}\n"
                         f"Link original: {drive_link}\n"
                         f"[/CONTEXTO DO ARQUIVO ANEXADO]"
                     )
