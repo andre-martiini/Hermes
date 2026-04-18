@@ -1226,7 +1226,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
     return (
         <div
-            className={`fixed inset-y-0 right-0 z-[500] shadow-2xl transition-transform duration-300 transform translate-x-0 flex flex-col ${isDark ? 'bg-[#0f0f1a] text-white' : 'bg-white text-slate-900 border-l border-slate-200'}`}
+            className={`fixed inset-y-0 right-0 z-[500] shadow-2xl transition-transform duration-300 transform translate-x-0 flex flex-col break-words [overflow-wrap:anywhere] ${isDark ? 'bg-[#0f0f1a] text-white' : 'bg-white text-slate-900 border-l border-slate-200'}`}
             style={{ width: effectiveDrawerWidth, maxWidth: isMobileViewport ? '100vw' : undefined }}
         >
             {/* Handle de redimensionamento — borda esquerda */}
@@ -1347,7 +1347,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                         {messages.map((msg, i) => (
                             <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                                <div className={`max-w-[90%] min-w-0 px-4 py-3 rounded-2xl text-xs font-medium leading-relaxed shadow-sm ${msg.role === 'user'
+                                <div className={`max-w-[90%] min-w-0 px-4 py-3 rounded-2xl text-xs font-medium leading-relaxed shadow-sm break-words [overflow-wrap:anywhere] [&_*]:max-w-full ${msg.role === 'user'
                                     ? 'bg-blue-600 text-white rounded-br-none'
                                     : 'bg-slate-100 text-slate-700 rounded-bl-none'
                                     }`}>
@@ -1390,10 +1390,24 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         remarkPlugins={[remarkGfm]}
                                         urlTransform={(url) => url}
                                         components={{
-                                            p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
-                                            ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-2" {...props} />,
-                                            li: ({ node, ...props }) => <li className="mb-0.5" {...props} />,
+                                            p: ({ node, ...props }) => <p className="mb-2 last:mb-0 break-words [overflow-wrap:anywhere]" {...props} />,
+                                            ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-2 break-words [overflow-wrap:anywhere]" {...props} />,
+                                            li: ({ node, ...props }) => <li className="mb-0.5 break-words [overflow-wrap:anywhere]" {...props} />,
                                             strong: ({ node, ...props }) => <strong className="font-bold text-blue-600" {...props} />,
+                                            pre: ({ node, ...props }) => (
+                                                <pre
+                                                    className="max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] overflow-x-hidden rounded-xl"
+                                                    {...props}
+                                                />
+                                            ),
+                                            code: ({ node, className, children, ...props }) => (
+                                                <code
+                                                    className={`${className ?? ''} whitespace-pre-wrap break-words [overflow-wrap:anywhere]`}
+                                                    {...props}
+                                                >
+                                                    {children}
+                                                </code>
+                                            ),
                                             a: ({ node, ...props }) => {
                                                 const href = props.href || '';
                                                 console.log("[HermesCopiloto] Link clicked:", href);
