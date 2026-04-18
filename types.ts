@@ -78,6 +78,8 @@ export interface Tarefa {
     extra_context_id?: string;
     // Knowledge Graph fields
     concept_node_id?: string | null;     // Preenchido na Fase 2 (cristalização)
+    sourceGmailMessageId?: string;       // Origem do email que gerou a tarefa (idempotência)
+    sourceKnowledgeId?: string;          // Referência a um Nó de Fonte do Grafo RAG
     kg_tags?: string[];                  // Tags geradas pela Fase 1 (Retrieval-First)
     kg_crystallized?: boolean;           // true após a Fase 2 ser concluída
     artefatos_kg?: ArtefatoKG[];         // Artefatos indexados pelo módulo de artefatos

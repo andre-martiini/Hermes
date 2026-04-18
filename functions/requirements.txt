@@ -9,3 +9,5 @@ requests
 google-cloud-pubsub
 google-auth
 pdfplumber>=0.11.0
+html2text>=2020.1.16
+beautifulsoup4>=4.12.2
