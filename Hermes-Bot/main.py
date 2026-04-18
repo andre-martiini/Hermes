@@ -38,7 +38,7 @@ google_search_tool = types.Tool(
     google_search=types.GoogleSearch()
 )
 
-model_id = "gemini-2.5-flash-lite"
+model_id = "gemini-3.1-flash-lite-preview"
 system_instruction = """
 Você é o HERMES, o braço direito e assistente pessoal de elite do André Araújo Martini.
 Sua personalidade é uma mistura de Jarvis (Homem de Ferro) com um Gerente de Projetos extremamente eficiente.
@@ -48,6 +48,11 @@ Sua personalidade é uma mistura de Jarvis (Homem de Ferro) com um Gerente de Pr
 2. **Eficiência Implacável**: Suas respostas devem ser organizadas. Se o André perguntar sobre o dia dele, traga as informações divididas por módulos (Financeiro, Saúde, Tarefas).
 3. **Proatividade**: Se o André registrar uma despesa alta, você pode comentar algo breve e profissional como "Registrado, André. Vou atualizar seu teto de gastos mensal."
 4. **Precisão com Flexibilidade**: Você consulta o Firestore de forma inteligente. Se não encontrar algo de primeira, use sua capacidade de síntese para tentar variações de busca (keywords). Se após as tentativas nada for encontrado, informe ao André de forma educada.
+
+
+### REGRA DE OTIMIZAÇÃO PROATIVA:
+Sempre que o usuário solicitar uma tarefa repetitiva, estruturada ou procedimental (ex: formatar relatórios, extrair dados específicos) e NÃO houver uma diretriz operacional (POP) em andamento, você deve executar a tarefa e, ao final, perguntar proativamente:
+"Notei que esta é uma tarefa que pode ser padronizada. Deseja que eu crie um Procedimento Operacional Padrão (POP) no sistema para executar isso de forma automática nas próximas vezes?"
 
 ### BUSCAS E ENTENDIMENTO AMPLO:
 1. **Extração de Keywords**: Ao realizar buscas (em tarefas, documentos ou registros), identifique a palavra-chave principal. Nunca passe frases longas para as funções de busca.
@@ -258,6 +263,25 @@ def registrar_conhecimento_mestre(titulo: str, conteudo: str, tags: list = []):
     except Exception as e:
         return f"Erro ao registrar aprendizado mestre: {str(e)}"
 
+
+def buscar_diretriz_pop(mensagem: str) -> str:
+    """Busca um POP no Firestore cujos gatilhos estejam na mensagem do usuário."""
+    try:
+        mensagem_lower = mensagem.lower()
+        pops = db.collection('pops_diretrizes').stream()
+
+        for doc in pops:
+            pop = doc.to_dict()
+            gatilhos = pop.get('gatilhos', [])
+
+            if any(g.lower() in mensagem_lower for g in gatilhos):
+                return pop.get('instrucao_sistema')
+
+        return None
+    except Exception as e:
+        print(f"Erro ao buscar POP: {e}")
+        return None
+
 # Lista expandida de ferramentas
 tools_list = [
     consultar_hermes, 
@@ -281,7 +305,13 @@ chat = client.chats.create(model=model_id, config=types.GenerateContentConfig(
 def responder(mensagem):
     try:
         bot.send_chat_action(mensagem.chat.id, 'typing')
-        response = chat.send_message(mensagem.text)
+
+        texto_envio = mensagem.text
+        instrucao_pop = buscar_diretriz_pop(mensagem.text)
+        if instrucao_pop:
+            texto_envio = f"{mensagem.text}\n\n[DIRETRIZ OPERACIONAL OBRIGATÓRIA: Aplique o procedimento abaixo para processar esta requisição]\n{instrucao_pop}"
+
+        response = chat.send_message(texto_envio)
         bot.reply_to(mensagem, response.text, parse_mode="Markdown")
     except Exception as e:
         bot.reply_to(mensagem, f"Erro: {str(e)}")
@@ -304,9 +334,11 @@ def processar_audio(mensagem):
 
         # A forma correta de enviar múltiplos componentes no SDK novo:
         # Passamos uma lista de Partes diretamente no argumento 'message'
+        texto_prompt = "Transcreva e execute o comando contido neste áudio conforme as regras do sistema Hermes."
+
         response = chat.send_message(message=[
             types.Part.from_bytes(data=audio_data, mime_type="audio/ogg"),
-            types.Part.from_text(text="Transcreva e execute o comando contido neste áudio conforme as regras do sistema Hermes.")
+            types.Part.from_text(text=texto_prompt)
         ])
         
         bot.reply_to(mensagem, response.text, parse_mode="Markdown")
