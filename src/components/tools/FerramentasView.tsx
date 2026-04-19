@@ -10,8 +10,9 @@ import { ChoirRehearsalsTool } from './ChoirRehearsalsTool';
 import { MeetingTranscriptionTool } from './MeetingTranscriptionTool';
 import { WhatsAppAssistantTool } from './WhatsAppAssistantTool';
 import { DiagnosticoTool } from './DiagnosticoTool';
+import { PopManagerTool } from './PopManagerTool';
 
-type FerramentaAtiva = 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'whatsapp_assistant' | 'diagnostico' | null;
+type FerramentaAtiva = 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'whatsapp_assistant' | 'diagnostico' | 'pop_manager' | null;
 
 interface FerramentasViewProps {
   ideas: BrainstormIdea[];
@@ -195,6 +196,10 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
     }
   };
 
+  if (activeTool === 'pop_manager') {
+    return <PopManagerTool onBack={() => setActiveTool(null)} />;
+  }
+
   if (!activeTool) {
     const toolCardClass = "bg-white p-6 md:p-12 rounded-2xl md:rounded-[3rem] border border-slate-200 shadow-sm md:shadow-xl hover:shadow-lg md:hover:shadow-2xl transition-all group text-left flex flex-row md:flex-col items-center md:items-start gap-4 md:gap-6";
 
@@ -288,6 +293,19 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
           <div>
             <h3 className="text-lg md:text-2xl font-black text-slate-900 tracking-tighter mb-1 md:mb-2">Assistente WhatsApp</h3>
             <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Consulta multimodal de mensagens com Gemini.</p>
+          </div>
+        </button>
+
+        <button
+          onClick={() => setActiveTool('pop_manager')}
+          className={toolCardClass}
+        >
+          <div className="w-12 h-12 md:w-16 md:h-16 bg-blue-50 rounded-none md:rounded-2xl flex items-center justify-center text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all flex-shrink-0">
+            <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+          </div>
+          <div>
+            <h3 className="text-lg md:text-2xl font-black text-slate-900 tracking-tighter mb-1 md:mb-2">Gestor de POPs</h3>
+            <p className="text-slate-500 font-medium leading-relaxed text-xs md:text-base">Procedimentos Operacionais Padrão do Hermes.</p>
           </div>
         </button>
       </div>

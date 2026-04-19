@@ -1,4 +1,7 @@
 
+
+
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import {
@@ -7970,6 +7973,8 @@ declare global {
     __hermesReactRoot?: Root;
   }
 }
+
+
 
 const container = document.getElementById('root');
 if (container) {
