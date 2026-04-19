@@ -197,7 +197,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   };
 
   if (activeTool === 'pop_manager') {
-    return <PopManagerTool />;
+    return <PopManagerTool onBack={() => setActiveTool(null)} />;
   }
 
   if (!activeTool) {
