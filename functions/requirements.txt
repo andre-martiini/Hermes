@@ -9,9 +9,5 @@ requests
 google-cloud-pubsub
 google-auth
 pdfplumber>=0.11.0
-python-pptx>=0.6.21
-svglib>=1.5.0
-reportlab>=4.0.0
-Pillow>=9.0.0
-numpy>=1.20.0
-lxml>=4.9.0
+html2text>=2020.1.16
+beautifulsoup4>=4.12.2

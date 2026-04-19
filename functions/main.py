@@ -8919,13 +8919,3 @@ def salvarRelatorioNoDrive(req: https_fn.CallableRequest):
             code=https_fn.FunctionsErrorCode.INTERNAL,
             message=str(e)
         )
-
-# ==============================================================================
-# IMPORTAÇÃO DO MÓDULO DE SLIDES ORCHESTRATOR
-# ==============================================================================
-from slides_orchestrator import (
-    iniciarJobSlides,
-    slideStrategistWorker,
-    slideExecutorWorker,
-    slideFinalizeWorker
-)

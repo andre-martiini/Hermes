@@ -1,8 +1,7 @@
 ﻿import React, { useState, useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { onAuthStateChanged, type User } from 'firebase/auth';
-import { doc, getDoc, collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
-import { functions, db, auth } from '@/firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { functions, db } from '@/firebase';
 import { SlideHistoryEntry } from '@/types';
 import { SLIDES_HISTORY_KEY } from '@/constants';
 import { AutoExpandingTextarea } from '../ui/UIComponents';
@@ -24,11 +23,9 @@ const mapFirestoreSlide = (s: any) => ({
 });
 
 export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initialDraftId }) => {
-  const [user, setUser] = useState<User | null>(() => auth.currentUser);
   const [rascunho, setRascunho] = useState('');
   const [qtdSlides, setQtdSlides] = useState(5);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isSubmittingJob, setIsSubmittingJob] = useState(false);
   const [presentation, setPresentation] = useState<any>(null);
   const [currentHistoryId, setCurrentHistoryId] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ slideIdx: number; topicoIdx: number } | null>(null);
@@ -39,24 +36,6 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
   const [history, setHistory] = useState<SlideHistoryEntry[]>(() => {
     try { return JSON.parse(localStorage.getItem(SLIDES_HISTORY_KEY) || '[]'); } catch { return []; }
   });
-  const [jobs, setJobs] = useState<any[]>([]);
-
-  useEffect(() => onAuthStateChanged(auth, setUser), []);
-
-  // Escutar jobs do Firestore em tempo real
-  useEffect(() => {
-    if (!user) return;
-    const q = query(
-      collection(db, 'slide_jobs'),
-      where('userId', '==', user.uid),
-      orderBy('timestamp', 'desc')
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const newJobs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setJobs(newJobs);
-    });
-    return () => unsubscribe();
-  }, [user]);
 
   // Carrega draft do Firestore quando initialDraftId é fornecido (vindo do Copiloto)
   useEffect(() => {
@@ -129,23 +108,28 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
     finally { setIsGenerating(false); }
   };
 
-  const handleDispatchJob = async () => {
-    if (!presentation?.slides || !user) return;
-    setIsSubmittingJob(true);
+  const handleExportPPTX = async () => {
+    if (!presentation?.slides) return;
     try {
-      const iniciarJobSlides = httpsCallable(functions, 'iniciarJobSlides');
-      await iniciarJobSlides({
-        rascunho: rascunho,
-        slides: presentation.slides
+      const pptxgen = (await import('pptxgenjs')).default;
+      const pres = new pptxgen();
+      presentation.slides.forEach((si: any) => {
+        const slide = pres.addSlide();
+        if (si.layout === 'capa') {
+          slide.background = { color: '1e293b' };
+          slide.addText(si.titulo, { x: 1, y: 2, w: '80%', h: 1, fontSize: 44, color: 'FFFFFF', bold: true, align: 'center' });
+          if (si.topicos?.length > 0) slide.addText(si.topicos[0], { x: 1, y: 3.5, w: '80%', fontSize: 24, color: 'cbd5e1', align: 'center' });
+        } else {
+          slide.background = { color: 'FFFFFF' };
+          slide.addText(si.titulo, { x: 0.5, y: 0.5, w: '90%', h: 0.8, fontSize: 32, color: '1e293b', bold: true });
+          slide.addShape(pres.ShapeType.line, { x: 0.5, y: 1.3, w: '90%', h: 0, line: { color: 'f97316', width: 2 } });
+          if (Array.isArray(si.topicos)) si.topicos.forEach((t: string, i: number) => slide.addText(t, { x: 0.8, y: 1.8 + i * 0.8, w: '85%', h: 0.6, fontSize: 18, color: '475569', bullet: true }));
+        }
+        slide.addText('Gerado por Hermes AI', { x: 0.5, y: 5.2, fontSize: 10, color: '94a3b8' });
       });
-      showToast("Job de exportação iniciado no backend!", "success");
-      setView('history');
-    } catch (e) {
-      console.error(e);
-      showToast("Erro ao iniciar job de exportação.", "error");
-    } finally {
-      setIsSubmittingJob(false);
-    }
+      await pres.writeFile({ fileName: `${presentation.slides?.[0]?.titulo || 'apresentacao'}.pptx` });
+      showToast("PPTX exportado com sucesso!", "success");
+    } catch (e) { console.error(e); showToast("Erro ao gerar PPTX.", "error"); }
   };
 
   const startEditing = (slideIdx: number, topicoIdx: number, val: string) => { setEditing({ slideIdx, topicoIdx }); setEditValue(val); };
@@ -260,52 +244,6 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
       {/* ===== HISTÃ“RICO ===== */}
       {view === 'history' && (
         <div className="animate-in fade-in duration-300">
-
-          {jobs.length > 0 && (
-            <div className="mb-8 space-y-3">
-              <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Jobs de Processamento em Nuvem</h3>
-              {jobs.map(job => (
-                <div key={job.id} className="bg-white rounded-[2rem] border border-orange-100 p-6 flex flex-col gap-4 shadow-sm relative overflow-hidden">
-                  {job.status === 'processing' && <div className="absolute top-0 left-0 w-full h-1 bg-orange-100"><div className="h-full bg-orange-500 animate-pulse w-1/2 rounded-r-full"></div></div>}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${job.status === 'completed' ? 'bg-emerald-100 text-emerald-600' : job.status === 'error' ? 'bg-rose-100 text-rose-600' : 'bg-orange-100 text-orange-600 animate-pulse'}`}>
-                        {job.status === 'completed' ? (
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                        ) : job.status === 'error' ? (
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-                        ) : (
-                          <svg className="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                        )}
-                      </div>
-                      <div>
-                        <p className="text-sm font-black text-slate-900">{job.tema ? job.tema.slice(0, 40) + '...' : 'Apresentação'}</p>
-                        <p className="text-[10px] font-bold text-slate-400 mt-0.5">
-                          {job.status === 'processing' ? 'Processando...' : job.status === 'completed' ? 'Concluído' : 'Erro'} • {job.totalSlides} slides
-                        </p>
-                      </div>
-                    </div>
-                    {job.driveLink && (
-                      <a href={job.driveLink} target="_blank" rel="noopener noreferrer" className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-colors flex items-center gap-2">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                        Abrir no Drive
-                      </a>
-                    )}
-                  </div>
-                  {job.status === 'processing' && (
-                    <div className="flex gap-1 mt-2">
-                      {job.slides_status?.map((s: any, i: number) => (
-                        <div key={i} className={`h-1.5 flex-1 rounded-full ${s.status === 'completed' ? 'bg-emerald-500' : s.status === 'error' ? 'bg-rose-500' : s.status === 'processing' ? 'bg-orange-500 animate-pulse' : 'bg-slate-200'}`} title={`Slide ${i + 1}: ${s.status}`}></div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1 mb-3">Histórico de Rascunhos</h3>
-
           {history.length === 0 ? (
             <div className="py-24 flex flex-col items-center justify-center text-slate-300 space-y-4">
               <svg className="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -396,9 +334,9 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                     Copiar Tudo
                   </button>
-                  <button onClick={handleDispatchJob} disabled={isSubmittingJob || jobs.some(j => j.status === 'processing')} className={`flex items-center gap-2 px-4 py-2.5 bg-orange-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-orange-600 transition-all shadow-lg shadow-orange-200 disabled:opacity-50 disabled:grayscale ${isSubmittingJob ? 'animate-pulse' : ''}`}>
-                    {isSubmittingJob ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>}
-                    Aprovar e Exportar Assíncrono PPTX
+                  <button onClick={handleExportPPTX} className="flex items-center gap-2 px-4 py-2.5 bg-orange-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-orange-600 transition-all shadow-lg shadow-orange-200">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                    Exportar PPTX
                   </button>
                 </div>
               </div>
