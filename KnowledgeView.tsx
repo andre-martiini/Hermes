@@ -501,17 +501,16 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
 
                          const data = nodeSnap.data() as KnowledgeNode;
                          setDrawerItem({
-                            id: data.id,
-                            tipo: data.tipo,
-                            titulo: data.titulo,
-                            score: 1.0,
-                            data_extracao: data.data_criacao,
-                            resumo: data.conteudo_regra,
-                            metadata: {
-                                tags: data.tags || [],
-                                origem: data.origem,
-                                task_origin_id: data.task_origin_id
-                            }
+                            id: data.id || kgId,
+                            type: 'node',
+                            title: data.titulo,
+                            snippet: data.conteudo_regra || '',
+                            resumo_semantico: data.conteudo_regra || '',
+                            tags: data.tags || [],
+                            date: data.data_criacao,
+                            area_tematica: data.area_tematica,
+                            origem: data.origem,
+                            task_id: data.task_origin_id
                          });
 
                      }

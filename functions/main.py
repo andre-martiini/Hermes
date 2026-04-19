@@ -6878,10 +6878,15 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
                 source_knowledge_id = None
                 if sourceKnowledgeText:
-                    from knowledge_graph import _get_embedding, _derive_node_title
+                    from knowledge_graph import _get_embedding
                     try:
                         kg_id = str(_uuid.uuid4())[:20]
-                        embedding = _get_embedding(sourceKnowledgeText)
+                        keys_doc = db.collection('system').document('api_keys').get()
+                        gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+                        if not gemini_key:
+                            raise ValueError("Gemini API Key não encontrada (system/api_keys).")
+
+                        embedding = _get_embedding(sourceKnowledgeText, gemini_key)
 
                         db.collection('conhecimento_mestre').document(kg_id).set({
                             'id': kg_id,

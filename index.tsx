@@ -1127,7 +1127,8 @@ const App: React.FC = () => {
     const handleOpenKnowledgeNode = (e: any) => {
       const kgId = e.detail;
       if (kgId) {
-        setActiveModule('knowledge');
+        setActiveModule('acoes');
+        setViewMode('knowledge');
         setTimeout(() => {
           // Trigger the specific node opening inside KnowledgeView.
           // Since KnowledgeView uses internal state, we can pass it via another event
