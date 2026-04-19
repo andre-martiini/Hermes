@@ -485,6 +485,45 @@ const KnowledgeDrawer: React.FC<{
 // ─── KnowledgeView ───────────────────────────────────────────────────────────
 
 const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => {
+
+    useEffect(() => {
+        const handleOpenNode = (e: any) => {
+            const kgId = e.detail;
+            setQuery(`ID_DIRETO_BUSCA:${kgId}`); // Assuming smart search doesn't natively support ID lookup, but we can intercept or just show raw node if we had it.
+            // Wait, we can fetch directly from db
+            setTimeout(async () => {
+                try {
+                     const { doc, getDoc } = await import('firebase/firestore');
+                     const { db } = await import('./firebase');
+                     const nodeRef = doc(db, 'conhecimento_mestre', kgId);
+                     const nodeSnap = await getDoc(nodeRef);
+                     if (nodeSnap.exists()) {
+
+                         const data = nodeSnap.data() as KnowledgeNode;
+                         setDrawerItem({
+                            id: data.id,
+                            tipo: data.tipo,
+                            titulo: data.titulo,
+                            score: 1.0,
+                            data_extracao: data.data_criacao,
+                            resumo: data.conteudo_regra,
+                            metadata: {
+                                tags: data.tags || [],
+                                origem: data.origem,
+                                task_origin_id: data.task_origin_id
+                            }
+                         });
+
+                     }
+                } catch(err) {
+                     console.error("Failed to load specific node via ID", err);
+                }
+            }, 100);
+        };
+        window.addEventListener('knowledge-view-open-node', handleOpenNode);
+        return () => window.removeEventListener('knowledge-view-open-node', handleOpenNode);
+    }, []);
+
     const [mode, setMode] = useState<'search' | 'audit'>('search');
     const [query, setQuery] = useState('');
     const [filtros, setFiltros] = useState<KnowledgeFilters>({ tipo: 'all' });

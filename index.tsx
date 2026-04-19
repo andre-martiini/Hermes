@@ -1122,6 +1122,24 @@ const App: React.FC = () => {
   });
 
 
+
+  useEffect(() => {
+    const handleOpenKnowledgeNode = (e: any) => {
+      const kgId = e.detail;
+      if (kgId) {
+        setActiveModule('knowledge');
+        setTimeout(() => {
+          // Trigger the specific node opening inside KnowledgeView.
+          // Since KnowledgeView uses internal state, we can pass it via another event
+          // or just navigate to knowledge.
+          window.dispatchEvent(new CustomEvent('knowledge-view-open-node', { detail: kgId }));
+        }, 100);
+      }
+    };
+    window.addEventListener('open-knowledge-node', handleOpenKnowledgeNode);
+    return () => window.removeEventListener('open-knowledge-node', handleOpenKnowledgeNode);
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {

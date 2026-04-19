@@ -413,7 +413,25 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
                 </button>
               )}
 
-              {onUpdateTask && (
+
+              {task.sourceKnowledgeId && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // Como não podemos importar hooks complexos de navegação aqui facilmente se não passados via props,
+                    // podemos emitir um evento customizado ou pass it as prop.
+                    // Uma maneira simples é dispatch event no window e ouvir no index.tsx
+                    window.dispatchEvent(new CustomEvent('open-knowledge-node', { detail: task.sourceKnowledgeId }));
+                  }}
+                  title="Abrir E-mail Original no Grafo"
+                  className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg md:rounded-xl transition-all mr-1"
+                >
+                  <svg className="w-4 h-4 md:w-4.5 md:h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                </button>
+              )}
+{onUpdateTask && (
                 <DatePickerButton taskId={task.id} onUpdateTask={onUpdateTask} />
               )}
 
