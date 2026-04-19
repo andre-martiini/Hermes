@@ -14,6 +14,7 @@ import uuid
 import secrets
 import os
 import sys
+import unicodedata
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 if CURRENT_DIR not in sys.path:
@@ -101,9 +102,19 @@ def get_db():
 
     return firestore.client()
 
+GOOGLE_BASE_SCOPES = [
+    'https://www.googleapis.com/auth/tasks',
+    'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/calendar',
+    'https://www.googleapis.com/auth/drive',
+]
+
+GOOGLE_FORMS_SCOPES = GOOGLE_BASE_SCOPES + [
+    'https://www.googleapis.com/auth/forms.body'
+]
 
 
-def get_google_creds():
+def get_google_creds(scopes=None):
     """Busca as credenciais OAuth2 do Firestore e renova se necessário"""
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
@@ -115,13 +126,7 @@ def get_google_creds():
         raise Exception("Credenciais não encontradas no Firestore.")
 
     creds_data = creds_doc.to_dict()
-    SCOPES = [
-        'https://www.googleapis.com/auth/tasks',
-        'https://www.googleapis.com/auth/gmail.readonly',
-        'https://www.googleapis.com/auth/calendar',
-        'https://www.googleapis.com/auth/drive',
-        'https://www.googleapis.com/auth/forms.body'
-    ]
+    scopes = scopes or GOOGLE_BASE_SCOPES
 
     creds = Credentials(
         token=creds_data.get('token'),
@@ -129,7 +134,7 @@ def get_google_creds():
         token_uri=creds_data.get('token_uri'),
         client_id=creds_data.get('client_id'),
         client_secret=creds_data.get('client_secret'),
-        scopes=SCOPES
+        scopes=scopes
     )
 
     # Verifica se o token expirou e tenta renovar
@@ -4156,6 +4161,63 @@ def _normalize_text_for_match(text: str | None) -> str:
     return re.sub(r"\s+", " ", (text or "").strip().lower())
 
 
+def _normalize_pop_text(text: str | None) -> str:
+    raw = unicodedata.normalize("NFKD", (text or "").strip().lower())
+    without_accents = "".join(ch for ch in raw if not unicodedata.combining(ch))
+    without_punct = re.sub(r"[^\w\s]", " ", without_accents)
+    return re.sub(r"\s+", " ", without_punct).strip()
+
+
+def _match_pop_directives(db, prompt: str) -> list[dict]:
+    prompt_norm = _normalize_pop_text(prompt)
+    if not prompt_norm:
+        return []
+
+    prompt_terms = set(prompt_norm.split())
+    matched: list[dict] = []
+
+    try:
+        docs = db.collection("pops_diretrizes").stream()
+        for pop_doc in docs:
+            pop = pop_doc.to_dict() or {}
+            gatilhos = pop.get("gatilhos", []) or []
+            instrucao = (pop.get("instrucao_sistema") or "").strip()
+            titulo = (pop.get("titulo") or pop_doc.id or "POP").strip()
+
+            if not instrucao or not isinstance(gatilhos, list):
+                continue
+
+            matched_triggers: list[str] = []
+            for gatilho in gatilhos:
+                gatilho_norm = _normalize_pop_text(str(gatilho))
+                if not gatilho_norm:
+                    continue
+
+                gatilho_terms = gatilho_norm.split()
+                if gatilho_norm in prompt_norm:
+                    matched_triggers.append(str(gatilho))
+                    continue
+
+                if len(gatilho_terms) > 1 and all(term in prompt_terms for term in gatilho_terms):
+                    matched_triggers.append(str(gatilho))
+                    continue
+
+            if matched_triggers:
+                matched.append({
+                    "id": pop_doc.id,
+                    "titulo": titulo,
+                    "instrucao_sistema": instrucao,
+                    "matched_triggers": matched_triggers,
+                    "score": max(len(_normalize_pop_text(trigger).split()) for trigger in matched_triggers),
+                })
+    except Exception as pop_err:
+        print(f"[POP] Erro ao buscar diretrizes: {pop_err}")
+        return []
+
+    matched.sort(key=lambda item: item.get("score", 0), reverse=True)
+    return matched[:3]
+
+
 def _get_copilot_core(db):
     doc = db.collection("system").document("copilot_core").get()
     if doc.exists:
@@ -4978,7 +5040,7 @@ def criar_formulario_google(req: https_fn.CallableRequest):
     perguntas = form_data.get('perguntas', [])
 
     try:
-        creds = get_google_creds()
+        creds = get_google_creds(GOOGLE_FORMS_SCOPES)
         forms_service = build('forms', 'v1', credentials=creds)
         drive_service = build('drive', 'v3', credentials=creds)
 
@@ -6141,6 +6203,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         ai_profile = _bootstrap_user_ai_profile(db, user_uid)
         _save_user_profile_signal(db, user_uid, prompt, task_id, system_id)
         memory_context = _build_memory_context(db, gemini_key, prompt, limit=4)
+        matched_pop_directives = _match_pop_directives(db, prompt)
         session_conflict_context = ""
         session_ref = None
         if session_id:
@@ -7549,6 +7612,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
         # Mapa nome → função para dispatch manual do loop de ferramentas
         _function_map = {
+            'buscar_e_analisar_email': buscar_e_analisar_email,
             'consultar_historico_acoes': consultar_historico_acoes,
             'buscar_arquivos_acervo': buscar_arquivos_acervo,
             'obter_contexto_tela': obter_contexto_tela,
@@ -7877,6 +7941,23 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         if file_context:
             context_parts.append(file_context)
         context_parts.append(f"USUÁRIO: {prompt}")
+        if matched_pop_directives:
+            pop_lines = [
+                "[DIRETRIZES OPERACIONAIS (POPs) CORRESPONDENTES - OBRIGATORIAS]"
+            ]
+            for idx, pop in enumerate(matched_pop_directives, start=1):
+                triggers = ", ".join(pop.get("matched_triggers", []))
+                pop_lines.append(
+                    f"{idx}. TITULO: {pop.get('titulo', 'POP')}\n"
+                    f"GATILHOS ACIONADOS: {triggers or 'n/a'}\n"
+                    f"INSTRUCAO:\n{pop.get('instrucao_sistema', '')}"
+                )
+            pop_lines.append(
+                "Aplique as diretrizes acima ao responder e ao decidir quais ferramentas usar. "
+                "Se houver conflito entre POP e pedido literal do usuario, exponha o conflito antes de agir."
+            )
+            pop_lines.append("[/DIRETRIZES OPERACIONAIS (POPs) CORRESPONDENTES - OBRIGATORIAS]")
+            context_parts.append("\n".join(pop_lines))
         final_prompt = "\n\n".join(context_parts)
         
         # Loop manual de tool calling — intercepta cada chamada para rastrear ferramentas usadas

@@ -16,6 +16,8 @@ interface PopManagerToolProps {
 export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack }) => {
   const [pops, setPops] = useState<Pop[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Form State
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -23,8 +25,25 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack }) => {
   const [gatilhos, setGatilhos] = useState('');
   const [instrucao, setInstrucao] = useState('');
 
+  const getErrorMessage = (error: unknown) => {
+    const code = typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code)
+      : '';
+
+    if (code.includes('network') || code.includes('unavailable') || code.includes('failed-precondition')) {
+      return 'Nao foi possivel conectar ao Firebase. O navegador perdeu acesso seguro ao backend.';
+    }
+
+    if (code.includes('permission-denied')) {
+      return 'Seu usuario nao tem permissao para salvar POPs.';
+    }
+
+    return 'Falha ao acessar os POPs. Verifique a conexao com o Firebase e tente novamente.';
+  };
+
   const fetchPops = async () => {
     setLoading(true);
+    setErrorMessage(null);
     try {
       const querySnapshot = await getDocs(collection(db, 'pops_diretrizes'));
       const popData: Pop[] = [];
@@ -34,6 +53,7 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack }) => {
       setPops(popData);
     } catch (error) {
       console.error("Erro ao buscar POPs:", error);
+      setErrorMessage(getErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -48,6 +68,8 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack }) => {
     const arrayGatilhos = gatilhos.split(',').map(g => g.trim().toLowerCase()).filter(g => g);
 
     try {
+      setSaving(true);
+      setErrorMessage(null);
       if (editingId) {
         const popRef = doc(db, 'pops_diretrizes', editingId);
         await updateDoc(popRef, {
@@ -63,9 +85,12 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack }) => {
         });
       }
       resetForm();
-      fetchPops();
+      await fetchPops();
     } catch (error) {
       console.error("Erro ao salvar POP:", error);
+      setErrorMessage(getErrorMessage(error));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -79,10 +104,12 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack }) => {
   const handleDelete = async (id: string) => {
     if (!window.confirm("Tem certeza que deseja excluir este POP?")) return;
     try {
+      setErrorMessage(null);
       await deleteDoc(doc(db, 'pops_diretrizes', id));
-      fetchPops();
+      await fetchPops();
     } catch (error) {
       console.error("Erro ao excluir POP:", error);
+      setErrorMessage(getErrorMessage(error));
     }
   };
 
@@ -113,6 +140,11 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack }) => {
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-8">
+        {errorMessage && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+            {errorMessage}
+          </div>
+        )}
 
         {/* Formulário de Criação/Edição */}
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
@@ -154,9 +186,10 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack }) => {
             <div className="flex gap-3 pt-2">
               <button
                 type="submit"
+                disabled={saving}
                 className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl transition-colors"
               >
-                {editingId ? 'Atualizar POP' : 'Salvar POP'}
+                {saving ? 'Salvando...' : editingId ? 'Atualizar POP' : 'Salvar POP'}
               </button>
               {editingId && (
                 <button

@@ -1410,7 +1410,6 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             ),
                                             a: ({ node, ...props }) => {
                                                 const href = props.href || '';
-                                                console.log("[HermesCopiloto] Link clicked:", href);
 
                                                 if (isInternalAppHref(href)) {
                                                     return (
@@ -1419,6 +1418,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                             href={href}
                                                             onClick={(event) => {
                                                                 event.preventDefault();
+                                                                console.log("[HermesCopiloto] Link clicked:", href);
                                                                 navigateWithinApp(href);
                                                                 onClose?.();
                                                             }}
@@ -1433,6 +1433,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                     return (
                                                         <button
                                                             onClick={() => {
+                                                                console.log("[HermesCopiloto] Link clicked:", href);
                                                                 onOpenTask?.(id);
                                                                 onClose?.();
                                                             }}
@@ -1448,7 +1449,10 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                     const draftId = href.split('tool:slides:')[1];
                                                     return (
                                                         <button
-                                                            onClick={() => onOpenTool?.('slides', draftId)}
+                                                            onClick={() => {
+                                                                console.log("[HermesCopiloto] Link clicked:", href);
+                                                                onOpenTool?.('slides', draftId);
+                                                            }}
                                                             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm"
                                                         >
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" /></svg>
@@ -1460,7 +1464,10 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                     const diagId = href.split('tool:diagnosis:')[1];
                                                     return (
                                                         <button
-                                                            onClick={() => handleOpenDiagnosis(diagId)}
+                                                            onClick={() => {
+                                                                console.log("[HermesCopiloto] Link clicked:", href);
+                                                                handleOpenDiagnosis(diagId);
+                                                            }}
                                                             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm"
                                                         >
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
@@ -1468,7 +1475,15 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                         </button>
                                                     );
                                                 }
-                                                return <a className="text-blue-600 underline hover:text-blue-800 break-all" target="_blank" rel="noopener noreferrer" {...props} />;
+                                                return (
+                                                    <a
+                                                        className="text-blue-600 underline hover:text-blue-800 break-all"
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        onClick={() => console.log("[HermesCopiloto] Link clicked:", href)}
+                                                        {...props}
+                                                    />
+                                                );
                                             },
                                         }}
                                     >
