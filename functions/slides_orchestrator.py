@@ -4,15 +4,14 @@ import json
 import uuid
 import os
 import tempfile
-import base64
 import sys
+from pathlib import Path
 from google import genai
-from main import get_db, emit_notification_backend
 
 # Import ppt-master tools
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'ppt_master'))
-from finalize_svg import crop_images_in_svg, embed_icons_in_file, embed_images_in_svg, fix_image_aspect_in_svg
-import svg_to_pptx.main as pptx_exporter
+from finalize_svg import crop_images_in_svg, embed_icons_in_file, fix_image_aspect_in_svg
+from svg_finalize.embed_icons import DEFAULT_ICONS_DIR
 
 @https_fn.on_call(
     cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
@@ -42,6 +41,7 @@ def iniciarJobSlides(req: https_fn.CallableRequest):
             message="Dados insuficientes."
         )
 
+    from main import get_db
     db = get_db()
 
     # Criar registro de job
@@ -83,6 +83,7 @@ def slideStrategistWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
         print("No job_id provided.")
         return
 
+    from main import get_db
     db = get_db()
     job_ref = db.collection('slide_jobs').document(job_id)
     job_doc = job_ref.get()
@@ -129,10 +130,26 @@ def slideExecutorWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedDa
     if not job_id or slide_index is None:
         return
 
+    from main import get_db
     db = get_db()
     job_ref = db.collection('slide_jobs').document(job_id)
 
     try:
+        def publish_finalizer_if_ready():
+            job_doc = job_ref.get()
+            statuses = job_doc.get("slides_status") or []
+            all_terminal = all(s["status"] in {"completed", "error"} for s in statuses)
+
+            if not all_terminal:
+                return
+
+            from google.cloud import pubsub_v1
+            publisher = pubsub_v1.PublisherClient()
+            project_id = os.environ.get("GCLOUD_PROJECT", "gestao-hermes")
+            finalizer_topic_path = publisher.topic_path(project_id, "slide-finalizer")
+            msg = json.dumps({"job_id": job_id})
+            publisher.publish(finalizer_topic_path, msg.encode("utf-8"))
+
         # Atualiza status individual para processing
         def update_status(status_str):
             @firestore.transactional
@@ -180,19 +197,7 @@ def slideExecutorWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedDa
 
         update_status("completed")
 
-        # Verificar se é o último slide
-        job_doc = job_ref.get()
-        statuses = job_doc.get("slides_status")
-        all_completed = all(s["status"] == "completed" for s in statuses)
-        has_error = any(s["status"] == "error" for s in statuses)
-
-        if all_completed or (all_completed and has_error):
-            from google.cloud import pubsub_v1
-            publisher = pubsub_v1.PublisherClient()
-            project_id = os.environ.get("GCLOUD_PROJECT", "gestao-hermes")
-            finalizer_topic_path = publisher.topic_path(project_id, "slide-finalizer")
-            msg = json.dumps({"job_id": job_id})
-            publisher.publish(finalizer_topic_path, msg.encode("utf-8"))
+        publish_finalizer_if_ready()
 
     except Exception as e:
         print(f"Error in executor for slide {slide_index}: {e}")
@@ -204,11 +209,12 @@ def slideExecutorWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedDa
             statuses[slide_index]["status"] = "error"
             transaction.update(ref, {"slides_status": statuses})
         _err_txn(db.transaction(), job_ref)
+        publish_finalizer_if_ready()
 
 @pubsub_fn.on_message_published(
     topic="slide-finalizer",
     memory=options.MemoryOption.GB_2,
-    timeout_sec=3600
+    timeout_sec=540
 )
 def slideFinalizeWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedData]):
     """
@@ -219,6 +225,7 @@ def slideFinalizeWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedDa
 
     if not job_id: return
 
+    from main import get_db
     db = get_db()
     job_ref = db.collection('slide_jobs').document(job_id)
     job_doc = job_ref.get()
@@ -243,24 +250,25 @@ def slideFinalizeWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedDa
             file_path = os.path.join(svg_output_dir, os.path.basename(blob.name))
             blob.download_to_filename(file_path)
 
-        # 2. Finalize SVGs (usando os scripts do PPT Master na íntegra)
+        icons_dir = DEFAULT_ICONS_DIR
+
+        # 2. Finalize SVGs usando helpers file-based do PPT Master
         for svg_file in os.listdir(svg_output_dir):
-            if not svg_file.endswith(".svg"): continue
+            if not svg_file.endswith(".svg"):
+                continue
             src_path = os.path.join(svg_output_dir, svg_file)
             dest_path = os.path.join(svg_final_dir, svg_file)
+            svg_path = Path(dest_path)
 
-            with open(src_path, "r", encoding="utf-8") as f:
-                svg_content = f.read()
+            with open(src_path, "r", encoding="utf-8") as src_file:
+                with open(dest_path, "w", encoding="utf-8") as dest_file:
+                    dest_file.write(src_file.read())
 
-            # Executar pipeline de finalização:
-            svg_content = embed_icons_in_file(svg_content)
-            svg_content = crop_images_in_svg(svg_content)
-            svg_content = fix_image_aspect_in_svg(svg_content)
+            embed_icons_in_file(svg_path, icons_dir, dry_run=False, verbose=False)
+            crop_images_in_svg(str(svg_path), dry_run=False, verbose=False)
+            fix_image_aspect_in_svg(str(svg_path), dry_run=False, verbose=False)
 
-            with open(dest_path, "w", encoding="utf-8") as f:
-                f.write(svg_content)
-
-        # 3. Export to PPTX via pptx_exporter module
+        # 3. Export to PPTX
         # A pasta tmpdir deve agir como o root directory do projeto para o ppt-master.
         # Precisamos criar as pastas esperadas (exports, notes) mesmo que vazias
         os.makedirs(os.path.join(tmpdir, "exports"), exist_ok=True)
@@ -270,15 +278,20 @@ def slideFinalizeWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedDa
         with open(os.path.join(tmpdir, "notes", "total.md"), "w") as f:
             f.write("")
 
-        # Como o pacote svg_to_pptx do hugohe espera um projeto no sys.argv, podemos
-        # simular chamando a API do builder diretamente ou modificando sys.argv (não recomendado).
-        # Vamos importar a API direta de conversão.
-        from ppt_master.svg_to_pptx import create_pptx_with_native_svg
+        from svg_to_pptx import create_pptx_with_native_svg
 
         # Gerar o PPTX
         try:
             pptx_path = os.path.join(tmpdir, "exports", f"{job_id}.pptx")
-            create_pptx_with_native_svg(tmpdir, "final", pptx_path)
+            svg_files = sorted(Path(svg_final_dir).glob("*.svg"))
+            build_ok = create_pptx_with_native_svg(
+                svg_files=svg_files,
+                output_path=Path(pptx_path),
+                use_native_shapes=True,
+                verbose=False,
+            )
+            if not build_ok:
+                raise RuntimeError("Falha na montagem do PPTX a partir dos SVGs finalizados.")
         except Exception as build_err:
             print(f"Erro na geração nativa do PPTX: {build_err}")
             # Se falhar, atualiza o job e aborta
@@ -320,6 +333,7 @@ def slideFinalizeWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedDa
             "completedAt": firestore.SERVER_TIMESTAMP
         })
 
+        from main import emit_notification_backend
         emit_notification_backend(
             title="Apresentação Concluída",
             message="Sua apresentação foi gerada com sucesso e está pronta no Google Drive.",

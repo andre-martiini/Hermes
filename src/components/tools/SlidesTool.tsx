@@ -1,11 +1,11 @@
 ﻿import React, { useState, useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
+import { onAuthStateChanged, type User } from 'firebase/auth';
 import { doc, getDoc, collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
-import { functions, db } from '@/firebase';
+import { functions, db, auth } from '@/firebase';
 import { SlideHistoryEntry } from '@/types';
 import { SLIDES_HISTORY_KEY } from '@/constants';
 import { AutoExpandingTextarea } from '../ui/UIComponents';
-import { useAuth } from '@/hooks/useAuth';
 
 interface SlidesToolProps {
   onBack: () => void;
@@ -24,7 +24,7 @@ const mapFirestoreSlide = (s: any) => ({
 });
 
 export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initialDraftId }) => {
-  const { user } = useAuth();
+  const [user, setUser] = useState<User | null>(() => auth.currentUser);
   const [rascunho, setRascunho] = useState('');
   const [qtdSlides, setQtdSlides] = useState(5);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -40,6 +40,8 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
     try { return JSON.parse(localStorage.getItem(SLIDES_HISTORY_KEY) || '[]'); } catch { return []; }
   });
   const [jobs, setJobs] = useState<any[]>([]);
+
+  useEffect(() => onAuthStateChanged(auth, setUser), []);
 
   // Escutar jobs do Firestore em tempo real
   useEffect(() => {
