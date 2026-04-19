@@ -29,8 +29,25 @@ async function getGoogleAuth() {
     );
     oauth2Client.setCredentials({
         access_token: credsData.token,
-        refresh_token: credsData.refresh_token
+        refresh_token: credsData.refresh_token,
+        expiry_date: credsData.expiry_date
     });
+
+    const shouldRefresh = Boolean(
+        credsData.refresh_token &&
+        (!credsData.expiry_date || Date.now() >= credsData.expiry_date - 60_000)
+    );
+
+    if (shouldRefresh) {
+        await oauth2Client.refreshAccessToken();
+        const refreshed = oauth2Client.credentials || {};
+        await db.collection('system').doc('google_credentials').update({
+            token: refreshed.access_token || credsData.token,
+            expiry_date: refreshed.expiry_date || null,
+            updated_at: admin.firestore.FieldValue.serverTimestamp()
+        });
+    }
+
     return oauth2Client;
 }
 
