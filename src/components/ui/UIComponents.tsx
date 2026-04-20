@@ -270,8 +270,9 @@ const DatePickerButton = ({ taskId, onUpdateTask }: { taskId: string, onUpdateTa
   );
 };
 
-export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, onUpdateToToday, onUpdateTask, highlighted }: {
+export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, onDelete, onEdit, onUpdateToToday, onUpdateTask, highlighted }: {
   task: Tarefa,
+  isDark?: boolean,
   onClick?: () => void,
   onToggle: (id: string, currentStatus: string) => void,
   onDelete: (id: string) => void,
@@ -325,7 +326,7 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
         e.dataTransfer.effectAllowed = 'move';
       }}
       title={task.data_criacao ? `Criada em: ${formatDate(task.data_criacao.split('T')[0])}` : ''}
-      className={`group w-full px-4 md:px-6 py-5 md:py-4 border-b border-slate-100 hover:bg-slate-50/80 transition-all flex flex-col sm:flex-row sm:items-start gap-4 md:gap-6 animate-in cursor-pointer relative ${isCompleted ? 'opacity-60 grayscale-[0.5]' : ''} ${highlighted ? 'bg-gradient-to-r from-blue-50/50 to-white border-l-4 border-l-blue-600 py-8 md:py-7 shadow-lg ring-1 ring-blue-200/50 scale-[1.01] z-10' : 'bg-white'}`}
+      className={`group w-full px-4 md:px-6 py-5 md:py-4 border-b transition-all flex flex-col sm:flex-row sm:items-start gap-4 md:gap-6 animate-in cursor-pointer relative ${isDark ? 'border-slate-800/90 hover:bg-slate-900/55' : 'border-slate-200/80 hover:bg-slate-50/70'} ${isCompleted ? 'opacity-60 grayscale-[0.35]' : ''} ${highlighted ? isDark ? 'bg-slate-800/80 border-l-2 border-l-blue-400' : 'bg-blue-50/70 border-l-2 border-l-blue-600' : 'bg-transparent'}`}
     >
       {/* Esquerda: Checkbox + Título */}
       <div className="flex items-center gap-4 flex-1 min-w-0">
@@ -334,25 +335,25 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
             e.stopPropagation();
             onToggle(task.id, task.status);
           }}
-          className={`w-6 h-6 sm:w-5 sm:h-5 rounded-lg border-2 flex items-center justify-center transition-all flex-shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : (highlighted ? 'border-amber-300 hover:border-amber-500' : 'border-slate-200 hover:border-slate-400')} text-transparent`}
+          className={`w-6 h-6 sm:w-5 sm:h-5 rounded-lg border-2 flex items-center justify-center transition-all flex-shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : highlighted ? (isDark ? 'border-blue-400 hover:border-blue-300' : 'border-amber-300 hover:border-amber-500') : (isDark ? 'border-slate-500 hover:border-slate-300' : 'border-slate-200 hover:border-slate-400')} text-transparent`}
         >
           <svg className="w-4 h-4 sm:w-3.5 sm:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" /></svg>
         </button>
 
         <div className="flex flex-col gap-1 flex-1 min-w-0">
           {highlighted && !isCompleted && (
-            <div className="flex items-center gap-1.5 animate-pulse">
+            <div className="flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
-              <span className="text-[9px] font-black text-blue-700 uppercase tracking-[0.2em]">Executar Agora • Próxima Ação</span>
+              <span className={`text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>Executar Agora • Próxima Ação</span>
             </div>
           )}
-          <div className={`${highlighted ? 'text-[15px] md:text-lg font-black text-amber-950' : 'text-[13px] md:text-[15px] font-bold text-[#1a202c]'} leading-snug transition-colors whitespace-normal break-words ${isCompleted ? 'line-through text-slate-400' : (highlighted ? 'group-hover:text-amber-700' : 'group-hover:text-blue-600')}`}>
+          <div className={`${highlighted ? `text-[15px] md:text-lg font-black ${isDark ? 'text-slate-50' : 'text-slate-950'}` : `text-[13px] md:text-[15px] font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`} leading-snug transition-colors whitespace-normal break-words ${isCompleted ? 'line-through text-slate-400' : isDark ? 'group-hover:text-blue-300' : 'group-hover:text-blue-700'}`}>
             {task.titulo}
           </div>
           {task.tags && task.tags.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-0.5 opacity-60">
               {task.tags.map(tag => (
-                <span key={tag} className="text-[8px] md:text-[9px] font-bold text-slate-500 lowercase tracking-wide before:content-['#']">
+                <span key={tag} className={`text-[8px] md:text-[9px] font-bold lowercase tracking-wide before:content-['#'] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
                   {tag}
                 </span>
               ))}
@@ -365,7 +366,7 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
       <div className="flex items-start justify-between sm:justify-end sm:self-start gap-4 md:gap-6 flex-wrap sm:flex-nowrap">
         <div className="flex items-center gap-2 flex-wrap">
           {task.area_tematica && task.area_tematica !== 'NÃO CLASSIFICADA' && (
-            <span className={`text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded-full border whitespace-nowrap ${getTagStyle(task.area_tematica, 'category')}`}>
+            <span className={`text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded-full border whitespace-nowrap opacity-80 ${isDark ? 'bg-slate-100 text-slate-700 border-slate-200' : getTagStyle(task.area_tematica, 'category')}`}>
               {task.area_tematica}
             </span>
           )}
@@ -376,7 +377,7 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
         </div>
 
         <div className="flex items-center gap-6">
-          <div className="flex items-center gap-1.5 text-slate-400 font-black uppercase text-[9px] md:text-[10px] tracking-widest min-w-[65px] relative group/date hover:text-blue-600 transition-all">
+          <div className={`flex items-center gap-1.5 font-black uppercase text-[9px] md:text-[10px] tracking-widest min-w-[65px] relative group/date transition-all ${isDark ? 'text-slate-400 hover:text-blue-300' : 'text-slate-400 hover:text-blue-600'}`}>
             <svg className="w-3 h-3 md:w-3.5 md:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
             <span>{dateDisplay} {task.horario_inicio ? `• ${task.horario_inicio}` : ''}</span>
             {onUpdateTask && (
@@ -404,7 +405,7 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
               {onUpdateToToday && (
                 <button
                   onClick={(e) => { e.stopPropagation(); onUpdateToToday(task); }}
-                  className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg md:rounded-xl transition-all"
+                  className={`p-2 rounded-lg md:rounded-xl transition-all ${isDark ? 'text-slate-500 hover:text-emerald-300 hover:bg-emerald-500/10' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}
                   title="Mover para Hoje"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -424,7 +425,7 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
                     window.dispatchEvent(new CustomEvent('open-knowledge-node', { detail: task.sourceKnowledgeId }));
                   }}
                   title="Abrir E-mail Original no Grafo"
-                  className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg md:rounded-xl transition-all mr-1"
+                  className={`p-2 rounded-lg md:rounded-xl transition-all mr-1 ${isDark ? 'text-blue-300 hover:text-blue-200 hover:bg-blue-500/10' : 'text-blue-500 hover:text-blue-700 hover:bg-blue-50'}`}
                 >
                   <svg className="w-4 h-4 md:w-4.5 md:h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -437,7 +438,7 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
 
               <button
                 onClick={(e) => { e.stopPropagation(); onEdit(task); }}
-                className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg md:rounded-xl transition-all"
+                className={`p-2 rounded-lg md:rounded-xl transition-all ${isDark ? 'text-slate-500 hover:text-blue-300 hover:bg-blue-500/10' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}
                 title="Editar Ação"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
@@ -452,7 +453,7 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
                     setIsConfirmingDelete(true);
                   }
                 }}
-                className={`p-2 rounded-lg md:rounded-xl transition-all ${isConfirmingDelete ? 'bg-rose-500 text-white shadow-lg shadow-rose-200' : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'}`}
+                className={`p-2 rounded-lg md:rounded-xl transition-all ${isConfirmingDelete ? 'bg-rose-500 text-white shadow-lg shadow-rose-200' : isDark ? 'text-slate-500 hover:text-rose-300 hover:bg-rose-500/10' : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'}`}
                 title={isConfirmingDelete ? "Confirmar?" : "Excluir"}
               >
                 {isConfirmingDelete ? (
@@ -465,7 +466,7 @@ export const RowCard = React.memo(({ task, onClick, onToggle, onDelete, onEdit, 
           )}
 
           {isCompleted && (
-            <span className={`text-[8px] md:text-[9px] font-black uppercase px-2 py-1 rounded-full ${STATUS_COLORS[statusValue] || 'bg-slate-100 text-slate-500'}`}>
+            <span className={`text-[8px] md:text-[9px] font-black uppercase px-2 py-1 rounded-full ${isDark ? 'bg-emerald-500/15 text-emerald-300' : STATUS_COLORS[statusValue] || 'bg-slate-100 text-slate-500'}`}>
               {task.status}
             </span>
           )}

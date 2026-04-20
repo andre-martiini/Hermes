@@ -6217,7 +6217,6 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
     drive_file_id = data.get('driveFileId')
     drive_file_name = (data.get('driveFileName') or 'documento').strip()
     routing_index = data.get('routingIndex') or []
-    routing_index = data.get('routingIndex') or []
     user_uid = req.auth.uid if req.auth else None
 
     # Ingestão muda: arquivo sem texto → prompt padrão de catalogação
@@ -6251,18 +6250,6 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         _save_user_profile_signal(db, user_uid, prompt, task_id, system_id)
         memory_context = _build_memory_context(db, gemini_key, prompt, limit=4)
         matched_pop_directives = _match_pop_directives(db, prompt)
-
-        tools_routing_context = ""
-        if routing_index:
-            tools_routing_context = "\n\n## CATÁLOGO DE FERRAMENTAS DISPONÍVEIS\n"
-            tools_routing_context += "Você pode acionar ferramentas interativas na interface do usuário usando a função `acionar_ferramenta`. "
-            tools_routing_context += "Não peça permissão para usar as ferramentas, acione-as diretamente se a intenção do usuário bater com as chaves (keys) ou a tag abaixo:\n\n"
-            for t in routing_index:
-                tools_routing_context += f"- ID da Ferramenta: {t['id']}\n"
-                tools_routing_context += f"  Tag Explícita: {t.get('tag', '')}\n"
-                tools_routing_context += f"  Chaves de Ativação (Keys): {', '.join(t.get('keys', []))}\n\n"
-            tools_routing_context += "ATENÇÃO: Caso o usuário use uma Tag Explícita (ex: @SlidesTool) mas o texto do pedido exija algo totalmente diferente (ex: 'Gerar nota fiscal'), seja juiz semântico, suspenda o acionamento e alerte-o sobre a contradição.\n"
-
 
         tools_routing_context = ""
         if routing_index:
@@ -7430,7 +7417,6 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "## PERFIL OPERACIONAL DO USUÁRIO\n"
             f"{_format_ai_profile_for_prompt(ai_profile)}\n\n"
             f"{tools_routing_context}"
-            f"{tools_routing_context}"
             "\n\nCATÁLOGO DE SISTEMAS (Mapeamento Exato de Nome para ID):\n"
             f"{sistemas_str}\n\n"
             "Ao realizar diagnósticos ou operações em sistemas, utilize SEMPRE o ID técnico do catálogo acima correspondente ao nome citado pelo usuário.\n\n"
@@ -8270,10 +8256,29 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             response = chat.send_message(function_response_parts)
 
         if tool_invocation_data:
+            clean_text = "[Invocando Ferramenta...]"
+            suggested_title = prompt[:50] if prompt and len(prompt) < 100 else None
+
+            if session_id:
+                try:
+                    db.collection('sessoes_copiloto').document(session_id).collection('mensagens').add({
+                        "role": "assistant",
+                        "content": clean_text,
+                        "toolInvocation": tool_invocation_data,
+                        "toolsUsed": tools_used if tools_used else None,
+                        "timestamp": firestore.SERVER_TIMESTAMP
+                    })
+                    db.collection('sessoes_copiloto').document(session_id).update({
+                        "lastMessageAt": firestore.SERVER_TIMESTAMP
+                    })
+                except Exception as e:
+                    print(f"Erro ao salvar invocação de ferramenta no Firestore: {e}")
+
             return {
-                "result": "[Invocando Ferramenta...]",
+                "result": clean_text,
                 "kg_nodes": kg_nodes_payload,
-                "toolInvocation": tool_invocation_data
+                "toolInvocation": tool_invocation_data,
+                "suggestedTitle": suggested_title
             }
 
         result_text = response.text

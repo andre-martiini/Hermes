@@ -13,6 +13,7 @@ import { httpsCallable } from 'firebase/functions';
 import { setDoc, doc } from 'firebase/firestore';
 import { DiarioBordoUI } from './DiarioBordoUI';
 import { SpeedDialMenu } from '../components/ui/SpeedDialMenu';
+import { HermesCopilotoDrawer } from '../components/tools/HermesCopilotoDrawer';
 
 const getPendingFileKey = (file: File) => `${file.name}-${file.size}-${file.lastModified}`;
 
@@ -26,6 +27,7 @@ interface Artifact {
 interface TaskExecutionViewProps {
   task: Tarefa;
   tarefas: Tarefa[];
+  isDark?: boolean;
   appSettings: AppSettings;
   knowledgeBases?: BaseConhecimento[];
   onSave: (id: string, updates: Partial<Tarefa>) => void;
@@ -47,14 +49,28 @@ interface TaskExecutionViewProps {
   onMarkAsRead: (id: string) => void;
   onDismiss: (id: string) => void;
   onOpenCopiloto: () => void;
+  copilotoUserId: string;
+  onOpenCopilotoTask?: (taskId: string) => void;
+  onOpenCopilotoTool?: (tool: string, id: string) => void;
   onCreateAction: () => void;
 }
 
 type MobileTab = 'mapa' | 'diario';
+type DesktopPanel = 'plan' | 'copilot';
+
+const OPS_LAYOUT_KEY = 'hermes-ops-layout-v1';
+const DESKTOP_BREAKPOINT = 1024;
+const PANEL_COLLAPSED_WIDTH = 52;
+const PLAN_PANEL_MIN_WIDTH = 280;
+const COPILOT_PANEL_MIN_WIDTH = 320;
+const DIARY_PANEL_MIN_WIDTH = 480;
+const PLAN_PANEL_DEFAULT_WIDTH = 360;
+const COPILOT_PANEL_DEFAULT_WIDTH = 440;
 
 export const TaskExecutionView = ({
   task,
   tarefas,
+  isDark = false,
   appSettings,
   knowledgeBases = [],
   onSave,
@@ -76,6 +92,9 @@ export const TaskExecutionView = ({
   onMarkAsRead,
   onDismiss,
   onOpenCopiloto,
+  copilotoUserId,
+  onOpenCopilotoTask,
+  onOpenCopilotoTool,
   onCreateAction,
 }: TaskExecutionViewProps) => {
 
@@ -87,6 +106,11 @@ export const TaskExecutionView = ({
 
   // ─── States ───────────────────────────────────────────────────
   const [mobileTab, setMobileTab] = useState<MobileTab>('diario');
+  const [desktopViewportWidth, setDesktopViewportWidth] = useState(() => window.innerWidth);
+  const [planPanelWidth, setPlanPanelWidth] = useState(PLAN_PANEL_DEFAULT_WIDTH);
+  const [copilotPanelWidth, setCopilotPanelWidth] = useState(COPILOT_PANEL_DEFAULT_WIDTH);
+  const [isPlanCollapsed, setIsPlanCollapsed] = useState(false);
+  const [isCopilotCollapsed, setIsCopilotCollapsed] = useState(false);
   const [newFollowUp, setNewFollowUp] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [showPool, setShowPool] = useState(false);
@@ -166,9 +190,10 @@ export const TaskExecutionView = ({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const diaryEndRef = useRef<HTMLDivElement>(null);
+  const workspaceRef = useRef<HTMLDivElement>(null);
 
   const isBreakActive = false;
-  const isDark = false;
+  const isDesktopViewport = desktopViewportWidth >= DESKTOP_BREAKPOINT;
 
   const progressPercent = useMemo(() => {
     const items = currentTaskData.plano_acao || [];
@@ -176,6 +201,80 @@ export const TaskExecutionView = ({
     const done = items.filter(i => i.completed).length;
     return Math.round((done / items.length) * 100);
   }, [currentTaskData.plano_acao]);
+
+  useEffect(() => {
+    const handleViewportResize = () => setDesktopViewportWidth(window.innerWidth);
+    handleViewportResize();
+    window.addEventListener('resize', handleViewportResize);
+    return () => window.removeEventListener('resize', handleViewportResize);
+  }, []);
+
+  useEffect(() => {
+    try {
+      const savedLayout = localStorage.getItem(OPS_LAYOUT_KEY);
+      if (!savedLayout) return;
+      const parsed = JSON.parse(savedLayout);
+      if (typeof parsed.planWidth === 'number') setPlanPanelWidth(parsed.planWidth);
+      if (typeof parsed.copilotWidth === 'number') setCopilotPanelWidth(parsed.copilotWidth);
+      if (typeof parsed.isPlanCollapsed === 'boolean') setIsPlanCollapsed(parsed.isPlanCollapsed);
+      if (typeof parsed.isCopilotCollapsed === 'boolean') setIsCopilotCollapsed(parsed.isCopilotCollapsed);
+    } catch (error) {
+      console.warn('[TaskExecutionView] Falha ao carregar layout da sala de operações', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(OPS_LAYOUT_KEY, JSON.stringify({
+      planWidth: planPanelWidth,
+      copilotWidth: copilotPanelWidth,
+      isPlanCollapsed,
+      isCopilotCollapsed,
+    }));
+  }, [copilotPanelWidth, isCopilotCollapsed, isPlanCollapsed, planPanelWidth]);
+
+  const getPanelMaxWidth = (panel: DesktopPanel) => {
+    const workspaceWidth = workspaceRef.current?.clientWidth || desktopViewportWidth;
+    const otherPanelWidth = panel === 'plan'
+      ? (isCopilotCollapsed ? PANEL_COLLAPSED_WIDTH : copilotPanelWidth)
+      : (isPlanCollapsed ? PANEL_COLLAPSED_WIDTH : planPanelWidth);
+    const panelMinWidth = panel === 'plan' ? PLAN_PANEL_MIN_WIDTH : COPILOT_PANEL_MIN_WIDTH;
+    return Math.max(panelMinWidth, workspaceWidth - otherPanelWidth - DIARY_PANEL_MIN_WIDTH);
+  };
+
+  const startDesktopResize = (panel: DesktopPanel, event: React.MouseEvent) => {
+    if (!isDesktopViewport) return;
+
+    event.preventDefault();
+    const startX = event.clientX;
+    const initialWidth = panel === 'plan' ? planPanelWidth : copilotPanelWidth;
+    document.body.style.cursor = 'ew-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const rawWidth = panel === 'plan' ? initialWidth + deltaX : initialWidth - deltaX;
+      const nextWidth = Math.max(
+        panel === 'plan' ? PLAN_PANEL_MIN_WIDTH : COPILOT_PANEL_MIN_WIDTH,
+        Math.min(rawWidth, getPanelMaxWidth(panel))
+      );
+
+      if (panel === 'plan') {
+        setPlanPanelWidth(nextWidth);
+      } else {
+        setCopilotPanelWidth(nextWidth);
+      }
+    };
+
+    const onMouseUp = () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
 
   // ─── Checklist Toggle (with auto-diary entry) ─────────────────
   const handleToggleChecklistItem = (itemId: string) => {
@@ -739,6 +838,44 @@ export const TaskExecutionView = ({
   // ─── Columns visibility (mobile tabs) ────────────────────────
   const showMapa = mobileTab === 'mapa';
   const showDiario = mobileTab === 'diario';
+  const isPlanPanelCollapsed = isDesktopViewport && isPlanCollapsed;
+  const isCopilotPanelCollapsed = isDesktopViewport && isCopilotCollapsed;
+  const mapPanelDesktopWidth = isPlanPanelCollapsed ? PANEL_COLLAPSED_WIDTH : planPanelWidth;
+  const copilotoDesktopWidth = isCopilotPanelCollapsed ? PANEL_COLLAPSED_WIDTH : copilotPanelWidth;
+
+  const renderCollapsedPanelRail = (
+    panel: DesktopPanel,
+    title: string,
+    subtitle: string,
+    onExpand: () => void
+  ) => (
+    <div className={`hidden lg:flex h-full shrink-0 flex-col items-center justify-between rounded-2xl border px-2 py-4 ${cardBg}`}>
+      <button
+        onClick={onExpand}
+        className={`flex h-8 w-8 items-center justify-center rounded-xl border transition-all ${isDark ? 'border-white/10 text-white/70 hover:bg-white/10 hover:text-white' : 'border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-slate-900'}`}
+        title={`Expandir ${title}`}
+      >
+        <svg className={`h-4 w-4 ${panel === 'plan' ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
+        </svg>
+      </button>
+      <div className="flex flex-1 flex-col items-center justify-center gap-3">
+        <span className={`text-[8px] font-black uppercase tracking-[0.35em] [writing-mode:vertical-rl] rotate-180 ${mutedText}`}>{subtitle}</span>
+        <span className={`text-[9px] font-black uppercase tracking-widest [writing-mode:vertical-rl] rotate-180 ${isDark ? 'text-white/80' : 'text-slate-700'}`}>{title}</span>
+      </div>
+      <div className={`h-8 w-1 rounded-full ${isDark ? 'bg-white/10' : 'bg-slate-200'}`} />
+    </div>
+  );
+
+  const renderResizeHandle = (panel: DesktopPanel) => (
+    <div
+      onMouseDown={(event) => startDesktopResize(panel, event)}
+      className="group hidden lg:flex w-3 shrink-0 cursor-ew-resize items-center justify-center"
+      title="Arrastar para redimensionar"
+    >
+      <div className={`h-14 w-1 rounded-full transition-all ${isDark ? 'bg-white/10 group-hover:bg-blue-400/60' : 'bg-slate-300 group-hover:bg-blue-500/60'}`} />
+    </div>
+  );
 
   // ─── Render ───────────────────────────────────────────────────
   return (
@@ -823,11 +960,30 @@ export const TaskExecutionView = ({
       {/* ══════════════════════════════════════════════════════════
           MAIN CONTENT — 3-column desktop / single tab mobile
       ══════════════════════════════════════════════════════════ */}
-      <div className="flex-1 flex flex-col lg:grid lg:grid-cols-12 gap-0 lg:gap-4 lg:p-4 overflow-hidden">
+      <div ref={workspaceRef} className="flex-1 flex flex-col gap-0 overflow-hidden lg:flex-row lg:gap-0 lg:p-4">
 
         {/* LEFT COLUMN — Mapa Operacional */}
-        <div className={`lg:col-span-4 flex flex-col gap-3 overflow-y-auto lg:overflow-y-auto p-4 lg:p-0 ${!showMapa ? 'hidden lg:flex' : 'flex'}`}
-          style={{ scrollbarWidth: 'thin', scrollbarColor: '#CBD5E0 transparent' }}>
+        {isPlanPanelCollapsed ? (
+          renderCollapsedPanelRail('plan', 'Plano', 'Sala de Operações', () => setIsPlanCollapsed(false))
+        ) : (
+        <>
+        <div className={`flex flex-col gap-3 overflow-y-auto p-4 lg:p-0 ${!showMapa ? 'hidden lg:flex' : 'flex'} shrink-0 min-h-0`}
+          style={{ scrollbarWidth: 'thin', scrollbarColor: '#CBD5E0 transparent', width: isDesktopViewport ? mapPanelDesktopWidth : undefined }}>
+          <div className="hidden lg:flex items-center justify-between px-1 pb-1">
+            <div>
+              <p className={labelCls}>Plano de Ação</p>
+              <p className={`text-[11px] font-bold ${isDark ? 'text-white/70' : 'text-slate-700'}`}>Mapa operacional da ação</p>
+            </div>
+            <button
+              onClick={() => setIsPlanCollapsed(true)}
+              className={`flex h-8 w-8 items-center justify-center rounded-xl border transition-all ${isDark ? 'border-white/10 text-white/50 hover:bg-white/10 hover:text-white' : 'border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-slate-900'}`}
+              title="Retrair plano de ação"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+          </div>
 
           {/* Síntese / Descrição */}
           {currentTaskData.descricao && (
@@ -1176,8 +1332,13 @@ export const TaskExecutionView = ({
         </div>
 
         {/* CENTER COLUMN — Diário de Missão */}
-        <div className={`lg:col-span-8 flex flex-col overflow-hidden ${!showDiario ? 'hidden lg:flex' : 'flex'} min-h-0`}>
-          <div className={`flex-1 flex flex-col rounded-none lg:rounded-2xl border overflow-hidden ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
+        </>
+        )}
+
+        {!isPlanPanelCollapsed && renderResizeHandle('plan')}
+
+        <div className={`flex min-w-0 flex-1 flex-col overflow-hidden ${!showDiario ? 'hidden lg:flex' : 'flex'} min-h-0`}>
+          <div className={`flex-1 flex flex-col rounded-none lg:rounded-2xl border overflow-hidden ${isDark ? 'bg-[#0f1724] border-white/10' : 'bg-white border-slate-200'}`}>
             {/* Diary header */}
             <div className={`shrink-0 px-4 py-3 flex items-center justify-between border-b ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
               <div className="flex items-center gap-2">
@@ -1212,7 +1373,7 @@ export const TaskExecutionView = ({
               handleFileUploadInput={handleFileUploadInput}
               setModalConfig={setModalConfig}
               applyFormatting={() => { }}
-              isTimerRunning={false}
+              isTimerRunning={isDark}
               diaryEndRef={diaryEndRef}
               handleDiaryScroll={() => { }}
               handleEditDiaryEntry={(index) => {
@@ -1226,6 +1387,29 @@ export const TaskExecutionView = ({
             />
           </div>
         </div>
+
+        {!isCopilotPanelCollapsed && renderResizeHandle('copilot')}
+
+        {isCopilotPanelCollapsed ? (
+          renderCollapsedPanelRail('copilot', 'Copiloto', 'Hermes', () => setIsCopilotCollapsed(false))
+        ) : (
+          <div
+            className="hidden lg:flex min-h-0 shrink-0 flex-col"
+            style={{ width: copilotoDesktopWidth }}
+          >
+            <HermesCopilotoDrawer
+              isOpen
+              onClose={() => setIsCopilotCollapsed(true)}
+              isDark={isDark}
+              variant="embedded"
+              taskId={task.id}
+              systemId={currentTaskData.sistema_id}
+              userId={copilotoUserId}
+              onOpenTask={onOpenCopilotoTask}
+              onOpenTool={onOpenCopilotoTool}
+            />
+          </div>
+        )}
 
       </div>
 
@@ -1330,7 +1514,13 @@ export const TaskExecutionView = ({
       <div className="fixed bottom-6 right-6 z-[250]">
         <SpeedDialMenu
           notifications={notifications} isSyncing={isSyncing} isNotificationCenterOpen={isNotificationCenterOpen}
-          onOpenNotes={onOpenNotes} onOpenLog={onOpenLog} onOpenCopiloto={onOpenCopiloto} onOpenShopping={onOpenShopping}
+          onOpenNotes={onOpenNotes} onOpenLog={onOpenLog} onOpenCopiloto={() => {
+            if (isDesktopViewport) {
+              setIsCopilotCollapsed(false);
+              return;
+            }
+            onOpenCopiloto();
+          }} onOpenShopping={onOpenShopping}
           onOpenTranscription={onOpenTranscription} onOpenMeetingTranscription={onOpenMeetingTranscription}
           onToggleNotifications={onToggleNotifications} onSync={onSync} onOpenSettings={onOpenSettings}
           onCloseNotifications={onCloseNotifications} onMarkAsRead={onMarkAsRead} onDismiss={onDismiss}

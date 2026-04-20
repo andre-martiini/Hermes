@@ -6,6 +6,7 @@ import {
 
 interface DashboardViewProps {
     tarefas: Tarefa[];
+    isDark?: boolean;
     financeTransactions: FinanceTransaction[];
     financeSettings: FinanceSettings;
     fixedBills: FixedBill[];
@@ -24,19 +25,19 @@ interface DashboardViewProps {
 
 // --- SUBCOMPONENTES MOVIDOS PARA FORA ---
 
-const DashboardCard = ({ title, iconColor, onRedirect, children }: { title: string, iconColor: string, onRedirect: () => void, children: React.ReactNode }) => (
+const DashboardCard = ({ title, iconColor, onRedirect, children, isDark = false }: { title: string, iconColor: string, onRedirect: () => void, children: React.ReactNode, isDark?: boolean }) => (
     <div
         onClick={onRedirect}
-        className="group bg-white p-3 md:p-4 rounded-2xl md:rounded-[1.5rem] border border-slate-200 shadow-sm md:shadow-md hover:shadow-xl hover:border-slate-300 h-full transition-all flex flex-col cursor-pointer min-h-0"
+        className={`group p-3 md:p-4 rounded-2xl md:rounded-[1.5rem] border h-full transition-all flex flex-col cursor-pointer min-h-0 ${isDark ? 'bg-slate-900/85 border-slate-800 hover:border-slate-700' : 'bg-white border-slate-200 shadow-sm md:shadow-md hover:shadow-xl hover:border-slate-300'}`}
         role="button"
         tabIndex={0}
     >
         <div className="flex items-center justify-between mb-2 shrink-0">
             <div className="flex items-center gap-2">
                 <span className={`w-1.5 h-5 md:h-7 ${iconColor} rounded-full`}></span>
-                <h3 className="text-xs md:text-base font-black text-slate-900 uppercase tracking-tight">{title}</h3>
+                <h3 className={`text-xs md:text-base font-black uppercase tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{title}</h3>
             </div>
-            <div className="p-2 rounded-xl text-slate-400 group-hover:bg-slate-50 group-hover:text-slate-900 transition-all">
+            <div className={`p-2 rounded-xl transition-all ${isDark ? 'text-slate-500 group-hover:bg-slate-800 group-hover:text-slate-100' : 'text-slate-400 group-hover:bg-slate-50 group-hover:text-slate-900'}`}>
                 <svg className="w-5 h-5 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13 7l5 5m0 0l-5 5m5-5H6" />
                 </svg>
@@ -48,45 +49,34 @@ const DashboardCard = ({ title, iconColor, onRedirect, children }: { title: stri
     </div>
 );
 
-const PieChart = ({ data }: { data: [string, number][] }) => {
+const PieChart = ({ data, isDark = false }: { data: [string, number][], isDark?: boolean }) => {
     const total = data.reduce((acc, curr) => acc + curr[1], 0);
-    if (total === 0) return <div className="h-24 md:h-40 flex items-center justify-center text-slate-300 text-[10px] font-black uppercase">Sem dados</div>;
+    if (total === 0) return <div className={`h-24 md:h-40 flex items-center justify-center text-[10px] font-black uppercase ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>Sem dados</div>;
 
-    let currentAngle = 0;
-    const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+    const colors = isDark
+        ? ['#60a5fa', '#34d399', '#fbbf24', '#fb7185', '#a78bfa', '#f472b6']
+        : ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
     return (
-        <div className="flex items-center gap-3 md:gap-6">
-            <svg viewBox="0 0 100 100" className="w-16 h-16 md:w-28 md:h-28 transform -rotate-90 shrink-0 drop-shadow-lg">
-                {data.map((item, i) => {
-                    const percentage = item[1] / total;
-                    const angle = percentage * 360;
-
-                    if (percentage === 1) {
-                        return <circle key={i} cx="50" cy="50" r="40" fill={colors[i % colors.length]} />;
-                    }
-
-                    const x1 = 50 + 40 * Math.cos((currentAngle * Math.PI) / 180);
-                    const y1 = 50 + 40 * Math.sin((currentAngle * Math.PI) / 180);
-                    const x2 = 50 + 40 * Math.cos(((currentAngle + angle) * Math.PI) / 180);
-                    const y2 = 50 + 40 * Math.sin(((currentAngle + angle) * Math.PI) / 180);
-
-                    const largeArc = angle > 180 ? 1 : 0;
-                    const d = `M 50 50 L ${x1} ${y1} A 40 40 0 ${largeArc} 1 ${x2} ${y2} Z`;
-
-                    currentAngle += angle;
-                    return <path key={i} d={d} className="transition-all duration-500 hover:opacity-80 cursor-pointer" fill={colors[i % colors.length]} />;
-                })}
-                <circle cx="50" cy="50" r="22" fill="white" />
-            </svg>
-            <div className="space-y-1 md:space-y-1.5 flex-1 min-w-0">
+        <div className="space-y-2 md:space-y-2.5">
+            <div className={`h-2 rounded-full overflow-hidden flex ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                {data.slice(0, 5).map((item, i) => (
+                    <div
+                        key={i}
+                        className="h-full transition-all"
+                        style={{ width: `${(item[1] / total) * 100}%`, backgroundColor: colors[i % colors.length] }}
+                        title={`${item[0]}: ${item[1]}`}
+                    />
+                ))}
+            </div>
+            <div className="space-y-1.5 flex-1 min-w-0">
                 {data.slice(0, 5).map((item, i) => (
                     <div key={i} className="flex items-center justify-between gap-3 group">
-                        <div className="flex items-center gap-2 truncate">
-                            <div className="w-2 h-2 md:w-2.5 md:h-2.5 rounded-full shrink-0 shadow-sm" style={{ backgroundColor: colors[i % colors.length] }}></div>
-                            <span className="text-[9px] md:text-[11px] font-bold text-slate-600 uppercase truncate group-hover:text-slate-900 transition-colors">{item[0]}</span>
+                        <div className="flex items-center gap-2 truncate flex-1">
+                            <div className="w-2 h-2 md:w-2.5 md:h-2.5 rounded-full shrink-0" style={{ backgroundColor: colors[i % colors.length] }}></div>
+                            <span className={`text-[9px] md:text-[11px] font-bold uppercase truncate transition-colors ${isDark ? 'text-slate-300 group-hover:text-slate-100' : 'text-slate-600 group-hover:text-slate-900'}`}>{item[0]}</span>
                         </div>
-                        <span className="text-[10px] md:text-xs font-black text-slate-900">{item[1]}</span>
+                        <span className={`text-[10px] md:text-xs font-black ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{item[1]}</span>
                     </div>
                 ))}
             </div>
@@ -94,11 +84,11 @@ const PieChart = ({ data }: { data: [string, number][] }) => {
     );
 };
 
-const BarChart = ({ data, color, maxHeight = 65 }: { data: number[], color: string, maxHeight?: number }) => {
+const BarChart = ({ data, color, isDark = false, maxHeight = 65 }: { data: number[], color: string, isDark?: boolean, maxHeight?: number }) => {
     const max = Math.max(...data, 1);
     const chartHeightClass = "h-[40px] md:h-[65px]";
     return (
-        <div className={`flex items-end gap-0.5 md:gap-1 ${chartHeightClass} w-full bg-slate-50/50 rounded-lg md:rounded-xl px-1 md:px-2 pb-1 md:pb-2`}>
+        <div className={`flex items-end gap-0.5 md:gap-1 ${chartHeightClass} w-full rounded-lg md:rounded-xl px-1 md:px-2 pb-1 md:pb-2 ${isDark ? 'bg-slate-950/80' : 'bg-slate-50/50'}`}>
             {data.map((v, i) => (
                 <div key={i} className="flex-1 flex flex-col justify-end items-center gap-0.5 group">
                     <div
@@ -110,33 +100,33 @@ const BarChart = ({ data, color, maxHeight = 65 }: { data: number[], color: stri
                         }}
                         title={`Dia ${i + 1}: R$ ${v.toFixed(2)}`}
                     />
-                    <span className="text-[6px] md:text-[8px] text-slate-400 font-bold opacity-60 group-hover:opacity-100">{i + 1}</span>
+                    <span className={`text-[6px] md:text-[8px] font-bold opacity-60 group-hover:opacity-100 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{i + 1}</span>
                 </div>
             ))}
         </div>
     );
 };
 
-const SystemsBarChart = ({ data }: { data: [string, number][] }) => {
+const SystemsBarChart = ({ data, isDark = false }: { data: [string, number][], isDark?: boolean }) => {
     const max = Math.max(...data.map(d => d[1]), 1);
     return (
         <div className="space-y-1 md:space-y-2">
             {data.map((item, i) => (
                 <div key={i} className="space-y-0.5 md:space-y-1">
-                    <div className="flex justify-between text-[8px] md:text-[10px] font-black uppercase text-slate-500 tracking-tight">
+                    <div className={`flex justify-between text-[8px] md:text-[10px] font-black uppercase tracking-tight ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                         <span className="truncate max-w-[150px] md:max-w-[200px]">{item[0]}</span>
-                        <span className="text-slate-900">{item[1]} ajustes</span>
+                        <span className={isDark ? 'text-slate-100' : 'text-slate-900'}>{item[1]} ajustes</span>
                     </div>
-                    <div className="h-1 md:h-2 bg-slate-100 rounded-full overflow-hidden shadow-inner">
+                    <div className={`h-1 md:h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-100 shadow-inner'}`}>
                         <div
-                            className="h-full bg-violet-500 rounded-full transition-all duration-1000 shadow-[0_0_8px_rgba(139,92,246,0.3)]"
+                            className="h-full bg-violet-500 rounded-full transition-all duration-1000"
                             style={{ width: `${(item[1] / max) * 100}%` }}
                         />
                     </div>
                 </div>
             ))}
             {data.length === 0 && (
-                <div className="py-4 text-center text-slate-300 text-[10px] md:text-xs font-black uppercase tracking-widest italic opacity-50">Nenhum ajuste pendente</div>
+                <div className={`py-4 text-center text-[10px] md:text-xs font-black uppercase tracking-widest italic opacity-50 ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>Nenhum ajuste pendente</div>
             )}
         </div>
     );
@@ -169,6 +159,7 @@ const OrphanItemsDebugger = ({ workItems, unidades, sistemasDetalhes }: { workIt
 
 const DashboardView: React.FC<DashboardViewProps> = ({
     tarefas = [],
+    isDark = false,
     financeTransactions = [],
     financeSettings = {} as FinanceSettings,
     fixedBills = [],
@@ -367,49 +358,49 @@ const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="grid grid-cols-1 lg:grid-cols-2 lg:grid-rows-2 gap-2 md:gap-3 lg:gap-2 flex-1 min-h-0">
 
                 {/* CARD: AÇÕES */}
-                <DashboardCard title="Ações" iconColor="bg-blue-500" onRedirect={() => onNavigate('gallery')}>
+                <DashboardCard title="Ações" iconColor="bg-blue-500" onRedirect={() => onNavigate('gallery')} isDark={isDark}>
                     <div className="space-y-3 md:space-y-4">
                         <div className="grid grid-cols-2 gap-2 md:gap-3">
-                            <div className="bg-blue-50/50 p-2 md:p-3 rounded-xl md:rounded-2xl border border-blue-100/50 flex flex-col justify-center transition-transform hover:scale-[1.01]">
-                                <p className="text-[8px] md:text-[10px] font-black text-blue-600 uppercase tracking-widest mb-1">Em Andamento</p>
-                                <div className="text-lg md:text-xl font-black text-slate-900">{inProgressActions.length}</div>
+                            <div className={`p-2 md:p-3 rounded-xl md:rounded-2xl border flex flex-col justify-center transition-transform hover:scale-[1.01] ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-blue-50/50 border-blue-100/50'}`}>
+                                <p className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-1 ${isDark ? 'text-blue-300' : 'text-blue-600'}`}>Em Andamento</p>
+                                <div className={`text-lg md:text-xl font-black ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{inProgressActions.length}</div>
                             </div>
-                            <div className="bg-indigo-50/50 p-2 md:p-3 rounded-xl md:rounded-2xl border border-indigo-100/50 flex flex-col justify-center transition-transform hover:scale-[1.01]">
-                                <p className="text-[8px] md:text-[10px] font-black text-indigo-600 uppercase tracking-widest mb-1">Hoje/Amanhã</p>
-                                <div className="text-lg md:text-xl font-black text-slate-900">{nextTwoDaysActions.length}</div>
+                            <div className={`p-2 md:p-3 rounded-xl md:rounded-2xl border flex flex-col justify-center transition-transform hover:scale-[1.01] ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-indigo-50/50 border-indigo-100/50'}`}>
+                                <p className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-1 ${isDark ? 'text-indigo-300' : 'text-indigo-600'}`}>Hoje/Amanhã</p>
+                                <div className={`text-lg md:text-xl font-black ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{nextTwoDaysActions.length}</div>
                             </div>
                         </div>
                         <div className="flex-1">
-                            <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 md:mb-3">Distribuição por Área</p>
-                            <PieChart data={actionsByArea} />
+                            <p className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-2 md:mb-3 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Distribuição por Área</p>
+                            <PieChart data={actionsByArea} isDark={isDark} />
                         </div>
                     </div>
                 </DashboardCard>
 
                 {/* CARD: FINANCEIRO */}
-                <DashboardCard title="Financeiro" iconColor="bg-emerald-500" onRedirect={() => onNavigate('finance')}>
+                <DashboardCard title="Financeiro" iconColor="bg-emerald-500" onRedirect={() => onNavigate('finance')} isDark={isDark}>
                     <div className="space-y-2 md:space-y-4">
                         <div>
-                            <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5 md:mb-1">Saldo Disponível</p>
-                            <div className={`text-lg md:text-2xl font-black tracking-tight ${availableBalance < 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+                            <p className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-0.5 md:mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Saldo Disponível</p>
+                            <div className={`text-lg md:text-2xl font-black tracking-tight ${availableBalance < 0 ? 'text-rose-600' : isDark ? 'text-slate-100' : 'text-slate-900'}`}>
                                 R$ {availableBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </div>
                         </div>
                         <div className="flex-1">
-                            <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Gastos Diários</p>
-                            <BarChart data={dailySpending} color="#10b981" />
+                            <p className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Gastos Diários</p>
+                            <BarChart data={dailySpending} color={isDark ? "#34d399" : "#10b981"} isDark={isDark} />
                         </div>
-                        <div className="grid grid-cols-2 gap-2 md:gap-4 pt-2 md:pt-3 border-t border-slate-100">
+                        <div className={`grid grid-cols-2 gap-2 md:gap-4 pt-2 md:pt-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
                             <div className="group">
-                                <p className="text-[7px] md:text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Recebido</p>
-                                <div className="text-[10px] md:text-sm font-black text-slate-900 group-hover:text-emerald-600 transition-colors">R$ {currentMonthIncome.toLocaleString('pt-BR')}</div>
+                                <p className={`text-[7px] md:text-[9px] font-black uppercase tracking-widest mb-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Recebido</p>
+                                <div className={`text-[10px] md:text-sm font-black transition-colors ${isDark ? 'text-slate-100 group-hover:text-emerald-300' : 'text-slate-900 group-hover:text-emerald-600'}`}>R$ {currentMonthIncome.toLocaleString('pt-BR')}</div>
                                 <div className={`text-[7px] md:text-[9px] font-bold inline-flex items-center gap-1 ${incomeVariation >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                                     {incomeVariation >= 0 ? '↑' : '↓'} {Math.abs(incomeVariation).toFixed(0)}%
                                 </div>
                             </div>
                             <div className="group">
-                                <p className="text-[7px] md:text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Em Contas</p>
-                                <div className="text-[10px] md:text-sm font-black text-slate-900 group-hover:text-rose-600 transition-colors">R$ {currentTotalBills.toLocaleString('pt-BR')}</div>
+                                <p className={`text-[7px] md:text-[9px] font-black uppercase tracking-widest mb-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Em Contas</p>
+                                <div className={`text-[10px] md:text-sm font-black transition-colors ${isDark ? 'text-slate-100 group-hover:text-rose-300' : 'text-slate-900 group-hover:text-rose-600'}`}>R$ {currentTotalBills.toLocaleString('pt-BR')}</div>
                                 <div className={`text-[7px] md:text-[9px] font-bold inline-flex items-center gap-1 ${billsVariation <= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                                     {billsVariation <= 0 ? '↓' : '↑'} {Math.abs(billsVariation).toFixed(0)}%
                                 </div>
@@ -419,23 +410,23 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                 </DashboardCard>
 
                 {/* CARD: SAÚDE */}
-                <DashboardCard title="Saúde" iconColor="bg-rose-500" onRedirect={() => onNavigate('saude')}>
+                <DashboardCard title="Saúde" iconColor="bg-rose-500" onRedirect={() => onNavigate('saude')} isDark={isDark}>
                     <div className="space-y-3 md:space-y-4">
                         <div className="flex justify-between items-end">
                             <div>
-                                <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5 md:mb-1">Peso vs Meta</p>
-                                <div className="text-lg md:text-2xl font-black text-slate-900">
-                                    {hasWeightData ? currentWeight.toFixed(1) : '--'} <span className="text-slate-300 text-xs md:text-base">/ {healthSettings?.targetWeight || '--'} kg</span>
+                                <p className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-0.5 md:mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Peso vs Meta</p>
+                                <div className={`text-lg md:text-2xl font-black ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                                    {hasWeightData ? currentWeight.toFixed(1) : '--'} <span className={`${isDark ? 'text-slate-600' : 'text-slate-300'} text-xs md:text-base`}>/ {healthSettings?.targetWeight || '--'} kg</span>
                                 </div>
                             </div>
                             <div className="text-right">
-                                <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5 md:mb-1">{weightDeltaLabel}</p>
+                                <p className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-0.5 md:mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{weightDeltaLabel}</p>
                                 <div className={`text-lg md:text-xl font-black ${weightDeltaColor}`}>
                                     {hasWeightTrendData ? `${weightDeltaPrefix}${weightDeltaAbs.toFixed(1)} kg` : '--'}
                                 </div>
                             </div>
                         </div>
-                        <div className="bg-slate-900 p-3 md:p-4 rounded-xl md:rounded-2xl text-white shadow-lg relative overflow-hidden group">
+                        <div className={`p-3 md:p-4 rounded-xl md:rounded-2xl text-white relative overflow-hidden group ${isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-900 shadow-lg'}`}>
                             <div className="absolute top-0 right-0 w-20 h-20 bg-blue-500/10 rounded-full blur-2xl -mr-10 -mt-10 group-hover:bg-blue-500/20 transition-all"></div>
                             <p className="text-[7px] md:text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5 relative z-10">Previsão (ETA)</p>
                             <div className="text-lg md:text-xl font-black text-blue-400 relative z-10">{healthProjection?.eta || '--'}</div>
@@ -454,7 +445,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                         )}
                         <div>
                             <div className="flex justify-between items-center mb-2">
-                                <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Ofensiva de Hábitos</p>
+                                <p className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Ofensiva de Hábitos</p>
                                 <span className="bg-amber-100 text-amber-700 text-[9px] md:text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm">{habitStreak} dias</span>
                             </div>
                             <div className="flex gap-1 md:gap-1.5">
@@ -468,7 +459,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                         <div
                                             key={i}
                                             className="flex-1 h-5 md:h-10 rounded-md md:rounded-lg shadow-inner transition-all hover:scale-105"
-                                            style={{ backgroundColor: count === 0 ? '#f1f5f9' : `hsl(${(count / 6) * 120}, 70%, 50%)` }}
+                                            style={{ backgroundColor: count === 0 ? (isDark ? '#1e293b' : '#f1f5f9') : `hsl(${(count / 6) * 120}, 70%, ${isDark ? '58%' : '50%'})` }}
                                             title={`${dStr}: ${count}/6 hábitos`}
                                         />
                                     );
@@ -479,19 +470,19 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                 </DashboardCard>
 
                 {/* CARD: SISTEMAS */}
-                <DashboardCard title="Sistemas" iconColor="bg-violet-500" onRedirect={() => onNavigate('sistemas-dev')}>
+                <DashboardCard title="Sistemas" iconColor="bg-violet-500" onRedirect={() => onNavigate('sistemas-dev')} isDark={isDark}>
                     <div className="space-y-3 md:space-y-4 flex flex-col h-full">
                         <div className="flex flex-wrap gap-2">
                             {systemsByPhase.map(([phase, count]) => (
-                                <div key={phase} className="px-2 py-1 md:px-3 md:py-1.5 bg-slate-50 border border-slate-100 rounded-xl flex items-center gap-1.5 md:gap-2 transition-colors hover:bg-slate-100">
-                                    <span className="text-[7px] md:text-[9px] font-black text-slate-400 uppercase tracking-tight">{phase === 'prototipacao' ? 'Protótipo' : phase === 'producao' ? 'Prod' : phase}</span>
-                                    <span className="text-[9px] md:text-xs font-black text-slate-900">{count}</span>
+                                <div key={phase} className={`px-2 py-1 md:px-3 md:py-1.5 rounded-xl flex items-center gap-1.5 md:gap-2 transition-colors ${isDark ? 'bg-slate-950 border border-slate-800 hover:bg-slate-900' : 'bg-slate-50 border border-slate-100 hover:bg-slate-100'}`}>
+                                    <span className={`text-[7px] md:text-[9px] font-black uppercase tracking-tight ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>{phase === 'prototipacao' ? 'Protótipo' : phase === 'producao' ? 'Prod' : phase}</span>
+                                    <span className={`text-[9px] md:text-xs font-black ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{count}</span>
                                 </div>
                             ))}
                         </div>
                         <div className="flex-1 overflow-y-auto pr-1">
-                            <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 md:mb-3">Pendências por Sistema</p>
-                            <SystemsBarChart data={systemsByAdjustments} />
+                            <p className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-2 md:mb-3 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Pendências por Sistema</p>
+                            <SystemsBarChart data={systemsByAdjustments} isDark={isDark} />
                             <OrphanItemsDebugger workItems={workItems} unidades={unidades} sistemasDetalhes={sistemasDetalhes} />
                         </div>
                     </div>

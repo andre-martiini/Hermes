@@ -130,7 +130,7 @@ export const DiarioBordoUI = ({
   };
 
   return (
-<div className={`flex flex-col h-full relative rounded-none md:rounded-b-2xl ${isTimerRunning ? 'bg-black/20' : 'bg-slate-50'}`}>
+<div className={`flex flex-col h-full relative rounded-none md:rounded-b-2xl ${isTimerRunning ? 'bg-[#111827]' : 'bg-slate-50'}`}>
       {/* ── Área de histórico com scroll suave e scrollbar fina ── */}
       <div
         onScroll={handleDiaryScroll}

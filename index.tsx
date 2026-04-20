@@ -73,6 +73,7 @@ import { parseDiaryRichNote } from './src/utils/diaryEntries';
 
 type SortOption = 'date-asc' | 'date-desc' | 'priority-high' | 'priority-low';
 type DateFilter = 'today' | 'week' | 'month';
+type ThemeMode = 'system' | 'dark' | 'light';
 
 interface Toast {
   id: string;
@@ -1771,6 +1772,12 @@ const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'finance' | 'saude' | 'ferramentas' | 'sistemas-dev' | 'knowledge' | 'services' | 'rag-bases' | 'concluidas'>('dashboard');
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
   const [isSidebarRetracted, setIsSidebarRetracted] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
+    const saved = localStorage.getItem('hermes-theme-mode');
+    if (saved === 'dark' || saved === 'light') return saved;
+    return 'system';
+  });
+  const [prefersDark, setPrefersDark] = useState(false);
   const [financeActiveTab, setFinanceActiveTab] = useState<'dashboard' | 'fixed'>('dashboard');
   const [isFinanceSettingsOpen, setIsFinanceSettingsOpen] = useState(false);
 
@@ -1783,6 +1790,21 @@ const App: React.FC = () => {
       setTaskModalMode('default');
     }
   }, [selectedTask]);
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const syncPreference = (event?: MediaQueryList | MediaQueryListEvent) => {
+      setPrefersDark(event ? event.matches : media.matches);
+    };
+
+    syncPreference();
+    media.addEventListener('change', syncPreference);
+    return () => media.removeEventListener('change', syncPreference);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('hermes-theme-mode', themeMode);
+  }, [themeMode]);
 
   // Sync selectedTask with updated data from Firestore to ensure components have latest data
   useEffect(() => {
@@ -4704,9 +4726,23 @@ const App: React.FC = () => {
     );
   }
 
+  const isDarkTheme = themeMode === 'dark' || (themeMode === 'system' && prefersDark);
+  const appBgClass = isDarkTheme ? 'bg-[#0b1120] text-slate-100' : 'bg-[#f6f7fb] text-slate-900';
+  const sidebarClass = isDarkTheme
+    ? 'bg-[#020817] text-slate-100 border-r border-white/10'
+    : 'bg-[#0f1720] text-white border-r border-white/5';
+  const headerClass = isDarkTheme
+    ? 'bg-slate-950/80 border-slate-800/80'
+    : 'bg-white/78 border-slate-200/80';
+  const mutedTextClass = isDarkTheme ? 'text-slate-400' : 'text-slate-500';
+  const subtleBorderClass = isDarkTheme ? 'border-slate-800/80' : 'border-slate-200';
+  const inputSurfaceClass = isDarkTheme
+    ? 'bg-slate-900/80 border-slate-800 text-slate-100 placeholder:text-slate-500'
+    : 'bg-white/70 border-slate-200 text-slate-900 placeholder:text-slate-400';
+
   return (
     <>
-      <div className="min-h-screen bg-[#F8FAFC] flex flex-col md:flex-row relative">
+      <div className={`min-h-screen flex flex-col md:flex-row relative transition-colors ${appBgClass}`}>
 
         {/* Pop-up de Notificação */}
         {activePopup && (
@@ -4750,22 +4786,22 @@ const App: React.FC = () => {
         )}
 
         {/* Sidebar Desktop */}
-        <aside className={`hidden md:flex ${isSidebarRetracted ? 'w-24' : 'w-72'} bg-slate-900 text-white flex-col h-screen sticky top-0 overflow-y-auto shrink-0 z-50 shadow-2xl transition-all duration-300`}>
-          <div className={`p-8 flex flex-col h-full ${isSidebarRetracted ? 'gap-8 items-center pt-10' : 'gap-10'}`}>
+        <aside className={`hidden md:flex ${isSidebarRetracted ? 'w-20' : 'w-64'} ${sidebarClass} flex-col h-screen sticky top-0 overflow-y-auto shrink-0 z-50 transition-all duration-300`}>
+          <div className={`px-4 py-6 flex flex-col h-full ${isSidebarRetracted ? 'gap-6 items-center pt-8' : 'gap-8'}`}>
             <div
               className={`flex items-center gap-4 cursor-pointer hover:opacity-80 transition-opacity ${isSidebarRetracted ? 'flex-col' : ''}`}
               onClick={() => setIsSidebarRetracted(!isSidebarRetracted)}
             >
-              <img src="/logo.png" alt="Hermes" className={`${isSidebarRetracted ? 'w-14 h-14' : 'w-12 h-12'} object-contain`} />
+              <img src="/logo.png" alt="Hermes" className={`${isSidebarRetracted ? 'w-12 h-12' : 'w-11 h-11'} object-contain`} />
               {!isSidebarRetracted && (
                 <div>
-                  <h1 className="text-2xl font-black tracking-tighter">HERMES</h1>
-                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">Management System</p>
+                  <h1 className="text-xl font-black tracking-tight">HERMES</h1>
+                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-[0.22em] leading-none">Management System</p>
                 </div>
               )}
             </div>
 
-            <nav className="flex flex-col gap-2">
+            <nav className="flex flex-col gap-1.5">
               {[
                 { id: 'dashboard', label: 'Dashboard', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>, active: viewMode === 'dashboard', onClick: () => { setActiveModule('dashboard'); setViewMode('dashboard'); } },
                 { id: 'acoes', label: 'Ações', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>, active: activeModule === 'acoes' && (viewMode === 'gallery' || viewMode === 'pgc' || viewMode === 'licitacoes' || viewMode === 'assistencia' || viewMode === 'concluidas'), onClick: () => { setActiveModule('acoes'); setViewMode('gallery'); } },
@@ -4780,10 +4816,10 @@ const App: React.FC = () => {
                 <button
                   key={item.id}
                   onClick={item.onClick}
-                  className={`flex items-center gap-4 px-6 py-4 rounded-2xl transition-all duration-300 group ${item.active ? 'bg-white text-slate-900 shadow-xl' : 'text-slate-400 hover:text-white hover:bg-white/5'} ${isSidebarRetracted ? 'justify-center' : ''}`}
+                  className={`flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-200 group ${item.active ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white hover:bg-white/[0.03]'} ${isSidebarRetracted ? 'justify-center' : ''}`}
                   title={isSidebarRetracted ? item.label : ''}
                 >
-                  <div className={`${item.active ? 'text-slate-900' : 'group-hover:scale-110 transition-transform duration-300'}`}>
+                  <div className={`${item.active ? 'text-white' : 'group-hover:scale-105 transition-transform duration-200'}`}>
                     {item.icon}
                   </div>
                   {!isSidebarRetracted && <span className="text-[11px] font-black uppercase tracking-widest">{item.label}</span>}
@@ -4791,12 +4827,34 @@ const App: React.FC = () => {
               ))}
             </nav>
 
-            <div className="mt-auto flex flex-col gap-6">
-              <div className={`flex items-center gap-3 bg-white/5 p-4 rounded-2xl border border-white/5 ${isSidebarRetracted ? 'flex-col gap-4' : ''}`}>
+            <div className="mt-auto flex flex-col gap-4">
+              {!isSidebarRetracted && (
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-1 grid grid-cols-3 gap-1">
+                  <button
+                    onClick={() => setThemeMode('system')}
+                    className={`flex-1 px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-[0.18em] transition-all ${themeMode === 'system' ? 'bg-white text-slate-900' : 'text-slate-400 hover:text-white'}`}
+                  >
+                    Sistema
+                  </button>
+                  <button
+                    onClick={() => setThemeMode('light')}
+                    className={`flex-1 px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-[0.18em] transition-all ${themeMode === 'light' ? 'bg-white text-slate-900' : 'text-slate-400 hover:text-white'}`}
+                  >
+                    Light
+                  </button>
+                  <button
+                    onClick={() => setThemeMode('dark')}
+                    className={`flex-1 px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-[0.18em] transition-all ${themeMode === 'dark' ? 'bg-white text-slate-900' : 'text-slate-400 hover:text-white'}`}
+                  >
+                    Dark
+                  </button>
+                </div>
+              )}
+              <div className={`flex items-center gap-3 bg-white/[0.03] p-3 rounded-2xl border border-white/10 ${isSidebarRetracted ? 'flex-col gap-4' : ''}`}>
                 {isSidebarRetracted ? (
                   <>
                     <div
-                      className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center font-black text-[10px] text-white border border-white/10 shadow-lg"
+                      className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center font-black text-[10px] text-white border border-white/10"
                       title={user?.displayName || "Usuário"}
                     >
                       {user?.displayName ? user.displayName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'A'}
@@ -4814,7 +4872,7 @@ const App: React.FC = () => {
                 ) : (
                   <>
                     {user?.photoURL ? (
-                      <img src={user.photoURL} alt="Profile" className="w-10 h-10 rounded-xl shadow-sm border border-white/10" />
+                      <img src={user.photoURL} alt="Profile" className="w-10 h-10 rounded-xl border border-white/10" />
                     ) : (
                       <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center font-black text-xs text-white border border-white/10">
                         {user?.displayName ? user.displayName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'A'}
@@ -4833,7 +4891,7 @@ const App: React.FC = () => {
                 )}
               </div>
               {!isSidebarRetracted && (
-                <p className="text-center text-[8px] font-black text-slate-700 uppercase tracking-widest">
+                <p className="text-center text-[8px] font-black text-slate-600 uppercase tracking-widest">
                   Hermes v2.5.0 • 2024
                 </p>
               )}
@@ -4844,14 +4902,14 @@ const App: React.FC = () => {
         {/* Conteúdo Principal */}
         <div className="flex-1 flex flex-col relative min-h-screen">
           <>
-            <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
-              <div className="max-w-[1400px] mx-auto px-4 md:px-8 py-3 md:py-4">
+            <header className={`sticky top-0 z-40 backdrop-blur-xl transition-colors ${headerClass} border-b`}>
+              <div className="w-full px-4 md:px-8 py-3 md:py-4">
                 {/* Mobile Header */}
                 <div className="flex md:hidden items-center justify-between">
                   <div className="flex items-center gap-4">
                     <button
                       onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                      className="p-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-all active:scale-95"
+                      className={`p-2 rounded-lg transition-all active:scale-95 ${isDarkTheme ? 'text-slate-200 hover:bg-white/5' : 'text-slate-700 hover:bg-slate-100'}`}
                       aria-label="Menu"
                     >
                       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4910,25 +4968,25 @@ const App: React.FC = () => {
 
                 {/* Opções de Sub-módulo para Mobile (Ações / PGC / Concluídas) */}
                 {(viewMode === 'gallery' || viewMode === 'pgc' || viewMode === 'concluidas') && activeModule === 'acoes' && (
-                  <div className="flex md:hidden items-center gap-2 mt-3 pt-3 border-t border-slate-100 animate-in slide-in-from-top-2 duration-300">
+                  <div className={`flex md:hidden items-center gap-2 mt-3 pt-3 border-t animate-in slide-in-from-top-2 duration-300 ${subtleBorderClass}`}>
                     <button
                       onClick={() => {
                         setViewMode('gallery');
                         setSearchTerm('');
                       }}
-                      className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'gallery' ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
+                      className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'gallery' ? 'bg-slate-900 text-white' : isDarkTheme ? 'bg-slate-900/70 text-slate-300' : 'bg-slate-100 text-slate-500 hover:bg-slate-200/70'}`}
                     >
                       Ações
                     </button>
                     <button
                       onClick={() => setViewMode('pgc')}
-                      className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pgc' ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
+                      className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pgc' ? 'bg-slate-900 text-white' : isDarkTheme ? 'bg-slate-900/70 text-slate-300' : 'bg-slate-100 text-slate-500 hover:bg-slate-200/70'}`}
                     >
                       PGD
                     </button>
                     <button
                       onClick={() => { setViewMode('concluidas'); setCompletedLimit(10); }}
-                      className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'concluidas' ? 'bg-emerald-600 text-white shadow-lg' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
+                      className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'concluidas' ? 'bg-emerald-600 text-white' : isDarkTheme ? 'bg-slate-900/70 text-slate-300' : 'bg-slate-100 text-slate-500 hover:bg-slate-200/70'}`}
                     >
                       Concluídas
                     </button>
@@ -5002,7 +5060,7 @@ const App: React.FC = () => {
                         onClick={() => { setActiveModule('dashboard'); setViewMode('dashboard'); }}
                         className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
                       >
-                        <h1 className="text-xl font-black tracking-tighter text-slate-900 uppercase">
+                        <h1 className={`text-xl font-black tracking-tight uppercase ${isDarkTheme ? 'text-slate-100' : 'text-slate-900'}`}>
                           {viewMode === 'services' ? 'Serviços' :
                             viewMode === 'rag-bases' ? 'Bases RAG' :
                               viewMode === 'knowledge' ? 'Conhecimento' :
@@ -5019,7 +5077,7 @@ const App: React.FC = () => {
                       <div className="flex items-center gap-3 animate-in fade-in slide-in-from-left duration-500">
                         <button
                           onClick={handleExportModule}
-                          className="p-2 bg-white border border-slate-200 text-slate-400 rounded-xl hover:bg-slate-50 transition-all shadow-sm"
+                          className={`p-2 border rounded-xl transition-all ${isDarkTheme ? 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800' : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}
                           title="Exportar Markdown"
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4v12" /></svg>
@@ -5039,20 +5097,20 @@ const App: React.FC = () => {
                     )}
 
                     {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'services' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
-                      <nav className="flex bg-slate-100 p-1 rounded-lg md:rounded-xl border border-slate-200">
+                      <nav className={`flex p-1 rounded-2xl border ${isDarkTheme ? 'bg-slate-900/80 border-slate-800' : 'bg-white/70 border-slate-200'}`}>
                         <button
                           onClick={() => {
                             setViewMode('gallery');
                             setSearchTerm('');
                           }}
-                          className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'gallery' && !searchTerm ? 'bg-white text-slate-900 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}
+                          className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'gallery' && !searchTerm ? isDarkTheme ? 'bg-slate-800 text-white' : 'bg-slate-900 text-white' : isDarkTheme ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}
                         >
                           Ações
                         </button>
-                        <button onClick={() => setViewMode('licitacoes')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'licitacoes' ? 'bg-white text-slate-900 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>Licitações</button>
-                        <button onClick={() => setViewMode('assistencia')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'assistencia' ? 'bg-white text-slate-900 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-800'}`}>Assistência</button>
-                        <button onClick={() => setViewMode('pgc')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pgc' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>PGD</button>
-                        <button onClick={() => { setViewMode('concluidas'); setCompletedLimit(10); }} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${viewMode === 'concluidas' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-800'}`}>
+                        <button onClick={() => setViewMode('licitacoes')} className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'licitacoes' ? isDarkTheme ? 'bg-slate-800 text-white' : 'bg-slate-900 text-white' : isDarkTheme ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}>Licitações</button>
+                        <button onClick={() => setViewMode('assistencia')} className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'assistencia' ? isDarkTheme ? 'bg-slate-800 text-white' : 'bg-slate-900 text-white' : isDarkTheme ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}>Assistência</button>
+                        <button onClick={() => setViewMode('pgc')} className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pgc' ? 'bg-slate-900 text-white' : isDarkTheme ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}>PGD</button>
+                        <button onClick={() => { setViewMode('concluidas'); setCompletedLimit(10); }} className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${viewMode === 'concluidas' ? 'bg-emerald-600 text-white' : isDarkTheme ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}>
                           Concluídas
                           <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${viewMode === 'concluidas' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-500'}`}>{stats.concluidas}</span>
                         </button>
@@ -5074,7 +5132,7 @@ const App: React.FC = () => {
                           setSettingsTab('sistemas');
                           setIsSettingsModalOpen(true);
                         }}
-                        className="bg-slate-900 text-white px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center gap-2"
+                        className="bg-slate-900 text-white px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center gap-2"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
                         Novo <span className="hidden lg:inline">Sistema</span>
@@ -5145,14 +5203,14 @@ const App: React.FC = () => {
                   {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && (
                     <div className="flex items-center gap-4">
                       {activeModule !== 'dashboard' && (
-                        <div className="hidden lg:flex items-center bg-slate-50 border border-slate-200 rounded-lg md:rounded-xl px-4 py-2 w-64 group focus-within:ring-2 focus-within:ring-blue-500 focus-within:bg-white transition-all">
-                          <svg className="w-4 h-4 text-slate-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                          <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none outline-none text-xs font-bold text-slate-900 w-full" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                        <div className={`hidden lg:flex items-center border rounded-2xl px-4 py-2 w-64 group focus-within:ring-2 focus-within:ring-blue-500 transition-all ${inputSurfaceClass}`}>
+                          <svg className={`w-4 h-4 mr-3 ${mutedTextClass}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                          <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none outline-none text-xs font-bold w-full" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                         </div>
                       )}
                       <button
                         onClick={() => setIsCreateModalOpen(true)}
-                        className="bg-slate-900 text-white px-5 py-2 rounded-lg md:rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg hover:bg-slate-800 transition-all active:scale-95"
+                        className="bg-slate-900 text-white px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-slate-800 transition-all active:scale-95"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
                         Criar Ação
@@ -5190,7 +5248,7 @@ const App: React.FC = () => {
 
               {/* Mobile Menu Drawer */}
               {isMobileMenuOpen && (
-                <div className="md:hidden border-t border-slate-200 bg-white shadow-2xl animate-in slide-in-from-top-4 duration-300">
+                <div className={`md:hidden border-t animate-in slide-in-from-top-4 duration-300 ${isDarkTheme ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'}`}>
                   <nav className="flex flex-col p-4 gap-2">
                     {[
                       { label: 'Dashboard', active: viewMode === 'dashboard', onClick: () => { setActiveModule('dashboard'); setViewMode('dashboard'); } },
@@ -5210,7 +5268,7 @@ const App: React.FC = () => {
                           item.onClick();
                           setIsMobileMenuOpen(false);
                         }}
-                        className={`px-6 py-4 rounded-2xl text-sm font-black uppercase tracking-widest transition-all ${item.active ? 'bg-slate-900 text-white shadow-lg' : 'bg-slate-50 text-slate-600'}`}
+                        className={`px-6 py-4 rounded-2xl text-sm font-black uppercase tracking-widest transition-all ${item.active ? 'bg-slate-900 text-white' : isDarkTheme ? 'bg-slate-900/70 text-slate-300' : 'bg-slate-50 text-slate-600'}`}
                       >
                         {item.label}
                       </button>
@@ -5250,12 +5308,13 @@ const App: React.FC = () => {
               )}
             </header>
 
-            <div className={`mx-auto w-full ${viewMode === 'dashboard' ? 'max-w-[1600px] px-0 py-0' : 'max-w-[1400px] px-0 md:px-8 py-6'}`}>
+            <div className={`w-full ${viewMode === 'dashboard' ? 'px-0 py-0' : 'px-0 md:px-8 py-6'}`}>
               {/* Painel de Estatísticas e Filtros - APENAS NA VISÃO GERAL */}
               <main className={viewMode === 'dashboard' ? '' : 'mb-20'}>
                 {viewMode === 'dashboard' ? (
                   <DashboardView
                     tarefas={tarefas}
+                    isDark={isDarkTheme}
                     financeTransactions={financeTransactions}
                     financeSettings={financeSettings}
                     fixedBills={fixedBills}
@@ -5491,15 +5550,15 @@ const App: React.FC = () => {
                           </div>
 
                         ) : (
-                          <div className="animate-in border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl bg-white">
+                          <div className="animate-in">
                             {Object.keys(tarefasAgrupadas).length > 0 ? (
                               Object.entries(tarefasAgrupadas).map(([label, tasks]: [string, Tarefa[]]) => (
                                 <div
                                   key={label}
-                                  className="border-b last:border-b-0 border-slate-200 transition-colors"
+                                  className={`border-b last:border-b-0 transition-colors ${subtleBorderClass}`}
                                   onDragOver={(e) => {
                                     e.preventDefault();
-                                    e.currentTarget.style.backgroundColor = 'rgba(59, 130, 246, 0.05)';
+                                    e.currentTarget.style.backgroundColor = isDarkTheme ? 'rgba(30, 41, 59, 0.65)' : 'rgba(241, 245, 249, 0.9)';
                                   }}
                                   onDragLeave={(e) => {
                                     e.currentTarget.style.backgroundColor = '';
@@ -5522,13 +5581,13 @@ const App: React.FC = () => {
                                 >
                                   <button
                                     onClick={() => toggleSection(label)}
-                                    className="w-full px-6 py-3 bg-transparent border-b border-slate-100 flex items-center justify-between hover:bg-slate-50 transition-colors group"
+                                    className={`w-full px-2 md:px-0 py-3 bg-transparent flex items-center justify-between transition-colors group ${isDarkTheme ? 'hover:bg-white/[0.02]' : 'hover:bg-slate-50/80'}`}
                                   >
                                     <div className="flex items-center gap-3">
-                                      <span className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">{label}</span>
-                                      <span className="text-[10px] font-bold text-slate-300">({tasks.length})</span>
+                                      <span className={`text-xs font-black uppercase tracking-[0.22em] ${isDarkTheme ? 'text-slate-300' : 'text-slate-500'}`}>{label}</span>
+                                      <span className={`text-[10px] font-bold ${isDarkTheme ? 'text-slate-500' : 'text-slate-300'}`}>({tasks.length})</span>
                                     </div>
-                                    <svg className={`w-4 h-4 text-slate-300 transition-transform duration-300 ${effectiveExpandedSections.includes(label) ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg className={`w-4 h-4 transition-transform duration-300 ${effectiveExpandedSections.includes(label) ? 'rotate-180' : ''} ${isDarkTheme ? 'text-slate-500' : 'text-slate-300'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
                                     </svg>
                                   </button>
@@ -5541,6 +5600,7 @@ const App: React.FC = () => {
                                             <div key={task.id}>
                                               <RowCard
                                                 task={task}
+                                                isDark={isDarkTheme}
                                                 onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
                                                 onToggle={handleToggleTarefaStatus}
                                                 onDelete={handleDeleteTarefa}
@@ -5557,7 +5617,7 @@ const App: React.FC = () => {
                                                   e.stopPropagation();
                                                   setCompletedLimit(prev => prev + 10);
                                                 }}
-                                                className="px-6 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                                                className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isDarkTheme ? 'bg-slate-900 text-slate-300 hover:bg-slate-800' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
                                               >
                                                 Ver mais 10 concluídas
                                               </button>
@@ -5588,6 +5648,7 @@ const App: React.FC = () => {
                                           >
                                             <RowCard
                                               task={task}
+                                              isDark={isDarkTheme}
                                               highlighted={label === 'Hoje' && tasks.filter(t => normalizeStatus(t.status) !== 'concluido')[0]?.id === task.id}
                                               onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
                                               onToggle={handleToggleTarefaStatus}
@@ -5600,8 +5661,8 @@ const App: React.FC = () => {
                                         ))
                                       )}
                                       {tasks.length === 0 && (
-                                        <div className="p-8 text-center border-t border-slate-50 bg-slate-50/30">
-                                          <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest italic">
+                                        <div className={`p-8 text-center ${isDarkTheme ? 'bg-slate-950/40' : 'bg-slate-50/30'}`}>
+                                          <p className={`text-[10px] font-black uppercase tracking-widest italic ${isDarkTheme ? 'text-slate-500' : 'text-slate-300'}`}>
                                             {label === 'Ações em Stand-by' ? 'Arraste ações aqui para pausar' : 'Nenhuma ação nesta seção'}
                                           </p>
                                         </div>
@@ -5611,8 +5672,8 @@ const App: React.FC = () => {
                                 </div>
                               ))
                             ) : (
-                              <div className="py-24 text-center bg-white">
-                                <p className="text-slate-300 font-black text-xl uppercase tracking-widest">Sem demandas encontradas</p>
+                              <div className="py-24 text-center">
+                                <p className={`font-black text-xl uppercase tracking-widest ${isDarkTheme ? 'text-slate-600' : 'text-slate-300'}`}>Sem demandas encontradas</p>
                               </div>
                             )}
                           </div>
@@ -5641,6 +5702,7 @@ const App: React.FC = () => {
                           <div key={task.id}>
                             <RowCard
                               task={task}
+                              isDark={isDarkTheme}
                               onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
                               onToggle={handleToggleTarefaStatus}
                               onDelete={handleDeleteTarefa}
@@ -7527,6 +7589,7 @@ const App: React.FC = () => {
               <TaskExecutionView
                 task={selectedTask}
                 tarefas={tarefas}
+                isDark={isDarkTheme}
                 appSettings={appSettings}
                 knowledgeBases={knowledgeBases}
                 onSave={handleUpdateTarefa}
@@ -7553,6 +7616,32 @@ const App: React.FC = () => {
                 onCloseNotifications={() => setIsNotificationCenterOpen(false)}
                 onMarkAsRead={handleMarkNotificationRead}
                 onDismiss={handleDismissNotification}
+                copilotoUserId={user?.uid || ''}
+                onOpenCopilotoTask={async (id) => {
+                  const task = tarefas.find(t => t.id === id);
+                  if (task) {
+                    setSelectedTask(task);
+                    setTaskModalMode('execute');
+                    return;
+                  }
+
+                  const snap = await getDoc(doc(db, 'tarefas', id));
+                  if (snap.exists()) {
+                    setSelectedTask({ id: snap.id, ...snap.data() } as any);
+                    setTaskModalMode('execute');
+                  }
+                }}
+                onOpenCopilotoTool={(tool, id) => {
+                  setActiveModule('acoes');
+                  setViewMode('ferramentas');
+                  if (tool === 'slides') {
+                    setActiveFerramenta('slides');
+                    setInitialDraftId(id);
+                  } else if (tool === 'diagnostico') {
+                    setActiveFerramenta('diagnostico');
+                    setInitialDiagnosisId(id);
+                  }
+                }}
                 onCreateAction={() => setIsCreateModalOpen(true)}
               />
             ) : (
@@ -7935,6 +8024,7 @@ const App: React.FC = () => {
         <HermesCopilotoDrawer
           isOpen={isCopilotoOpen}
           onClose={() => setIsCopilotoOpen(false)}
+          isDark={isDarkTheme}
           taskId={selectedTask?.id || selectedWorkItem?.id}
           systemId={selectedSystemId || selectedTask?.sistema_id || selectedWorkItem?.sistema_id}
           userId={user?.uid || ''}
