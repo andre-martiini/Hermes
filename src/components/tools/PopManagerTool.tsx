@@ -11,13 +11,18 @@ interface Pop {
 
 interface PopManagerToolProps {
   onBack?: () => void;
+  initialSearch?: string;
+  isEmbedded?: boolean;
 }
 
-export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack }) => {
+export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack, initialSearch, isEmbedded }) => {
   const [pops, setPops] = useState<Pop[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const [searchTerm, setSearchTerm] = useState(initialSearch || '');
+
 
   // Form State
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -124,7 +129,7 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack }) => {
     <div className="flex flex-col h-full bg-white rounded-3xl overflow-hidden shadow-sm border border-slate-200">
       <div className="p-6 md:p-8 bg-slate-50 border-b border-slate-200 shrink-0">
         <div className="flex items-center gap-4 mb-4">
-          {onBack && (
+          {onBack && !isEmbedded && (
             <button onClick={onBack} className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
             </button>

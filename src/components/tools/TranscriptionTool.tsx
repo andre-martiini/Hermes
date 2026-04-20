@@ -5,6 +5,8 @@ import { functions } from '@/firebase';
 interface TranscriptionToolProps {
   onBack: () => void;
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
+  initialText?: string;
+  isEmbedded?: boolean;
 }
 
 const TRANSCRIPTION_HISTORY_KEY = 'hermes_transcription_history';
@@ -18,11 +20,11 @@ interface TranscriptionHistoryEntry {
   refined: string;
 }
 
-export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, showToast }) => {
+export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, showToast, initialText, isEmbedded }) => {
   const [file, setFile] = useState<File | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [transcription, setTranscription] = useState<{ raw: string, refined: string } | null>(null);
+  const [transcription, setTranscription] = useState<{ raw: string, refined: string } | null>(initialText ? { raw: initialText, refined: '' } : null);
   const [dragOver, setDragOver] = useState(false);
   const [history, setHistory] = useState<TranscriptionHistoryEntry[]>([]);
   const [pendingDeleteHistoryId, setPendingDeleteHistoryId] = useState<string | null>(null);

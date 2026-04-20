@@ -20,6 +20,8 @@ import {
 interface WhatsAppAssistantToolProps {
   onBack: () => void;
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
+  initialQuery?: string;
+  isEmbedded?: boolean;
 }
 
 const QUICK_PROMPTS = [
@@ -135,9 +137,16 @@ const createAssistantToolInitialState = () => {
   return createInitialAssistantState();
 };
 
-export const WhatsAppAssistantTool: React.FC<WhatsAppAssistantToolProps> = ({ onBack, showToast }) => {
+export const WhatsAppAssistantTool: React.FC<WhatsAppAssistantToolProps> = ({ onBack, showToast, initialQuery, isEmbedded }) => {
   const [state, dispatch] = useReducer(whatsappAssistantReducer, undefined, createAssistantToolInitialState);
   const activeSession = getActiveAssistantSession(state);
+
+  useEffect(() => {
+    if (initialQuery) {
+      dispatch({ type: 'INPUT_CHANGE', payload: initialQuery });
+    }
+  }, [initialQuery]);
+
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {

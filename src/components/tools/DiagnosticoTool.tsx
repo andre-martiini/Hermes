@@ -25,9 +25,11 @@ interface DiagnosticoItem {
 interface DiagnosticoToolProps {
     onBack: () => void;
     initialDiagnosisId?: string;
+    initialCode?: string;
+    isEmbedded?: boolean;
 }
 
-export const DiagnosticoTool: React.FC<DiagnosticoToolProps> = ({ onBack, initialDiagnosisId }) => {
+export const DiagnosticoTool: React.FC<DiagnosticoToolProps> = ({ onBack, initialDiagnosisId, initialCode, isEmbedded }) => {
     const [diagnosticos, setDiagnosticos] = useState<DiagnosticoItem[]>([]);
     const [expandedId, setExpandedId] = useState<string | null>(initialDiagnosisId || null);
     const [isLoading, setIsLoading] = useState(true);

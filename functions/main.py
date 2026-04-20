@@ -6171,6 +6171,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
     session_id = data.get('sessionId')
     drive_file_id = data.get('driveFileId')
     drive_file_name = (data.get('driveFileName') or 'documento').strip()
+    routing_index = data.get('routingIndex') or []
+    routing_index = data.get('routingIndex') or []
     user_uid = req.auth.uid if req.auth else None
 
     # Ingestão muda: arquivo sem texto → prompt padrão de catalogação
@@ -6204,6 +6206,30 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         _save_user_profile_signal(db, user_uid, prompt, task_id, system_id)
         memory_context = _build_memory_context(db, gemini_key, prompt, limit=4)
         matched_pop_directives = _match_pop_directives(db, prompt)
+
+        tools_routing_context = ""
+        if routing_index:
+            tools_routing_context = "\n\n## CATÁLOGO DE FERRAMENTAS DISPONÍVEIS\n"
+            tools_routing_context += "Você pode acionar ferramentas interativas na interface do usuário usando a função `acionar_ferramenta`. "
+            tools_routing_context += "Não peça permissão para usar as ferramentas, acione-as diretamente se a intenção do usuário bater com as chaves (keys) ou a tag abaixo:\n\n"
+            for t in routing_index:
+                tools_routing_context += f"- ID da Ferramenta: {t['id']}\n"
+                tools_routing_context += f"  Tag Explícita: {t.get('tag', '')}\n"
+                tools_routing_context += f"  Chaves de Ativação (Keys): {', '.join(t.get('keys', []))}\n\n"
+            tools_routing_context += "ATENÇÃO: Caso o usuário use uma Tag Explícita (ex: @SlidesTool) mas o texto do pedido exija algo totalmente diferente (ex: 'Gerar nota fiscal'), seja juiz semântico, suspenda o acionamento e alerte-o sobre a contradição.\n"
+
+
+        tools_routing_context = ""
+        if routing_index:
+            tools_routing_context = "\n\n## CATÁLOGO DE FERRAMENTAS DISPONÍVEIS\n"
+            tools_routing_context += "Você pode acionar ferramentas interativas na interface do usuário usando a função `acionar_ferramenta`. "
+            tools_routing_context += "Não peça permissão para usar as ferramentas, acione-as diretamente se a intenção do usuário bater com as chaves (keys) ou a tag abaixo:\n\n"
+            for t in routing_index:
+                tools_routing_context += f"- ID da Ferramenta: {t['id']}\n"
+                tools_routing_context += f"  Tag Explícita: {t.get('tag', '')}\n"
+                tools_routing_context += f"  Chaves de Ativação (Keys): {', '.join(t.get('keys', []))}\n\n"
+            tools_routing_context += "ATENÇÃO: Caso o usuário use uma Tag Explícita (ex: @SlidesTool) mas o texto do pedido exija algo totalmente diferente (ex: 'Gerar nota fiscal'), seja juiz semântico, suspenda o acionamento e alerte-o sobre a contradição.\n"
+
         session_conflict_context = ""
         session_ref = None
         if session_id:
@@ -7331,6 +7357,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             f"{copilot_soul.get('content') or json.dumps(copilot_soul, ensure_ascii=False)}\n\n"
             "## PERFIL OPERACIONAL DO USUÁRIO\n"
             f"{_format_ai_profile_for_prompt(ai_profile)}\n\n"
+            f"{tools_routing_context}"
+            f"{tools_routing_context}"
             "\n\nCATÁLOGO DE SISTEMAS (Mapeamento Exato de Nome para ID):\n"
             f"{sistemas_str}\n\n"
             "Ao realizar diagnósticos ou operações em sistemas, utilize SEMPRE o ID técnico do catálogo acima correspondente ao nome citado pelo usuário.\n\n"
@@ -7610,8 +7638,80 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             except Exception:
                 pass  # Fail-open: timeout ou erro → continua sem hint
 
-        # Mapa nome → função para dispatch manual do loop de ferramentas
+
+        dynamic_tools = []
         _function_map = {
+            'buscar_e_analisar_email': buscar_e_analisar_email,
+            'consultar_historico_acoes': consultar_historico_acoes,
+            'buscar_arquivos_acervo': buscar_arquivos_acervo,
+            'obter_contexto_tela': obter_contexto_tela,
+            'pesquisar_internet': pesquisar_internet,
+            'ler_pagina_web': ler_pagina_web,
+            'ler_documento_na_integra': ler_documento_na_integra,
+            'registrar_correcao_procedimento': registrar_correcao_procedimento,
+            'salvar_memoria_global': salvar_memoria_global,
+            'resolver_conflito_memoria': resolver_conflito_memoria,
+            'atualizar_personalidade': atualizar_personalidade,
+            'resolver_conflito_procedimento': resolver_conflito_procedimento,
+            'criar_acao_no_sistema': criar_acao_no_sistema,
+            'editar_plano_acao': editar_plano_acao,
+            'preparar_edicao_acao': preparar_edicao_acao,
+            'gerar_relatorio': gerar_relatorio,
+            'gerar_rascunho_formulario': gerar_rascunho_formulario,
+        }
+
+        # Cria função genérica de acionamento que o loop manual do Python irá ignorar
+        # mas que vamos retornar direto pro frontend
+        def acionar_ferramenta(tool_id: str, parametros: dict = None):
+            return {"intent": "tool_invocation", "tool_id": tool_id, "parametros": parametros or {}}
+
+        _function_map['acionar_ferramenta'] = acionar_ferramenta
+
+        for t in routing_index:
+            tool_id = t['id']
+            schema = t.get('parametersSchema', {})
+            props = {}
+            required = schema.get('required', [])
+            for k, v in schema.get('properties', {}).items():
+                v_type = v.get('type', 'string').upper()
+                if v_type == 'STRING':
+                    t_enum = types.Type.STRING
+                elif v_type == 'INTEGER':
+                    t_enum = types.Type.INTEGER
+                elif v_type == 'NUMBER':
+                    t_enum = types.Type.NUMBER
+                elif v_type == 'BOOLEAN':
+                    t_enum = types.Type.BOOLEAN
+                elif v_type == 'ARRAY':
+                    t_enum = types.Type.ARRAY
+                elif v_type == 'OBJECT':
+                    t_enum = types.Type.OBJECT
+                else:
+                    t_enum = types.Type.STRING
+                props[k] = types.Schema(type=t_enum, description=v.get('description', ''))
+
+            tool_func = types.FunctionDeclaration(
+                name=f"acionar_{tool_id}",
+                description=f"Aciona a ferramenta interativa {tool_id} na interface do usuário.",
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties=props,
+                    required=required
+                )
+            )
+            dynamic_tools.append(tool_func)
+
+            # Helper function to intercept dynamic tools
+            def _make_tool_invoker(tid):
+                def invoke(**kwargs):
+                    return {"intent": "tool_invocation", "tool_id": tid, "parametros": kwargs}
+                return invoke
+
+            _function_map[f"acionar_{tool_id}"] = _make_tool_invoker(tool_id)
+
+
+        # Reassign map for old static tools if needed but we just updated it above
+        _old_function_map = {
             'buscar_e_analisar_email': buscar_e_analisar_email,
             'consultar_historico_acoes': consultar_historico_acoes,
             'buscar_arquivos_acervo': buscar_arquivos_acervo,
@@ -7655,7 +7755,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     preparar_edicao_acao,
                     gerar_relatorio,
                     gerar_rascunho_formulario,
-                ],
+                ] + dynamic_tools,
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
             ),
             history=history
@@ -7959,12 +8059,12 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             pop_lines.append("[/DIRETRIZES OPERACIONAIS (POPs) CORRESPONDENTES - OBRIGATORIAS]")
             context_parts.append("\n".join(pop_lines))
         final_prompt = "\n\n".join(context_parts)
-        
         # Loop manual de tool calling — intercepta cada chamada para rastrear ferramentas usadas
         tools_used: list[str] = []
         pending_edit_data = None
         pending_memory_conflict = None
         report_data = None
+        tool_invocation_data = None
         response = chat.send_message(final_prompt)
         _max_iter = 10
         for _ in range(_max_iter):
@@ -7972,6 +8072,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             if not fcs:
                 break
             function_response_parts = []
+            break_loop = False
             for fc in fcs:
                 fn = _function_map.get(fc.name)
                 if fn is None:
@@ -7979,8 +8080,15 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 else:
                     try:
                         result = fn(**(fc.args or {}))
+                        if isinstance(result, dict) and result.get("intent") == "tool_invocation":
+                            tool_invocation_data = result
+                            break_loop = True
                     except Exception as _fe:
                         result = f"Erro ao executar {fc.name}: {_fe}"
+
+                if break_loop:
+                    break
+
                 # Captura payload de edição pendente gerado por preparar_edicao_acao
                 if fc.name == 'preparar_edicao_acao' and isinstance(result, str) and result.startswith('{'):
                     try:
@@ -8007,31 +8115,35 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                                     "pendingMemoryConflict": parsed_mem,
                                     "lastMemoryConflictAt": firestore.SERVER_TIMESTAMP,
                                 }, merge=True)
-                            elif parsed_mem.get('status') in {'saved', 'ignored'}:
-                                session_ref.set({
+                            else:
+                                session_ref.update({
                                     "pendingMemoryConflict": firestore.DELETE_FIELD,
-                                }, merge=True)
+                                    "lastMemoryConflictAt": firestore.DELETE_FIELD
+                                })
                     except Exception:
                         pass
-                if fc.name == 'resolver_conflito_memoria' and isinstance(result, str) and result.startswith('{'):
-                    try:
-                        parsed_resolution = json.loads(result)
-                        if session_ref and parsed_resolution.get('status') in {'resolved', 'updated'}:
-                            session_ref.set({
-                                "pendingMemoryConflict": firestore.DELETE_FIELD,
-                                "lastMemoryConflictResolutionAt": firestore.SERVER_TIMESTAMP,
-                            }, merge=True)
-                    except Exception:
-                        pass
-                if fc.name not in _HIDDEN_TOOLS and fc.name not in tools_used:
+
+                if fc.name not in _HIDDEN_TOOLS:
                     tools_used.append(fc.name)
+
                 function_response_parts.append(
                     types.Part.from_function_response(
                         name=fc.name,
                         response={"result": str(result)}
                     )
                 )
+
+            if break_loop:
+                break
+
             response = chat.send_message(function_response_parts)
+
+        if tool_invocation_data:
+            return {
+                "result": "[Invocando Ferramenta...]",
+                "kg_nodes": kg_nodes_payload,
+                "toolInvocation": tool_invocation_data
+            }
 
         result_text = response.text
         # Extração de Proposta [PROPOSAL]{...}[/PROPOSAL]

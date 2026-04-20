@@ -11,6 +11,8 @@ interface SlidesToolProps {
   onBack: () => void;
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
   initialDraftId?: string;
+  initialRascunho?: string;
+  isEmbedded?: boolean;
 }
 
 // Converte o schema do Firestore (slides_drafts) para o formato interno do editor
@@ -23,9 +25,9 @@ const mapFirestoreSlide = (s: any) => ({
   prompt_imagem: s.sugestao_imagem ?? '',
 });
 
-export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initialDraftId }) => {
+export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initialDraftId, initialRascunho, isEmbedded }) => {
   const [user, setUser] = useState<User | null>(() => auth.currentUser);
-  const [rascunho, setRascunho] = useState('');
+  const [rascunho, setRascunho] = useState(initialRascunho || '');
   const [qtdSlides, setQtdSlides] = useState(5);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSubmittingJob, setIsSubmittingJob] = useState(false);
