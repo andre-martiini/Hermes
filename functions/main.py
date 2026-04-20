@@ -8123,6 +8123,26 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     except Exception:
                         pass
 
+
+                if fc.name == 'resolver_conflito_memoria' and isinstance(result, str) and result.startswith('{'):
+                    try:
+                        parsed_resolution = json.loads(result)
+                        if session_ref and parsed_resolution.get('status') in {'resolved', 'updated'}:
+                            session_ref.set({
+                                "pendingMemoryConflict": firestore.DELETE_FIELD,
+                                "lastMemoryConflictResolutionAt": firestore.SERVER_TIMESTAMP,
+                            }, merge=True)
+
+                            # Also safely try to clear lastMemoryConflictAt if needed
+                            try:
+                                session_ref.update({
+                                    "lastMemoryConflictAt": firestore.DELETE_FIELD
+                                })
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
                 if fc.name not in _HIDDEN_TOOLS:
                     tools_used.append(fc.name)
 
