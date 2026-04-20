@@ -77,9 +77,7 @@ def get_embedding(text: str, api_key: str = None, task_type: str = "RETRIEVAL_DO
     from google import genai
     from google.genai import types
     if not api_key:
-        db = get_db()
-        GEMINI_API_KEY = get_gemini_api_key()
-        api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+        api_key = get_gemini_api_key()
     if not api_key:
         raise ValueError("Chave Gemini não configurada.")
     client = genai.Client(api_key=api_key)
@@ -8752,9 +8750,10 @@ def processar_correcoes_pendentes(event: scheduler_fn.ScheduledEvent) -> None:
     import traceback as _evo_tb
     import uuid as _evo_uuid
     import requests as _evo_req
+    from google import genai
 
     _db = get_db()
-    _gemini_key = _get_gemini_key()
+    _gemini_key = get_gemini_api_key()
     _evo_client = genai.Client(api_key=_gemini_key)
 
     # Recupera chave Tavily para consenso web

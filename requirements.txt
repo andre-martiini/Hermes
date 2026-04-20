@@ -1,3 +1,7 @@
 firebase-admin>=6.2.0
 google-auth-oauthlib
 google-api-python-client
+selenium>=4.0.0
+playwright>=1.40.0
+fastapi>=0.100.0
+openai>=1.0.0
