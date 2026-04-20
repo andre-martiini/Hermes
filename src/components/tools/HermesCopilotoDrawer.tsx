@@ -5,6 +5,7 @@ import { httpsCallable } from 'firebase/functions';
 import { collection, onSnapshot, query, orderBy, where, addDoc, doc, updateDoc, getDoc, getDocs, writeBatch, deleteDoc, limit, Timestamp } from 'firebase/firestore';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import MermaidBlock from './MermaidBlock';
 import { formatDate, PoolItem } from '@/types';
 import { ReportModal } from './ReportModal';
 import { getRoutingIndex, toolsRegistry } from './toolRegistry';
@@ -1427,20 +1428,34 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-2 break-words [overflow-wrap:anywhere]" {...props} />,
                                             li: ({ node, ...props }) => <li className="mb-0.5 break-words [overflow-wrap:anywhere]" {...props} />,
                                             strong: ({ node, ...props }) => <strong className={`font-bold ${isDark ? 'text-blue-300' : 'text-blue-600'}`} {...props} />,
-                                            pre: ({ node, ...props }) => (
-                                                <pre
-                                                    className="max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] overflow-x-hidden rounded-xl"
-                                                    {...props}
-                                                />
-                                            ),
-                                            code: ({ node, className, children, ...props }) => (
-                                                <code
-                                                    className={`${className ?? ''} whitespace-pre-wrap break-words [overflow-wrap:anywhere]`}
-                                                    {...props}
-                                                >
-                                                    {children}
-                                                </code>
-                                            ),
+                                            pre: ({ node, children, ...props }) => {
+                                                const arr = React.Children.toArray(children);
+                                                const first = arr[0] as React.ReactElement | undefined;
+                                                if (first?.props?.className === 'language-mermaid') {
+                                                    return <>{children}</>;
+                                                }
+                                                return (
+                                                    <pre
+                                                        className="max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] overflow-x-hidden rounded-xl"
+                                                        {...props}
+                                                    >
+                                                        {children}
+                                                    </pre>
+                                                );
+                                            },
+                                            code: ({ node, className, children, ...props }) => {
+                                                if (className === 'language-mermaid') {
+                                                    return <MermaidBlock code={String(children).trim()} isDark={isDark} />;
+                                                }
+                                                return (
+                                                    <code
+                                                        className={`${className ?? ''} whitespace-pre-wrap break-words [overflow-wrap:anywhere]`}
+                                                        {...props}
+                                                    >
+                                                        {children}
+                                                    </code>
+                                                );
+                                            },
                                             a: ({ node, ...props }) => {
                                                 const href = props.href || '';
 

@@ -5718,6 +5718,91 @@ def diagnosticar_codigo(req: https_fn.CallableRequest):
         )
 
 
+@https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=30)
+def corrigir_sintaxe_mermaid(req: https_fn.CallableRequest):
+    """
+    Recebe código Mermaid inválido e o erro do compilador JS, retorna apenas o código corrigido.
+    Chamado pelo self-healing loop do componente MermaidBlock no frontend (máx. 3 tentativas).
+    """
+    from google import genai
+    from google.genai import types
+
+    uid = req.auth.uid if req.auth else None
+    if not uid:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
+            message="Usuário não autenticado."
+        )
+
+    data = req.data or {}
+    codigo_mermaid = (data.get('codigoMermaid') or '').strip()
+    erro_compilador = (data.get('erroCompilador') or '').strip()
+
+    if not codigo_mermaid:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="Campo 'codigoMermaid' é obrigatório."
+        )
+
+    try:
+        db = get_db()
+        keys_doc = db.collection('system').document('api_keys').get()
+        gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+
+        if not gemini_key:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.INTERNAL,
+                message="Chave Gemini não configurada."
+            )
+
+        client = genai.Client(api_key=gemini_key)
+
+        system_instruction = (
+            "Você é um especialista em sintaxe Mermaid. "
+            "Receberá um código Mermaid inválido e o erro gerado pelo compilador. "
+            "Retorne APENAS o código Mermaid corrigido — sem blocos de markdown (não inclua ```mermaid), "
+            "sem explicações, sem texto adicional. "
+            "Mantenha o tipo de diagrama original. Corrija somente a sintaxe."
+        )
+
+        user_message = (
+            f"Código Mermaid inválido:\n{codigo_mermaid}\n\n"
+            f"Erro do compilador:\n{erro_compilador}"
+        )
+
+        response = client.models.generate_content(
+            model='gemini-2.0-flash',
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.1,
+                max_output_tokens=2048,
+            ),
+            contents=user_message,
+        )
+
+        codigo_corrigido = (response.text or '').strip()
+        # Strip markdown wrapper defensively in case the model added it anyway
+        if codigo_corrigido.startswith('```mermaid'):
+            codigo_corrigido = codigo_corrigido[10:].strip()
+        if codigo_corrigido.startswith('```'):
+            codigo_corrigido = codigo_corrigido[3:].strip()
+        if codigo_corrigido.endswith('```'):
+            codigo_corrigido = codigo_corrigido[:-3].strip()
+
+        return {'codigoCorrigido': codigo_corrigido}
+
+    except https_fn.HttpsError:
+        raise
+    except Exception as e:
+        print(f"Erro em corrigir_sintaxe_mermaid: {e}")
+        import traceback
+        print(traceback.format_exc())
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=str(e)
+        )
+
+
 @https_fn.on_call(memory=options.MemoryOption.GB_1)
 
 def processInvoiceOCR(req: https_fn.CallableRequest):
@@ -7640,6 +7725,21 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "ETAPA 3 — CONFIRMAÇÃO:\n"
             "Após confirmação do usuário, o FRONTEND chamará a Cloud Function criar_formulario_google e inserirá o link de sucesso diretamente no chat.\n"
             "Você NÃO chama nenhuma ferramenta nesta etapa — apenas oriente o usuário a clicar em 'Confirmar e Gerar Link' no card de rascunho de formulário.\n\n"
+
+            "## DIAGRAMAS E VISUALIZAÇÕES — RENDERIZAÇÃO DIRETA (CRÍTICO)\n\n"
+            "REGRA ABSOLUTA: Sempre que o usuário pedir um diagrama, fluxograma, fluxo, mapa, grafo, sequência, "
+            "hierarquia, cronograma, mapa mental ou qualquer visualização estrutural, você DEVE obrigatoriamente "
+            "gerar o código dentro de um bloco de código com a linguagem 'mermaid', exatamente assim:\n\n"
+            "```mermaid\n"
+            "<código aqui>\n"
+            "```\n\n"
+            "NUNCA escreva o código Mermaid como texto puro, sem o bloco de código. "
+            "NUNCA omita os marcadores de abertura (```mermaid) e fechamento (```). "
+            "O frontend detecta o bloco pela linguagem 'mermaid' e renderiza o diagrama visualmente — "
+            "sem o bloco correto, o diagrama não aparece.\n"
+            "Não explique o diagrama antes de gerá-lo, a menos que seja explicitamente solicitado.\n"
+            "Escolha o tipo de diagrama mais adequado: flowchart, sequenceDiagram, classDiagram, "
+            "stateDiagram-v2, erDiagram, gantt, mindmap, timeline, pie, quadrantChart, xychart-beta, etc.\n\n"
         )
 
         # --- RECUPERAÇÃO DE HISTÓRICO DA SESSÃO ---
