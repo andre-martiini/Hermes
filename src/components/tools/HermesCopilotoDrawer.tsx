@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { formatDate, PoolItem } from '@/types';
 import { ReportModal } from './ReportModal';
+import { getRoutingIndex, toolsRegistry } from './toolRegistry';
 import { isInternalAppHref, navigateWithinApp } from '../../utils/internalNavigation';
 
 // URL do endpoint HTTP de upload (Node.js Functions)
@@ -133,6 +134,7 @@ interface Message {
     role: 'user' | 'assistant';
     content: string;
     isArtifact?: boolean;
+    toolInvocation?: { intent: string, tool_id: string, parametros: any };
     proposedPlan?: any[];
     proposedPresentation?: ProposedPresentation;
     proposedDiagnosis?: DiagnosisRequest;
@@ -341,6 +343,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     };
 
     const [isFocused, setIsFocused] = useState(false);
+    const [showToolMenu, setShowToolMenu] = useState(false);
 
     // Estado de anexo
     const [attachedFile, setAttachedFile] = useState<File | null>(null);
@@ -1044,7 +1047,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 taskId: taskId || null,
                 systemId: systemId || null,
                 driveFileId: driveFileId || null,
-                driveFileName: driveFileName || null
+                driveFileName: driveFileName || null,
+                routingIndex: getRoutingIndex()
             });
 
             const data = response.data as any;
@@ -1489,6 +1493,18 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                     >
                                         {msg.content}
                                     </ReactMarkdown>
+
+                                {msg.toolInvocation && (
+                                    <div className="mt-4 p-4 bg-white/5 border border-white/10 rounded-xl overflow-hidden">
+                                        {(() => {
+                                            const tool = toolsRegistry.find(t => t.id === msg.toolInvocation!.tool_id);
+                                            if (!tool) return <div className="text-red-400 text-sm">Erro: Ferramenta {msg.toolInvocation!.tool_id} não encontrada no catálogo.</div>;
+                                            const ToolComponent = tool.component;
+                                            return <ToolComponent {...msg.toolInvocation!.parametros} onBack={() => {}} showToast={() => {}} isEmbedded={true} />;
+                                        })()}
+                                    </div>
+                                )}
+
 
                                     {/* Botões de confirmação de draft */}
                                     {msg.role === 'assistant' && (() => {

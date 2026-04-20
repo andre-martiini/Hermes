@@ -1,0 +1,200 @@
+import React from 'react';
+import { SlidesTool } from './SlidesTool';
+import { ShoppingListTool } from './ShoppingListTool';
+import { TranscriptionTool } from './TranscriptionTool';
+import { ChoirRehearsalsTool } from './ChoirRehearsalsTool';
+import { MeetingTranscriptionTool } from './MeetingTranscriptionTool';
+import { WhatsAppAssistantTool } from './WhatsAppAssistantTool';
+import { DiagnosticoTool } from './DiagnosticoTool';
+import { PopManagerTool } from './PopManagerTool';
+
+export interface ToolParameterSchema {
+    type: string;
+    properties: Record<string, any>;
+    required?: string[];
+}
+
+export interface ToolMetadata {
+    id: string;
+    ui_metadata: {
+        title: string;
+        description: string;
+        icon: string;
+        category: string;
+        tag: string;
+    };
+    keys: string[];
+    parametersSchema: ToolParameterSchema;
+    component: React.ComponentType<any>;
+}
+
+export const toolsRegistry: ToolMetadata[] = [
+    {
+        id: 'SlidesTool',
+        ui_metadata: {
+            title: 'Gerador de Slides',
+            description: 'Cria apresentações profissionais a partir de textos base.',
+            icon: 'slides',
+            category: 'Produtividade',
+            tag: '@SlidesTool'
+        },
+        keys: ['apresentação', 'slides', 'powerpoint', 'gerar slides', 'apresentacao'],
+        parametersSchema: {
+            type: 'object',
+            properties: {
+                initialRascunho: {
+                    type: 'string',
+                    description: 'O texto base ou rascunho para gerar os slides.'
+                }
+            },
+            required: ['initialRascunho']
+        },
+        component: SlidesTool
+    },
+    {
+        id: 'ShoppingListTool',
+        ui_metadata: {
+            title: 'Lista de Compras',
+            description: 'Organize suas compras com sugestões de IA.',
+            icon: 'shopping',
+            category: 'Pessoal',
+            tag: '@ShoppingListTool'
+        },
+        keys: ['compras', 'lista de compras', 'mercado', 'comprar'],
+        parametersSchema: {
+            type: 'object',
+            properties: {
+                initialImportText: {
+                    type: 'string',
+                    description: 'Texto bruto com os itens para importar para a lista de compras.'
+                }
+            }
+        },
+        component: ShoppingListTool
+    },
+    {
+        id: 'TranscriptionTool',
+        ui_metadata: {
+            title: 'Transcrição de Áudio',
+            description: 'Transcreva e refine áudios do WhatsApp e outros.',
+            icon: 'transcription',
+            category: 'Produtividade',
+            tag: '@TranscriptionTool'
+        },
+        keys: ['transcrever', 'transcrição', 'áudio', 'audio', 'texto do audio'],
+        parametersSchema: {
+            type: 'object',
+            properties: {
+                initialText: {
+                    type: 'string',
+                    description: 'Texto opcional para inicializar a ferramenta de transcrição.'
+                }
+            }
+        },
+        component: TranscriptionTool
+    },
+    {
+        id: 'WhatsAppAssistantTool',
+        ui_metadata: {
+            title: 'Assistente WhatsApp',
+            description: 'Consulta multimodal de mensagens com Gemini.',
+            icon: 'whatsapp',
+            category: 'Comunicação',
+            tag: '@WhatsAppAssistantTool'
+        },
+        keys: ['whatsapp', 'mensagens', 'zap', 'assistente whatsapp'],
+        parametersSchema: {
+            type: 'object',
+            properties: {
+                initialQuery: {
+                    type: 'string',
+                    description: 'A pergunta ou instrução inicial sobre as conversas.'
+                }
+            }
+        },
+        component: WhatsAppAssistantTool
+    },
+    {
+        id: 'DiagnosticoTool',
+        ui_metadata: {
+            title: 'Diagnóstico de Código',
+            description: 'Análise de código e diagnóstico de erros.',
+            icon: 'code',
+            category: 'Desenvolvimento',
+            tag: '@DiagnosticoTool'
+        },
+        keys: ['diagnóstico', 'código', 'erro de código', 'bug', 'analisar código'],
+        parametersSchema: {
+            type: 'object',
+            properties: {
+                initialCode: {
+                    type: 'string',
+                    description: 'O código ou mensagem de erro para diagnosticar.'
+                }
+            }
+        },
+        component: DiagnosticoTool
+    },
+    {
+        id: 'MeetingTranscriptionTool',
+        ui_metadata: {
+            title: 'Transcrição de Reunião',
+            description: 'Transcreva com áudio duplo e chat IA.',
+            icon: 'meeting',
+            category: 'Produtividade',
+            tag: '@MeetingTranscriptionTool'
+        },
+        keys: ['reunião', 'ata', 'transcrição de reunião', 'gravação de reunião'],
+        parametersSchema: {
+            type: 'object',
+            properties: {}
+        },
+        component: MeetingTranscriptionTool
+    },
+    {
+        id: 'ChoirRehearsalsTool',
+        ui_metadata: {
+            title: 'Ensaios de Coro',
+            description: 'Gestão de repertório, partituras e áudios.',
+            icon: 'music',
+            category: 'Música',
+            tag: '@ChoirRehearsalsTool'
+        },
+        keys: ['coro', 'ensaio', 'repertório', 'partitura', 'música', 'coral'],
+        parametersSchema: {
+            type: 'object',
+            properties: {}
+        },
+        component: ChoirRehearsalsTool
+    },
+    {
+        id: 'PopManagerTool',
+        ui_metadata: {
+            title: 'Gerenciador de POPs',
+            description: 'Gerencie Procedimentos Operacionais Padrão.',
+            icon: 'pop',
+            category: 'Sistema',
+            tag: '@PopManagerTool'
+        },
+        keys: ['pop', 'procedimento', 'procedimentos', 'operacional'],
+        parametersSchema: {
+            type: 'object',
+            properties: {
+                initialSearch: {
+                    type: 'string',
+                    description: 'Termo de busca inicial para POPs.'
+                }
+            }
+        },
+        component: PopManagerTool
+    }
+];
+
+export const getRoutingIndex = () => {
+    return toolsRegistry.map(tool => ({
+        id: tool.id,
+        tag: tool.ui_metadata.tag,
+        keys: tool.keys,
+        parametersSchema: tool.parametersSchema
+    }));
+};

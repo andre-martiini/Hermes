@@ -3,14 +3,14 @@ import { collection, onSnapshot, addDoc, deleteDoc, updateDoc, doc, writeBatch, 
 import { db } from '@/firebase';
 import { ShoppingItem } from '@/types';
 
-export const ShoppingListTool = ({ onBack, showToast }: { onBack: () => void, showToast: (msg: string, type: 'success' | 'error' | 'info') => void }) => {
+export const ShoppingListTool = ({ onBack, showToast, initialImportText, isEmbedded }: { onBack: () => void, showToast: (msg: string, type: 'success' | 'error' | 'info') => void, initialImportText?: string, isEmbedded?: boolean }) => {
   const [items, setItems] = useState<ShoppingItem[]>([]);
   const [view, setView] = useState<'catalog' | 'planning' | 'shopping'>('catalog');
   const [searchTerm, setSearchTerm] = useState('');
   const [newItemName, setNewItemName] = useState('');
   const [newItemCategoria, setNewItemCategoria] = useState('Geral');
-  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [importText, setImportText] = useState('');
+  const [isImportModalOpen, setIsImportModalOpen] = useState(!!initialImportText);
+  const [importText, setImportText] = useState(initialImportText || '');
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editingField, setEditingField] = useState<'nome' | 'categoria' | 'quantidade' | null>(null);
   const [editValue, setEditValue] = useState('');
