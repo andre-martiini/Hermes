@@ -32,6 +32,7 @@ from security_portals import (
     submitPublicFinanceTransaction,
     submitPublicScholarshipRegistration,
 )
+from pdf_precision import extract_pdf_text_with_fallback, is_pdf_mime_type
 
 # Grafo de Conhecimento — importa as Cloud Functions e o helper de RAG
 from knowledge_graph import (  # noqa: F401 — registra as Cloud Functions
@@ -64,6 +65,12 @@ def get_genai_module():
     return genai
 
 
+def get_gemini_api_key() -> str | None:
+    db = get_db()
+    keys_doc = db.collection('system').document('api_keys').get()
+    return keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+
+
 def get_embedding(text: str, api_key: str = None, task_type: str = "RETRIEVAL_DOCUMENT") -> list:
     """Get text embedding via Gemini SDK (gemini-embedding-001, 768 dims).
     task_type should be RETRIEVAL_DOCUMENT for indexing and RETRIEVAL_QUERY for searching."""
@@ -71,7 +78,7 @@ def get_embedding(text: str, api_key: str = None, task_type: str = "RETRIEVAL_DO
     from google.genai import types
     if not api_key:
         db = get_db()
-        keys_doc = db.collection('system').document('api_keys').get()
+        GEMINI_API_KEY = get_gemini_api_key()
         api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
     if not api_key:
         raise ValueError("Chave Gemini não configurada.")
@@ -2408,13 +2415,19 @@ def extractAndVectorizeRAGItem(req: https_fn.CallableRequest):
 
     # Extrai texto
     texto_bruto = ""
+    extraction_strategy = "text_decode"
+    extraction_metadata = None
     try:
-        if mime_type == 'application/pdf' or mime_type.endswith('/pdf'):
-            import pdfplumber
-            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-                texto_bruto = "\n\n".join(
-                    page.extract_text() or "" for page in pdf.pages
-                ).strip()
+        if is_pdf_mime_type(None, mime_type):
+            pdf_result = extract_pdf_text_with_fallback(
+                file_bytes,
+                "arquivo.pdf",
+                api_key=get_gemini_api_key(),
+                allow_gemini_fallback=True,
+            )
+            texto_bruto = pdf_result.get('text', '')
+            extraction_strategy = pdf_result.get('strategy', 'none')
+            extraction_metadata = pdf_result.get('metadata')
         else:
             texto_bruto = file_bytes.decode('utf-8', errors='replace').strip()
     except Exception as e:
@@ -2427,12 +2440,17 @@ def extractAndVectorizeRAGItem(req: https_fn.CallableRequest):
     texto_bruto = texto_bruto[:500000]
 
     # Salva texto no documento existente
-    doc_ref.update({'texto_bruto': texto_bruto})
+    doc_updates = {
+        'texto_bruto': texto_bruto,
+        'texto_extraido_por': extraction_strategy,
+    }
+    if extraction_metadata:
+        doc_updates['pdf_extraction_metadata'] = extraction_metadata
+    doc_ref.update(doc_updates)
 
     # Vetoriza
     try:
-        keys_doc = db.collection('system').document('api_keys').get()
-        api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+        api_key = get_gemini_api_key()
         if not api_key:
             return {'success': True, 'vectorized': False, 'message': 'Texto salvo, mas chave Gemini não configurada.'}
 
@@ -2805,15 +2823,21 @@ def processExtraContextFile(req: https_fn.CallableRequest):
 
     # Extração de texto baseada no tipo do arquivo
     texto_bruto = ""
-    is_pdf = 'pdf' in mime_type.lower() or filename.lower().endswith('.pdf')
+    extraction_strategy = "text_decode"
+    extraction_metadata = None
+    is_pdf = is_pdf_mime_type(filename, mime_type)
 
     if is_pdf:
         try:
-            import pdfplumber
-            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-                texto_bruto = "\n\n".join(
-                    page.extract_text() or "" for page in pdf.pages
-                ).strip()
+            pdf_result = extract_pdf_text_with_fallback(
+                file_bytes,
+                filename,
+                api_key=get_gemini_api_key(),
+                allow_gemini_fallback=True,
+            )
+            texto_bruto = pdf_result.get('text', '')
+            extraction_strategy = pdf_result.get('strategy', 'none')
+            extraction_metadata = pdf_result.get('metadata')
         except Exception as e:
             print(f"Erro ao extrair PDF '{filename}': {e}")
             texto_bruto = ""
@@ -2838,15 +2862,17 @@ def processExtraContextFile(req: https_fn.CallableRequest):
         'data_criacao': datetime.now(timezone.utc).isoformat(),
         'origem': None,
         'parent_id': None,
+        'texto_extraido_por': extraction_strategy,
     }
+    if extraction_metadata:
+        doc_data['pdf_extraction_metadata'] = extraction_metadata
     db.collection('conhecimento').document(doc_id).set(doc_data)
 
     # Vetorização automática
     vectorized = False
     if texto_bruto:
         try:
-            keys_doc = db.collection('system').document('api_keys').get()
-            api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+            api_key = get_gemini_api_key()
 
             if api_key:
                 embedding_vec = get_embedding(texto_bruto, api_key=api_key)
@@ -3272,15 +3298,7 @@ def start_file_indexing(item_id, item_data):
 
         db = get_db()
 
-        keys_doc = db.collection('system').document('api_keys').get()
-
-        if not keys_doc.exists:
-
-            return {'success': False, 'error': 'Configuração de API não encontrada (system/api_keys)'}
-
-
-
-        GEMINI_API_KEY = keys_doc.to_dict().get('gemini_api_key')
+        GEMINI_API_KEY = get_gemini_api_key()
 
         if not GEMINI_API_KEY:
 
@@ -3340,7 +3358,36 @@ def start_file_indexing(item_id, item_data):
 
         elif mime_type == 'application/pdf':
 
-            prompt = """
+            pdf_result = extract_pdf_text_with_fallback(
+                content,
+                file_metadata.get('name') or 'documento.pdf',
+                api_key=GEMINI_API_KEY,
+                allow_gemini_fallback=True,
+            )
+            extracted_pdf_text = (pdf_result.get('text') or '').strip()
+
+            if extracted_pdf_text:
+                prompt = f"""
+
+            Analise o texto abaixo, extraído de um PDF, e retorne em JSON:
+
+            1. texto_bruto: Conteúdo principal extraído.
+
+            2. resumo_tldr: Resumo de até 3 linhas.
+
+            3. tags: Lista de 5-10 palavras-chave.
+
+            4. area_tematica: Uma única palavra de classificação.
+
+            TEXTO EXTRAÍDO:
+
+            {extracted_pdf_text[:100000]}
+
+            """
+
+                parts = [prompt]
+            else:
+                prompt = """
 
             Analise este PDF e retorne em JSON:
 
@@ -3354,7 +3401,7 @@ def start_file_indexing(item_id, item_data):
 
             """
 
-            parts = [{"mime_type": mime_type, "data": content}, prompt]
+                parts = [{"mime_type": mime_type, "data": content}, prompt]
 
         else:
 
@@ -6519,12 +6566,13 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
                             try:
                                 if att['mime_type'] == 'application/pdf':
-                                    import pdfplumber
-                                    with pdfplumber.open(temp_path) as pdf:
-                                        extracted_text = ""
-                                        for page in pdf.pages[:10]:
-                                            text = page.extract_text()
-                                            if text: extracted_text += text + "\n"
+                                    pdf_result = extract_pdf_text_with_fallback(
+                                        file_data,
+                                        att_name,
+                                        allow_gemini_fallback=False,
+                                        max_pages=10,
+                                    )
+                                    extracted_text = pdf_result.get('text', '')
                                     msg_str += f"Conteúdo do PDF (Extração):\n{extracted_text[:3000]}\n"
                                 elif att['mime_type'] == 'text/csv':
                                     import csv
@@ -6613,11 +6661,37 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 while not _done:
                     _, _done = _dl.next_chunk()
                 _fh.seek(0)
+                _file_bytes = _fh.read()
+
+                if is_pdf_mime_type(_real_name, _mime):
+                    _pdf_result = extract_pdf_text_with_fallback(
+                        _file_bytes,
+                        _real_name,
+                        api_key=gemini_key,
+                        allow_gemini_fallback=False,
+                    )
+                    _pdf_text = (_pdf_result.get('text') or '').strip()
+                    if _pdf_text:
+                        _response = client.models.generate_content(
+                            model=model_id,
+                            contents=[(
+                                f"Você recebeu a extração local do arquivo '{_real_name}'. "
+                                f"Responda exclusivamente à pergunta abaixo com base nesse conteúdo.\n\n"
+                                f"PERGUNTA: {query_especifica}\n\n"
+                                "REGRAS:\n"
+                                "- Se a informação existir, responda de forma precisa e cite o trecho de origem.\n"
+                                "- Se a informação não existir, declare: 'A informação solicitada não foi encontrada neste documento.'\n"
+                                "- Não invente dados externos.\n\n"
+                                f"CONTEÚDO EXTRAÍDO:\n{_pdf_text[:120000]}"
+                            )]
+                        )
+                        _answer = (_response.text or "").strip()
+                        return f"[Leitura de '{_real_name}']\n{_answer}" if _answer else "Não foi possível extrair a resposta do documento."
 
                 # 3. Salva temporariamente e envia para Gemini File API
                 _ext = _os.path.splitext(_real_name)[1] or '.bin'
                 with _tempfile.NamedTemporaryFile(delete=False, suffix=_ext) as _tmp:
-                    _tmp.write(_fh.read())
+                    _tmp.write(_file_bytes)
                     _tmp_path = _tmp.name
 
                 _gemini_file = client.files.upload(
@@ -7709,22 +7783,35 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     _, done = downloader.next_chunk()
                 fh.seek(0)
                 file_bytes = fh.read()
-
-                # 3. Salva em arquivo temporário para a File API do Gemini
-                file_ext = os.path.splitext(real_file_name)[1] or '.bin'
-                with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
-                    tmp.write(file_bytes)
-                    tmp_path = tmp.name
-
-                # 4. Faz upload para a File API do Gemini
-                gemini_file = client.files.upload(
-                    file=tmp_path,
-                    config=types.UploadFileConfig(
-                        mime_type=real_mime_type,
-                        display_name=real_file_name
+                local_pdf_text = ""
+                local_pdf_metadata = None
+                if is_pdf_mime_type(real_file_name, real_mime_type):
+                    pdf_result = extract_pdf_text_with_fallback(
+                        file_bytes,
+                        real_file_name,
+                        api_key=gemini_key,
+                        allow_gemini_fallback=False,
                     )
-                )
-                os.unlink(tmp_path)
+                    local_pdf_text = (pdf_result.get('text') or '').strip()
+                    local_pdf_metadata = pdf_result.get('metadata')
+
+                gemini_file = None
+                if is_image_file or not local_pdf_text:
+                    # 3. Salva em arquivo temporário para a File API do Gemini
+                    file_ext = os.path.splitext(real_file_name)[1] or '.bin'
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
+                        tmp.write(file_bytes)
+                        tmp_path = tmp.name
+
+                    # 4. Faz upload para a File API do Gemini
+                    gemini_file = client.files.upload(
+                        file=tmp_path,
+                        config=types.UploadFileConfig(
+                            mime_type=real_mime_type,
+                            display_name=real_file_name
+                        )
+                    )
+                    os.unlink(tmp_path)
 
                 # O bloco try/finally abaixo garante que o arquivo seja sempre
                 # deletado da File API do Gemini, mesmo que a extração falhe.
@@ -7752,6 +7839,26 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                             "- utilidade_pratica: diga como o Hermes deve usar esta imagem para apoiar a ação.\n"
                             f"\nCONTEXTO DA AÇÃO:\n{task_context_summary or 'Nenhuma tarefa ativa foi fornecida.'}"
                         )
+                    elif local_pdf_text:
+                        extraction_prompt = (
+                            f"Você recebeu o texto extraído localmente do arquivo '{real_file_name}'. "
+                            "Retorne EXCLUSIVAMENTE um JSON válido, sem markdown, sem texto extra, com esta estrutura:\n"
+                            '{"titulo": "...", "natureza": "...", "resumo": "...", '
+                            '"relacao_com_acao": "...", "utilidade_pratica": "..."}\n'
+                            "Onde:\n"
+                            "- titulo: nome/título do documento\n"
+                            "- natureza: categoria (ex: Edital, Contrato, Relatório, Manual, Planilha, etc.)\n"
+                            "- resumo: resumo executivo em 3 a 5 frases sobre conteúdo e utilidade\n"
+                            "- relacao_com_acao: explique a conexão do arquivo com a tarefa atual; se não houver contexto suficiente, diga isso explicitamente\n"
+                            "- utilidade_pratica: diga como o Hermes deve usar este arquivo para apoiar a ação\n"
+                            f"\nCONTEXTO DA AÇÃO:\n{task_context_summary or 'Nenhuma tarefa ativa foi fornecida.'}\n\n"
+                            f"METADADOS DA EXTRAÇÃO LOCAL: {json.dumps(local_pdf_metadata or {}, ensure_ascii=False)}\n\n"
+                            f"TEXTO EXTRAÍDO:\n{local_pdf_text[:120000]}"
+                        )
+                        extraction_response = client.models.generate_content(
+                            model=model_id,
+                            contents=[extraction_prompt]
+                        )
                     else:
                         extraction_prompt = (
                             f"Você recebeu o arquivo '{real_file_name}'. "
@@ -7767,18 +7874,19 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                             "- utilidade_pratica: diga como o Hermes deve usar este arquivo para apoiar a ação\n"
                             f"\nCONTEXTO DA AÇÃO:\n{task_context_summary or 'Nenhuma tarefa ativa foi fornecida.'}"
                         )
-                    extraction_response = client.models.generate_content(
-                        model=model_id,
-                        contents=[
-                            types.Content(parts=[
-                                types.Part.from_uri(
-                                    file_uri=gemini_file.uri,
-                                    mime_type=real_mime_type
-                                ),
-                                types.Part(text=extraction_prompt)
-                            ])
-                        ]
-                    )
+                    if is_image_file or not local_pdf_text:
+                        extraction_response = client.models.generate_content(
+                            model=model_id,
+                            contents=[
+                                types.Content(parts=[
+                                    types.Part.from_uri(
+                                        file_uri=gemini_file.uri,
+                                        mime_type=real_mime_type
+                                    ),
+                                    types.Part(text=extraction_prompt)
+                                ])
+                            ]
+                        )
                     extraction_text = extraction_response.text.strip()
                     # Remove blocos de código caso o modelo os inclua mesmo instruído
                     if extraction_text.startswith("```"):
@@ -7833,6 +7941,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     db.collection('indice_artefatos').document(artefato_id).set({
                         'titulo': titulo_doc,
                         'trecho': resumo_doc,
+                        'texto_bruto': (local_pdf_text or ocr_doc or resumo_doc)[:500000],
                         'fonte': natureza_doc,
                         'embedding': Vector(embedding_floats),
                         'tipo_arquivo': real_mime_type.split('/')[-1],
@@ -7849,6 +7958,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         'descricao_visual': descricao_visual,
                         'elementos_chave': elementos_chave[:8],
                         'evidencias': evidencias[:8],
+                        'texto_extraido_por': 'pdf-inspector' if local_pdf_text else ('gemini_ocr' if is_image_file else 'gemini_file_api'),
+                        'pdf_extraction_metadata': local_pdf_metadata if local_pdf_metadata else None,
                     })
                     print(f"[Copiloto] Artefato '{titulo_doc}' gravado em indice_artefatos (id={artefato_id})")
 
@@ -7884,6 +7995,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         f"Resumo: {resumo_doc}\n"
                         f"Relação com a ação: {relacao_com_acao or 'Não inferida.'}\n"
                         f"Utilidade prática: {utilidade_pratica or 'Não inferida.'}\n"
+                        f"Texto local relevante: {local_pdf_text[:2500] if local_pdf_text else 'Não aplicável.'}\n"
                         f"OCR relevante: {ocr_doc[:2500] if ocr_doc else 'Sem texto legível relevante.'}\n"
                         f"Descrição visual: {descricao_visual or 'Não aplicável.'}\n"
                         f"Elementos-chave: {', '.join(elementos_chave[:8]) if elementos_chave else 'Nenhum listado.'}\n"
@@ -7894,11 +8006,12 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
                 finally:
                     # Limpeza obrigatória — evita acúmulo na File API do Gemini
-                    try:
-                        client.files.delete(name=gemini_file.name)
-                        print(f"[Copiloto] Arquivo Gemini '{gemini_file.name}' deletado com sucesso.")
-                    except Exception as del_err:
-                        print(f"[Copiloto] Aviso: falha ao deletar arquivo Gemini '{gemini_file.name}': {del_err}")
+                    if gemini_file is not None:
+                        try:
+                            client.files.delete(name=gemini_file.name)
+                            print(f"[Copiloto] Arquivo Gemini '{gemini_file.name}' deletado com sucesso.")
+                        except Exception as del_err:
+                            print(f"[Copiloto] Aviso: falha ao deletar arquivo Gemini '{gemini_file.name}': {del_err}")
 
             except Exception as file_err:
                 import traceback as _tb

@@ -10,6 +10,7 @@ google-cloud-pubsub
 google-auth
 html2text>=2024.2.26
 pdfplumber>=0.11.0
+pypdf>=5.0.0
 python-pptx>=0.6.21
 svglib>=1.5.0
 reportlab>=4.0.0

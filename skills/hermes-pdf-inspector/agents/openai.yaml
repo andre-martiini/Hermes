@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hermes PDF Inspector"
+  short_description: "Roteia PDFs do Hermes com precisao local."
+  default_prompt: "Use esta skill para instalar o pdf-inspector no Hermes, extrair Markdown estrutural de PDFs e decidir entre merge hibrido, OCR seletivo ou fallback para Gemini."
