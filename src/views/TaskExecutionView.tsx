@@ -901,16 +901,43 @@ export const TaskExecutionView = ({
             </h1>
           </div>
 
-          {/* Status inline selector */}
-          <select
-            value={currentTaskData.status}
-            onChange={e => handleStatusChange(e.target.value)}
-            className={`order-2 sm:order-3 shrink-0 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl border appearance-none cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 transition-all ${statusColor(currentTaskData.status)} ${isDark ? 'bg-transparent' : 'bg-white'}`}
-          >
-            <option value="em andamento">Em Andamento</option>
-            <option value="stand-by">Stand-by</option>
-            <option value="concluído">Concluído</option>
-          </select>
+          <div className="order-2 sm:order-3 shrink-0 flex items-center gap-2">
+            <SpeedDialMenu
+              notifications={notifications}
+              isSyncing={isSyncing}
+              isNotificationCenterOpen={isNotificationCenterOpen}
+              onOpenNotes={onOpenNotes}
+              onOpenLog={onOpenLog}
+              onOpenCopiloto={() => {
+                if (isDesktopViewport) {
+                  setIsCopilotCollapsed(false);
+                  return;
+                }
+                onOpenCopiloto();
+              }}
+              onOpenShopping={onOpenShopping}
+              onOpenTranscription={onOpenTranscription}
+              onOpenMeetingTranscription={onOpenMeetingTranscription}
+              onToggleNotifications={onToggleNotifications}
+              onSync={onSync}
+              onOpenSettings={onOpenSettings}
+              onCloseNotifications={onCloseNotifications}
+              onMarkAsRead={onMarkAsRead}
+              onDismiss={onDismiss}
+              onCreateAction={onCreateAction}
+              direction="down"
+            />
+            {/* Status inline selector */}
+            <select
+              value={currentTaskData.status}
+              onChange={e => handleStatusChange(e.target.value)}
+              className={`shrink-0 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl border appearance-none cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 transition-all ${statusColor(currentTaskData.status)} ${isDark ? 'bg-transparent' : 'bg-white'}`}
+            >
+              <option value="em andamento">Em Andamento</option>
+              <option value="stand-by">Stand-by</option>
+              <option value="conclu?do">Conclu?do</option>
+            </select>
+          </div>
 
         </div>
 
@@ -1508,25 +1535,6 @@ export const TaskExecutionView = ({
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════
-          SPEED DIAL
-      ══════════════════════════════════════════════════════════ */}
-      <div className="fixed bottom-6 right-6 z-[250]">
-        <SpeedDialMenu
-          notifications={notifications} isSyncing={isSyncing} isNotificationCenterOpen={isNotificationCenterOpen}
-          onOpenNotes={onOpenNotes} onOpenLog={onOpenLog} onOpenCopiloto={() => {
-            if (isDesktopViewport) {
-              setIsCopilotCollapsed(false);
-              return;
-            }
-            onOpenCopiloto();
-          }} onOpenShopping={onOpenShopping}
-          onOpenTranscription={onOpenTranscription} onOpenMeetingTranscription={onOpenMeetingTranscription}
-          onToggleNotifications={onToggleNotifications} onSync={onSync} onOpenSettings={onOpenSettings}
-          onCloseNotifications={onCloseNotifications} onMarkAsRead={onMarkAsRead} onDismiss={onDismiss}
-          onCreateAction={onCreateAction} direction="up"
-        />
-      </div>
 
       {/* ══════════════════════════════════════════════════════════
           MODAL SYSTEM (link / contact / edit / delete / upload / reminder)

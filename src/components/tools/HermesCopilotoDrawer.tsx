@@ -318,6 +318,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const chatEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const toolMenuRef = useRef<HTMLDivElement>(null);
 
     // ── Estado do modal de relatório ─────────────────────────────────────────
     const [reportModalOpen, setReportModalOpen] = useState(false);
@@ -477,9 +478,11 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         const handleResize = () => {
             if (textareaRef.current) {
                 textareaRef.current.style.height = 'auto';
-                const minH = isFocused ? 250 : 50;
+                const minH = isFocused ? 120 : 50;
+                const maxH = 220;
                 const scrollH = textareaRef.current.scrollHeight;
-                textareaRef.current.style.height = `${Math.max(minH, Math.min(scrollH, 400))}px`;
+                textareaRef.current.style.height = `${Math.max(minH, Math.min(scrollH, maxH))}px`;
+                textareaRef.current.style.overflowY = scrollH > maxH ? 'auto' : 'hidden';
             }
         };
 
@@ -489,6 +492,9 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             if (textareaRef.current && !textareaRef.current.contains(e.target as Node)) {
                 setIsFocused(false);
             }
+            if (toolMenuRef.current && !toolMenuRef.current.contains(e.target as Node)) {
+                setShowToolMenu(false);
+            }
         };
 
         if (isFocused) {
@@ -497,6 +503,17 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
         return () => window.removeEventListener('mousedown', handleClickOutside);
     }, [input, isFocused]);
+
+    const insertToolShortcut = (tag: string) => {
+        setInput(prev => {
+            const trimmedStart = prev.trimStart();
+            if (trimmedStart.startsWith(tag)) return prev;
+            return prev.trim().length > 0 ? `${tag} ${prev}` : `${tag} `;
+        });
+        setShowToolMenu(false);
+        setIsFocused(true);
+        setTimeout(() => textareaRef.current?.focus(), 0);
+    };
 
     // Load pool_dados from active task for @ mentions
     useEffect(() => {
@@ -1293,7 +1310,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 </div>
             </div>
 
-            <div className="flex-1 overflow-hidden flex relative">
+            <div className="flex-1 overflow-x-hidden overflow-y-visible flex relative">
                 {/* History Sidebar */}
                 {showHistory && (
                     <div className={`absolute inset-0 z-10 flex flex-col ${isDark ? 'border-r border-white/10 bg-[#0b1220]' : 'border-r border-slate-200 bg-white'}`}>
@@ -1343,7 +1360,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 )}
 
                 {/* Chat Area */}
-                <div className="flex-1 flex flex-col min-w-0">
+                <div className="flex-1 flex flex-col min-w-0 overflow-visible">
                     <div className="flex-1 overflow-y-auto p-6 space-y-6" style={{ scrollbarWidth: 'thin' }}>
                         {messages.length === 0 && !isLoading && (
                             <div className="h-full flex flex-col items-center justify-center text-center gap-5">
@@ -2006,7 +2023,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                     </div>
 
                     {/* Footer Input */}
-                    <div className={`shrink-0 p-6 border-t ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+                    <div className={`relative z-20 shrink-0 overflow-visible p-6 border-t ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
 
                         {/* Banner de erro inline */}
                         {footerError && (
@@ -2056,7 +2073,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                             </div>
                         )}
 
-                        <div className="flex gap-3 items-end">
+                            <div className="relative z-20 flex items-end">
                             {/* Input de arquivo oculto */}
                             <input
                                 ref={fileInputRef}
@@ -2133,29 +2150,109 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         }
                                     }}
                                     placeholder={isRecording ? '🎙 Gravando… clique no microfone para parar' : isProcessingMic ? 'Transcrevendo áudio...' : isTranscribing ? 'Transcrevendo áudio...' : attachedFile ? 'Pergunte sobre o arquivo ou envie sem texto…' : 'Estrategize com Hermes…'}
-                                    className={`w-full pl-4 pr-9 py-3.5 rounded-2xl text-sm font-medium outline-none border resize-none overflow-y-auto ${isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-blue-500' : 'bg-slate-50 border-slate-200 text-slate-700 placeholder:text-slate-400 focus:border-blue-500'} transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed`}
+                                    className={`w-full pl-4 pr-[10.25rem] pt-3.5 pb-11 rounded-2xl text-sm font-medium outline-none border resize-none ${isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-blue-500' : 'bg-slate-50 border-slate-200 text-slate-700 placeholder:text-slate-400 focus:border-blue-500'} transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed`}
                                 />
-                                <button
-                                    onClick={() => !isBlocked && fileInputRef.current?.click()}
-                                    disabled={isBlocked}
-                                    title="Anexar arquivo"
-                                    className={`absolute right-2.5 bottom-3 transition-all ${attachedFile
-                                            ? 'text-blue-500'
-                                            : isDark
-                                                ? 'text-white/30 hover:text-white/70'
-                                                : 'text-slate-300 hover:text-slate-500'
-                                        } disabled:opacity-30 disabled:cursor-not-allowed`}
-                                >
-                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                                    </svg>
-                                </button>
+                                <div className="absolute bottom-2.5 right-2.5 z-10 flex items-center gap-2">
+                                    <button
+                                        onClick={() => !isBlocked && fileInputRef.current?.click()}
+                                        disabled={isBlocked}
+                                        title="Anexar arquivo"
+                                        className={`flex h-6 w-6 items-center justify-center rounded-full transition-all ${attachedFile
+                                                ? 'bg-blue-500/10 text-blue-500'
+                                                : isDark
+                                                    ? 'bg-white/5 text-white/30 hover:bg-white/10 hover:text-white/70'
+                                                    : 'bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-500'
+                                            } disabled:opacity-30 disabled:cursor-not-allowed`}
+                                    >
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                        </svg>
+                                    </button>
+                                    <div className="relative" ref={toolMenuRef}>
+                                        <button
+                                            onClick={() => setShowToolMenu(prev => !prev)}
+                                            disabled={isBlocked}
+                                            aria-label="Ações Rápidas"
+                                            aria-expanded={showToolMenu}
+                                            title="Atalhos de ferramentas"
+                                            className={`flex h-6 w-6 items-center justify-center rounded-full transition-all ${isDark ? 'bg-white/5 text-white/30 hover:bg-white/10 hover:text-white/70' : 'bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-500'} disabled:opacity-30 disabled:cursor-not-allowed`}
+                                        >
+                                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                <circle cx="5" cy="5" r="1.8" />
+                                                <circle cx="12" cy="5" r="1.8" />
+                                                <circle cx="19" cy="5" r="1.8" />
+                                                <circle cx="5" cy="12" r="1.8" />
+                                                <circle cx="12" cy="12" r="1.8" />
+                                                <circle cx="19" cy="12" r="1.8" />
+                                                <circle cx="5" cy="19" r="1.8" />
+                                                <circle cx="12" cy="19" r="1.8" />
+                                                <circle cx="19" cy="19" r="1.8" />
+                                            </svg>
+                                        </button>
+                                        {showToolMenu && (
+                                            <div className={`absolute bottom-full right-0 mb-2 z-[80] min-w-[260px] max-w-[min(20rem,calc(100vw-2rem))] max-h-[min(24rem,calc(100vh-14rem))] overflow-y-auto overflow-x-hidden rounded-2xl border shadow-2xl ${isDark ? 'border-white/10 bg-[#101827]' : 'border-slate-200 bg-white'}`}>
+                                                <div className={`sticky top-0 z-10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'border-b border-white/10 bg-[#101827] text-white/40' : 'border-b border-slate-100 bg-white text-slate-400'}`}>
+                                                    Inserir Atalho
+                                                </div>
+                                                <div className="p-2">
+                                                    {toolsRegistry.map(tool => (
+                                                        <button
+                                                            key={tool.id}
+                                                            onClick={() => insertToolShortcut(tool.ui_metadata.tag)}
+                                                            className={`w-full rounded-xl px-3 py-2 text-left transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-50'}`}
+                                                        >
+                                                            <div className="flex items-center justify-between gap-3">
+                                                                <span className={`text-[11px] font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{tool.ui_metadata.title}</span>
+                                                                <span className={`text-[9px] font-mono ${isDark ? 'text-blue-300' : 'text-blue-600'}`}>{tool.ui_metadata.tag}</span>
+                                                            </div>
+                                                            <p className={`mt-1 text-[10px] leading-relaxed ${isDark ? 'text-white/50' : 'text-slate-500'}`}>{tool.ui_metadata.description}</p>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <button
+                                        onClick={() => isRecording ? stopRecording() : startRecording()}
+                                        disabled={isBlocked && !isRecording}
+                                        title={isRecording ? 'Parar gravação' : 'Gravar Áudio'}
+                                        className={`flex h-6 w-6 items-center justify-center rounded-full transition-all active:scale-90 shadow-sm ${
+                                            isRecording
+                                                ? 'bg-red-500 text-white animate-pulse hover:bg-red-600'
+                                                : isDark
+                                                    ? 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white disabled:opacity-30'
+                                                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700 disabled:opacity-30'
+                                        } disabled:cursor-not-allowed`}
+                                    >
+                                        {isProcessingMic ? (
+                                            <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                                        ) : (
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 10v2a7 7 0 01-14 0v-2m14 0h2m-16 0H3m9 10v3m-3 0h6" />
+                                            </svg>
+                                        )}
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            if (!currentSessionId) {
+                                                handleCreateSession(input);
+                                            } else {
+                                                sendMessage(input);
+                                            }
+                                        }}
+                                        disabled={isBlocked || (!input.trim() && !attachedFile)}
+                                        className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 disabled:opacity-40 transition-all"
+                                    >
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                                    </button>
+                                </div>
                             </div>
                             <button
                                 onClick={() => isRecording ? stopRecording() : startRecording()}
                                 disabled={isBlocked && !isRecording}
                                 title={isRecording ? 'Parar gravação' : 'Gravar Áudio'}
-                                className={`w-12 h-12 shrink-0 flex items-center justify-center rounded-2xl transition-all active:scale-90 shadow-sm ${
+                                className={`absolute right-8 bottom-2.5 z-10 hidden h-6 w-6 items-center justify-center rounded-full transition-all active:scale-90 shadow-sm ${
                                     isRecording
                                         ? 'bg-red-500 text-white animate-pulse hover:bg-red-600'
                                         : isDark
@@ -2164,9 +2261,9 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                 } disabled:cursor-not-allowed`}
                             >
                                 {isProcessingMic ? (
-                                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                                    <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
                                 ) : (
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 10v2a7 7 0 01-14 0v-2m14 0h2m-16 0H3m9 10v3m-3 0h6" />
                                     </svg>
@@ -2181,9 +2278,9 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                     }
                                 }}
                                 disabled={isBlocked || (!input.trim() && !attachedFile)}
-                                className="w-12 h-12 shrink-0 bg-blue-600 text-white rounded-2xl flex items-center justify-center shadow-lg hover:bg-blue-700 disabled:opacity-40 transition-all"
+                                className="absolute right-0 bottom-2.5 z-10 hidden h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 disabled:opacity-40 transition-all"
                             >
-                                <svg className="w-6 h-6 rotate-45" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
                             </button>
                         </div>
                     </div>

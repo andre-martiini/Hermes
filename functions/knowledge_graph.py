@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -1551,6 +1552,75 @@ SMART_SEARCH_TOP_N = 10
 SMART_SEARCH_KNN_CANDIDATES = 50  # candidatos vetoriais puros antes do post-filtering
 
 
+def _normalize_search_text(value: str) -> str:
+    """Normaliza texto para matching lexical tolerante a acentos e caixa."""
+    if not value:
+        return ""
+    normalized = unicodedata.normalize("NFKD", str(value))
+    ascii_only = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return ascii_only.lower().strip()
+
+
+def _extract_query_terms(query: str) -> list[str]:
+    """Quebra a query em termos úteis para busca lexical complementar."""
+    normalized = _normalize_search_text(query)
+    return [term for term in re.findall(r"\w+", normalized) if len(term) >= 2]
+
+
+def _score_artefato_lexical(ad: dict, query: str, terms: list[str]) -> float:
+    """
+    Complementa o KNN quando o embedding do resumo não captura nome do arquivo,
+    siglas ou trechos literais relevantes para o usuário.
+    """
+    if not query:
+        return 0.0
+
+    normalized_query = _normalize_search_text(query)
+    nome = _normalize_search_text(ad.get("nome", ""))
+    resumo = _normalize_search_text(ad.get("resumo_semantico", ""))
+    texto_bruto = _normalize_search_text(ad.get("texto_bruto", ""))
+    tags = [_normalize_search_text(t) for t in (ad.get("tags") or []) if t]
+    tags_text = " ".join(tags)
+    corpus = " ".join(part for part in [nome, resumo, tags_text, texto_bruto] if part)
+
+    if not corpus:
+        return 0.0
+
+    score = 0.0
+
+    if normalized_query and normalized_query in nome:
+        score += 12.0
+    elif normalized_query and normalized_query in tags_text:
+        score += 8.0
+    elif normalized_query and normalized_query in resumo:
+        score += 6.0
+    elif normalized_query and normalized_query in texto_bruto:
+        score += 4.0
+
+    if terms:
+        hits_nome = sum(1 for term in terms if term in nome)
+        hits_tags = sum(1 for term in terms if term in tags_text)
+        hits_resumo = sum(1 for term in terms if term in resumo)
+        hits_texto = sum(1 for term in terms if term in texto_bruto)
+
+        if hits_nome == len(terms):
+            score += 8.0
+        elif hits_nome:
+            score += 3.0 + hits_nome
+
+        if hits_tags:
+            score += 2.5 + (hits_tags * 0.5)
+        if hits_resumo:
+            score += 2.0 + (hits_resumo * 0.4)
+        if hits_texto:
+            score += min(3.0, 0.3 * hits_texto)
+
+        overlap = sum(1 for term in terms if term in corpus)
+        score += overlap / max(len(terms), 1)
+
+    return score
+
+
 def _parse_iso_date(value) -> Optional[datetime]:
     """Tolerante a None, Timestamp do Firestore, string ISO ou datetime."""
     if value is None or value == "":
@@ -1680,6 +1750,7 @@ def _search_nodes(
 
 def _search_artefatos(
     db,
+    query: str,
     query_emb: list[float],
     tags_set: set[str],
     date_start: Optional[datetime],
@@ -1690,6 +1761,9 @@ def _search_artefatos(
     Busca vetorial em indice_artefatos com post-filtering em memória.
     Usa find_nearest com limit maior e aplica filtros locais — evita Composite Vector Indexes no GCP.
     """
+    lexical_terms = _extract_query_terms(query)
+    results_by_id: dict[str, dict] = {}
+
     try:
         stream = (
             db.collection("indice_artefatos")
@@ -1703,24 +1777,21 @@ def _search_artefatos(
         )
     except Exception as exc:
         print(f"[smart_search_kg] FindNearest falhou: {exc}")
-        return []
+        stream = []
 
-    filtered: list[dict] = []
     for adoc in stream:
         ad = adoc.to_dict() or {}
         if not ad.get("resumo_semantico"):
             continue
 
-        # Filtro de tags
         if not _tags_match(ad.get("tags", []), tags_set):
             continue
 
-        # Filtro de data
         art_date = _parse_iso_date(ad.get("indexed_at"))
         if not _in_date_window(art_date, date_start, date_end):
             continue
 
-        filtered.append({
+        results_by_id[adoc.id] = {
             "id": adoc.id,
             "type": "artefato",
             "title": ad.get("nome", "Documento"),
@@ -1735,10 +1806,58 @@ def _search_artefatos(
             "origem": ad.get("origem", ""),
             "task_id": ad.get("task_id", ""),
             "acervo_id": ad.get("acervo_id", ""),
-            # distance não é exposta pelo SDK por padrão; usamos a ordem retornada como score
-            "score": 1.0,
-        })
+            "score": 20.0,
+        }
 
+    try:
+        lexical_stream = db.collection("indice_artefatos").stream()
+    except Exception as exc:
+        print(f"[smart_search_kg] Stream lexical de artefatos falhou: {exc}")
+        lexical_stream = []
+
+    for adoc in lexical_stream:
+        ad = adoc.to_dict() or {}
+        if not ad.get("resumo_semantico"):
+            continue
+
+        if not _tags_match(ad.get("tags", []), tags_set):
+            continue
+
+        art_date = _parse_iso_date(ad.get("indexed_at"))
+        if not _in_date_window(art_date, date_start, date_end):
+            continue
+
+        lexical_score = _score_artefato_lexical(ad, query, lexical_terms)
+        if lexical_score <= 0:
+            continue
+
+        if adoc.id in results_by_id:
+            results_by_id[adoc.id]["score"] = max(
+                results_by_id[adoc.id].get("score", 0.0),
+                20.0 + lexical_score,
+            )
+            continue
+
+        results_by_id[adoc.id] = {
+            "id": adoc.id,
+            "type": "artefato",
+            "title": ad.get("nome", "Documento"),
+            "snippet": (ad.get("resumo_semantico") or "")[:400],
+            "resumo_semantico": ad.get("resumo_semantico") or "",
+            "tags": ad.get("tags", []),
+            "date": ad.get("indexed_at", ""),
+            "area_tematica": "",
+            "drive_url": ad.get("url", ""),
+            "drive_file_id": _extract_drive_id(ad.get("url", "")),
+            "tipo_mime": ad.get("tipo_mime", ""),
+            "origem": ad.get("origem", ""),
+            "task_id": ad.get("task_id", ""),
+            "acervo_id": ad.get("acervo_id", ""),
+            "score": lexical_score,
+        }
+
+    filtered = list(results_by_id.values())
+    filtered.sort(key=lambda x: x["score"], reverse=True)
     return filtered
 
 
@@ -1876,7 +1995,7 @@ def smart_search_kg(req: https_fn.CallableRequest):
         )
     if tipo_filter in ("all", "artefato"):
         artefato_results = _search_artefatos(
-            db, query_emb, tags_set, date_start, date_end, tipo_filter
+            db, query, query_emb, tags_set, date_start, date_end, tipo_filter
         )
 
     # Merge intercalado: prioriza melhores scores mantendo diversidade de tipos
