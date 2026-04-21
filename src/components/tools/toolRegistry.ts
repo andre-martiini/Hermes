@@ -4,7 +4,6 @@ import { ShoppingListTool } from './ShoppingListTool';
 import { TranscriptionTool } from './TranscriptionTool';
 import { ChoirRehearsalsTool } from './ChoirRehearsalsTool';
 import { MeetingTranscriptionTool } from './MeetingTranscriptionTool';
-import { WhatsAppAssistantTool } from './WhatsAppAssistantTool';
 import { DiagnosticoTool } from './DiagnosticoTool';
 import { PopManagerTool } from './PopManagerTool';
 
@@ -76,7 +75,7 @@ export const toolsRegistry: ToolMetadata[] = [
         id: 'TranscriptionTool',
         ui_metadata: {
             title: 'Transcrição de Áudio',
-            description: 'Transcreva e refine áudios do WhatsApp e outros.',
+            description: 'Transcreva e refine áudios.',
             icon: 'transcription',
             category: 'Produtividade',
             tag: '@TranscriptionTool'
@@ -92,27 +91,6 @@ export const toolsRegistry: ToolMetadata[] = [
             }
         },
         component: TranscriptionTool
-    },
-    {
-        id: 'WhatsAppAssistantTool',
-        ui_metadata: {
-            title: 'Assistente WhatsApp',
-            description: 'Consulta multimodal de mensagens com Gemini.',
-            icon: 'whatsapp',
-            category: 'Comunicação',
-            tag: '@WhatsAppAssistantTool'
-        },
-        keys: ['whatsapp', 'mensagens', 'zap', 'assistente whatsapp'],
-        parametersSchema: {
-            type: 'object',
-            properties: {
-                initialQuery: {
-                    type: 'string',
-                    description: 'A pergunta ou instrução inicial sobre as conversas.'
-                }
-            }
-        },
-        component: WhatsAppAssistantTool
     },
     {
         id: 'DiagnosticoTool',

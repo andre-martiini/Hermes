@@ -21,7 +21,6 @@ if CURRENT_DIR not in sys.path:
     sys.path.insert(0, CURRENT_DIR)
 
 from security_portals import (
-    askWhatsAppAssistantSecure,
     generatePgdFromDiariesAI,
     generatePgdFromRawTextAI,
     getPublicFinancePortal,
@@ -45,6 +44,12 @@ from knowledge_graph import (  # noqa: F401 — registra as Cloud Functions
     monitorar_acervo_global,
     smart_search_kg,
     get_artefato_raw_text,
+)
+
+# Telegram integration
+from hermes_core_logic import (  # noqa: F401 — registra as Cloud Functions
+    telegramWebhook,
+    on_telegram_inbound,
 )
 
 

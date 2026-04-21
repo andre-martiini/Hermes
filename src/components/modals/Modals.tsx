@@ -933,7 +933,7 @@ const SpeechRecognition = (window as any).SpeechRecognition || (window as any).w
 
 export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems = [], onSave, onClose, showAlert, initialData, existingTags = [] }: { unidades: { id: string, nome: string }[], knowledgeBases?: { id: string, nome: string, tipo?: string, sistema_id?: string }[], knowledgeItems?: ConhecimentoItem[], onSave: (data: Partial<Tarefa>) => void, onClose: () => void, showAlert: (title: string, message: string) => void, initialData?: Partial<Tarefa>, existingTags?: string[] }) => {
   const [tipoAcao, setTipoAcao] = useState<TipoAcao>('fast');
-  const [origemIngestao, setOrigemIngestao] = useState<'manual' | 'whatsapp' | 'audio'>('manual');
+  const [origemIngestao, setOrigemIngestao] = useState<'manual' | 'audio'>('manual');
   const [isExtraContextOpen, setIsExtraContextOpen] = useState(false);
   const [extraContext, setExtraContext] = useState('');
   const [extraContextId] = useState<string>(() => crypto.randomUUID());
@@ -1214,13 +1214,13 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
           {tipoAcao === 'deep' && (
             <div className="space-y-4 animate-in slide-in-from-top-4 duration-300 border-b border-slate-100 pb-4">
               <div className="flex bg-slate-100 p-1 rounded-xl gap-1">
-                {(['manual', 'whatsapp', 'audio'] as const).map((o) => (
+                {(['manual', 'audio'] as const).map((o) => (
                   <button
                     key={o}
                     onClick={() => setOrigemIngestao(o)}
                     className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${origemIngestao === o ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
                   >
-                    {o === 'manual' ? 'Manual' : o === 'whatsapp' ? 'WhatsApp' : 'Áudio'}
+                    {o === 'manual' ? 'Manual' : 'Áudio'}
                   </button>
                 ))}
               </div>
@@ -1387,14 +1387,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
               {/* Área de Processamento Dinâmico */}
               {origemIngestao !== 'manual' && (
                 <div className="space-y-3 p-3 bg-slate-50 rounded-2xl border border-slate-100">
-                  {origemIngestao === 'whatsapp' ? (
-                    <textarea
-                      value={inputText}
-                      onChange={e => setInputText(e.target.value)}
-                      className="w-full bg-white border-none rounded-xl px-4 py-3 text-xs font-medium text-slate-700 min-h-[100px] resize-none focus:ring-1 focus:ring-slate-300"
-                      placeholder="Cole aqui as mensagens copiadas do WhatsApp..."
-                    />
-                  ) : (
+                  {(
                     <div className="flex flex-col items-center justify-center gap-4 py-4">
                       <button
                         onClick={handleAudioToggle}
@@ -1416,7 +1409,6 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                         {inputText && <p className="text-[9px] font-medium text-slate-500 mt-1 max-w-[200px] truncate">{inputText}</p>}
                       </div>
                     </div>
-                  )}
                   <button
                     onClick={handleGenerateWithIA}
                     disabled={isGenerating || !inputText.trim()}
