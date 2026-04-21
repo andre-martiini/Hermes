@@ -6920,6 +6920,95 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "reason": str(mem_err),
                 }, ensure_ascii=False)
 
+        def salvar_pop_global(
+            titulo: str,
+            gatilhos: list[str],
+            instrucao_sistema: str
+        ):
+            """
+            Cria ou atualiza um POP operacional persistido em pops_diretrizes.
+            Use apenas quando houver pedido explícito do usuário para cadastrar ou atualizar um POP.
+            """
+            try:
+                titulo_clean = (titulo or "").strip()
+                instrucao_clean = (instrucao_sistema or "").strip()
+
+                if not titulo_clean:
+                    return json.dumps({"status": "error", "reason": "titulo_obrigatorio"}, ensure_ascii=False)
+                if not instrucao_clean:
+                    return json.dumps({"status": "error", "reason": "instrucao_obrigatoria"}, ensure_ascii=False)
+
+                gatilhos_clean = []
+                seen_gatilhos = set()
+                for gatilho in gatilhos or []:
+                    gatilho_clean = str(gatilho or "").strip().lower()
+                    gatilho_norm = _normalize_pop_text(gatilho_clean)
+                    if not gatilho_norm or gatilho_norm in seen_gatilhos:
+                        continue
+                    seen_gatilhos.add(gatilho_norm)
+                    gatilhos_clean.append(gatilho_clean)
+
+                if not gatilhos_clean:
+                    return json.dumps({"status": "error", "reason": "gatilhos_obrigatorios"}, ensure_ascii=False)
+
+                titulo_norm = _normalize_pop_text(titulo_clean)
+                gatilhos_norm = {_normalize_pop_text(item) for item in gatilhos_clean}
+                existing_ref = None
+                existing_data = None
+
+                for pop_doc in db.collection("pops_diretrizes").stream():
+                    pop_data = pop_doc.to_dict() or {}
+                    existing_title_norm = _normalize_pop_text(pop_data.get("titulo") or "")
+                    existing_triggers_norm = {
+                        _normalize_pop_text(item)
+                        for item in (pop_data.get("gatilhos") or [])
+                        if _normalize_pop_text(item)
+                    }
+
+                    if titulo_norm and titulo_norm == existing_title_norm:
+                        existing_ref = pop_doc.reference
+                        existing_data = pop_data
+                        break
+
+                    if gatilhos_norm and existing_triggers_norm.intersection(gatilhos_norm):
+                        existing_ref = pop_doc.reference
+                        existing_data = pop_data
+                        break
+
+                payload = {
+                    "titulo": titulo_clean,
+                    "gatilhos": gatilhos_clean,
+                    "instrucao_sistema": instrucao_clean,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                    "updated_by": user_uid or "copiloto",
+                    "origem": "copiloto",
+                }
+
+                if existing_ref:
+                    payload["created_at"] = existing_data.get("created_at", firestore.SERVER_TIMESTAMP)
+                    existing_ref.set(payload, merge=True)
+                    return json.dumps({
+                        "status": "updated",
+                        "pop_id": existing_ref.id,
+                        "titulo": titulo_clean,
+                        "gatilhos": gatilhos_clean,
+                    }, ensure_ascii=False)
+
+                new_ref = db.collection("pops_diretrizes").document()
+                payload["created_at"] = firestore.SERVER_TIMESTAMP
+                new_ref.set(payload)
+                return json.dumps({
+                    "status": "saved",
+                    "pop_id": new_ref.id,
+                    "titulo": titulo_clean,
+                    "gatilhos": gatilhos_clean,
+                }, ensure_ascii=False)
+            except Exception as pop_err:
+                return json.dumps({
+                    "status": "error",
+                    "reason": str(pop_err),
+                }, ensure_ascii=False)
+
         def resolver_conflito_memoria(
             memoria_id: str,
             decisao: str,
@@ -7677,6 +7766,12 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "Após o usuário decidir, use resolver_conflito_memoria() para convergir a fonte de verdade.\n"
             "Se o usuário pedir mudança de tom, estilo, profundidade ou comportamento, use atualizar_personalidade() para reescrever a personalidade dinâmica.\n\n"
             "ETAPA 1 — PROPOSTA VIA FERRAMENTA:\n"
+            "## POPS OPERACIONAIS\n"
+            "Se o usuÃ¡rio pedir explicitamente para criar, cadastrar, registrar ou atualizar um POP/Procedimento Operacional PadrÃ£o,\n"
+            "use salvar_pop_global(titulo, gatilhos, instrucao_sistema).\n"
+            "Use essa ferramenta apenas quando houver intenÃ§Ã£o clara de persistir um POP reutilizÃ¡vel no Gestor de POPs.\n"
+            "Gatilhos devem ser uma lista de frases curtas que disparam o POP.\n"
+            "ApÃ³s salvar_pop_global com sucesso, deixe claro para o usuÃ¡rio que o POP foi salvo ou atualizado no Gestor de POPs.\n\n"
             "Chame preparar_edicao_acao(task_id, alteracoes, justificativa) com:\n"
             "- task_id: ID da ação encontrada\n"
             "- alteracoes: dicionário com APENAS os campos que mudam. Ex: {\"data_limite\": \"2026-05-15\"}\n"
@@ -7864,6 +7959,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'ler_documento_na_integra': ler_documento_na_integra,
             'registrar_correcao_procedimento': registrar_correcao_procedimento,
             'salvar_memoria_global': salvar_memoria_global,
+            'salvar_pop_global': salvar_pop_global,
             'resolver_conflito_memoria': resolver_conflito_memoria,
             'atualizar_personalidade': atualizar_personalidade,
             'resolver_conflito_procedimento': resolver_conflito_procedimento,
@@ -7937,6 +8033,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'ler_documento_na_integra': ler_documento_na_integra,
             'registrar_correcao_procedimento': registrar_correcao_procedimento,
             'salvar_memoria_global': salvar_memoria_global,
+            'salvar_pop_global': salvar_pop_global,
             'resolver_conflito_memoria': resolver_conflito_memoria,
             'atualizar_personalidade': atualizar_personalidade,
             'resolver_conflito_procedimento': resolver_conflito_procedimento,
@@ -7965,6 +8062,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     ler_documento_na_integra,
                     registrar_correcao_procedimento,
                     salvar_memoria_global,
+                    salvar_pop_global,
                     resolver_conflito_memoria,
                     atualizar_personalidade,
                     resolver_conflito_procedimento,

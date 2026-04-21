@@ -156,6 +156,7 @@ const TOOL_LABELS: Record<string, string> = {
     ler_pagina_web: 'Leitura de Página',
     ler_documento_na_integra: 'Leitura de Documento',
     salvar_memoria_global: 'Memória Atualizada',
+    salvar_pop_global: 'POP Atualizado',
     atualizar_personalidade: 'Personalidade Ajustada',
     resolver_conflito_procedimento: 'Resolução de Conflito',
     criar_acao_no_sistema: 'Criando Ação',
@@ -181,6 +182,7 @@ const WRITE_TOOLS = new Set([
     'editar_plano_acao',
     'preparar_edicao_acao',
     'salvar_memoria_global',
+    'salvar_pop_global',
     'atualizar_personalidade',
 ]);
 
