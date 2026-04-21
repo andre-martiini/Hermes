@@ -33,7 +33,6 @@ from security_portals import (
 )
 from pdf_precision import extract_pdf_text_with_fallback, is_pdf_mime_type
 
-# Grafo de Conhecimento — importa as Cloud Functions e o helper de RAG
 from knowledge_graph import (  # noqa: F401 — registra as Cloud Functions
     on_tarefa_created_kg,
     on_tarefa_concluida_kg,
@@ -42,11 +41,10 @@ from knowledge_graph import (  # noqa: F401 — registra as Cloud Functions
     extract_kg_rag_context,
     processar_artefato_kg,
     monitorar_acervo_global,
+    executar_monitoramento_acervo_global,
     smart_search_kg,
     get_artefato_raw_text,
 )
-
-# Telegram integration
 from hermes_core_logic import (  # noqa: F401 — registra as Cloud Functions
     telegramWebhook,
     on_telegram_inbound,
@@ -1669,6 +1667,10 @@ def run_full_sync(trigger_reason='unspecified'):
             sync_google_tasks_pull(ts, sync_ref, logs)
 
             sync_pix_emails(gs, sync_ref, logs)
+            
+            # Ingestão de Documentos (Acervo Global)
+            log_to_firestore(sync_ref, logs, "[SYNC] Verificando novos documentos na Pasta de Deságue (Acervo Global)...", True)
+            executar_monitoramento_acervo_global()
 
             sync_boletos_gmail(gs, sync_ref, logs)
 
@@ -1708,7 +1710,7 @@ def run_full_sync(trigger_reason='unspecified'):
 
 
 
-@firestore_fn.on_document_updated(document="system/sync")
+@firestore_fn.on_document_updated(document="system/sync", timeout_sec=540, memory=options.MemoryOption.GB_1)
 
 def on_sync_request(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot]]):
 
@@ -1724,7 +1726,7 @@ def on_sync_request(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.D
 
 
 
-@scheduler_fn.on_schedule(schedule="every 30 minutes")
+@scheduler_fn.on_schedule(schedule="every 30 minutes", timeout_sec=540, memory=options.MemoryOption.GB_1)
 
 def scheduled_sync(event: scheduler_fn.ScheduledEvent) -> None:
 
@@ -2194,15 +2196,16 @@ def on_vectorize_requested(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishe
 
     try:
 
-        message_text = event.data.message.text
-
-        if not message_text:
-
-             # Em algumas versões, pode estar em event.data.message.data (base64)
-
-             import base64
-
-             message_text = base64.b64decode(event.data.message.data).decode('utf-8')
+        # No Gen 2, event.data.message.data contém os bytes
+        msg_bytes = event.data.message.data
+        if msg_bytes:
+            import base64
+            if isinstance(msg_bytes, str):
+                message_text = base64.b64decode(msg_bytes).decode('utf-8')
+            else:
+                message_text = msg_bytes.decode('utf-8')
+        else:
+             message_text = getattr(event.data.message, "text", "")
 
 
 

@@ -724,15 +724,18 @@ def _process_telegram_message(db, data: dict):
         area_tematica: str = None,
         data_limite_inicio: str = None,
         data_limite_fim: str = None,
+        status: str = None,
     ):
-        """Busca ações e tarefas no Hermes. Use data_limite_inicio/fim (YYYY-MM-DD) para filtrar por prazo."""
+        """Busca ações e tarefas no Hermes. Use status para filtrar por estado (ex: 'em andamento', 'concluída', 'cancelada'). Use data_limite_inicio/fim (YYYY-MM-DD) para filtrar por prazo."""
         from tools.busca_grafo import buscar_tarefas
 
         res = buscar_tarefas(query, area_tematica=area_tematica, match_mode="all",
-                             data_limite_inicio=data_limite_inicio, data_limite_fim=data_limite_fim)
+                             data_limite_inicio=data_limite_inicio, data_limite_fim=data_limite_fim,
+                             status=status)
         if not res.get("resultados"):
             res = buscar_tarefas(query, area_tematica=area_tematica, match_mode="any",
-                                 data_limite_inicio=data_limite_inicio, data_limite_fim=data_limite_fim)
+                                 data_limite_inicio=data_limite_inicio, data_limite_fim=data_limite_fim,
+                                 status=status)
         if res.get("erro"):
             return f"⚠️ [ERRO] {res['erro']}"
         resultados = res.get("resultados", [])

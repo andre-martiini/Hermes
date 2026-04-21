@@ -9,6 +9,7 @@ from datetime import datetime, timezone, timedelta
 import firebase_admin
 from firebase_admin import credentials, firestore
 import time
+import uuid
 
 # Imports para Google APIs
 import os.path
@@ -609,28 +610,98 @@ def sync_pix_emails(db, log_list=None, sync_ref=None):
                         continue
                     db.collection('finance_income').add({
                         'description': description, 'amount': amount, 'day': dt.day,
-                        'month': dt.month - 1, 'year': dt.year,
-                        'category': 'Renda Extra', 'isReceived': True, 'date': iso_date,
-                        'google_message_id': msg_id, 'status': 'active'
+                        'month': dt.month - 1, 'year': dt.year, 'status': 'active',
+                        'data_recebimento': iso_date, 'google_message_id': msg_id
                     })
                 else:
                     if record in existing_transactions:
                         new_processed_ids.append(msg_id)
                         continue
-                    sprint = 1 if dt.day < 8 else 2 if dt.day < 15 else 3 if dt.day < 22 else 4
                     db.collection('finance_transactions').add({
                         'description': description, 'amount': amount, 'date': iso_date,
-                        'sprint': sprint, 'category': 'Alimentação',
-                        'google_message_id': msg_id, 'status': 'active'
+                        'status': 'active', 'google_message_id': msg_id
                     })
+                    
                 new_processed_ids.append(msg_id)
-                log(f"[PIX] Processado: {description} (R$ {amount:.2f}) - Data: {dt.strftime('%d/%m/%y')}")
-
+                log(f"[PIX] Processado: {description} (R$ {amount:.2f})")
+        
         if new_processed_ids:
-            updated_ids = list(set(processed_ids + new_processed_ids))[-200:]
+            updated_ids = list(set(processed_ids + new_processed_ids))
             db.collection('system').document('processed_emails').set({'ids': updated_ids}, merge=True)
     except Exception as e:
         log(f"ERRO PIX: {e}")
+
+def sync_google_drive_acervo(db, logs=None, sync_ref=None):
+    def log(msg):
+        if logs is not None: logs.append(msg)
+        if sync_ref: sync_ref.update({'logs': logs})
+        print(msg)
+
+    log("Verificando Pasta de Deságue (Acervo Global)...")
+    try:
+        # 1. Configuração
+        settings_doc = db.collection("system").document("settings").get()
+        folder_id = settings_doc.to_dict().get("drop_folder_id", "") if settings_doc.exists else ""
+        if not folder_id:
+            log("Aviso: drop_folder_id não configurado.")
+            return
+
+        # 2. Drive Service
+        service = build("drive", "v3", credentials=get_google_creds())
+        
+        # 3. Listagem
+        all_files = []
+        page_token = None
+        while True:
+            resp = service.files().list(
+                q=f"'{folder_id}' in parents and trashed=false",
+                fields="nextPageToken, files(id, name, mimeType)",
+                pageSize=100
+            ).execute()
+            all_files.extend(resp.get("files", []))
+            page_token = resp.get("nextPageToken")
+            if not page_token: break
+
+        if not all_files:
+            log("Pasta de Deságue vazia.")
+            return
+
+        # 4. Filtro de já indexados
+        # ── Map de arquivos conhecidos ─────────────
+        acervo_map = {}
+        for doc in db.collection("acervo_global").stream():
+            d = doc.to_dict() or {}
+            fid_stored = d.get("drive_file_id")
+            if fid_stored:
+                acervo_map[fid_stored] = d.get("status_indexacao", "pendente")
+
+        # 5. Processamento
+        count = 0
+        for f in all_files:
+            fid = f.get('id')
+            if not fid or fid in acervo_map: continue
+            
+            acervo_id = str(uuid.uuid4())[:16]
+            url = f"https://drive.google.com/file/d/{fid}/view"
+            db.collection("acervo_global").document(acervo_id).set({
+                "nome": f.get('name'),
+                "url": url,
+                "tipo_mime": f.get('mimeType'),
+                "drive_file_id": fid,
+                "status_indexacao": "pendente",
+                "indexed_at": firestore.SERVER_TIMESTAMP,
+            })
+            log(f"[Acervo] Novo documento detectado: {f.get('name')}")
+            count += 1
+        
+        if count > 0:
+            log(f"Sincronização do acervo concluída. {count} novos arquivos pendentes para IA.")
+        else:
+            log("Nenhum arquivo novo no acervo.")
+            
+    except Exception as e:
+        log(f"Erro no acervo: {e}")
+
 
 def classify_task(title, notes, mapping=None):
     if mapping is None: mapping = {'CLC': [], 'ASSISTÊNCIA': []}
@@ -666,6 +737,7 @@ def watch_commands(db):
                 sync_google_tasks(db, log_entries, sync_doc_ref)
                 sync_google_calendar(db, log_entries, sync_doc_ref)
                 sync_pix_emails(db, log_entries, sync_doc_ref)
+                sync_google_drive_acervo(db, log_entries, sync_doc_ref)
                 sync_doc_ref.update({'status': 'completed', 'last_success': datetime.now().isoformat(), 'logs': log_entries})
                 print("Sincronização concluída.")
             except Exception as e:
@@ -681,6 +753,7 @@ def main():
     subparsers.add_parser('watch')
     subparsers.add_parser('sync-pix')
     subparsers.add_parser('sync-cal')
+    subparsers.add_parser('sync-acervo')
     args = parser.parse_args()
     if not args.command: parser.print_help(); return
     db = init_db()
@@ -688,5 +761,6 @@ def main():
     elif args.command == 'watch': watch_commands(db)
     elif args.command == 'sync-pix': sync_pix_emails(db)
     elif args.command == 'sync-cal': sync_google_calendar(db)
+    elif args.command == 'sync-acervo': sync_google_drive_acervo(db)
 
 if __name__ == '__main__': main()

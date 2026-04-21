@@ -546,7 +546,7 @@ Responda:"""
 def _dispatch_acervo_pubsub(
     project_id: str, acervo_id: str, url: str, tipo_mime: str, drive_file_id: str, nome: str
 ) -> None:
-    """Publica uma mensagem única de acervo no tópico hermes-artefato-kg."""
+    """Publica uma mensagem única de acervo no tópico hermes-artefato-kg e aguarda confirmação."""
     import json as _json
     from google.cloud import pubsub_v1
 
@@ -560,7 +560,8 @@ def _dispatch_acervo_pubsub(
         "drive_file_id": drive_file_id,
         "nome": nome,
     }
-    publisher.publish(topic_path, _json.dumps(msg).encode("utf-8"))
+    future = publisher.publish(topic_path, _json.dumps(msg).encode("utf-8"))
+    future.result(timeout=10)  # Garante que a mensagem foi aceita pelo Pub/Sub
 
 
 # ─── Fase 1: geração de tags Retrieval-First ─────────────────────────────────
@@ -926,9 +927,22 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
 
     # ── Decodifica mensagem ───────────────────────────────────────────────────
     try:
-        raw = event.data.message.text
+        # No Gen 2, event.data.message.data contém os bytes em base64
+        msg_bytes = event.data.message.data
+        if msg_bytes:
+            # O SDK pode já entregar os bytes decodificados ou em base64 string
+            if isinstance(msg_bytes, str):
+                raw = _b64.b64decode(msg_bytes).decode("utf-8")
+            else:
+                raw = msg_bytes.decode("utf-8")
+        else:
+            # Fallback para .text se disponível (compatibilidade)
+            raw = getattr(event.data.message, "text", "")
+
         if not raw:
-            raw = _b64.b64decode(event.data.message.data).decode("utf-8")
+            print("[KG Artefato] Erro: Mensagem Pub/Sub vazia.")
+            return
+
         data = json.loads(raw)
     except Exception as exc:
         print(f"[KG Artefato] Erro ao decodificar mensagem Pub/Sub: {exc}")
@@ -994,14 +1008,14 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
 
     # ── Extração de texto via Gemini ─────────────────────────────────────────
     try:
+        from google.genai import types
         client = _gemini_client(api_key)
-        file_b64 = _b64.b64encode(file_bytes).decode("utf-8")
         extract_resp = client.models.generate_content(
             model="gemini-3-flash-preview",
             contents=[
                 "Extraia todo o texto relevante deste documento. "
                 "Ignore cabecalhos repetitivos, rodapes e numeracao de paginas.",
-                {"mime_type": tipo_mime, "data": file_b64},
+                types.Part.from_bytes(data=file_bytes, mime_type=tipo_mime),
             ],
         )
         texto = (extract_resp.text or "").strip()
@@ -1086,23 +1100,11 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
 
 # ─── Acervo Global: Cron Job de ingestão ─────────────────────────────────────
 
-@scheduler_fn.on_schedule(
-    schedule="every 15 minutes",
-    memory=options.MemoryOption.MB_512,
-    timeout_sec=540,
-)
-def monitorar_acervo_global(event: scheduler_fn.ScheduledEvent) -> None:
+def executar_monitoramento_acervo_global() -> None:
     """
-    Cron Job — monitora a Pasta de Deságue no Google Drive a cada 15 minutos.
-
-    Fluxo:
-      1. Lê drop_folder_id de system/settings
-      2. Lista todos os arquivos na pasta via Drive API (com paginação nextPageToken)
-      3. Cruza com drive_file_ids já em acervo_global para detectar apenas inéditos
-      4. Cria doc pendente em acervo_global e despacha para hermes-artefato-kg
+    Core function — monitora a Pasta de Deságue no Google Drive.
     """
     import os as _os
-    import json as _json
     from googleapiclient.discovery import build
 
     db = _get_db()
@@ -1131,15 +1133,15 @@ def monitorar_acervo_global(event: scheduler_fn.ScheduledEvent) -> None:
     all_files: list = []
     page_token: Optional[str] = None
     while True:
-        kwargs: dict = {
+        kwargs_api: dict = {
             "q": f"'{folder_id}' in parents and trashed=false",
             "fields": "nextPageToken, files(id, name, mimeType)",
             "pageSize": 1000,
         }
         if page_token:
-            kwargs["pageToken"] = page_token
+            kwargs_api["pageToken"] = page_token
         try:
-            resp = service.files().list(**kwargs).execute()
+            resp = service.files().list(**kwargs_api).execute()
         except Exception as exc:
             print(f"[Acervo] Erro ao listar Drive: {exc}")
             return
@@ -1154,45 +1156,82 @@ def monitorar_acervo_global(event: scheduler_fn.ScheduledEvent) -> None:
 
     print(f"[Acervo] {len(all_files)} arquivo(s) encontrado(s) na pasta")
 
-    # ── Busca drive_file_ids já indexados (1 query por stream) ───────────────
-    indexed_ids: set = set()
-    for doc in db.collection("acervo_global").select(["drive_file_id"]).stream():
-        fid = (doc.to_dict() or {}).get("drive_file_id", "")
+    # ── Map de arquivos conhecidos: drive_file_id -> {acervo_id, status} ─────
+    acervo_map: dict = {}
+    for doc in db.collection("acervo_global").stream():
+        d = doc.to_dict() or {}
+        fid = d.get("drive_file_id")
         if fid:
-            indexed_ids.add(fid)
+            acervo_map[fid] = {
+                "id": doc.id,
+                "status": d.get("status_indexacao", "pendente")
+            }
 
-    # ── Filtra e despacha apenas arquivos inéditos ────────────────────────────
+    # ── Filtra e despacha ─────────────────────────────────────────────────────
     project_id = _os.environ.get("GCLOUD_PROJECT", "gestao-hermes")
     novos = 0
+    reprocessados = 0
+
     for f in all_files:
         fid  = f.get("id", "")
         nome = f.get("name", "arquivo")
         mime = f.get("mimeType", "")
-
-        if not fid or fid in indexed_ids:
+        if not fid:
             continue
 
-        # Cria documento pendente em acervo_global antes de despachar
-        acervo_id = str(uuid.uuid4())[:16]
         url = f"https://drive.google.com/file/d/{fid}/view"
-        db.collection("acervo_global").document(acervo_id).set({
-            "nome": nome,
-            "url": url,
-            "tipo_mime": mime,
-            "drive_file_id": fid,
-            "resumo_semantico": None,
-            "tags": [],
-            "status_indexacao": "pendente",
-            "indexed_at": firestore.SERVER_TIMESTAMP,
-        })
 
+        # Se já existe no acervo_global
+        if fid in acervo_map:
+            info = acervo_map[fid]
+            # Se não está concluído nem ignorado propositalmente, tenta re-despachar
+            if info["status"] not in ("concluido", "ignorado_mime"):
+                # Já existe mas está travado ou falhou? Re-despacha para o Worker Pub/Sub
+                try:
+                    # Reseta status para pendente se não estiver
+                    if info["status"] != "pendente":
+                        db.collection("acervo_global").document(info["id"]).update({
+                            "status_indexacao": "pendente"
+                        })
+                    _dispatch_acervo_pubsub(project_id, info["id"], url, mime, fid, nome)
+                    reprocessados += 1
+                except Exception as exc:
+                    print(f"[Acervo] Erro ao re-despachar {nome}: {exc}")
+            continue
+
+        # Novo documento: cria registro e despacha
+        acervo_id = str(uuid.uuid4())[:16]
         try:
+            db.collection("acervo_global").document(acervo_id).set({
+                "nome": nome,
+                "url": url,
+                "tipo_mime": mime,
+                "drive_file_id": fid,
+                "resumo_semantico": None,
+                "tags": [],
+                "status_indexacao": "pendente",
+                "indexed_at": firestore.SERVER_TIMESTAMP,
+            })
             _dispatch_acervo_pubsub(project_id, acervo_id, url, mime, fid, nome)
             novos += 1
         except Exception as exc:
-            print(f"[Acervo] Erro ao despachar {nome}: {exc}")
+            print(f"[Acervo] Erro ao processar novo arquivo {nome}: {exc}")
+
+    print(f"[Acervo] Monitoramento concluído. Novos: {novos}, Re-despachados: {reprocessados}")
 
     print(f"[Acervo] {novos} arquivo(s) novo(s) despachados para indexação")
+
+
+@scheduler_fn.on_schedule(
+    schedule="every 15 minutes",
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=540,
+)
+def monitorar_acervo_global(*args, **kwargs) -> None:
+    """
+    Cron Job — monitora a Pasta de Deságue no Google Drive a cada 15 minutos.
+    """
+    executar_monitoramento_acervo_global()
 
 
 # ─── RAG: extração com time decay + circuit breaker ──────────────────────────

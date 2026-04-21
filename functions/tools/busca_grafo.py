@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 
 GRAFO_COLLECTION  = "tarefas"
 FALLBACK_LIMIT    = 200   # quantos docs recentes puxar antes do filtro em memória
-RESULT_LIMIT      = 10    # máximo de resultados retornados ao LLM
+RESULT_LIMIT      = 50    # máximo de resultados retornados ao LLM
 
 # Campos de texto que serão inspecionados em cada documento
 CAMPOS_TEXTO = ["titulo", "descricao", "tags", "responsavel", "status"]
@@ -38,31 +38,34 @@ def _doc_bate_com_padrao(doc_dict: dict, padrao: re.Pattern) -> bool:
     return False
 
 
-def buscar_tarefas(query: str, area_tematica: str = None, dias_retroativos: int = 120, match_mode: str = "all", data_limite_inicio: str = None, data_limite_fim: str = None) -> dict:
+def buscar_tarefas(query: str, area_tematica: str = None, dias_retroativos: int = 365, match_mode: str = "all", data_limite_inicio: str = None, data_limite_fim: str = None, status: str = None) -> dict:
     """
     Tool chamada pelo LLM para buscar no Grafo de Conhecimento (tarefas).
 
     Estratégia:
         1. Puxa tarefas recentes.
-        2. Aplica filtros de área_tematica e data_limite se fornecidos.
-        3. Aplica regex em cada termo da query.
+        2. Aplica filtros nativos de status, área_tematica e data_limite se fornecidos.
+        3. Aplica regex em cada termo da query (opcional quando status é fornecido).
     """
     db = firestore.Client()
 
     try:
-        # 1. Definir janela de tempo de criação (para não varrer o banco todo)
+        # 1. Definir janela de tempo de criação
         corte_dt = datetime.now(tz=timezone.utc) - timedelta(days=dias_retroativos)
         corte_str = corte_dt.isoformat().replace("+00:00", "Z")
 
         # 2. Busca base no Firestore
         query_ref = db.collection(GRAFO_COLLECTION).where(filter=FieldFilter("data_criacao", ">=", corte_str))
-        
+
+        if status:
+            query_ref = query_ref.where(filter=FieldFilter("status", "==", status))
+
         if area_tematica:
             query_ref = query_ref.where(filter=FieldFilter("area_tematica", "==", area_tematica))
 
         if data_limite_inicio:
             query_ref = query_ref.where(filter=FieldFilter("data_limite", ">=", data_limite_inicio))
-        
+
         if data_limite_fim:
             query_ref = query_ref.where(filter=FieldFilter("data_limite", "<=", data_limite_fim))
 
