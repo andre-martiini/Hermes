@@ -292,9 +292,9 @@ def _build_system_instruction(copilot_core: str, copilot_soul: str, contexto_ati
         "## REGRAS ABSOLUTAS\n"
         "1. JAMAIS expanda siglas arbitrariamente.\n"
         "2. Se qualquer ferramenta retornar campo 'erro', reproduza o erro literal.\n"
-        "3. Para criar uma ação, apresente um draft primeiro e aguarde confirmação explícita.\n"
-        "4. Links de tarefas: use o formato task:{ID} no texto (ex: 'Ação task:abc123').\n"
-        "5. Se o usuário corrigir um procedimento, acione registrar_correcao_procedimento silenciosamente.\n"
+        "3. Agendamento/Agenda: Você DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horário de funcionamento: 08:00 às 19:00, janela D+7. Se houver conflito em horário específico, pergunte se força inserção ou busca outro slot. Na criação, use os campos horario_inicio e horario_fim.\n"
+        "4. Para criar uma ação, apresente um draft estruturado primeiro com Título, Início/Fim (se houver), Área Temática e Tipo. Aguarde confirmação explicita.\n"
+        "5. Links de tarefas: use o formato task:{ID} no texto (ex: 'Ação task:abc123').\n"
         "6. Acione salvar_memoria_global apenas para fatos duráveis e preferências estáveis.\n"
     )
 
@@ -796,6 +796,38 @@ def _process_telegram_message(db, data: dict):
         except Exception as e:
             return f'{{"error": "{e}"}}'
 
+    def consultar_agenda(data_inicio: str, data_fim: str):
+        """Retorna eventos ocupados no período para verificação de disponibilidade (YYYY-MM-DD)."""
+        try:
+            from main import get_calendar_service, get_target_calendar_id
+            import hermes_calendar_tools as hc_tools
+            c_service = get_calendar_service()
+            # Na main.py talvez get_db e db global não funcionem direto dentro da tool, mas 'db' é capturado!
+            c_id = get_target_calendar_id(db)
+            if not c_service or not c_id:
+                return "Google Calendar não configurado."
+            events = hc_tools.consultar_eventos(c_service, c_id, data_inicio, data_fim)
+            return hc_tools.formatar_eventos_para_llm(events)
+        except Exception as e:
+            return f"Erro ao consultar agenda: {e}"
+
+    def encontrar_slot_livre(a_partir_de: str, duracao_min: int = 30):
+        """Encontra o próximo horário livre na agenda. a_partir_de = YYYY-MM-DD. Retorna JSON com data, horario_inicio, horario_fim."""
+        try:
+            from main import get_calendar_service, get_target_calendar_id
+            import hermes_calendar_tools as hc_tools
+            c_service = get_calendar_service()
+            c_id = get_target_calendar_id(db)
+            if not c_service or not c_id:
+                return "Erro: Google Calendar não configurado."
+            slot = hc_tools.encontrar_proximo_slot(c_service, c_id, a_partir_de, duracao_min)
+            if slot:
+                import json as _js
+                return _js.dumps(slot, ensure_ascii=False)
+            return "Nenhum slot livre encontrado."
+        except Exception as e:
+            return f"Erro ao buscar slot livre: {e}"
+
     def criar_acao_no_sistema(
         titulo: str,
         descricao: str = "",
@@ -805,6 +837,8 @@ def _process_telegram_message(db, data: dict):
         tags: list[str] = None,
         notas: str = "",
         plano_acao: list[str] = None,
+        horario_inicio: str = None,
+        horario_fim: str = None,
     ):
         """
         Cria uma nova ação no Hermes. Apresente draft ao usuário antes de chamar.
@@ -820,21 +854,35 @@ def _process_telegram_message(db, data: dict):
             {"id": str(_uuid.uuid4())[:8], "text": str(p), "completed": False}
             for p in (plano_acao or []) if str(p).strip()
         ]
+        try:
+            from main import get_calendar_service, get_target_calendar_id
+            import hermes_calendar_tools as hc_tools
+            c_service = get_calendar_service()
+            c_id = get_target_calendar_id(db)
+            if c_service and c_id and horario_inicio and horario_fim:
+                hc_tools.reagendar_acoes_hermes(db, c_service, c_id, data_limite, horario_inicio, horario_fim)
+        except Exception as e:
+            print(f"[Core] Erro ao reagendar iterativo: {e}")
+
         doc = {
             "id": task_id,
             "titulo": titulo.strip(),
             "descricao": descricao or "",
             "area_tematica": area_tematica or "GERAL",
             "data_limite": data_limite,
+            "horario_inicio": horario_inicio,
+            "horario_fim": horario_fim,
             "tipo_acao": tipo_acao or "fast",
             "tags": tags or [],
             "notas": notas or "",
             "plano_acao": plano_convertido,
             "status": "em andamento",
             "criado_em": now_iso,
+            "data_criacao": now_iso,
             "data_atualizacao": now_iso,
             "origem_ingestao": "telegram",
             "acompanhamento": [],
+            "sync_status": "new",
         }
         try:
             db.collection("tarefas").document(task_id).set(doc)
@@ -897,6 +945,8 @@ def _process_telegram_message(db, data: dict):
         buscar_arquivos_acervo,
         pesquisar_internet,
         ler_pagina_web,
+        consultar_agenda,
+        encontrar_slot_livre,
         criar_acao_no_sistema,
         salvar_memoria_global,
         registrar_correcao_procedimento,

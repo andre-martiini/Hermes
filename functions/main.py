@@ -7064,6 +7064,38 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             except Exception as _res_err:
                 return f"⚠️ Erro ao resolver conflito: {str(_res_err)}"
 
+        def consultar_agenda(data_inicio: str, data_fim: str):
+            """Retorna eventos ocupados no período para verificação de disponibilidade (YYYY-MM-DD)."""
+            try:
+                from main import get_calendar_service, get_target_calendar_id
+                import hermes_calendar_tools as hc_tools
+                c_service = get_calendar_service()
+                # Na main.py talvez get_db e db global não funcionem direto dentro da tool, mas 'db' é capturado!
+                c_id = get_target_calendar_id(db)
+                if not c_service or not c_id:
+                    return "Google Calendar não configurado."
+                events = hc_tools.consultar_eventos(c_service, c_id, data_inicio, data_fim)
+                return hc_tools.formatar_eventos_para_llm(events)
+            except Exception as e:
+                return f"Erro ao consultar agenda: {e}"
+
+        def encontrar_slot_livre(a_partir_de: str, duracao_min: int = 30):
+            """Encontra o próximo horário livre na agenda. a_partir_de = YYYY-MM-DD. Retorna JSON com data, horario_inicio, horario_fim."""
+            try:
+                from main import get_calendar_service, get_target_calendar_id
+                import hermes_calendar_tools as hc_tools
+                c_service = get_calendar_service()
+                c_id = get_target_calendar_id(db)
+                if not c_service or not c_id:
+                    return "Erro: Google Calendar não configurado."
+                slot = hc_tools.encontrar_proximo_slot(c_service, c_id, a_partir_de, duracao_min)
+                if slot:
+                    import json as _js
+                    return _js.dumps(slot, ensure_ascii=False)
+                return "Nenhum slot livre encontrado."
+            except Exception as e:
+                return f"Erro ao buscar slot livre: {e}"
+
         def criar_acao_no_sistema(
             titulo: str,
             descricao: str = "",
@@ -7074,7 +7106,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             notas: str = "",
             plano_acao: list[str] = [],
             sourceGmailMessageId: str = None,
-            sourceKnowledgeText: str = None
+            sourceKnowledgeText: str = None,
+            horario_inicio: str = None,
+            horario_fim: str = None,
         ):
             """
             Cria uma nova ação/tarefa no sistema Hermes após confirmação explícita do usuário.
@@ -7170,9 +7204,21 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "pool_dados": [],
                     "plano_acao_historico": [],
                     "sync_status": "new",
+                    "horario_inicio": horario_inicio,
+                    "horario_fim": horario_fim,
 
                     "sourceGmailMessageId": sourceGmailMessageId or None,
                     "sourceKnowledgeId": source_knowledge_id or None,}
+
+                try:
+                    from main import get_calendar_service, get_target_calendar_id
+                    import hermes_calendar_tools as hc_tools
+                    c_service = get_calendar_service()
+                    c_id = get_target_calendar_id(db)
+                    if c_service and c_id and horario_inicio and horario_fim:
+                        hc_tools.reagendar_acoes_hermes(db, c_service, c_id, data_limite, horario_inicio, horario_fim)
+                except Exception as e:
+                    print(f"[Copiloto] Erro ao reagendar: {e}")
 
                 db.collection("tarefas").document(task_id).set(doc)
                 print(f"[Copiloto] Ação criada: id={task_id}, titulo='{titulo}'")
@@ -7558,19 +7604,21 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "  3. Baseie sua resposta EXCLUSIVAMENTE no retorno desta ferramenta.\n"
             "  4. Se a ferramenta declarar que a informação não existe, reproduza essa declaração sem inventar alternativas.\n"
             "NUNCA misture dados numéricos (valores, itens, quantidades) de processos ou documentos distintos.\n\n"
-            "## CRIAÇÃO DE AÇÕES — PADRÃO DRAFT-THEN-COMMIT (CRÍTICO)\n\n"
-            "Quando o usuário solicitar a criação de uma ação/tarefa, siga OBRIGATORIAMENTE este protocolo:\n\n"
+            "## CRIAÇÃO E ALOCAÇÃO DE AÇÕES NA AGENDA (CRÍTICO)\n\n"
+            "Quando o usuário solicitar a criação ou agendamento de uma ação/tarefa, siga OBRIGATORIAMENTE este protocolo:\n\n"
+            "ETAPA 0 — VERIFICAÇÃO DE DISPONIBILIDADE NA AGENDA:\n"
+            "Você DEVE usar consultar_agenda(data_inicio, data_fim) ou encontrar_slot_livre(data) ANTES de apresentar qualquer proposta ao usuário.\n"
+            "Se o usuário pedir um horário específico (ex: 'amanhã às 14h') e houver colisão (conflito detectado): trave a inserção perguntando se ele quer Forçar a sobreposição ou Buscar próximo horário livre.\n"
+            "Se o usuário for flexível ('agende para amanhã'), use encontrar_slot_livre para acomodar no primeiro espaço vazio (duração padrão 30min).\n"
+            "Restrição: A agenda opera estritamente entre 08:00 e 19:00, dentro de uma janela de 7 dias úteis.\n\n"
             "ETAPA 1 — DRAFT (apresentar antes de criar):\n"
-            "Nunca chame criar_acao_no_sistema imediatamente. Primeiro, apresente um resumo estruturado:\n"
-            "  📋 **Draft da Ação**\n"
-            "  - **Título:** [título proposto]\n"
-            "  - **Área Temática:** [área]\n"
-            "  - **Prazo:** [data no formato YYYY-MM-DD; se não informado, use a data de hoje]\n"
+            "Apresente um resumo estruturado para o usuário confirmar:\n"
+            "  📋 **Draft da Ação na Agenda**\n"
+            "  - **Título:** [título]\n"
+            "  - **Início/Fim:** [ex: 2026-05-15 14:00 às 14:30]\n"
+            "  - **Área Temática:** [área ou projeto baseada no contexto; PERGUNTE SE FOR AMBÍGUA]\n"
             "  - **Tipo:** [fast / deep]\n"
-            "  - **Plano de Ação:**\n"
-            "    1. [passo 1]\n"
-            "    2. [passo 2]\n"
-            "  Confirma a criação desta ação?\n\n"
+            "  Confirma a alocação desta ação?\n\n"
             "ETAPA 2 — CONFIRMAÇÃO:\n"
             "Só chame criar_acao_no_sistema após receber confirmação explícita ('sim', 'confirma', 'pode criar', 'ok', etc.).\n"
             "Se o usuário ajustar algum campo no draft, incorpore as correções antes de criar.\n\n"
@@ -7821,6 +7869,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'preparar_edicao_acao': preparar_edicao_acao,
             'gerar_relatorio': gerar_relatorio,
             'gerar_rascunho_formulario': gerar_rascunho_formulario,
+            'consultar_agenda': consultar_agenda,
+            'encontrar_slot_livre': encontrar_slot_livre,
         }
 
         # Cria função genérica de acionamento que o loop manual do Python irá ignorar
@@ -7892,6 +7942,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'preparar_edicao_acao': preparar_edicao_acao,
             'gerar_relatorio': gerar_relatorio,
             'gerar_rascunho_formulario': gerar_rascunho_formulario,
+            'consultar_agenda': consultar_agenda,
+            'encontrar_slot_livre': encontrar_slot_livre,
         }
         # Ferramentas internas que não devem aparecer para o usuário
         _HIDDEN_TOOLS = {'registrar_correcao_procedimento', 'resolver_conflito_memoria'}
@@ -7918,6 +7970,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     preparar_edicao_acao,
                     gerar_relatorio,
                     gerar_rascunho_formulario,
+                    consultar_agenda,
+                    encontrar_slot_livre,
                 ] + dynamic_tools,
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
             ),
