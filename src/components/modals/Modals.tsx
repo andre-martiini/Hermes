@@ -1387,7 +1387,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
               {/* Área de Processamento Dinâmico */}
               {origemIngestao !== 'manual' && (
                 <div className="space-y-3 p-3 bg-slate-50 rounded-2xl border border-slate-100">
-                  {(
+                  <>
                     <div className="flex flex-col items-center justify-center gap-4 py-4">
                       <button
                         onClick={handleAudioToggle}
@@ -1416,6 +1416,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                   >
                     {isGenerating ? '✨ Processando Inteligência...' : '✨ Gerar Demanda com IA'}
                   </button>
+                  </>
                 </div>
               )}
             </div>

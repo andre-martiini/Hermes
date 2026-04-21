@@ -6,7 +6,13 @@ import json
 import os
 import re
 import tempfile
+import threading
+import time
+import unicodedata
+import wave
+from contextlib import contextmanager
 from datetime import datetime, timezone
+from io import BytesIO
 from typing import Optional
 
 import requests as _requests
@@ -22,6 +28,10 @@ except ValueError:
 
 _MAX_HISTORY_TURNS = 20
 _MAX_FILE_BYTES = 20 * 1024 * 1024  # 20 MB
+_TTS_MODEL_ID = "gemini-3.1-flash-tts-preview"
+_TEXT_MODEL_ID = "gemini-3-flash-preview"
+_DEFAULT_MALE_VOICE = "Charon"
+_MAX_TTS_TRANSCRIPT_CHARS = 1500
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -63,15 +73,77 @@ def _send_telegram_message(token: str, chat_id: str | int, text: str, parse_mode
         print(f"[Telegram] sendMessage failed: {resp.status_code} {resp.text[:300]}")
 
 
-def _send_telegram_typing(token: str, chat_id: str | int):
+def _send_telegram_chat_action(token: str, chat_id: str | int, action: str):
     try:
         _requests.post(
             f"https://api.telegram.org/bot{token}/sendChatAction",
-            json={"chat_id": chat_id, "action": "typing"},
+            json={"chat_id": chat_id, "action": action},
             timeout=5,
         )
     except Exception:
         pass
+
+
+def _send_telegram_typing(token: str, chat_id: str | int):
+    _send_telegram_chat_action(token, chat_id, "typing")
+
+
+@contextmanager
+def _telegram_action_heartbeat(token: str, chat_id: str | int, action: str, interval_seconds: int = 4):
+    stop_event = threading.Event()
+
+    def _loop():
+        while not stop_event.is_set():
+            _send_telegram_chat_action(token, chat_id, action)
+            stop_event.wait(interval_seconds)
+
+    thread = threading.Thread(target=_loop, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop_event.set()
+        thread.join(timeout=1)
+
+
+def _send_telegram_voice(token: str, chat_id: str | int, audio_bytes: bytes, filename: str, mime_type: str, caption: str = "") -> bool:
+    files = {
+        "voice": (filename, audio_bytes, mime_type),
+    }
+    data = {
+        "chat_id": str(chat_id),
+    }
+    if caption:
+        data["caption"] = caption[:1024]
+    resp = _requests.post(
+        f"https://api.telegram.org/bot{token}/sendVoice",
+        data=data,
+        files=files,
+        timeout=120,
+    )
+    if not resp.ok:
+        print(f"[Telegram] sendVoice failed: {resp.status_code} {resp.text[:500]}")
+    return bool(resp.ok)
+
+
+def _send_telegram_document(token: str, chat_id: str | int, file_bytes: bytes, filename: str, mime_type: str, caption: str = "") -> bool:
+    files = {
+        "document": (filename, file_bytes, mime_type),
+    }
+    data = {
+        "chat_id": str(chat_id),
+    }
+    if caption:
+        data["caption"] = caption[:1024]
+    resp = _requests.post(
+        f"https://api.telegram.org/bot{token}/sendDocument",
+        data=data,
+        files=files,
+        timeout=120,
+    )
+    if not resp.ok:
+        print(f"[Telegram] sendDocument failed: {resp.status_code} {resp.text[:500]}")
+    return bool(resp.ok)
 
 
 def _get_telegram_file(token: str, file_id: str) -> dict:
@@ -227,6 +299,204 @@ def _build_system_instruction(copilot_core: str, copilot_soul: str, contexto_ati
     )
 
 
+def _normalize_for_matching(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text or "")
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return normalized.lower()
+
+
+def _extract_response_mode(text: str, session: dict) -> tuple[str, str]:
+    raw_text = (text or "").strip()
+    if not raw_text:
+        return session.get("response_mode", "texto"), raw_text
+
+    lowered = _normalize_for_matching(raw_text)
+    explicit_audio_markers = (
+        "/audio",
+        "#audio",
+        "[audio]",
+        "mensagem de voz",
+        "em voz",
+        "por voz",
+    )
+    audio_keywords = ("audio", "voz")
+    request_verbs = ("responda", "resposta", "mande", "manda", "envie", "quero")
+    wants_audio = any(marker in lowered for marker in explicit_audio_markers)
+    if not wants_audio:
+        wants_audio = any(v in lowered for v in request_verbs) and any(k in lowered for k in audio_keywords)
+
+    if wants_audio:
+        cleaned = raw_text
+        cleaned = re.sub(r"^/audio\b", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"#audio|\[audio\]", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"(me\s+)?responda\s+(em|por|para|pro?)\s+(o\s+)?[aá]udio", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"resposta\s+(em|por|para|pro?)\s+(o\s+)?[aá]udio", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"envie\s+(em|por|para|pro?)\s+(o\s+)?[aá]udio", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"(me\s+)?mande\s+(em|por|para|pro?)\s+(o\s+)?[aá]udio", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"quero\s+(em|por|para|pro?)\s+(o\s+)?[aá]udio", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"mensagem de voz", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"\b(em|por)\s+voz\b", "", cleaned, flags=re.IGNORECASE).strip()
+        return "audio", cleaned.strip(" ,.-")
+
+    explicit_text_markers = ("/texto", "#texto", "[texto]")
+    if any(marker in lowered for marker in explicit_text_markers):
+        cleaned = re.sub(r"^/texto\b|#texto|\[texto\]", "", raw_text, flags=re.IGNORECASE).strip()
+        return "texto", cleaned
+
+    return session.get("response_mode", "texto"), raw_text
+
+
+def _extract_voice_profile(text: str, default_voice: str = "masculina") -> tuple[str, str]:
+    raw_text = (text or "").strip()
+    if not raw_text:
+        return default_voice, raw_text
+
+    lowered = _normalize_for_matching(raw_text)
+    masculine_markers = (
+        "#voz:masculina",
+        "[voz:masculina]",
+        "/voz masculina",
+        "voz masculina",
+        "na voz masculina",
+        "com voz masculina",
+    )
+
+    if any(marker in lowered for marker in masculine_markers):
+        cleaned = re.sub(r"#voz:masculina|\[voz:masculina\]|/voz masculina", "", raw_text, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"\b(na|com)?\s*voz masculina\b", "", cleaned, flags=re.IGNORECASE).strip()
+        return "masculina", cleaned
+
+    return default_voice, raw_text
+
+
+def _run_gemini_text(gemini_key: str, system_instruction: str, user_prompt: str, model_id: str = _TEXT_MODEL_ID) -> str:
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=gemini_key)
+    response = client.models.generate_content(
+        model=model_id,
+        contents=user_prompt,
+        config=types.GenerateContentConfig(system_instruction=system_instruction),
+    )
+    return (response.text or "").strip()
+
+
+def _build_tts_director_instruction(voice_profile: str) -> str:
+    return (
+        "Voce e o diretor de TTS do Hermes. "
+        "Recebera uma resposta factual pronta e deve apenas converte-la em um roteiro curto para fala natural. "
+        "Nao adicione fatos novos. "
+        "Nao inclua links, nomes tecnicos longos nem listas densas. "
+        "Nao use tags, colchetes nem anotacoes de palco. "
+        "Entregue apenas o texto a ser falado. "
+        "Mantenha tom de assistente operacional, conversa um a um, sem soar como narrador. "
+        "Priorize objetividade, proximidade e sobriedade. "
+        f"Perfil de voz desejado: {voice_profile}. "
+        "Responda apenas com o roteiro final."
+    )
+
+
+def _run_gemini_tts(gemini_key: str, script_text: str, voice_profile: str) -> tuple[bytes, str]:
+    from google import genai
+    from google.genai import types
+
+    voice_name = _DEFAULT_MALE_VOICE
+    client = genai.Client(api_key=gemini_key)
+    style_prompt = (
+        "### DIRECTOR'S NOTES\n"
+        "Style: concise operational assistant, one-to-one, practical and calm.\n"
+        "Pacing: natural conversational pace, with short pauses only when meaning changes.\n"
+        "Tone: professional, direct, grounded, helpful and discreet.\n"
+        "Delivery: do not sound like a narrator, announcer, storyteller, presenter or commercial voice-over.\n"
+        "Delivery: sound like a senior assistant speaking directly to one person.\n\n"
+        "### SCRIPT\n"
+        f"\"{script_text[:_MAX_TTS_TRANSCRIPT_CHARS]}\""
+    )
+    response = client.models.generate_content(
+        model=_TTS_MODEL_ID,
+        contents=style_prompt,
+        config=types.GenerateContentConfig(
+            response_modalities=["AUDIO"],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
+                )
+            ),
+        ),
+    )
+
+    for candidate in (response.candidates or []):
+        for part in (candidate.content.parts or []):
+            inline_data = getattr(part, "inline_data", None)
+            if inline_data and getattr(inline_data, "data", None):
+                return inline_data.data, getattr(inline_data, "mime_type", "audio/L16;rate=24000")
+    raise RuntimeError("Gemini TTS nÃ£o retornou Ã¡udio.")
+
+
+def _transcode_audio_for_telegram_voice(audio_bytes: bytes, mime_type: str) -> tuple[bytes, str, str] | tuple[None, None, None]:
+    import shutil
+    import subprocess
+
+    sample_rate = 24000
+    rate_match = re.search(r"rate=(\d+)", (mime_type or "").lower())
+    if rate_match:
+        sample_rate = int(rate_match.group(1))
+
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        return None, None, None
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        wav_path = os.path.join(tmpdir, "input.wav")
+        ogg_path = os.path.join(tmpdir, "output.ogg")
+        with wave.open(wav_path, "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(audio_bytes)
+        cmd = [
+            ffmpeg_bin,
+            "-y",
+            "-i",
+            wav_path,
+            "-c:a",
+            "libopus",
+            "-b:a",
+            "32k",
+            ogg_path,
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
+        if proc.returncode != 0 or not os.path.exists(ogg_path):
+            print(f"[TTS] ffmpeg transcode failed: {proc.stderr[:400]}")
+            return None, None, None
+        with open(ogg_path, "rb") as f:
+            return f.read(), "audio/ogg", "hermes_voice.ogg"
+
+
+def _wrap_pcm_audio_as_wav(audio_bytes: bytes, mime_type: str) -> tuple[bytes, str, str]:
+    sample_rate = 24000
+    rate_match = re.search(r"rate=(\d+)", (mime_type or "").lower())
+    if rate_match:
+        sample_rate = int(rate_match.group(1))
+
+    wav_buffer = BytesIO()
+    with wave.open(wav_buffer, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(audio_bytes)
+    return wav_buffer.getvalue(), "audio/wav", "hermes_audio.wav"
+
+
+def _send_tts_failure_notice(token: str, chat_id: str | int):
+    _send_telegram_message(
+        token,
+        chat_id,
+        "⚠️ Houve uma falha tÃ©cnica ao gerar o Ã¡udio. Repita a solicitaÃ§Ã£o ou peÃ§a a resposta em texto.",
+    )
+
+
 def _run_gemini_turn(
     db,
     gemini_key: str,
@@ -330,6 +600,9 @@ def _process_telegram_message(db, data: dict):
         return
 
     session = _get_session(db, chat_id)
+    response_mode, text = _extract_response_mode(text, session)
+    voice_profile, text = _extract_voice_profile(text, "masculina")
+    print(f"[Core] initial response_mode={response_mode} voice_profile={voice_profile}")
 
     # --- Command handler ---
     if text.startswith("/"):
@@ -385,10 +658,17 @@ def _process_telegram_message(db, data: dict):
             import traceback; traceback.print_exc()
             transcription = None
         if transcription:
-            file_context_text = f"[Transcrição de áudio]: {transcription}"
+            if response_mode != "audio":
+                transcribed_mode, cleaned_transcription = _extract_response_mode(transcription, session)
+                if transcribed_mode == "audio":
+                    response_mode = "audio"
+                    transcription = cleaned_transcription
+            voice_profile, transcription = _extract_voice_profile(transcription, voice_profile)
+            print(f"[Core] transcription response_mode={response_mode} voice_profile={voice_profile} transcription={transcription[:160]}")
+            file_context_text = f"[Transcri??o de ?udio]: {transcription}"
             user_parts.append(types.Part(text=file_context_text))
         else:
-            user_parts.append(types.Part(text="[Áudio recebido mas transcrição falhou]"))
+            user_parts.append(types.Part(text="[?udio recebido mas transcri??o falhou]"))
 
     # File/document
     elif file_info and media_bytes_b64:
@@ -656,7 +936,34 @@ def _process_telegram_message(db, data: dict):
     _save_session(db, chat_id, session)
 
     # --- Send response ---
-    _send_telegram_message(token, chat_id, response_text)
+    if response_mode == "audio":
+        try:
+            with _telegram_action_heartbeat(token, chat_id, "record_voice"):
+                print(f"[Core] sending audio with voice_profile={voice_profile}")
+                tts_script = _run_gemini_text(
+                    gemini_key=gemini_key,
+                    system_instruction=_build_tts_director_instruction(voice_profile),
+                    user_prompt=response_text,
+                )
+                audio_bytes, audio_mime = _run_gemini_tts(
+                    gemini_key=gemini_key,
+                    script_text=tts_script or response_text,
+                    voice_profile=voice_profile,
+                )
+                tg_audio_bytes, tg_audio_mime, tg_audio_name = _transcode_audio_for_telegram_voice(audio_bytes, audio_mime)
+                if tg_audio_bytes:
+                    if not _send_telegram_voice(token, chat_id, tg_audio_bytes, tg_audio_name, tg_audio_mime):
+                        raise RuntimeError("Falha ao enviar voice note pelo Telegram.")
+                else:
+                    wav_bytes, wav_mime, wav_name = _wrap_pcm_audio_as_wav(audio_bytes, audio_mime)
+                    if not _send_telegram_document(token, chat_id, wav_bytes, wav_name, wav_mime, caption="Resposta em audio"):
+                        raise RuntimeError("Falha ao enviar arquivo de audio pelo Telegram.")
+        except Exception as tts_err:
+            print(f"[Core] TTS error: {tts_err}")
+            _send_tts_failure_notice(token, chat_id)
+            return
+    else:
+        _send_telegram_message(token, chat_id, response_text)
 
 
 # ---------------------------------------------------------------------------

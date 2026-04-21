@@ -1,6 +1,7 @@
 # tools/busca_grafo.py
 import re
 from google.cloud import firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
 from datetime import datetime, timezone, timedelta
 
 GRAFO_COLLECTION  = "tarefas"
@@ -54,16 +55,16 @@ def buscar_tarefas(query: str, area_tematica: str = None, dias_retroativos: int 
         corte_str = corte_dt.isoformat().replace("+00:00", "Z")
 
         # 2. Busca base no Firestore
-        query_ref = db.collection(GRAFO_COLLECTION).where("data_criacao", ">=", corte_str)
+        query_ref = db.collection(GRAFO_COLLECTION).where(filter=FieldFilter("data_criacao", ">=", corte_str))
         
         if area_tematica:
-            query_ref = query_ref.where("area_tematica", "==", area_tematica)
+            query_ref = query_ref.where(filter=FieldFilter("area_tematica", "==", area_tematica))
 
         if data_limite_inicio:
-            query_ref = query_ref.where("data_limite", ">=", data_limite_inicio)
+            query_ref = query_ref.where(filter=FieldFilter("data_limite", ">=", data_limite_inicio))
         
         if data_limite_fim:
-            query_ref = query_ref.where("data_limite", "<=", data_limite_fim)
+            query_ref = query_ref.where(filter=FieldFilter("data_limite", "<=", data_limite_fim))
 
         docs_ref = (
             query_ref.order_by("data_criacao", direction=firestore.Query.DESCENDING)
