@@ -80,13 +80,13 @@ export const SpeedDialMenu = ({
       ),
     },
     {
-      label: 'Notas Rápidas',
-      color: 'text-amber-500',
+      label: 'Transcrição IA',
+      color: 'text-indigo-600',
       badge: null as React.ReactNode,
-      onClick: () => { setOpen(false); onOpenNotes(); },
+      onClick: () => { setOpen(false); onOpenTranscription(); },
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 18a6 6 0 006-6V8a6 6 0 10-12 0v4a6 6 0 006 6zm0 0v3m-4 0h8" />
         </svg>
       ),
     },
@@ -113,13 +113,13 @@ export const SpeedDialMenu = ({
       ),
     },
     {
-      label: 'Transcrição IA',
-      color: 'text-indigo-600',
+      label: 'Transcrição WPP',
+      color: 'text-green-600',
       badge: null as React.ReactNode,
       onClick: () => { setOpen(false); onOpenTranscription(); },
       icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M19.05 4.91A9.82 9.82 0 0012.03 2C6.59 2 2.16 6.43 2.16 11.88c0 1.74.46 3.45 1.32 4.95L2 22l5.31-1.39a9.8 9.8 0 004.72 1.2h.01c5.44 0 9.87-4.43 9.87-9.88a9.8 9.8 0 00-2.86-7.02zm-7.02 15.23h-.01a8.13 8.13 0 01-4.14-1.14l-.3-.18-3.15.83.84-3.07-.2-.32a8.17 8.17 0 01-1.26-4.38c0-4.5 3.67-8.17 8.18-8.17 2.18 0 4.23.85 5.77 2.39a8.1 8.1 0 012.39 5.78c0 4.5-3.67 8.16-8.17 8.16zm4.48-6.11c-.24-.12-1.43-.7-1.65-.78-.22-.08-.38-.12-.54.12-.16.24-.62.78-.76.94-.14.16-.28.18-.52.06-.24-.12-1.01-.37-1.93-1.18-.71-.63-1.19-1.41-1.33-1.65-.14-.24-.02-.37.1-.49.11-.11.24-.28.36-.42.12-.14.16-.24.24-.4.08-.16.04-.3-.02-.42-.06-.12-.54-1.3-.74-1.78-.2-.47-.4-.4-.54-.4h-.46c-.16 0-.42.06-.64.3-.22.24-.84.82-.84 2 0 1.18.86 2.32.98 2.48.12.16 1.69 2.58 4.1 3.62.57.25 1.02.4 1.37.51.58.18 1.1.16 1.51.1.46-.07 1.43-.58 1.63-1.14.2-.56.2-1.04.14-1.14-.06-.1-.22-.16-.46-.28z" />
         </svg>
       ),
     },

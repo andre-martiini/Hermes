@@ -327,11 +327,23 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
   const [isProcessing, setIsProcessing] = useState(false);
   const [transcription, setTranscription] = useState<{ raw: string, refined: string } | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     if (!isOpen) {
       setFile(null);
       setTranscription(null);
+      setIsRecording(false);
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
       return;
     }
 
@@ -344,7 +356,16 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
       }
     };
     window.addEventListener('paste', handlePaste);
-    return () => window.removeEventListener('paste', handlePaste);
+    return () => {
+      window.removeEventListener('paste', handlePaste);
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+    };
   }, [isOpen]);
 
   const handleFileSelection = (f: File) => {
@@ -356,30 +377,72 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
     }
     setFile(f);
     setTranscription(null);
+    void handleTranscribe(f);
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        setIsRecording(false);
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => track.stop());
+          streamRef.current = null;
+        }
+        const mimeType = audioChunksRef.current[0]?.type || 'audio/webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        const audioFile = new File([audioBlob], `gravacao-${Date.now()}.webm`, { type: mimeType });
+        handleFileSelection(audioFile);
+      };
+
+      mediaRecorder.start();
+      setFile(null);
+      setTranscription(null);
+      setIsRecording(true);
+      showToast("Gravando áudio...", "info");
+    } catch (error) {
+      console.error("Erro ao acessar microfone:", error);
+      showToast("Permissão de microfone negada ou indisponível.", "error");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
   };
 
   useEffect(() => {
     const handleSharedAudio = (e: any) => {
       if (e.detail && e.detail instanceof File) {
         handleFileSelection(e.detail);
-        // Pequeno delay para garantir que o estado file seja atualizado e renderizado
-        setTimeout(() => document.getElementById('btn-transcribe-now')?.click(), 300);
       }
     };
     window.addEventListener('hermes-shared-audio', handleSharedAudio);
     return () => window.removeEventListener('hermes-shared-audio', handleSharedAudio);
   }, []);
 
-  const handleTranscribe = async () => {
-    if (!file) return;
+  const handleTranscribe = async (selectedFile: File | null = file) => {
+    if (!selectedFile) return;
     setIsProcessing(true);
     try {
       const reader = new FileReader();
-      reader.readAsDataURL(file);
+      reader.readAsDataURL(selectedFile);
       reader.onloadend = async () => {
         try {
           const base64String = (reader.result as string).split(',')[1];
-          const extension = `.${file.name.split('.').pop()?.toLowerCase() || 'm4a'}`;
+          const extension = `.${selectedFile.name.split('.').pop()?.toLowerCase() || 'm4a'}`;
           const transcribeFunc = httpsCallable(functions, 'transcreverAudio');
           const response = await transcribeFunc({ audioBase64: base64String, extension });
           const data = response.data as { raw: string, refined: string };
@@ -390,15 +453,21 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
           const history = saved ? JSON.parse(saved) : [];
           const newEntry = {
             id: Date.now().toString(),
-            fileName: file.name,
-            fileSize: file.size,
+            fileName: selectedFile.name,
+            fileSize: selectedFile.size,
             date: new Date().toISOString(),
             raw: data.raw,
             refined: data.refined
           };
           localStorage.setItem('hermes_transcription_history', JSON.stringify([newEntry, ...history].slice(0, 50)));
 
-          showToast("Transcrição concluída!", "success");
+          try {
+            await navigator.clipboard.writeText(data.refined || data.raw || '');
+            showToast("Transcrição copiada!", "success");
+          } catch (clipboardError) {
+            console.error('Erro ao copiar transcrição:', clipboardError);
+            showToast("Transcrição pronta, mas não foi possível copiar.", "error");
+          }
         } catch (error) {
           console.error(error);
           showToast("Erro ao processar áudio.", "error");
@@ -414,64 +483,69 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white w-full max-w-2xl rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95">
-        <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+    <div className="fixed inset-0 z-[250] flex items-end md:items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white w-full max-w-md rounded-t-[2rem] md:rounded-[2rem] shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 md:zoom-in-95">
+        <div className="px-5 py-4 md:px-6 md:py-5 border-b border-slate-100 bg-white flex items-center justify-between">
           <div>
-            <h3 className="text-2xl font-black text-slate-900 tracking-tight">Transcrição Rápida</h3>
-            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">IA Audio Processing</p>
+            <h3 className="text-lg md:text-xl font-black text-slate-900 tracking-tight">Transcrição IA</h3>
+            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">Áudio rápido com cópia automática</p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
-            <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+            <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
 
-        <div className="p-8 space-y-6">
+        <div className="p-5 md:p-6 space-y-4">
           {!transcription ? (
             <div
               onDragOver={e => { e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
               onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files.length) handleFileSelection(e.dataTransfer.files[0]); }}
-              className={`border-4 border-dashed rounded-none md:rounded-[2rem] p-10 flex flex-col items-center justify-center text-center gap-4 transition-all ${dragOver ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-slate-50'}`}
+              className={`border-2 border-dashed rounded-[1.75rem] p-5 md:p-6 flex flex-col items-center justify-center text-center gap-4 transition-all ${dragOver ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-slate-50'}`}
             >
               {isProcessing ? (
-                <div className="flex flex-col items-center gap-4 py-10">
+                <div className="flex flex-col items-center gap-4 py-8">
                   <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-                  <p className="text-indigo-600 font-black uppercase tracking-widest text-[10px]">Processando seu áudio...</p>
+                  <p className="text-indigo-600 font-black uppercase tracking-widest text-[10px]">Processando e copiando...</p>
                 </div>
               ) : file ? (
-                <div className="space-y-4 py-4 w-full">
+                <div className="space-y-4 py-2 w-full">
                   <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
                     <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
                   </div>
-                  <p className="text-lg font-black text-slate-900 truncate px-4">{file.name}</p>
-                  <button id="btn-transcribe-now" onClick={handleTranscribe} className="bg-indigo-600 text-white px-8 py-3 rounded-none md:rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg hover:bg-indigo-700 transition-all">Transcrever Agora</button>
+                  <p className="text-sm font-black text-slate-900 truncate px-4">{file.name}</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Transcrição automática em andamento</p>
                 </div>
               ) : (
-                <div className="py-10">
-                  <div className="w-16 h-16 bg-slate-200 text-slate-400 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
-                  </div>
+                <div className="py-4 w-full flex flex-col items-center gap-4">
+                  <button
+                    onClick={isRecording ? stopRecording : startRecording}
+                    className={`w-24 h-24 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95 ${isRecording ? 'bg-rose-600 text-white animate-pulse' : 'bg-slate-900 text-white hover:bg-indigo-600'}`}
+                  >
+                    {isRecording ? (
+                      <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M7 7h10v10H7z" /></svg>
+                    ) : (
+                      <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 18a6 6 0 006-6V8a6 6 0 10-12 0v4a6 6 0 006 6zm0 0v3m-4 0h8" /></svg>
+                    )}
+                  </button>
                   <div className="space-y-1">
-                    <p className="font-black text-slate-900">Cole seu áudio aqui (Ctrl+V)</p>
-                    <p className="text-slate-400 text-xs font-medium">Ou arraste o arquivo aqui</p>
+                    <p className="font-black text-slate-900">{isRecording ? 'Toque novamente para encerrar' : 'Toque para gravar o áudio'}</p>
+                    <p className="text-slate-400 text-xs font-medium">Também funciona com colar, arrastar ou selecionar arquivo.</p>
                   </div>
-                  <div className="mt-6 md:hidden">
-                    <button
-                      onClick={() => document.getElementById('mobile-transcription-upload')?.click()}
-                      className="bg-indigo-100 text-indigo-700 px-6 py-3 rounded-xl font-black uppercase tracking-widest text-[10px] shadow-sm hover:bg-indigo-200 transition-all flex items-center gap-2 mx-auto"
-                    >
+                  <div className="mt-2">
+                    <label htmlFor="mobile-transcription-upload" className="bg-white border border-slate-200 text-slate-700 px-4 py-3 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-sm hover:border-indigo-300 hover:text-indigo-600 transition-all cursor-pointer flex items-center gap-2 mx-auto w-fit">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
                       Selecionar Arquivo
-                    </button>
+                    </label>
                     <input
                       id="mobile-transcription-upload"
                       type="file"
                       className="hidden"
                       accept="audio/*,video/*"
-                      onChange={(e: any) => {
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                         if (e.target.files && e.target.files.length > 0) {
                           handleFileSelection(e.target.files[0]);
+                          e.target.value = '';
                         }
                       }}
                     />
@@ -480,20 +554,31 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
               )}
             </div>
           ) : (
-            <div className="space-y-6 animate-in slide-in-from-bottom-4">
-              <div className="bg-slate-50 p-6 rounded-none md:rounded-[2rem] border border-slate-100 max-h-[300px] overflow-y-auto custom-scrollbar">
+            <div className="space-y-4 animate-in slide-in-from-bottom-4">
+              <div className="bg-emerald-50 px-4 py-3 rounded-[1.5rem] border border-emerald-100">
+                <label className="text-[10px] font-black text-emerald-600 uppercase tracking-widest block">Copiado automaticamente</label>
+              </div>
+              <div className="bg-slate-50 p-4 md:p-5 rounded-[1.75rem] border border-slate-100 max-h-[280px] overflow-y-auto custom-scrollbar">
                 <label className="text-[10px] font-black text-indigo-500 uppercase tracking-widest block mb-2">Resultado Final</label>
                 <p className="text-slate-800 text-base font-bold leading-relaxed whitespace-pre-wrap">{transcription.refined}</p>
               </div>
               <div className="flex gap-4">
                 <button
-                  onClick={() => { navigator.clipboard.writeText(transcription.refined); showToast("Texto copiado!", "success"); }}
-                  className="flex-1 bg-slate-900 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-indigo-600 transition-all flex items-center justify-center gap-2"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(transcription.refined);
+                      showToast("Transcrição copiada!", "success");
+                    } catch (clipboardError) {
+                      console.error('Erro ao copiar transcrição:', clipboardError);
+                      showToast("Não foi possível copiar a transcrição.", "error");
+                    }
+                  }}
+                  className="flex-1 bg-slate-900 text-white py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-indigo-600 transition-all flex items-center justify-center gap-2"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                  Copiar Texto
+                  Copiar Novamente
                 </button>
-                <button onClick={() => setTranscription(null)} className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-none md:rounded-2xl transition-all">Novo</button>
+                <button onClick={() => { setFile(null); setTranscription(null); }} className="px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-2xl transition-all">Novo</button>
               </div>
             </div>
           )}
