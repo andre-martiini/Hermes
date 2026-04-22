@@ -1,0 +1,9 @@
+{
+  "name": "obter_portal_compras_publico",
+  "description": "Lista itens do portal público de compras",
+  "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": []
+  }
+}

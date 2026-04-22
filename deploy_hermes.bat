@@ -56,7 +56,11 @@ echo.
 REM -------------------------------------------------------
 REM [3/4] Deploy das Cloud Functions Python
 REM -------------------------------------------------------
-echo [3/4] Fazendo deploy das Cloud Functions (pode levar 3-8 min)...
+echo [3/4] Garantindo topico Pub/Sub e fazendo deploy das Cloud Functions...
+if "%SKIP_GCLOUD%"=="0" (
+    echo       Garantindo topico hermes-telegram-tool-dispatch...
+    call gcloud pubsub topics create hermes-telegram-tool-dispatch --project=gestao-hermes 2>nul || echo       [INFO] Topico ja existe.
+)
 echo.
 firebase deploy --only functions:python --project gestao-hermes
 
@@ -65,7 +69,7 @@ if %ERRORLEVEL% NEQ 0 (
     pause & exit /b 1
 )
 echo.
-echo       OK - telegramWebhook e on_telegram_inbound atualizados
+echo       OK - telegramWebhook, on_telegram_inbound e on_telegram_tool_dispatch atualizados
 echo.
 
 REM -------------------------------------------------------
@@ -95,7 +99,9 @@ echo   - Slot-filling estruturado (sem historico bruto)
 echo   - Idempotencia por update_id (TTL 24h)
 echo   - Auth via whitelist Firestore (cache 5min)
 echo   - trace_id propagado em todos os logs
+echo   - Worker Pub/Sub para execucao final de tools
 echo   - editMessageText para feedback assincrono
+echo   - Catalogo backend expandido para 27 tools roteaveis
 echo.
 echo   Colecoes Firestore novas:
 echo   - whitelist/{chat_id}   - usuarios autorizados

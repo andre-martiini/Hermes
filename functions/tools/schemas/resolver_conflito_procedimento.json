@@ -1,0 +1,22 @@
+{
+  "name": "resolver_conflito_procedimento",
+  "description": "Valida ou resolve um procedimento marcado para revisão",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "id_procedimento": {
+        "type": "string",
+        "description": "ID do procedimento"
+      },
+      "justificativa_humana": {
+        "type": "string",
+        "description": "Justificativa do revisor humano"
+      },
+      "confirmar_contrato": {
+        "type": "boolean",
+        "description": "Se true, aplica a resolução; se false, apenas monta o contrato"
+      }
+    },
+    "required": ["id_procedimento", "justificativa_humana", "confirmar_contrato"]
+  }
+}

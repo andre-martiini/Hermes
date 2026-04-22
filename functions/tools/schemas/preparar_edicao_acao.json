@@ -1,0 +1,22 @@
+{
+  "name": "preparar_edicao_acao",
+  "description": "Prepara uma proposta de edição de ação sem gravar no banco",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "ID da tarefa"
+      },
+      "alteracoes": {
+        "type": "object",
+        "description": "Mapa com os campos e novos valores"
+      },
+      "justificativa": {
+        "type": "string",
+        "description": "Justificativa da alteração"
+      }
+    },
+    "required": ["task_id", "alteracoes", "justificativa"]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "obter_contexto_tela",
+  "description": "Obtém o contexto completo de uma tarefa, incluindo diário, plano e arquivos disponíveis",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "ID exato da tarefa no Hermes"
+      }
+    },
+    "required": ["task_id"]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "atualizar_personalidade",
+  "description": "Atualiza a personalidade dinâmica do copiloto Hermes",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "nova_personalidade": {
+        "type": "string",
+        "description": "Novo texto-base da personalidade"
+      },
+      "motivo": {
+        "type": "string",
+        "description": "Motivo da atualização"
+      }
+    },
+    "required": ["nova_personalidade"]
+  }
+}

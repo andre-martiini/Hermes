@@ -1,0 +1,26 @@
+{
+  "name": "resolver_conflito_memoria",
+  "description": "Resolve um conflito de memória previamente detectado",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "memoria_id": {
+        "type": "string",
+        "description": "ID da memória em conflito"
+      },
+      "decisao": {
+        "type": "string",
+        "description": "Decisão: manter_existente ou substituir_pelo_novo"
+      },
+      "fato_atualizado": {
+        "type": "string",
+        "description": "Novo fato consolidado quando a decisão for substituir_pelo_novo"
+      },
+      "categoria": {
+        "type": "string",
+        "description": "Categoria da memória"
+      }
+    },
+    "required": ["memoria_id", "decisao"]
+  }
+}

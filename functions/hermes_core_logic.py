@@ -20,7 +20,7 @@ from typing import Optional
 
 import requests as _requests
 from firebase_admin import firestore, get_app, initialize_app, storage
-from firebase_functions import firestore_fn, https_fn, options
+from firebase_functions import firestore_fn, https_fn, options, pubsub_fn
 from firebase_functions.firestore_fn import Event, DocumentSnapshot
 
 try:
@@ -35,6 +35,7 @@ _TEXT_MODEL_ID = "gemini-3-flash-preview"
 _GENERAL_RESPONSE_MODEL = "gemini-3-flash-preview"
 _DEFAULT_MALE_VOICE = "Charon"
 _MAX_TTS_TRANSCRIPT_CHARS = 1500
+_TELEGRAM_TOOL_TIMEOUT_SEC = 540
 
 
 # ---------------------------------------------------------------------------
@@ -433,6 +434,35 @@ def _deliver_response(token: str, chat_id: str | int, response_text: str, respon
             _send_telegram_message(token, chat_id, response_text)
 
 
+def _dispatch_tool_execution(
+    *,
+    token: str,
+    chat_id: str,
+    trace_id: str,
+    tool_name: str,
+    slots: dict,
+    response_mode: str,
+    voice_profile: str,
+    provisional_text: str = "⏳ Processando...",
+) -> None:
+    from core.pubsub_queue import publish_telegram_tool
+    from core import tracing
+
+    provisional_msg_id = _send_telegram_message(token, chat_id, provisional_text)
+    payload = {
+        "trace_id": trace_id,
+        "tool_name": tool_name,
+        "json_data": slots,
+        "chat_id": chat_id,
+        "message_id": provisional_msg_id,
+        "response_mode": response_mode,
+        "voice_profile": voice_profile,
+        "dispatched_at": time.time(),
+    }
+    publish_telegram_tool(payload)
+    tracing.log("INFO", "tool_dispatched", tool=tool_name, chat_id=chat_id, message_id=provisional_msg_id)
+
+
 # ---------------------------------------------------------------------------
 # Command handler
 # ---------------------------------------------------------------------------
@@ -652,7 +682,8 @@ def _execute_tool(tool_name: str, slots: dict, db) -> str:
             from tools.buscar_e_analisar_email import buscar_e_analisar_email as _fn
             return _fn(query=slots.get("query", ""), max_results=min(int(slots.get("max_results", 5)), 5))
 
-        return f"⚠️ Ferramenta '{tool_name}' não reconhecida."
+        from tools.telegram_extended import execute as execute_extended
+        return execute_extended(tool_name, slots, db)
 
     except Exception as e:
         print(f"[Core] execute_tool error ({tool_name}): {e}")
@@ -857,12 +888,17 @@ def _process_telegram_message(db, data: dict):
     if active_tool and session.get("awaiting_confirmation"):
         # Usuário está respondendo ao draft de confirmação
         if core_router.is_confirmation(text):
-            provisional_msg_id = _send_telegram_message(token, chat_id, "⏳ Executando...")
-            result = _execute_tool(active_tool, session.get("slots", {}), db)
             clear_session(db, chat_id)
-            tracing.log("INFO", "tool_executed", tool=active_tool)
-            _deliver_response(token, chat_id, result, response_mode, voice_profile, gemini_key,
-                              message_id_to_edit=provisional_msg_id)
+            _dispatch_tool_execution(
+                token=token,
+                chat_id=chat_id,
+                trace_id=trace_id,
+                tool_name=active_tool,
+                slots=session.get("slots", {}),
+                response_mode=response_mode,
+                voice_profile=voice_profile,
+                provisional_text="⏳ Executando...",
+            )
         elif core_router.is_cancellation(text):
             clear_session(db, chat_id)
             _send_telegram_message(token, chat_id, "Operação cancelada.")
@@ -891,12 +927,17 @@ def _process_telegram_message(db, data: dict):
             _send_telegram_message(token, chat_id, _build_confirmation_draft(active_tool, updated_slots))
             return
 
-        provisional_msg_id = _send_telegram_message(token, chat_id, "⏳ Executando...")
-        result = _execute_tool(active_tool, updated_slots, db)
         clear_session(db, chat_id)
-        tracing.log("INFO", "tool_executed", tool=active_tool)
-        _deliver_response(token, chat_id, result, response_mode, voice_profile, gemini_key,
-                          message_id_to_edit=provisional_msg_id)
+        _dispatch_tool_execution(
+            token=token,
+            chat_id=chat_id,
+            trace_id=trace_id,
+            tool_name=active_tool,
+            slots=updated_slots,
+            response_mode=response_mode,
+            voice_profile=voice_profile,
+            provisional_text="⏳ Executando...",
+        )
         return
 
     # --- Sem sessão ativa: Stage 1 — classificação ---
@@ -922,11 +963,16 @@ def _process_telegram_message(db, data: dict):
             _send_telegram_message(token, chat_id, _build_confirmation_draft(tool_name, slots))
             return
 
-        provisional_msg_id = _send_telegram_message(token, chat_id, "⏳ Processando...")
-        result = _execute_tool(tool_name, slots, db)
-        tracing.log("INFO", "tool_executed", tool=tool_name)
-        _deliver_response(token, chat_id, result, response_mode, voice_profile, gemini_key,
-                          message_id_to_edit=provisional_msg_id)
+        _dispatch_tool_execution(
+            token=token,
+            chat_id=chat_id,
+            trace_id=trace_id,
+            tool_name=tool_name,
+            slots=slots,
+            response_mode=response_mode,
+            voice_profile=voice_profile,
+            provisional_text="⏳ Processando...",
+        )
         return
 
     # --- Sem tool identificada: resposta conversacional ---
@@ -1106,3 +1152,53 @@ def on_telegram_inbound(event: Event[DocumentSnapshot]) -> None:
                 )
         except Exception:
             pass
+
+
+@pubsub_fn.on_message_published(
+    topic="hermes-telegram-tool-dispatch",
+    timeout_sec=_TELEGRAM_TOOL_TIMEOUT_SEC,
+    memory=options.MemoryOption.GB_2,
+)
+def on_telegram_tool_dispatch(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedData]) -> None:
+    import base64
+
+    from core import tracing
+
+    raw_data = event.data.message.data
+    payload_bytes = base64.b64decode(raw_data or b"")
+    payload = json.loads(payload_bytes.decode("utf-8") or "{}")
+
+    trace_id = payload.get("trace_id", tracing.generate_trace_id())
+    tracing.set_trace_id(trace_id)
+
+    db = _get_db()
+    keys = _get_api_keys(db)
+    gemini_key = keys.get("gemini_api_key")
+    token = keys.get("telegram_bot_token") or os.environ.get("TELEGRAM_BOT_TOKEN", "")
+
+    chat_id = str(payload.get("chat_id", ""))
+    message_id = payload.get("message_id")
+    tool_name = payload.get("tool_name", "")
+    slots = payload.get("json_data") or {}
+    response_mode = payload.get("response_mode", "texto")
+    voice_profile = payload.get("voice_profile", "masculina")
+
+    try:
+        tracing.log("INFO", "tool_execution_started", tool=tool_name, chat_id=chat_id)
+        result = _execute_tool(tool_name, slots, db)
+        tracing.log("INFO", "tool_execution_finished", tool=tool_name, chat_id=chat_id)
+        _deliver_response(
+            token,
+            chat_id,
+            result,
+            response_mode,
+            voice_profile,
+            gemini_key,
+            message_id_to_edit=message_id,
+        )
+    except Exception as exc:
+        tracing.log("ERROR", "tool_execution_failed", tool=tool_name, error=str(exc))
+        if chat_id and token:
+            fallback = f"⚠️ Erro ao executar <b>{tool_name}</b>. Código: <code>{trace_id[:8]}</code>"
+            if message_id and not _edit_telegram_message(token, chat_id, message_id, fallback):
+                _send_telegram_message(token, chat_id, fallback)

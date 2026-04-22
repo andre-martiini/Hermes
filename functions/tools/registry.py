@@ -3,25 +3,56 @@ import os
 
 _SCHEMA_DIR = os.path.join(os.path.dirname(__file__), "schemas")
 
-# Catálogo resumido: nome → descrição de uma linha (Stage 1)
 _CATALOG: dict[str, str] = {
-    "consultar_historico_acoes": "Busca ações, tarefas e projetos no Hermes por texto, status, área ou prazo",
+    "consultar_historico_acoes": "Busca acoes, tarefas e projetos no Hermes por texto, status, area ou prazo",
     "buscar_arquivos_acervo": "Busca documentos, manuais e arquivos no Acervo Global do Hermes",
-    "pesquisar_internet": "Busca informações recentes e atuais na internet (notícias, preços, dados externos)",
-    "ler_pagina_web": "Lê e extrai o conteúdo completo de uma URL",
-    "consultar_agenda": "Consulta eventos e compromissos na agenda do Google Calendar em um período",
-    "encontrar_slot_livre": "Encontra o próximo horário livre disponível na agenda",
-    "criar_acao_no_sistema": "Cria uma nova ação ou tarefa no Hermes com título, área, prazo e plano",
-    "salvar_memoria_global": "Salva um fato durável ou preferência permanente na memória global",
-    "registrar_correcao_procedimento": "Registra uma correção ou melhoria em um procedimento existente",
-    "buscar_e_analisar_email": "Busca e analisa e-mails no Gmail usando query padrão (ex: 'from:x@y.com')",
+    "pesquisar_internet": "Busca informacoes recentes e atuais na internet",
+    "ler_pagina_web": "Le e extrai o conteudo completo de uma URL",
+    "consultar_agenda": "Consulta eventos e compromissos na agenda do Google Calendar",
+    "encontrar_slot_livre": "Encontra o proximo horario livre disponivel na agenda",
+    "criar_acao_no_sistema": "Cria uma nova acao ou tarefa no Hermes com titulo, area, prazo e plano",
+    "salvar_memoria_global": "Salva um fato duravel ou preferencia permanente na memoria global",
+    "registrar_correcao_procedimento": "Registra uma correcao ou melhoria em um procedimento existente",
+    "buscar_e_analisar_email": "Busca e analisa e-mails no Gmail usando query padrao",
+    "obter_contexto_tela": "Recupera o contexto completo de uma tarefa, incluindo diario, plano e arquivos",
+    "ler_documento_na_integra": "Le um documento do Drive e responde uma pergunta exata com base no conteudo",
+    "salvar_pop_global": "Cria ou atualiza um POP operacional reutilizavel",
+    "resolver_conflito_memoria": "Resolve conflitos entre memorias globais previamente detectados",
+    "atualizar_personalidade": "Atualiza a personalidade dinamica do copiloto Hermes",
+    "resolver_conflito_procedimento": "Valida ou resolve um procedimento marcado para revisao",
+    "editar_plano_acao": "Atualiza o plano de acao de uma tarefa existente preservando passos concluidos",
+    "preparar_edicao_acao": "Prepara uma proposta de edicao de campos de uma tarefa sem gravar no banco",
+    "gerar_relatorio": "Gera um relatorio estruturado em Markdown e salva no sistema",
+    "gerar_rascunho_formulario": "Gera um rascunho estruturado de formulario com perguntas e tipos",
+    "obter_portal_financeiro_publico": "Lista transacoes externas do portal financeiro publico",
+    "registrar_transacao_financeira_publica": "Registra uma nova transacao externa no portal financeiro publico",
+    "obter_portal_compras_publico": "Lista itens do portal publico de compras",
+    "mutar_portal_compras_publico": "Executa acoes simples no portal publico de compras",
+    "mutar_lista_compras": "Cria, atualiza, remove ou importa itens da lista de compras interna",
+    "obter_projeto_bolsas_publico": "Consulta dados publicos de um projeto de bolsas por ID",
+    "registrar_inscricao_bolsa_publica": "Registra uma inscricao publica em um projeto de bolsas",
 }
 
-# Tools que requerem confirmação explícita antes de executar
-_NEEDS_CONFIRMATION: set[str] = {"criar_acao_no_sistema"}
+_NEEDS_CONFIRMATION: set[str] = {
+    "criar_acao_no_sistema",
+    "editar_plano_acao",
+    "salvar_memoria_global",
+    "salvar_pop_global",
+    "resolver_conflito_memoria",
+    "resolver_conflito_procedimento",
+    "registrar_transacao_financeira_publica",
+    "mutar_lista_compras",
+    "mutar_portal_compras_publico",
+    "registrar_inscricao_bolsa_publica",
+}
 
-# Tools assíncronas (futuramente via Pub/Sub — por ora executam síncronas)
-_ASYNC_TOOLS: set[str] = {"buscar_e_analisar_email"}
+_ASYNC_TOOLS: set[str] = {
+    "buscar_e_analisar_email",
+    "ler_documento_na_integra",
+    "gerar_relatorio",
+    "pesquisar_internet",
+    "ler_pagina_web",
+}
 
 _schema_cache: dict[str, dict] = {}
 

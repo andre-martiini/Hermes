@@ -1,0 +1,50 @@
+{
+  "name": "mutar_lista_compras",
+  "description": "Cria, atualiza, remove ou importa itens da lista de compras interna",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "description": "Ação: create, update, delete, import_batch, clear_planning ou finalize"
+      },
+      "item_id": {
+        "type": "string",
+        "description": "ID do item"
+      },
+      "nome": {
+        "type": "string",
+        "description": "Nome do item"
+      },
+      "categoria": {
+        "type": "string",
+        "description": "Categoria do item"
+      },
+      "quantidade": {
+        "type": "string",
+        "description": "Quantidade textual"
+      },
+      "unit": {
+        "type": "string",
+        "description": "Unidade de medida"
+      },
+      "isPlanned": {
+        "type": "boolean",
+        "description": "Se o item está planejado"
+      },
+      "isPurchased": {
+        "type": "boolean",
+        "description": "Se o item está comprado"
+      },
+      "ordem": {
+        "type": "integer",
+        "description": "Posição do item"
+      },
+      "importText": {
+        "type": "string",
+        "description": "Texto bruto para importação em lote"
+      }
+    },
+    "required": ["action"]
+  }
+}

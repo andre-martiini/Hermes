@@ -1,0 +1,18 @@
+{
+  "name": "registrar_transacao_financeira_publica",
+  "description": "Registra uma transação externa no portal financeiro público",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "description": {
+        "type": "string",
+        "description": "Descrição da transação"
+      },
+      "amount": {
+        "type": "number",
+        "description": "Valor monetário"
+      }
+    },
+    "required": ["description", "amount"]
+  }
+}

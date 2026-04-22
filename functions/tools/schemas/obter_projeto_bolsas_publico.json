@@ -1,0 +1,14 @@
+{
+  "name": "obter_projeto_bolsas_publico",
+  "description": "Consulta dados públicos de um projeto de bolsas por ID",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "project_id": {
+        "type": "string",
+        "description": "ID do projeto"
+      }
+    },
+    "required": ["project_id"]
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "editar_plano_acao",
+  "description": "Atualiza o plano de ação de uma tarefa existente",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "ID da tarefa"
+      },
+      "novo_plano": {
+        "type": "array",
+        "description": "Lista de passos no formato {id?, text}",
+        "items": {
+          "type": "object"
+        }
+      },
+      "justificativa_diario": {
+        "type": "string",
+        "description": "Justificativa que será gravada no diário"
+      }
+    },
+    "required": ["task_id", "novo_plano", "justificativa_diario"]
+  }
+}

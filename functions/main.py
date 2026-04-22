@@ -49,6 +49,7 @@ from knowledge_graph import (  # noqa: F401 — registra as Cloud Functions
 from hermes_core_logic import (  # noqa: F401 — registra as Cloud Functions
     telegramWebhook,
     on_telegram_inbound,
+    on_telegram_tool_dispatch,
 )
 
 

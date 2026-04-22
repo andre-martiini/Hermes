@@ -1,0 +1,9 @@
+{
+  "name": "obter_portal_financeiro_publico",
+  "description": "Lista transações externas do portal financeiro público",
+  "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": []
+  }
+}

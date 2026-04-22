@@ -1,0 +1,31 @@
+{
+  "name": "gerar_relatorio",
+  "description": "Gera um relatório estruturado em Markdown e salva no sistema",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "titulo": {
+        "type": "string",
+        "description": "Título do relatório"
+      },
+      "tipo": {
+        "type": "string",
+        "description": "Tipo do relatório: executivo, técnico, analítico, progresso ou situacional"
+      },
+      "contexto": {
+        "type": "string",
+        "description": "Contexto consolidado para geração"
+      },
+      "secoes_customizadas": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Seções adicionais obrigatórias"
+      },
+      "task_id": {
+        "type": "string",
+        "description": "ID opcional da tarefa relacionada"
+      }
+    },
+    "required": ["titulo", "tipo", "contexto"]
+  }
+}

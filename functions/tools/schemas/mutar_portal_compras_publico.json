@@ -1,0 +1,22 @@
+{
+  "name": "mutar_portal_compras_publico",
+  "description": "Executa ações simples no portal público de compras",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "description": "Ação: toggle_planned, toggle_purchased, update_quantity, clear_planning ou finalize"
+      },
+      "item_id": {
+        "type": "string",
+        "description": "ID do item"
+      },
+      "value": {
+        "type": "string",
+        "description": "Valor auxiliar para update_quantity"
+      }
+    },
+    "required": ["action"]
+  }
+}

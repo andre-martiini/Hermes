@@ -1,0 +1,23 @@
+{
+  "name": "salvar_pop_global",
+  "description": "Cria ou atualiza um POP operacional persistido",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "titulo": {
+        "type": "string",
+        "description": "Título do POP"
+      },
+      "gatilhos": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Lista de gatilhos que ativam o POP"
+      },
+      "instrucao_sistema": {
+        "type": "string",
+        "description": "Instrução operacional completa do POP"
+      }
+    },
+    "required": ["titulo", "gatilhos", "instrucao_sistema"]
+  }
+}

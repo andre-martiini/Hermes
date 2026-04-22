@@ -1,0 +1,25 @@
+{
+  "name": "gerar_rascunho_formulario",
+  "description": "Gera um rascunho estruturado de formulário",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "titulo": {
+        "type": "string",
+        "description": "Título do formulário"
+      },
+      "descricao": {
+        "type": "string",
+        "description": "Descrição opcional do formulário"
+      },
+      "perguntas": {
+        "type": "array",
+        "description": "Lista estruturada de perguntas",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "required": ["titulo", "perguntas"]
+  }
+}

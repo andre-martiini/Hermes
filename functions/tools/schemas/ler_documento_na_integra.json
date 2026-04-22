@@ -1,0 +1,18 @@
+{
+  "name": "ler_documento_na_integra",
+  "description": "Lê um documento do Google Drive e responde uma pergunta exata com base no conteúdo",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "drive_file_id": {
+        "type": "string",
+        "description": "ID do arquivo no Google Drive"
+      },
+      "query_especifica": {
+        "type": "string",
+        "description": "Pergunta exata a ser respondida com base no documento"
+      }
+    },
+    "required": ["drive_file_id", "query_especifica"]
+  }
+}
