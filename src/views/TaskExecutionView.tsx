@@ -1137,12 +1137,13 @@ export const TaskExecutionView = ({
             <select
               value={currentTaskData.area_tematica || 'NÃO CLASSIFICADA'}
               onChange={e => onSave(task.id, { area_tematica: e.target.value as any })}
-              className={`w-full bg-transparent border-none p-0 text-xs font-black uppercase tracking-widest focus:ring-0 cursor-pointer ${isDark ? 'text-white' : 'text-slate-900'}`}
+              style={{ colorScheme: isDark ? 'dark' : 'light' }}
+              className={`w-full border-none p-0 text-xs font-black uppercase tracking-widest focus:ring-0 cursor-pointer ${isDark ? 'bg-slate-900 text-white' : 'bg-transparent text-slate-900'}`}
             >
-              <option value="GERAL">Geral</option>
-              <option value="NÃO CLASSIFICADA">Não Classificada</option>
+              <option className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'} value="GERAL">Geral</option>
+              <option className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'} value="NÃO CLASSIFICADA">Não Classificada</option>
               {unidades.map(u => (
-                <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
+                <option className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'} key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
               ))}
             </select>
           </div>

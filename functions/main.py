@@ -5071,6 +5071,7 @@ def criar_apresentacao_slides(req: https_fn.CallableRequest):
 
 
 @https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
     memory=options.MemoryOption.MB_512,
     timeout_sec=120,
 )

@@ -2156,9 +2156,18 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         }
                                     }}
                                     placeholder={isRecording ? '🎙 Gravando… clique no microfone para parar' : isProcessingMic ? 'Transcrevendo áudio...' : isTranscribing ? 'Transcrevendo áudio...' : attachedFile ? 'Pergunte sobre o arquivo ou envie sem texto…' : 'Estrategize com Hermes…'}
-                                    className={`w-full pl-4 pr-[10.25rem] pt-3.5 pb-11 rounded-2xl text-sm font-medium outline-none border resize-none ${isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-blue-500' : 'bg-slate-50 border-slate-200 text-slate-700 placeholder:text-slate-400 focus:border-blue-500'} transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed`}
+                                    className={`w-full px-4 pt-3.5 pb-11 rounded-2xl text-sm font-medium outline-none border resize-none ${isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-blue-500' : 'bg-slate-50 border-slate-200 text-slate-700 placeholder:text-slate-400 focus:border-blue-500'} transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed`}
                                 />
-                                <div className="absolute bottom-2.5 right-2.5 z-10 flex items-center gap-2">
+                                <div
+                                    aria-hidden="true"
+                                    className={`pointer-events-none absolute inset-x-1.5 bottom-1.5 z-[1] h-12 rounded-b-[15px] bg-gradient-to-t ${
+                                        isDark
+                                            ? 'from-[#0f172acc] via-[#0f172abf] to-transparent'
+                                            : 'from-white/95 via-white/85 to-transparent'
+                                    }`}
+                                />
+                                <div className="absolute inset-x-2.5 bottom-2.5 z-10 flex items-center justify-end">
+                                    <div className="pointer-events-auto flex items-center gap-2">
                                     <button
                                         onClick={() => !isBlocked && fileInputRef.current?.click()}
                                         disabled={isBlocked}
@@ -2252,6 +2261,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                     >
                                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
                                     </button>
+                                    </div>
                                 </div>
                             </div>
                             <button
