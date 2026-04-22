@@ -28,6 +28,7 @@ except ValueError:
 
 _MAX_HISTORY_TURNS = 20
 _MAX_FILE_BYTES = 20 * 1024 * 1024  # 20 MB
+_MAX_INLINE_MEDIA_BYTES = 700 * 1024  # base64 stays safely below Firestore field limit
 _TTS_MODEL_ID = "gemini-3.1-flash-tts-preview"
 _TEXT_MODEL_ID = "gemini-3-flash-preview"
 _DEFAULT_MALE_VOICE = "Charon"
@@ -261,6 +262,36 @@ def _upload_to_storage(file_bytes: bytes, file_name: str, mime_type: str, chat_i
     blob.upload_from_string(file_bytes, content_type=mime_type)
     blob.make_public()
     return blob.public_url
+
+
+def _store_telegram_media(file_bytes: bytes, file_name: str, mime_type: str, chat_id: str) -> tuple[str | None, str | None]:
+    """
+    Stores media inline when small enough; otherwise uploads to Storage and returns the blob path.
+    Returns: (media_bytes_b64, storage_path)
+    """
+    import base64
+
+    if len(file_bytes) <= _MAX_INLINE_MEDIA_BYTES:
+        return base64.b64encode(file_bytes).decode(), None
+
+    safe_name = os.path.basename(file_name or f"upload_{int(time.time())}")
+    bucket = storage.bucket()
+    path = f"telegram_uploads/{chat_id}/{int(time.time())}_{safe_name}"
+    blob = bucket.blob(path)
+    blob.upload_from_string(file_bytes, content_type=mime_type)
+    return None, path
+
+
+def _load_telegram_media_bytes(media_bytes_b64: str | None, storage_path: str | None) -> bytes | None:
+    if media_bytes_b64:
+        import base64
+
+        return base64.b64decode(media_bytes_b64)
+    if storage_path:
+        bucket = storage.bucket()
+        blob = bucket.blob(storage_path)
+        return blob.download_as_bytes()
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -588,6 +619,7 @@ def _process_telegram_message(db, data: dict):
     file_info = data.get("file_info")   # {file_id, file_unique_id, file_size, mime_type, file_name}
     audio_info = data.get("audio_info") # {file_id, file_size, mime_type, duration}
     media_bytes_b64 = data.get("media_bytes_b64")  # base64 of already-downloaded file
+    media_storage_path = data.get("media_storage_path")
 
     if not chat_id:
         return
@@ -644,48 +676,59 @@ def _process_telegram_message(db, data: dict):
     file_context_text = ""
 
     # Audio transcription
-    if audio_info and media_bytes_b64:
-        import base64
-        audio_bytes = base64.b64decode(media_bytes_b64)
-        mime = audio_info.get("mime_type", "audio/ogg")
-        raw_ext = mime.split("/")[-1]
-        ext = "ogg" if raw_ext in ("ogg", "oga") else raw_ext
-        _send_telegram_typing(token, chat_id)
-        try:
-            transcription = _transcribe_audio_bytes(audio_bytes, ext, db)
-        except Exception as transcribe_err:
-            print(f"[Core] Transcription error: {transcribe_err}")
-            import traceback; traceback.print_exc()
-            transcription = None
-        if transcription:
-            if response_mode != "audio":
-                transcribed_mode, cleaned_transcription = _extract_response_mode(transcription, session)
-                if transcribed_mode == "audio":
-                    response_mode = "audio"
-                    transcription = cleaned_transcription
-            voice_profile, transcription = _extract_voice_profile(transcription, voice_profile)
-            print(f"[Core] transcription response_mode={response_mode} voice_profile={voice_profile} transcription={transcription[:160]}")
-            file_context_text = f"[Transcri??o de ?udio]: {transcription}"
-            user_parts.append(types.Part(text=file_context_text))
+    if audio_info and (media_bytes_b64 or media_storage_path):
+        audio_bytes = _load_telegram_media_bytes(media_bytes_b64, media_storage_path)
+        if not audio_bytes:
+            user_parts.append(types.Part(text="[Audio recebido mas o arquivo nao foi encontrado para transcricao]"))
+            audio_bytes = None
+        if not audio_bytes:
+            pass
         else:
-            user_parts.append(types.Part(text="[?udio recebido mas transcri??o falhou]"))
+            mime = audio_info.get("mime_type", "audio/ogg")
+            raw_ext = mime.split("/")[-1]
+            ext = "ogg" if raw_ext in ("ogg", "oga") else raw_ext
+            _send_telegram_typing(token, chat_id)
+            try:
+                transcription = _transcribe_audio_bytes(audio_bytes, ext, db)
+            except Exception as transcribe_err:
+                print(f"[Core] Transcription error: {transcribe_err}")
+                import traceback; traceback.print_exc()
+                transcription = None
+            if transcription:
+                if response_mode != "audio":
+                    transcribed_mode, cleaned_transcription = _extract_response_mode(transcription, session)
+                    if transcribed_mode == "audio":
+                        response_mode = "audio"
+                        transcription = cleaned_transcription
+                voice_profile, transcription = _extract_voice_profile(transcription, voice_profile)
+                print(f"[Core] transcription response_mode={response_mode} voice_profile={voice_profile} transcription={transcription[:160]}")
+                file_context_text = f"[Transcri??o de ?udio]: {transcription}"
+                user_parts.append(types.Part(text=file_context_text))
+            else:
+                user_parts.append(types.Part(text="[?udio recebido mas transcri??o falhou]"))
 
     # File/document
-    elif file_info and media_bytes_b64:
-        import base64, uuid as _uuid
-        file_bytes = base64.b64decode(media_bytes_b64)
-        fname = file_info.get("file_name") or f"upload_{_uuid.uuid4().hex[:8]}"
-        mime = file_info.get("mime_type", "application/octet-stream")
-        try:
-            pub_url = _upload_to_storage(file_bytes, fname, mime, chat_id)
-            file_context_text = (
-                f"[Arquivo recebido]: {fname} ({mime})\n"
-                f"URL: {pub_url}\n"
-                "Analise este arquivo, identifique o que ele mostra e sugira como ele se relaciona ao contexto atual."
-            )
-        except Exception as up_err:
-            file_context_text = f"[Arquivo recebido: {fname}] (falha no upload: {up_err})"
-        user_parts.append(types.Part(text=file_context_text))
+    elif file_info and (media_bytes_b64 or media_storage_path):
+        import uuid as _uuid
+        file_bytes = _load_telegram_media_bytes(media_bytes_b64, media_storage_path)
+        if not file_bytes:
+            user_parts.append(types.Part(text="[Arquivo recebido mas o conteudo nao foi encontrado]"))
+            file_bytes = None
+        if not file_bytes:
+            pass
+        else:
+            fname = file_info.get("file_name") or f"upload_{_uuid.uuid4().hex[:8]}"
+            mime = file_info.get("mime_type", "application/octet-stream")
+            try:
+                pub_url = _upload_to_storage(file_bytes, fname, mime, chat_id)
+                file_context_text = (
+                    f"[Arquivo recebido]: {fname} ({mime})\n"
+                    f"URL: {pub_url}\n"
+                    "Analise este arquivo, identifique o que ele mostra e sugira como ele se relaciona ao contexto atual."
+                )
+            except Exception as up_err:
+                file_context_text = f"[Arquivo recebido: {fname}] (falha no upload: {up_err})"
+            user_parts.append(types.Part(text=file_context_text))
 
     # Text
     if text:
@@ -1026,7 +1069,7 @@ def _process_telegram_message(db, data: dict):
 @https_fn.on_request(
     cors=options.CorsOptions(cors_origins="*", cors_methods=["GET", "POST"]),
     timeout_sec=10,
-    memory=options.MemoryOption.MB_256,
+    memory=options.MemoryOption.GB_1,
 )
 def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
     """
@@ -1064,6 +1107,7 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
     audio_info = None
     file_info = None
     media_bytes_b64 = None
+    media_storage_path = None
 
     db = _get_db()
 
@@ -1083,10 +1127,14 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
             )
             return https_fn.Response("OK", status=200)
         try:
-            import base64
             file_meta = _get_telegram_file(token, audio["file_id"])
             file_bytes = _download_telegram_file(token, file_meta["file_path"])
-            media_bytes_b64 = base64.b64encode(file_bytes).decode()
+            media_bytes_b64, media_storage_path = _store_telegram_media(
+                file_bytes,
+                f"audio_{message_id}.ogg",
+                audio.get("mime_type", "audio/ogg"),
+                chat_id,
+            )
             audio_info = {
                 "file_id": audio["file_id"],
                 "file_size": file_size,
@@ -1115,16 +1163,20 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
                 )
                 return https_fn.Response("OK", status=200)
             try:
-                import base64
                 file_meta = _get_telegram_file(token, media_obj["file_id"])
                 file_bytes = _download_telegram_file(token, file_meta["file_path"])
-                media_bytes_b64 = base64.b64encode(file_bytes).decode()
                 file_info = {
                     "file_id": media_obj["file_id"],
                     "file_size": file_size,
                     "file_name": doc.get("file_name", "arquivo") if doc else "foto.jpg",
                     "mime_type": (doc.get("mime_type") if doc else "image/jpeg") or "application/octet-stream",
                 }
+                media_bytes_b64, media_storage_path = _store_telegram_media(
+                    file_bytes,
+                    file_info["file_name"],
+                    file_info["mime_type"],
+                    chat_id,
+                )
             except Exception as e:
                 print(f"[Webhook] File download error: {e}")
 
@@ -1140,6 +1192,7 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
         "audio_info": audio_info,
         "file_info": file_info,
         "media_bytes_b64": media_bytes_b64,
+        "media_storage_path": media_storage_path,
         "received_at": firestore.SERVER_TIMESTAMP,
         "processed": False,
     }
