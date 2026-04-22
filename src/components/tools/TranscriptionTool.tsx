@@ -56,6 +56,18 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
     return () => window.removeEventListener('paste', handlePaste);
   }, []);
 
+  useEffect(() => {
+    const handleSharedAudio = (e: Event) => {
+      const customEvent = e as CustomEvent<File>;
+      if (customEvent.detail instanceof File) {
+        handleFileSelection(customEvent.detail);
+      }
+    };
+
+    window.addEventListener('hermes-shared-audio', handleSharedAudio);
+    return () => window.removeEventListener('hermes-shared-audio', handleSharedAudio);
+  }, []);
+
   const saveToHistory = (data: { raw: string, refined: string }, fileName: string, fileSize: number) => {
     const newEntry: TranscriptionHistoryEntry = {
       id: Date.now().toString(),

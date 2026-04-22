@@ -11,6 +11,7 @@ interface SpeedDialMenuProps {
   onOpenCopiloto: () => void;
   onOpenShopping: () => void;
   onOpenTranscription: () => void;
+  onOpenWhatsAppTranscription?: () => void;
   onOpenMeetingTranscription: () => void;
   onToggleNotifications: () => void;
   onSync: () => void;
@@ -26,7 +27,7 @@ interface SpeedDialMenuProps {
 
 export const SpeedDialMenu = ({
   notifications, isSyncing, isNotificationCenterOpen,
-  onOpenNotes, onOpenLog, onOpenCopiloto, onOpenShopping, onOpenTranscription, onOpenMeetingTranscription, onToggleNotifications,
+  onOpenNotes, onOpenLog, onOpenCopiloto, onOpenShopping, onOpenTranscription, onOpenWhatsAppTranscription, onOpenMeetingTranscription, onToggleNotifications,
   onSync, onOpenSettings, onCloseNotifications,
   onMarkAsRead, onDismiss, onUpdateOverdue, onNavigate,
   onCreateAction,
@@ -116,7 +117,7 @@ export const SpeedDialMenu = ({
       label: 'Transcrição WPP',
       color: 'text-green-600',
       badge: null as React.ReactNode,
-      onClick: () => { setOpen(false); onOpenTranscription(); },
+      onClick: () => { setOpen(false); (onOpenWhatsAppTranscription ?? onOpenTranscription)(); },
       icon: (
         <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M19.05 4.91A9.82 9.82 0 0012.03 2C6.59 2 2.16 6.43 2.16 11.88c0 1.74.46 3.45 1.32 4.95L2 22l5.31-1.39a9.8 9.8 0 004.72 1.2h.01c5.44 0 9.87-4.43 9.87-9.88a9.8 9.8 0 00-2.86-7.02zm-7.02 15.23h-.01a8.13 8.13 0 01-4.14-1.14l-.3-.18-3.15.83.84-3.07-.2-.32a8.17 8.17 0 01-1.26-4.38c0-4.5 3.67-8.17 8.18-8.17 2.18 0 4.23.85 5.77 2.39a8.1 8.1 0 012.39 5.78c0 4.5-3.67 8.16-8.17 8.16zm4.48-6.11c-.24-.12-1.43-.7-1.65-.78-.22-.08-.38-.12-.54.12-.16.24-.62.78-.76.94-.14.16-.28.18-.52.06-.24-.12-1.01-.37-1.93-1.18-.71-.63-1.19-1.41-1.33-1.65-.14-.24-.02-.37.1-.49.11-.11.24-.28.36-.42.12-.14.16-.24.24-.4.08-.16.04-.3-.02-.42-.06-.12-.54-1.3-.74-1.78-.2-.47-.4-.4-.54-.4h-.46c-.16 0-.42.06-.64.3-.22.24-.84.82-.84 2 0 1.18.86 2.32.98 2.48.12.16 1.69 2.58 4.1 3.62.57.25 1.02.4 1.37.51.58.18 1.1.16 1.51.1.46-.07 1.43-.58 1.63-1.14.2-.56.2-1.04.14-1.14-.06-.1-.22-.16-.46-.28z" />

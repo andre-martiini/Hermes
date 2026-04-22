@@ -483,8 +483,8 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[250] flex items-end md:items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white w-full max-w-md rounded-t-[2rem] md:rounded-[2rem] shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 md:zoom-in-95">
+    <div className="fixed inset-0 z-[250] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-in fade-in p-4">
+      <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 md:zoom-in-95 my-auto">
         <div className="px-5 py-4 md:px-6 md:py-5 border-b border-slate-100 bg-white flex items-center justify-between">
           <div>
             <h3 className="text-lg md:text-xl font-black text-slate-900 tracking-tight">Transcrição IA</h3>
@@ -501,7 +501,7 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
               onDragOver={e => { e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
               onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files.length) handleFileSelection(e.dataTransfer.files[0]); }}
-              className={`border-2 border-dashed rounded-[1.75rem] p-5 md:p-6 flex flex-col items-center justify-center text-center gap-4 transition-all ${dragOver ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-slate-50'}`}
+              className={`border-2 border-dashed rounded-[1.75rem] p-5 md:p-6 flex flex-col items-center justify-center text-center gap-4 transition-all min-h-[340px] md:min-h-0 ${dragOver ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-slate-50'}`}
             >
               {isProcessing ? (
                 <div className="flex flex-col items-center gap-4 py-8">
@@ -517,22 +517,25 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Transcrição automática em andamento</p>
                 </div>
               ) : (
-                <div className="py-4 w-full flex flex-col items-center gap-4">
+                <div className="py-4 w-full flex flex-col items-center justify-center gap-5 md:gap-4">
                   <button
                     onClick={isRecording ? stopRecording : startRecording}
-                    className={`w-24 h-24 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95 ${isRecording ? 'bg-rose-600 text-white animate-pulse' : 'bg-slate-900 text-white hover:bg-indigo-600'}`}
+                    className={`mx-auto relative shadow-lg transition-all active:scale-95 w-[80vw] max-w-[320px] h-[16vw] max-h-[76px] min-h-[60px] rounded-[1.5rem] md:w-24 md:h-24 md:rounded-full ${isRecording ? 'bg-rose-700 text-white animate-pulse' : 'bg-rose-600 text-white hover:bg-rose-700'}`}
                   >
-                    {isRecording ? (
-                      <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24"><path d="M7 7h10v10H7z" /></svg>
-                    ) : (
-                      <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 18a6 6 0 006-6V8a6 6 0 10-12 0v4a6 6 0 006 6zm0 0v3m-4 0h8" /></svg>
-                    )}
+                    <span className="absolute inset-0 flex items-center justify-center">
+                      {isRecording ? (
+                        <svg className="w-8 h-8 block" fill="currentColor" viewBox="0 0 24 24"><path d="M7 7h10v10H7z" /></svg>
+                      ) : (
+                        <svg className="w-8 h-8 block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 18a6 6 0 006-6V8a6 6 0 10-12 0v4a6 6 0 006 6zm0 0v3m-4 0h8" /></svg>
+                      )}
+                    </span>
                   </button>
                   <div className="space-y-1">
                     <p className="font-black text-slate-900">{isRecording ? 'Toque novamente para encerrar' : 'Toque para gravar o áudio'}</p>
-                    <p className="text-slate-400 text-xs font-medium">Também funciona com colar, arrastar ou selecionar arquivo.</p>
+                    <p className="text-slate-400 text-xs font-medium md:hidden">Use o botão central para iniciar a gravação.</p>
+                    <p className="text-slate-400 text-xs font-medium hidden md:block">Também funciona com colar, arrastar ou selecionar arquivo.</p>
                   </div>
-                  <div className="mt-2">
+                  <div className="mt-2 hidden md:block">
                     <label htmlFor="mobile-transcription-upload" className="bg-white border border-slate-200 text-slate-700 px-4 py-3 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-sm hover:border-indigo-300 hover:text-indigo-600 transition-all cursor-pointer flex items-center gap-2 mx-auto w-fit">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
                       Selecionar Arquivo
@@ -1935,7 +1938,9 @@ const App: React.FC = () => {
           if (items && items.length > 0) {
             for (const item of items) {
               if (item.fileType === 'audio') {
-                setIsTranscriptionAIModalOpen(true);
+                setActiveModule('acoes');
+                setViewMode('ferramentas');
+                setActiveFerramenta('transcription');
                 setTimeout(() => window.dispatchEvent(new CustomEvent('hermes-shared-audio', { detail: item.file })), 800);
               } else if (item.fileType === 'video') {
                 setActiveModule('acoes');
@@ -5036,6 +5041,12 @@ const App: React.FC = () => {
                       onOpenLog={() => { setIsQuickLogModalOpen(true); setIsMobileMenuOpen(false); }}
                       onOpenShopping={() => { setIsShoppingAIModalOpen(true); setIsMobileMenuOpen(false); }}
                       onOpenTranscription={() => { setIsTranscriptionAIModalOpen(true); setIsMobileMenuOpen(false); }}
+                      onOpenWhatsAppTranscription={() => {
+                        setActiveModule('acoes');
+                        setViewMode('ferramentas');
+                        setActiveFerramenta('transcription');
+                        setIsMobileMenuOpen(false);
+                      }}
                       onOpenMeetingTranscription={() => {
                         setActiveModule('acoes');
                         setViewMode('ferramentas');
@@ -5326,6 +5337,11 @@ const App: React.FC = () => {
                     onOpenLog={() => setIsQuickLogModalOpen(true)}
                     onOpenShopping={() => setIsShoppingAIModalOpen(true)}
                     onOpenTranscription={() => setIsTranscriptionAIModalOpen(true)}
+                    onOpenWhatsAppTranscription={() => {
+                      setActiveModule('acoes');
+                      setViewMode('ferramentas');
+                      setActiveFerramenta('transcription');
+                    }}
                     onOpenMeetingTranscription={() => {
                       setActiveModule('acoes');
                       setViewMode('ferramentas');
