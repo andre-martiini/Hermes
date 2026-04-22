@@ -25,7 +25,7 @@ export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
 });
 
-export const functions = getFunctions(app);
+export const functions = getFunctions(app, "us-central1");
 let _messaging: ReturnType<typeof getMessaging> | null = null;
 if (typeof window !== "undefined") {
   // Use a self-executing async function to check for support without blocking the export

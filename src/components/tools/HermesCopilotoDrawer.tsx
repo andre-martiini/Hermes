@@ -366,6 +366,15 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
     const [creatingFormId, setCreatingFormId] = useState<string | null>(null);
 
+    const handleFirestoreListenerError = (error: any) => {
+        console.error('[Copiloto] Erro no listener do Firestore:', error);
+        if (error?.code === 'permission-denied') {
+            setFooterError('O copiloto não conseguiu acessar o histórico no Firestore por falta de permissão.');
+            return;
+        }
+        setFooterError(error?.message || 'Erro ao carregar dados do copiloto.');
+    };
+
     const handleConfirmForm = async (form: ProposedForm, messageId?: string) => {
         if (!currentSessionId || creatingFormId) return;
         if (messageId) setCreatingFormId(messageId);
@@ -539,13 +548,17 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             limit(20)
         );
 
-        return onSnapshot(q, (snapshot) => {
-            const sessList = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            })) as Session[];
-            setSessions(sessList);
-        });
+        return onSnapshot(
+            q,
+            (snapshot) => {
+                const sessList = snapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                })) as Session[];
+                setSessions(sessList);
+            },
+            handleFirestoreListenerError
+        );
     }, [userId]);
 
     // Load Messages for current session
@@ -560,10 +573,14 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             orderBy('timestamp', 'asc')
         );
 
-        return onSnapshot(q, (snapshot) => {
-            const msgList = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Message[];
-            setMessages(msgList);
-        });
+        return onSnapshot(
+            q,
+            (snapshot) => {
+                const msgList = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Message[];
+                setMessages(msgList);
+            },
+            handleFirestoreListenerError
+        );
     }, [currentSessionId]);
 
     useEffect(() => {
