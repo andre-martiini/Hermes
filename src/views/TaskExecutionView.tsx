@@ -10,6 +10,7 @@ import { buildDiaryRichNote, ensureHttpUrl, getRenamedFileName, parseDiaryRichNo
 import { NotificationCenter } from '../components/ui/UIComponents';
 import { db, functions } from '../../firebase';
 import { httpsCallable } from 'firebase/functions';
+import { getAuth } from 'firebase/auth';
 import { setDoc, doc } from 'firebase/firestore';
 import { DiarioBordoUI } from './DiarioBordoUI';
 import { SpeedDialMenu } from '../components/ui/SpeedDialMenu';
@@ -121,11 +122,49 @@ export const TaskExecutionView = ({
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(currentTaskData.chat_history || []);
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
+  const [pendingDeepResearchId, setPendingDeepResearchId] = useState<string | null>(null);
+  const [isDeepResearching, setIsDeepResearching] = useState(false);
+  const [deepResearchTopic, setDeepResearchTopic] = useState('');
+  const [showDeepResearchModal, setShowDeepResearchModal] = useState(false);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [showArtifacts, setShowArtifacts] = useState(false);
   const [copiedArtifactId, setCopiedArtifactId] = useState<string | null>(null);
   const [isChatFocused, setIsChatFocused] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!pendingDeepResearchId) return;
+
+    // Fallback timer (2 hours)
+    const fallbackTimer = setTimeout(() => {
+      setIsDeepResearching(false);
+      showToast('A pesquisa profunda pode ter falhado por timeout (mais de 2 horas).', 'error');
+      setPendingDeepResearchId(null);
+    }, 2 * 60 * 60 * 1000);
+
+    const unsub = onSnapshot(doc(db, 'deep_research_tasks', pendingDeepResearchId), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.status === 'COMPLETED' || data.status === 'FAILED' || data.status === 'CANCELLED') {
+           setIsDeepResearching(false);
+           if (data.status === 'COMPLETED') {
+             showToast('Pesquisa Profunda concluída! Verifique o acervo global.', 'success');
+           } else if (data.status === 'CANCELLED') {
+             showToast('Pesquisa Profunda cancelada.', 'info');
+           } else {
+             showToast('Pesquisa Profunda falhou.', 'error');
+           }
+           setPendingDeepResearchId(null);
+           clearTimeout(fallbackTimer);
+        }
+      }
+    });
+
+    return () => {
+       unsub();
+       clearTimeout(fallbackTimer);
+    };
+  }, [pendingDeepResearchId]);
 
   useEffect(() => {
     setChatMessages(currentTaskData.chat_history || []);
@@ -662,11 +701,69 @@ export const TaskExecutionView = ({
     }
   };
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     const msg = chatInput.trim();
     if (!msg) return;
     setChatInput('');
+
+    if (msg.startsWith('/pesquisa-profunda')) {
+      const topic = msg.replace('/pesquisa-profunda', '').trim();
+      if (!topic) {
+        showToast('Por favor, informe um tema. Ex: /pesquisa-profunda Inteligência Artificial', 'warning');
+        return;
+      }
+      setDeepResearchTopic(topic);
+      setShowDeepResearchModal(true);
+      return;
+    }
+
+    if (msg.startsWith('/cancelar-pesquisa')) {
+      const parts = msg.split(' ');
+      const idToCancel = parts.length > 1 ? parts[1] : pendingDeepResearchId;
+      if (!idToCancel) {
+         showToast('Nenhuma pesquisa em andamento ou ID inválido.', 'warning');
+         return;
+      }
+      try {
+         const fn = httpsCallable(functions, 'cancelDeepResearch');
+         await fn({ taskId: idToCancel });
+         showToast('Solicitação de cancelamento enviada.', 'success');
+      } catch (e) {
+         console.error('Erro ao cancelar:', e);
+         showToast('Erro ao cancelar pesquisa.', 'error');
+      }
+      return;
+    }
+
     sendChatMessage(msg);
+  };
+
+  const confirmDeepResearch = async () => {
+    const auth = getAuth();
+    const currentUser = auth.currentUser;
+    setShowDeepResearchModal(false);
+    setIsDeepResearching(true);
+
+    // Add to chat immediately
+    const userMsg: ChatMessage = { role: 'user', content: `/pesquisa-profunda ${deepResearchTopic}` };
+    const sysMsg: ChatMessage = { role: 'assistant', content: `Iniciando pesquisa profunda sobre: "${deepResearchTopic}". Isso pode levar até 60 minutos. Use /cancelar-pesquisa para interromper.` };
+    setChatMessages(prev => [...prev, userMsg, sysMsg]);
+
+    try {
+      const fn = httpsCallable(functions, 'startDeepResearch');
+      const res = await fn({
+        topic: deepResearchTopic,
+        requester_email: currentUser?.email,
+        telegram_chat_id: currentUser?.uid // Adapt according to how we store it, usually user uid maps to some config, but we pass what we can here.
+      });
+      const data = res.data as { taskId: string };
+      setPendingDeepResearchId(data.taskId);
+      showToast(`Pesquisa iniciada. ID: ${data.taskId}`, 'success');
+    } catch (e) {
+      console.error(e);
+      showToast('Erro ao iniciar pesquisa profunda.', 'error');
+      setIsDeepResearching(false);
+    }
   };
 
   const handleSummarizeWithAI = async () => {
