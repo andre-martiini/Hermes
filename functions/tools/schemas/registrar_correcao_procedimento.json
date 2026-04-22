@@ -1,0 +1,30 @@
+{
+  "name": "registrar_correcao_procedimento",
+  "description": "Registra uma correção ou melhoria em um procedimento existente",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "area_tematica": {
+        "type": "string",
+        "description": "Área temática do procedimento (ex: FINANCEIRO, TI, RH)"
+      },
+      "titulo_procedimento": {
+        "type": "string",
+        "description": "Título do procedimento a ser corrigido"
+      },
+      "correcao_descrita": {
+        "type": "string",
+        "description": "Descrição clara do que está errado ou desatualizado"
+      },
+      "novo_conteudo_proposto": {
+        "type": "string",
+        "description": "Proposta de novo conteúdo para substituir o atual"
+      },
+      "justificativa": {
+        "type": "string",
+        "description": "Justificativa para a correção"
+      }
+    },
+    "required": ["area_tematica", "titulo_procedimento", "correcao_descrita", "novo_conteudo_proposto", "justificativa"]
+  }
+}

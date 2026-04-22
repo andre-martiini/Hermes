@@ -1,0 +1,52 @@
+{
+  "name": "criar_acao_no_sistema",
+  "description": "Cria uma nova ação ou tarefa no Hermes",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "titulo": {
+        "type": "string",
+        "description": "Título da ação"
+      },
+      "area_tematica": {
+        "type": "string",
+        "description": "Área temática (ex: GERAL, FINANCEIRO, TI, RH, JURÍDICO)"
+      },
+      "data_limite": {
+        "type": "string",
+        "description": "Data limite no formato YYYY-MM-DD"
+      },
+      "descricao": {
+        "type": "string",
+        "description": "Descrição detalhada da ação"
+      },
+      "tipo_acao": {
+        "type": "string",
+        "description": "Tipo: 'fast' (menos de 1h), 'deep' (mais de 1h), 'projeto'"
+      },
+      "tags": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Tags para categorização"
+      },
+      "notas": {
+        "type": "string",
+        "description": "Notas adicionais"
+      },
+      "plano_acao": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Lista de etapas do plano de ação"
+      },
+      "horario_inicio": {
+        "type": "string",
+        "description": "Horário de início no formato HH:MM (se agendado)"
+      },
+      "horario_fim": {
+        "type": "string",
+        "description": "Horário de fim no formato HH:MM (se agendado)"
+      }
+    },
+    "required": ["titulo", "area_tematica", "data_limite"]
+  }
+}

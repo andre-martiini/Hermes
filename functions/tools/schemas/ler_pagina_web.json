@@ -1,0 +1,14 @@
+{
+  "name": "ler_pagina_web",
+  "description": "Lê e extrai o conteúdo completo de uma URL",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "URL completa da página a ser lida (ex: 'https://example.com/artigo')"
+      }
+    },
+    "required": ["url"]
+  }
+}

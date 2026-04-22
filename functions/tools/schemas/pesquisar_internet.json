@@ -1,0 +1,14 @@
+{
+  "name": "pesquisar_internet",
+  "description": "Busca informações recentes na internet via Tavily",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Consulta de busca (ex: 'cotação do dólar hoje', 'últimas notícias INSS')"
+      }
+    },
+    "required": ["query"]
+  }
+}

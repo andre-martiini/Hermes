@@ -1,0 +1,30 @@
+{
+  "name": "consultar_historico_acoes",
+  "description": "Busca ações, tarefas e projetos no Hermes",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Termos de busca (ex: 'relatório financeiro', 'sprint 3')"
+      },
+      "area_tematica": {
+        "type": "string",
+        "description": "Área temática para filtrar (ex: 'FINANCEIRO', 'TI', 'RH')"
+      },
+      "status": {
+        "type": "string",
+        "description": "Status da ação: 'em andamento', 'concluída', 'cancelada'"
+      },
+      "data_limite_inicio": {
+        "type": "string",
+        "description": "Data inicial no formato YYYY-MM-DD"
+      },
+      "data_limite_fim": {
+        "type": "string",
+        "description": "Data final no formato YYYY-MM-DD"
+      }
+    },
+    "required": ["query"]
+  }
+}

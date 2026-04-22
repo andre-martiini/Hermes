@@ -1,0 +1,18 @@
+{
+  "name": "buscar_e_analisar_email",
+  "description": "Busca e analisa e-mails no Gmail",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Query padrão do Gmail (ex: 'from:fulano@gov.br newer_than:7d', 'subject:ofício')"
+      },
+      "max_results": {
+        "type": "integer",
+        "description": "Número máximo de e-mails (padrão: 5, máximo: 5)"
+      }
+    },
+    "required": ["query"]
+  }
+}

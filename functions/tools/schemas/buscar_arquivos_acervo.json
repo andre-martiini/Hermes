@@ -1,0 +1,14 @@
+{
+  "name": "buscar_arquivos_acervo",
+  "description": "Busca documentos, manuais e arquivos no Acervo Global do Hermes",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Termos de busca (ex: 'manual de onboarding', 'política de férias')"
+      }
+    },
+    "required": ["query"]
+  }
+}

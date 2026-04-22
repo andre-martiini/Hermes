@@ -1,0 +1,18 @@
+{
+  "name": "encontrar_slot_livre",
+  "description": "Encontra o próximo horário livre disponível na agenda",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "a_partir_de": {
+        "type": "string",
+        "description": "Data de início da busca no formato YYYY-MM-DD"
+      },
+      "duracao_min": {
+        "type": "integer",
+        "description": "Duração desejada em minutos (padrão: 30)"
+      }
+    },
+    "required": ["a_partir_de"]
+  }
+}
