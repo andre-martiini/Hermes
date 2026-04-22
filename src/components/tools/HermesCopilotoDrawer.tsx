@@ -750,7 +750,11 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         if (messageId) setDiagnosingId(messageId);
         
         try {
-            let resolvedSystemId = diagnosis.sistemaId?.trim() || systemId?.trim() || '';
+            const sanitize = (v?: string | null) => {
+                const s = v?.trim() || '';
+                return (s === 'None' || s === 'null' || s === 'undefined') ? '' : s;
+            };
+            let resolvedSystemId = sanitize(diagnosis.sistemaId) || sanitize(systemId) || '';
             if (diagnosis.mode === 'repo' && !resolvedSystemId && taskId) {
                 try {
                     const taskSnap = await getDoc(doc(db, 'tarefas', taskId));

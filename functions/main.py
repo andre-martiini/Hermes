@@ -7638,7 +7638,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
         system_instruction = (
             f"Você é o Copiloto Hermes, estrategista sênior de processos. Hoje é {today_str}. "
-            f"{f'CONTEXTO TÉCNICO VINCULADO (OBRIGATÓRIO): sistemaId={system_id}, taskId={task_id}. ' if system_id or task_id else ''}"
+            f"{('CONTEXTO TÉCNICO VINCULADO (OBRIGATÓRIO): ' + (f'sistemaId={system_id}, ' if system_id else '') + (f'taskId={task_id}. ' if task_id else '')) if (system_id or task_id) else ''}"
             "\n\n## CORE ESTÁTICO DO COPILOTO\n"
             f"{copilot_core.get('content', '')}\n\n"
             "## PERSONALIDADE DINÂMICA ATUAL\n"
