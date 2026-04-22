@@ -11,7 +11,7 @@ import { NotificationCenter } from '../components/ui/UIComponents';
 import { db, functions } from '../../firebase';
 import { httpsCallable } from 'firebase/functions';
 import { getAuth } from 'firebase/auth';
-import { setDoc, doc } from 'firebase/firestore';
+import { setDoc, doc, onSnapshot } from 'firebase/firestore';
 import { DiarioBordoUI } from './DiarioBordoUI';
 import { SpeedDialMenu } from '../components/ui/SpeedDialMenu';
 import { HermesCopilotoDrawer } from '../components/tools/HermesCopilotoDrawer';
@@ -164,7 +164,7 @@ export const TaskExecutionView = ({
        unsub();
        clearTimeout(fallbackTimer);
     };
-  }, [pendingDeepResearchId]);
+  }, [pendingDeepResearchId, showToast]);
 
   useEffect(() => {
     setChatMessages(currentTaskData.chat_history || []);
@@ -739,26 +739,38 @@ export const TaskExecutionView = ({
   };
 
   const confirmDeepResearch = async () => {
+    const topic = deepResearchTopic.trim();
+    if (!topic) {
+      setShowDeepResearchModal(false);
+      showToast('Por favor, informe um tema para a pesquisa profunda.', 'warning');
+      return;
+    }
+
     const auth = getAuth();
     const currentUser = auth.currentUser;
+    if (!currentUser) {
+      setShowDeepResearchModal(false);
+      showToast('Você precisa estar autenticado para iniciar a pesquisa profunda.', 'error');
+      return;
+    }
+
     setShowDeepResearchModal(false);
     setIsDeepResearching(true);
 
     // Add to chat immediately
-    const userMsg: ChatMessage = { role: 'user', content: `/pesquisa-profunda ${deepResearchTopic}` };
-    const sysMsg: ChatMessage = { role: 'assistant', content: `Iniciando pesquisa profunda sobre: "${deepResearchTopic}". Isso pode levar até 60 minutos. Use /cancelar-pesquisa para interromper.` };
-    setChatMessages(prev => [...prev, userMsg, sysMsg]);
+    const userMsg: ChatMessage = { role: 'user', content: `/pesquisa-profunda ${topic}` };
+    const sysMsg: ChatMessage = { role: 'assistant', content: `Iniciando pesquisa profunda sobre: "${topic}". Isso pode levar até 60 minutos. Use /cancelar-pesquisa para interromper.` };
+    const updatedHistory = [...chatMessages, userMsg, sysMsg];
+    setChatMessages(updatedHistory);
+    onSave(task.id, { chat_history: updatedHistory });
 
     try {
       const fn = httpsCallable(functions, 'startDeepResearch');
-      const res = await fn({
-        topic: deepResearchTopic,
-        requester_email: currentUser?.email,
-        telegram_chat_id: currentUser?.uid // Adapt according to how we store it, usually user uid maps to some config, but we pass what we can here.
-      });
+      const res = await fn({ topic });
       const data = res.data as { taskId: string };
       setPendingDeepResearchId(data.taskId);
       showToast(`Pesquisa iniciada. ID: ${data.taskId}`, 'success');
+      setDeepResearchTopic('');
     } catch (e) {
       console.error(e);
       showToast('Erro ao iniciar pesquisa profunda.', 'error');
@@ -1626,6 +1638,59 @@ export const TaskExecutionView = ({
       {/* ══════════════════════════════════════════════════════════
           NOTIFICATION CENTER
       ══════════════════════════════════════════════════════════ */}
+      {showDeepResearchModal && (
+        <div className="fixed inset-0 z-[340] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-lg rounded-3xl shadow-2xl border p-6 ${isDark ? 'bg-[#10131d] border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-base font-black tracking-tight">Iniciar Pesquisa Profunda</h3>
+                <p className={`mt-1 text-xs leading-relaxed ${mutedText}`}>
+                  A execução é assíncrona e pode levar até 60 minutos. O resultado será salvo no acervo global.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowDeepResearchModal(false)}
+                className={`p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10 text-white/40' : 'hover:bg-slate-100 text-slate-400'}`}
+                aria-label="Fechar modal"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-2">
+              <label className={labelCls}>Tema da Pesquisa</label>
+              <textarea
+                value={deepResearchTopic}
+                onChange={e => setDeepResearchTopic(e.target.value)}
+                placeholder="Ex.: panorama regulatório e jurisprudencial sobre uso de IA generativa na administração pública"
+                className={`min-h-[140px] w-full resize-y rounded-2xl border p-4 text-sm outline-none transition-all ${isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/25' : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400'}`}
+              />
+              <p className={`text-[10px] ${mutedText}`}>
+                Use um tema específico. Quanto melhor o escopo, melhor o relatório final.
+              </p>
+            </div>
+
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setShowDeepResearchModal(false)}
+                className={`px-4 py-2 text-sm font-bold rounded-xl transition-all ${isDark ? 'text-white/40 hover:text-white/70' : 'text-slate-400 hover:text-slate-600'}`}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmDeepResearch}
+                disabled={isDeepResearching || !deepResearchTopic.trim()}
+                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-black shadow-lg transition-all"
+              >
+                Iniciar pesquisa
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isNotificationCenterOpen && (
         <div className="absolute top-20 right-6 z-[300] w-80 md:w-96 shadow-2xl animate-in slide-in-from-right-4 duration-300">
           <NotificationCenter notifications={notifications} onMarkAsRead={onMarkAsRead} onDismiss={onDismiss} isOpen={isNotificationCenterOpen} onClose={onCloseNotifications} />

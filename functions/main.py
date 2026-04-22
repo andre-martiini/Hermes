@@ -4805,6 +4805,22 @@ def consolidar_memorias_copiloto(event: scheduler_fn.ScheduledEvent):
         print(f"[Memoria] Falha na consolidação: {exc}")
 
 
+def _resolve_telegram_chat_id_for_uid(db, uid: str | None):
+    if not uid:
+        return None
+    try:
+        user_doc = db.collection("usuarios").document(uid).get()
+        if not user_doc.exists:
+            return None
+        data = user_doc.to_dict() or {}
+        for key in ("telegram_chat_id", "telegramChatId", "chat_id", "telegram_id"):
+            value = data.get(key)
+            if isinstance(value, (str, int)) and str(value).strip():
+                return str(value).strip()
+    except Exception as exc:
+        print(f"[DeepResearch] Falha ao resolver telegram_chat_id para uid={uid}: {exc}")
+    return None
+
 @https_fn.on_call(
 
     cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
@@ -9575,10 +9591,15 @@ def startDeepResearch(req: https_fn.CallableRequest):
     Valida dados, injeta serverTimestamp e cria o doc em deep_research_tasks.
     """
     try:
+        uid = req.auth.uid if req.auth else None
+        if not uid:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
+                message="Usuário não autenticado."
+            )
+
         data = req.data or {}
-        topic = data.get('topic')
-        requester_email = data.get('requester_email', 'unknown')
-        telegram_chat_id = data.get('telegram_chat_id', '')
+        topic = (data.get('topic') or '').strip()
 
         if not topic:
             raise https_fn.HttpsError(
@@ -9587,17 +9608,26 @@ def startDeepResearch(req: https_fn.CallableRequest):
             )
 
         db = get_db()
+        requester_email = (
+            ((req.auth.token or {}).get('email') if req.auth else None)
+            or data.get('requester_email')
+            or 'unknown'
+        )
+        telegram_chat_id = _resolve_telegram_chat_id_for_uid(db, uid)
         task_ref = db.collection('deep_research_tasks').document()
         task_ref.set({
-            'status': 'pending',
+            'status': 'PENDING',
             'topic': topic,
+            'created_by_uid': uid,
             'requester_email': requester_email,
             'telegram_chat_id': telegram_chat_id,
             'created_at': firestore.SERVER_TIMESTAMP
         })
 
-        return {"taskId": task_ref.id, "status": "pending"}
+        return {"taskId": task_ref.id, "status": "PENDING"}
     except Exception as e:
+        if isinstance(e, https_fn.HttpsError):
+            raise e
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.INTERNAL,
             message=str(e)
@@ -9613,6 +9643,13 @@ def cancelDeepResearch(req: https_fn.CallableRequest):
     Cancela uma pesquisa profunda, atualizando o status do doc.
     """
     try:
+        uid = req.auth.uid if req.auth else None
+        if not uid:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
+                message="Usuário não autenticado."
+            )
+
         data = req.data or {}
         task_id = data.get('taskId')
 
@@ -9632,6 +9669,14 @@ def cancelDeepResearch(req: https_fn.CallableRequest):
                 message="Task not found."
             )
 
+        task_data = doc.to_dict() or {}
+        owner_uid = task_data.get('created_by_uid')
+        if owner_uid and owner_uid != uid:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.PERMISSION_DENIED,
+                message="Você não tem permissão para cancelar esta pesquisa."
+            )
+
         task_ref.update({
             'status': 'CANCELLED',
             'cancelled_at': firestore.SERVER_TIMESTAMP
@@ -9639,6 +9684,8 @@ def cancelDeepResearch(req: https_fn.CallableRequest):
 
         return {"taskId": task_id, "status": "CANCELLED"}
     except Exception as e:
+        if isinstance(e, https_fn.HttpsError):
+            raise e
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.INTERNAL,
             message=str(e)
@@ -9704,6 +9751,15 @@ def deep_research_worker(event: firestore_fn.Event[firestore_fn.DocumentSnapshot
 
 
     try:
+        if check_cancelled():
+            print("[DeepResearch] Pesquisa cancelada antes do início do processamento.")
+            return
+
+        task_ref.update({
+            'status': 'RUNNING',
+            'started_at': firestore.SERVER_TIMESTAMP
+        })
+
         keys_doc = db.collection('system').document('api_keys').get()
         api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
         if not api_key:
@@ -9793,13 +9849,12 @@ def deep_research_worker(event: firestore_fn.Event[firestore_fn.DocumentSnapshot
         # Upload to Drive
         if check_cancelled(): return
 
-        from setup_credentials import get_google_auth, get_db
         from googleapiclient.discovery import build
         from googleapiclient.http import MediaIoBaseUpload
         import io
         import uuid
 
-        creds = get_google_auth(db)
+        creds = get_google_creds(scopes=['https://www.googleapis.com/auth/drive'])
         drive_service = build('drive', 'v3', credentials=creds)
 
         # Encontra pasta
