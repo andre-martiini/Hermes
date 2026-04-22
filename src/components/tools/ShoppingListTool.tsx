@@ -1,12 +1,66 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { httpsCallable } from 'firebase/functions';
 import { collection, onSnapshot, addDoc, deleteDoc, updateDoc, doc, writeBatch, setDoc } from 'firebase/firestore';
-import { db } from '@/firebase';
+import { db, functions } from '@/firebase';
 import { ShoppingItem } from '@/types';
 
-export const ShoppingListTool = ({ onBack, showToast, initialImportText, isEmbedded }: { onBack: () => void, showToast: (msg: string, type: 'success' | 'error' | 'info') => void, initialImportText?: string, isEmbedded?: boolean }) => {
+type ShoppingAssistantAction = 'view' | 'create' | 'update' | 'delete' | 'import_batch' | 'clear_planning' | 'finalize';
+
+interface ShoppingListToolProps {
+  onBack: () => void;
+  showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
+  initialImportText?: string;
+  initialView?: 'catalog' | 'planning' | 'shopping';
+  initialSearchTerm?: string;
+  assistantAction?: ShoppingAssistantAction;
+  targetItemId?: string;
+  targetItemName?: string;
+  nome?: string;
+  categoria?: string;
+  quantidade?: string;
+  unit?: string;
+  isPlanned?: boolean;
+  isPurchased?: boolean;
+  ordem?: number;
+  isEmbedded?: boolean;
+}
+
+interface AssistantMutationPreview {
+  title: string;
+  description: string;
+  lines: string[];
+  action: ShoppingAssistantAction;
+  payload: Record<string, any>;
+}
+
+const normalizeShoppingText = (value?: string | null) =>
+  (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+
+export const ShoppingListTool = ({
+  onBack,
+  showToast,
+  initialImportText,
+  initialView,
+  initialSearchTerm,
+  assistantAction,
+  targetItemId,
+  targetItemName,
+  nome,
+  categoria,
+  quantidade,
+  unit,
+  isPlanned,
+  isPurchased,
+  ordem,
+  isEmbedded,
+}: ShoppingListToolProps) => {
   const [items, setItems] = useState<ShoppingItem[]>([]);
-  const [view, setView] = useState<'catalog' | 'planning' | 'shopping'>('catalog');
-  const [searchTerm, setSearchTerm] = useState('');
+  const [view, setView] = useState<'catalog' | 'planning' | 'shopping'>(initialView || 'catalog');
+  const [searchTerm, setSearchTerm] = useState(initialSearchTerm || '');
   const [newItemName, setNewItemName] = useState('');
   const [newItemCategoria, setNewItemCategoria] = useState('Geral');
   const [isImportModalOpen, setIsImportModalOpen] = useState(!!initialImportText);
@@ -21,6 +75,8 @@ export const ShoppingListTool = ({ onBack, showToast, initialImportText, isEmbed
   const [isFinalizingConfirmOpen, setIsFinalizingConfirmOpen] = useState(false);
   const [exitingPurchasedIds, setExitingPurchasedIds] = useState<string[]>([]);
   const [isPurchasedSectionOpen, setIsPurchasedSectionOpen] = useState(false);
+  const [assistantStatus, setAssistantStatus] = useState<'idle' | 'applying' | 'applied' | 'cancelled' | 'error'>('idle');
+  const [assistantError, setAssistantError] = useState('');
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'shopping_items'), (snapshot) => {
@@ -41,6 +97,21 @@ export const ShoppingListTool = ({ onBack, showToast, initialImportText, isEmbed
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (initialView) setView(initialView);
+  }, [initialView]);
+
+  useEffect(() => {
+    if (typeof initialSearchTerm === 'string') setSearchTerm(initialSearchTerm);
+  }, [initialSearchTerm]);
+
+  useEffect(() => {
+    if (typeof initialImportText === 'string') {
+      setImportText(initialImportText);
+      setIsImportModalOpen(Boolean(initialImportText));
+    }
+  }, [initialImportText]);
 
   const generateExternalToken = async () => {
     try {
@@ -251,13 +322,246 @@ export const ShoppingListTool = ({ onBack, showToast, initialImportText, isEmbed
     return Array.from(cats).sort();
   }, [items]);
 
+  const assistantTargetItem = useMemo(() => {
+    if (!assistantAction || !['update', 'delete'].includes(assistantAction)) return null;
+    if (targetItemId) return items.find(item => item.id === targetItemId) || null;
+    if (!targetItemName) return null;
+
+    const normalizedTarget = normalizeShoppingText(targetItemName);
+    const exact = items.find(item => normalizeShoppingText(item.nome) === normalizedTarget);
+    if (exact) return exact;
+
+    const partialMatches = items.filter(item => normalizeShoppingText(item.nome).includes(normalizedTarget));
+    return partialMatches.length === 1 ? partialMatches[0] : null;
+  }, [assistantAction, items, targetItemId, targetItemName]);
+
+  const assistantPreview = useMemo<AssistantMutationPreview | null>(() => {
+    if (!assistantAction || assistantAction === 'view') return null;
+
+    if (assistantAction === 'import_batch') {
+      const rawText = (initialImportText || '').trim();
+      const lines = rawText.split('\n').map(line => line.trim()).filter(Boolean);
+      return {
+        title: 'Importacao em lote proposta',
+        description: lines.length > 0
+          ? `${lines.length} linha(s) serao processadas apos sua confirmacao.`
+          : 'Nenhuma linha valida foi enviada para importacao.',
+        lines: lines.slice(0, 6),
+        action: assistantAction,
+        payload: { action: 'import_batch', importText: rawText },
+      };
+    }
+
+    if (assistantAction === 'clear_planning') {
+      return {
+        title: 'Limpeza de planejamento proposta',
+        description: 'Todos os itens planejados ou comprados da rodada atual serao resetados.',
+        lines: [`Itens afetados agora: ${items.filter(item => item.isPlanned || item.isPurchased).length}`],
+        action: assistantAction,
+        payload: { action: 'clear_planning' },
+      };
+    }
+
+    if (assistantAction === 'finalize') {
+      return {
+        title: 'Finalizacao de compra proposta',
+        description: 'A rodada de compras sera encerrada e os status de planejamento e compra serao limpos.',
+        lines: [`Itens na rodada atual: ${items.filter(item => item.isPlanned || item.isPurchased).length}`],
+        action: assistantAction,
+        payload: { action: 'finalize' },
+      };
+    }
+
+    if (assistantAction === 'create') {
+      const nextNome = (nome || targetItemName || '').trim();
+      const nextCategoria = (categoria || 'Geral').trim() || 'Geral';
+      const nextQuantidade = String(quantidade || '1').trim() || '1';
+      const nextUnit = String(unit || 'un').trim() || 'un';
+      const nextIsPlanned = Boolean(isPlanned);
+      const nextIsPurchased = Boolean(isPurchased);
+      return {
+        title: 'Criacao de item proposta',
+        description: nextNome ? `O item "${nextNome}" sera criado na lista.` : 'Falta o nome do item para criar.',
+        lines: [
+          `Nome: ${nextNome || 'Nao informado'}`,
+          `Categoria: ${nextCategoria}`,
+          `Quantidade: ${nextQuantidade}`,
+          `Unidade: ${nextUnit}`,
+          `Planejado: ${nextIsPlanned ? 'Sim' : 'Nao'}`,
+          `Comprado: ${nextIsPurchased ? 'Sim' : 'Nao'}`,
+          ...(typeof ordem === 'number' ? [`Ordem: ${ordem}`] : []),
+        ],
+        action: assistantAction,
+        payload: {
+          action: 'create',
+          nome: nextNome,
+          categoria: nextCategoria,
+          quantidade: nextQuantidade,
+          unit: nextUnit,
+          isPlanned: nextIsPlanned,
+          isPurchased: nextIsPurchased,
+          ...(typeof ordem === 'number' ? { ordem } : {}),
+        },
+      };
+    }
+
+    if (assistantAction === 'delete') {
+      return {
+        title: 'Exclusao de item proposta',
+        description: assistantTargetItem
+          ? `O item "${assistantTargetItem.nome}" sera removido da lista.`
+          : 'Nao consegui localizar o item que o copiloto quer excluir.',
+        lines: assistantTargetItem
+          ? [
+              `Categoria: ${assistantTargetItem.categoria}`,
+              `Quantidade: ${assistantTargetItem.quantidade} ${assistantTargetItem.unit}`,
+              `Planejado: ${assistantTargetItem.isPlanned ? 'Sim' : 'Nao'}`,
+              `Comprado: ${assistantTargetItem.isPurchased ? 'Sim' : 'Nao'}`,
+            ]
+          : [`Item informado: ${targetItemName || targetItemId || 'Nao identificado'}`],
+        action: assistantAction,
+        payload: {
+          action: 'delete',
+          itemId: assistantTargetItem?.id || targetItemId || '',
+        },
+      };
+    }
+
+    const target = assistantTargetItem;
+    const diffLines: string[] = [];
+    const payload: Record<string, any> = { action: 'update', itemId: target?.id || targetItemId || '' };
+
+    if (nome !== undefined) {
+      diffLines.push(`Nome: ${target?.nome || '—'} -> ${nome}`);
+      payload.nome = nome;
+    }
+    if (categoria !== undefined) {
+      diffLines.push(`Categoria: ${target?.categoria || '—'} -> ${categoria}`);
+      payload.categoria = categoria;
+    }
+    if (quantidade !== undefined) {
+      diffLines.push(`Quantidade: ${target?.quantidade || '—'} -> ${quantidade}`);
+      payload.quantidade = quantidade;
+    }
+    if (unit !== undefined) {
+      diffLines.push(`Unidade: ${target?.unit || '—'} -> ${unit}`);
+      payload.unit = unit;
+    }
+    if (isPlanned !== undefined) {
+      diffLines.push(`Planejado: ${target?.isPlanned ? 'Sim' : 'Nao'} -> ${isPlanned ? 'Sim' : 'Nao'}`);
+      payload.isPlanned = isPlanned;
+    }
+    if (isPurchased !== undefined) {
+      diffLines.push(`Comprado: ${target?.isPurchased ? 'Sim' : 'Nao'} -> ${isPurchased ? 'Sim' : 'Nao'}`);
+      payload.isPurchased = isPurchased;
+    }
+    if (ordem !== undefined) {
+      diffLines.push(`Ordem: ${target?.ordem ?? '—'} -> ${ordem}`);
+      payload.ordem = ordem;
+    }
+
+    return {
+      title: 'Atualizacao de item proposta',
+      description: target
+        ? `O item "${target.nome}" sera atualizado apos sua confirmacao.`
+        : 'Nao consegui localizar com seguranca o item que o copiloto quer alterar.',
+      lines: diffLines.length > 0 ? diffLines : ['Nenhum campo de alteracao foi informado.'],
+      action: assistantAction,
+      payload,
+    };
+  }, [assistantAction, assistantTargetItem, categoria, initialImportText, isPlanned, isPurchased, items, nome, ordem, quantidade, targetItemId, targetItemName, unit]);
+
+  const canConfirmAssistantAction = useMemo(() => {
+    if (!assistantPreview) return false;
+    if (assistantAction === 'create') return Boolean(assistantPreview.payload.nome);
+    if (assistantAction === 'update' || assistantAction === 'delete') return Boolean(assistantPreview.payload.itemId);
+    if (assistantAction === 'import_batch') return Boolean(assistantPreview.payload.importText);
+    return true;
+  }, [assistantAction, assistantPreview]);
+
+  const applyAssistantAction = async () => {
+    if (!assistantPreview || !canConfirmAssistantAction) return;
+    setAssistantStatus('applying');
+    setAssistantError('');
+
+    try {
+      const fn = httpsCallable(functions, 'mutateShoppingList');
+      await fn(assistantPreview.payload);
+      setAssistantStatus('applied');
+      showToast('Alteracao aplicada na lista de compras.', 'success');
+    } catch (error: any) {
+      console.error(error);
+      const message = error?.message || 'Erro ao aplicar alteracao na lista.';
+      setAssistantStatus('error');
+      setAssistantError(message);
+      showToast(message, 'error');
+    }
+  };
+
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6 pb-32 px-2 md:px-0">
+      {assistantPreview && (
+        <div className="bg-amber-50 border border-amber-200 rounded-[2rem] shadow-sm p-5 space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">Validacao do Copiloto</p>
+              <h3 className="text-lg font-black text-slate-900">{assistantPreview.title}</h3>
+              <p className="text-sm text-slate-600 font-medium mt-1">{assistantPreview.description}</p>
+            </div>
+            <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
+              assistantStatus === 'applied'
+                ? 'bg-emerald-100 text-emerald-700'
+                : assistantStatus === 'cancelled'
+                  ? 'bg-slate-200 text-slate-500'
+                  : assistantStatus === 'error'
+                    ? 'bg-rose-100 text-rose-600'
+                    : 'bg-white text-amber-700 border border-amber-200'
+            }`}>
+              {assistantStatus === 'applied' ? 'Aplicado' : assistantStatus === 'cancelled' ? 'Cancelado' : assistantStatus === 'error' ? 'Erro' : 'Pendente'}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {assistantPreview.lines.map(line => (
+              <div key={line} className="bg-white/80 rounded-xl px-4 py-3 text-sm font-semibold text-slate-700">
+                {line}
+              </div>
+            ))}
+          </div>
+
+          {assistantError && (
+            <div className="bg-rose-50 border border-rose-100 rounded-xl px-4 py-3 text-sm font-semibold text-rose-600">
+              {assistantError}
+            </div>
+          )}
+
+          {assistantStatus === 'idle' && (
+            <div className="flex gap-3">
+              <button
+                onClick={applyAssistantAction}
+                disabled={!canConfirmAssistantAction}
+                className="flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                Confirmar alteracao
+              </button>
+              <button
+                onClick={() => setAssistantStatus('cancelled')}
+                className="flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-500 bg-white border border-slate-200 hover:bg-slate-50 transition-all"
+              >
+                Cancelar
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
-        <button onClick={onBack} className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-400 hover:text-slate-900 border border-slate-200 hover:border-slate-900 transition-all shadow-sm">
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
-        </button>
+        {!isEmbedded && (
+          <button onClick={onBack} className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-400 hover:text-slate-900 border border-slate-200 hover:border-slate-900 transition-all shadow-sm">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
+          </button>
+        )}
         <div className="flex-1">
           <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tighter">Lista de Compras</h2>
           <p className="text-slate-500 font-medium text-sm">{items.length} itens cadastrados · {plannedItems.length} planejados</p>

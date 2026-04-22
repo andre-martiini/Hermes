@@ -27,6 +27,7 @@ from security_portals import (
     getPublicScholarshipProject,
     getPublicShoppingPortal,
     matchShoppingItemsAI,
+    mutateShoppingList,
     mutatePublicShoppingPortal,
     submitPublicFinanceTransaction,
     submitPublicScholarshipRegistration,

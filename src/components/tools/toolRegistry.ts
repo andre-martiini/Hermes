@@ -63,9 +63,57 @@ export const toolsRegistry: ToolMetadata[] = [
         parametersSchema: {
             type: 'object',
             properties: {
+                assistantAction: {
+                    type: 'string',
+                    description: 'Acao estruturada para a lista de compras. Use: view, create, update, delete, import_batch, clear_planning ou finalize.'
+                },
+                targetItemId: {
+                    type: 'string',
+                    description: 'ID exato do item alvo quando ele ja for conhecido.'
+                },
+                targetItemName: {
+                    type: 'string',
+                    description: 'Nome do item alvo quando o ID nao for conhecido. Use o nome mais especifico possivel.'
+                },
+                nome: {
+                    type: 'string',
+                    description: 'Nome do item a criar ou novo nome do item a alterar.'
+                },
+                categoria: {
+                    type: 'string',
+                    description: 'Categoria atualizada do item.'
+                },
+                quantidade: {
+                    type: 'string',
+                    description: 'Quantidade textual do item, por exemplo 1, 2, 0.5 ou 12.'
+                },
+                unit: {
+                    type: 'string',
+                    description: 'Unidade do item, por exemplo un, kg, L, pct.'
+                },
+                isPlanned: {
+                    type: 'boolean',
+                    description: 'Se o item deve ficar marcado para a etapa de planejamento.'
+                },
+                isPurchased: {
+                    type: 'boolean',
+                    description: 'Se o item deve ficar marcado como comprado.'
+                },
+                ordem: {
+                    type: 'number',
+                    description: 'Posicao numerica do item na lista.'
+                },
                 initialImportText: {
                     type: 'string',
-                    description: 'Texto bruto com os itens para importar para a lista de compras.'
+                    description: 'Texto bruto para importacao em lote. Use uma linha por item, no formato Nome|Categoria.'
+                },
+                initialView: {
+                    type: 'string',
+                    description: 'Aba inicial da ferramenta: catalog, planning ou shopping.'
+                },
+                initialSearchTerm: {
+                    type: 'string',
+                    description: 'Filtro inicial para destacar itens relevantes na lista.'
                 }
             }
         },
