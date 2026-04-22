@@ -1407,7 +1407,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                 Ferramentas usadas
                                             </div>
                                             <div className="flex flex-wrap gap-1">
-                                            {msg.toolsUsed.map(tool => {
+                                            {[...new Set(msg.toolsUsed)].map(tool => {
                                                 if (!TOOL_LABELS[tool]) return null;
                                                 const isWrite = WRITE_TOOLS.has(tool);
                                                 return (

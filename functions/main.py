@@ -7768,11 +7768,11 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "Se o usuário pedir mudança de tom, estilo, profundidade ou comportamento, use atualizar_personalidade() para reescrever a personalidade dinâmica.\n\n"
             "ETAPA 1 — PROPOSTA VIA FERRAMENTA:\n"
             "## POPS OPERACIONAIS\n"
-            "Se o usuÃ¡rio pedir explicitamente para criar, cadastrar, registrar ou atualizar um POP/Procedimento Operacional PadrÃ£o,\n"
+            "Se o usuário pedir explicitamente para criar, cadastrar, registrar ou atualizar um POP/Procedimento Operacional Padrão,\n"
             "use salvar_pop_global(titulo, gatilhos, instrucao_sistema).\n"
-            "Use essa ferramenta apenas quando houver intenÃ§Ã£o clara de persistir um POP reutilizÃ¡vel no Gestor de POPs.\n"
+            "Use essa ferramenta apenas quando houver intenção clara de persistir um POP reutilizável no Gestor de POPs.\n"
             "Gatilhos devem ser uma lista de frases curtas que disparam o POP.\n"
-            "ApÃ³s salvar_pop_global com sucesso, deixe claro para o usuÃ¡rio que o POP foi salvo ou atualizado no Gestor de POPs.\n\n"
+            "Após salvar_pop_global com sucesso, deixe claro para o usuário que o POP foi salvo ou atualizado no Gestor de POPs.\n\n"
             "Chame preparar_edicao_acao(task_id, alteracoes, justificativa) com:\n"
             "- task_id: ID da ação encontrada\n"
             "- alteracoes: dicionário com APENAS os campos que mudam. Ex: {\"data_limite\": \"2026-05-15\"}\n"
@@ -8501,20 +8501,45 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     except Exception:
                         pass
 
-                if fc.name not in _HIDDEN_TOOLS:
+                if fc.name not in _HIDDEN_TOOLS and fc.name not in tools_used:
                     tools_used.append(fc.name)
 
+                _result_str = str(result)
+                if len(_result_str) > 12000:
+                    _result_str = _result_str[:12000] + "\n[...resultado truncado por tamanho...]"
                 function_response_parts.append(
                     types.Part.from_function_response(
                         name=fc.name,
-                        response={"result": str(result)}
+                        response={"result": _result_str}
                     )
                 )
 
             if break_loop:
                 break
 
-            response = chat.send_message(function_response_parts)
+            try:
+                response = chat.send_message(function_response_parts)
+            except Exception as _send_err:
+                from google.genai.errors import ServerError as _GeminiServerError
+                if isinstance(_send_err, _GeminiServerError) and '500' in str(_send_err):
+                    print(f"[Copiloto] Gemini 500 ao enviar resultados de ferramentas — tentando com payload reduzido: {_send_err}")
+                    _reduced_parts = []
+                    for _p in function_response_parts:
+                        try:
+                            _r = _p.function_response.response.get("result", "")
+                            if len(_r) > 4000:
+                                _r = _r[:4000] + "\n[...truncado para retry...]"
+                            _reduced_parts.append(
+                                types.Part.from_function_response(
+                                    name=_p.function_response.name,
+                                    response={"result": _r}
+                                )
+                            )
+                        except Exception:
+                            _reduced_parts.append(_p)
+                    response = chat.send_message(_reduced_parts)
+                else:
+                    raise
 
         if tool_invocation_data:
             clean_text = "[Invocando Ferramenta...]"
@@ -8542,7 +8567,11 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 "suggestedTitle": suggested_title
             }
 
-        result_text = response.text
+        try:
+            result_text = response.text or ""
+        except Exception as _text_err:
+            print(f"[Copiloto] response.text falhou: {_text_err}")
+            result_text = ""
         # Extração de Proposta [PROPOSAL]{...}[/PROPOSAL]
         proposal_data = None
         clean_text = result_text
