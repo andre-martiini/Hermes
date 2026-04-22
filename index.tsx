@@ -1850,6 +1850,7 @@ const App: React.FC = () => {
   const [calendarDate, setCalendarDate] = useState(new Date());
 
   const [loading, setLoading] = useState<boolean>(false);
+  const [isInitialDataLoading, setIsInitialDataLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [completedLimit, setCompletedLimit] = useState(10);
@@ -3640,10 +3641,12 @@ const App: React.FC = () => {
       }
 
       setLoading(false);
+      setIsInitialDataLoading(false);
     }, (err) => {
       console.error(err);
       setError("Erro ao conectar com o banco de dados (Tarefas).");
       setLoading(false);
+      setIsInitialDataLoading(false);
     });
 
     // Listener para Atividades PGC
@@ -4806,6 +4809,17 @@ const App: React.FC = () => {
             </label>
           </div>
           <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest mt-8">Secure Authentication via Firebase</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isInitialDataLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Carregando seus dados...</p>
         </div>
       </div>
     );
