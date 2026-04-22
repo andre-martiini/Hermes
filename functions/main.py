@@ -6512,6 +6512,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "id": id_tarefa,
                     "titulo": t.get('titulo'),
                     "area_tematica": t.get('area_tematica'),
+                    "sistema_id": t.get('sistema_id') or None,
                     "plano_atual": t.get('plano_acao', []),
                     "diario_integral": "\n".join(diario_full),
                     "tags": t.get('tags', []),
@@ -7846,8 +7847,11 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "  - O problema é localizado e autocontido\n\n"
             "### ETAPA 1 — IDENTIFICAÇÃO E EMISSÃO DO BLOCO\n\n"
             "Emita o bloco [DIAGNOSIS]...[/DIAGNOSIS] com o JSON apropriado para o modo escolhido.\n\n"
-            "MODO REPO — JSON (Use o 'sistemaId' fornecido no contexto técnico se disponível):\n"
-            '  [DIAGNOSIS]{"mode": "repo", "sistemaId": "id_do_sistema", "descricaoProblema": "descrição técnica concisa"}[/DIAGNOSIS]\n\n'
+            "MODO REPO — JSON (Use o 'sistemaId' do contexto técnico OU do campo 'sistema_id' retornado por obter_contexto_tela OU do catálogo de sistemas acima):\n"
+            '  [DIAGNOSIS]{"mode": "repo", "sistemaId": "id_exato_do_catalogo", "descricaoProblema": "descrição técnica concisa"}[/DIAGNOSIS]\n\n'
+            "REGRA CRÍTICA: Se NÃO for possível determinar o sistemaId a partir de nenhuma dessas fontes, "
+            "NÃO emita mode='repo' com sistemaId nulo. Em vez disso, use MODO SNIPPET ou pergunte "
+            "ao usuário: 'Qual é o ID do sistema? Consulte o catálogo: [lista os sistemas disponíveis]'.\n\n"
             "MODO SNIPPET — JSON (inclua o código extraído da mensagem do usuário, escapado como string JSON):\n"
             '  [DIAGNOSIS]{"mode": "snippet", "codeSnippet": "...código aqui...", "fileName": "nome_inferido.ext", "descricaoProblema": "descrição técnica concisa"}[/DIAGNOSIS]\n\n'
             "Texto ANTES do bloco deve conter:\n"

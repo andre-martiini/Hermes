@@ -765,7 +765,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 }
             }
             if (diagnosis.mode === 'repo' && !resolvedSystemId) {
-                setFooterError('Erro ao iniciar diagnostico: sistemaId nao pode ser resolvido para esta tarefa.');
+                setFooterError('Sistema não identificado. Diga ao Copiloto o nome exato do sistema (ex: "use o sistema sispnaes") para ele encontrar o ID no catálogo.');
                 return;
             }
             const diagnosticarCodigo = httpsCallable(functions, 'diagnosticar_codigo', { timeout: 300000 });
