@@ -135,12 +135,12 @@ export const TaskExecutionView = ({
   useEffect(() => {
     if (!pendingDeepResearchId) return;
 
-    // Fallback timer (2 hours)
+    // Fallback timer aligned with backend runtime envelope.
     const fallbackTimer = setTimeout(() => {
       setIsDeepResearching(false);
-      showToast('A pesquisa profunda pode ter falhado por timeout (mais de 2 horas).', 'error');
+      showToast('A pesquisa profunda pode ter falhado por timeout (mais de 12 minutos).', 'error');
       setPendingDeepResearchId(null);
-    }, 2 * 60 * 60 * 1000);
+    }, 12 * 60 * 1000);
 
     const unsub = onSnapshot(doc(db, 'deep_research_tasks', pendingDeepResearchId), (docSnap) => {
       if (docSnap.exists()) {
@@ -759,7 +759,7 @@ export const TaskExecutionView = ({
 
     // Add to chat immediately
     const userMsg: ChatMessage = { role: 'user', content: `/pesquisa-profunda ${topic}` };
-    const sysMsg: ChatMessage = { role: 'assistant', content: `Iniciando pesquisa profunda sobre: "${topic}". Isso pode levar até 60 minutos. Use /cancelar-pesquisa para interromper.` };
+    const sysMsg: ChatMessage = { role: 'assistant', content: `Iniciando pesquisa profunda sobre: "${topic}". Isso pode levar cerca de 8 a 9 minutos. Use /cancelar-pesquisa para interromper.` };
     const updatedHistory = [...chatMessages, userMsg, sysMsg];
     setChatMessages(updatedHistory);
     onSave(task.id, { chat_history: updatedHistory });
@@ -1645,7 +1645,7 @@ export const TaskExecutionView = ({
               <div>
                 <h3 className="text-base font-black tracking-tight">Iniciar Pesquisa Profunda</h3>
                 <p className={`mt-1 text-xs leading-relaxed ${mutedText}`}>
-                  A execução é assíncrona e pode levar até 60 minutos. O resultado será salvo no acervo global.
+                  A execução é assíncrona e pode levar cerca de 8 a 9 minutos. O resultado será salvo no acervo global.
                 </p>
               </div>
               <button

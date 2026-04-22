@@ -9698,7 +9698,7 @@ def cancelDeepResearch(req: https_fn.CallableRequest):
 @firestore_fn.on_document_created(
     document="deep_research_tasks/{taskId}",
     memory=options.MemoryOption.GB_2,
-    timeout_sec=3600 # 60 minutos
+    timeout_sec=540 # limite de 9 minutos para gatilhos Firestore
 )
 def deep_research_worker(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]):
     """
@@ -9722,8 +9722,8 @@ def deep_research_worker(event: firestore_fn.Event[firestore_fn.DocumentSnapshot
     import traceback
     import requests
 
-    # 55 minutos de software timeout em segundos (3300)
-    MAX_EXECUTION_TIME = 3300
+    # Mantém margem abaixo do limite real de 540s do trigger Firestore.
+    MAX_EXECUTION_TIME = 480
     start_time = time.time()
 
     def check_cancelled():
@@ -9778,7 +9778,7 @@ def deep_research_worker(event: firestore_fn.Event[firestore_fn.DocumentSnapshot
         for i in range(DEPTH_CAP):
             # Check Timeout
             if time.time() - start_time > MAX_EXECUTION_TIME:
-                 raise Exception("Software Timeout (55 min) excedido.")
+                 raise Exception("Software Timeout (~8 min) excedido.")
 
             # Check Cancelled
             if check_cancelled():
