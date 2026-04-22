@@ -328,6 +328,7 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
   const [transcription, setTranscription] = useState<{ raw: string, refined: string } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(() => window.innerWidth < 768);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
@@ -355,9 +356,12 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
         }
       }
     };
+    const handleResize = () => setIsMobileViewport(window.innerWidth < 768);
     window.addEventListener('paste', handlePaste);
+    window.addEventListener('resize', handleResize);
     return () => {
       window.removeEventListener('paste', handlePaste);
+      window.removeEventListener('resize', handleResize);
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         mediaRecorderRef.current.stop();
       }
@@ -464,6 +468,13 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
           try {
             await navigator.clipboard.writeText(data.refined || data.raw || '');
             showToast("Transcrição copiada!", "success");
+            if (isMobileViewport) {
+              window.setTimeout(() => {
+                setFile(null);
+                setTranscription(null);
+                onClose();
+              }, 450);
+            }
           } catch (clipboardError) {
             console.error('Erro ao copiar transcrição:', clipboardError);
             showToast("Transcrição pronta, mas não foi possível copiar.", "error");
@@ -481,6 +492,42 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
   };
 
   if (!isOpen) return null;
+
+  if (isMobileViewport) {
+    return (
+      <div className="fixed inset-0 z-[250] flex items-center justify-center bg-slate-950/10 backdrop-blur-md p-0">
+        <div className="flex items-center justify-center gap-3 w-full px-4">
+          <button
+            onClick={onClose}
+            aria-label="Cancelar transcrição"
+            className="flex items-center justify-center shrink-0 w-[15vw] h-[15vw] min-w-[52px] min-h-[52px] max-w-[64px] max-h-[64px] rounded-[1.15rem] border-2 border-white/80 bg-slate-900/65 text-white shadow-xl transition-all active:scale-95 hover:bg-slate-800/80"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.6" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+          <button
+            onClick={isProcessing ? undefined : (isRecording ? stopRecording : startRecording)}
+            disabled={isProcessing}
+            aria-label={isProcessing ? 'Processando transcrição' : isRecording ? 'Parar gravação' : 'Iniciar gravação'}
+            className={`relative flex items-center justify-center shadow-2xl transition-all active:scale-95 w-[62vw] h-[18vw] min-w-[180px] min-h-[58px] max-w-[320px] max-h-[76px] rounded-[1.6rem] border-4 border-white ${
+              isProcessing
+                ? 'bg-indigo-600 text-white'
+                : isRecording
+                  ? 'bg-rose-700 text-white animate-pulse'
+                  : 'bg-rose-600 text-white hover:bg-rose-700'
+            }`}
+          >
+            {isProcessing ? (
+              <span className="inline-flex h-9 w-9 rounded-full border-4 border-white border-t-transparent animate-spin" />
+            ) : isRecording ? (
+              <svg className="w-9 h-9" fill="currentColor" viewBox="0 0 24 24"><path d="M7 7h10v10H7z" /></svg>
+            ) : (
+              <svg className="w-9 h-9" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 18a6 6 0 006-6V8a6 6 0 10-12 0v4a6 6 0 006 6zm0 0v3m-4 0h8" /></svg>
+            )}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[250] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-in fade-in p-4">
