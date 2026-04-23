@@ -6384,7 +6384,7 @@ def askChatbot(req: https_fn.CallableRequest):
 @https_fn.on_call(
     cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
     memory=options.MemoryOption.GB_1,
-    timeout_sec=540
+    timeout_sec=60
 )
 def askCopilotoHermes(req: https_fn.CallableRequest):
     """
@@ -6469,11 +6469,12 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
         # --- DEFINIÇÃO DE FERRAMENTAS ---
         _perf_mark(perf_state, "web.session_context")
-        def consultar_historico_acoes(query: str, area_tematica: str = None, data_limite_inicio: str = None, data_limite_fim: str = None):
+        def consultar_historico_acoes(query: str, area_tematica: str = None, data_limite_inicio: str = None, data_limite_fim: str = None, ultimas_n_acoes: int = 20):
             """
             Busca no Grafo de Conhecimento. Retorna procedimentos cristalizados (semântica) 
             e histórico de execução real (regex flexível).
             
+            Use 'ultimas_n_acoes' (default 20) para buscar em lote em vez de múltiplas chamadas sequenciais.
             Use data_limite_inicio e data_limite_fim (formato YYYY-MM-DD) para filtrar por prazo/vencimento.
             """
             # 1. Busca Semântica (Nós Conceituais)
@@ -6491,13 +6492,15 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                                        area_tematica=area_tematica,
                                        match_mode=_initial_mode,
                                        data_limite_inicio=data_limite_inicio,
-                                       data_limite_fim=data_limite_fim)
+                                       data_limite_fim=data_limite_fim,
+                                       limite=ultimas_n_acoes)
             if _initial_mode == "all" and not res_exact.get("resultados"):
                 res_exact = buscar_tarefas(query,
                                            area_tematica=area_tematica,
                                            match_mode="any",
                                            data_limite_inicio=data_limite_inicio,
-                                           data_limite_fim=data_limite_fim)
+                                           data_limite_fim=data_limite_fim,
+                                           limite=ultimas_n_acoes)
 
             if res_exact.get("erro"):
                 return f"⚠️ [ERRO TÉCNICO BuscaGrafo] {res_exact['erro']}"
@@ -8542,99 +8545,95 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         response = chat.send_message(final_prompt)
         _perf_mark(perf_state, "web.first_model_response")
         _max_iter = 10
-        for _ in range(_max_iter):
+        for _round in range(_max_iter):
             fcs = response.function_calls
             if not fcs:
                 break
+            
             function_response_parts = []
+            # Constraint: Se mais de 3 roundtrips, forçar consolidação ou emitir aviso parcial
+            if _round >= 3:
+                # Injeta aviso diretamente no contexto do próximo turno para forçar consolidação
+                function_response_parts.append(types.Part(text="\nAVISO DE PERFORMANCE: Você já realizou 3 rodadas de consultas sequenciais. Para evitar latência excessiva, consolide TODAS as buscas restantes em um único lote (batch) nesta rodada ou emita uma resposta parcial informando que está compilando os dados."))
             break_loop = False
-            for fc in fcs:
+            # Paralelismo de Execução de Ferramentas: processa múltiplas ferramentas simultaneamente em uma única rodada
+            from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
+            _fn_results = [None] * len(fcs)
+            
+            def _execute_tool(idx, fc):
                 fn = _function_map.get(fc.name)
                 tool_start_ms = _perf_now_ms()
+                tool_invocation_data_local = None
+                
                 if fn is None:
-                    result = f"Ferramenta '{fc.name}' não encontrada."
+                    res = f"Ferramenta '{fc.name}' não encontrada."
                 else:
                     try:
-                        result = fn(**(fc.args or {}))
-                        if isinstance(result, dict) and result.get("intent") == "tool_invocation":
-                            tool_invocation_data = result
-                            break_loop = True
+                        res = fn(**(fc.args or {}))
+                        if isinstance(res, dict) and res.get("intent") == "tool_invocation":
+                            tool_invocation_data_local = res
                     except Exception as _fe:
-                        result = f"Erro ao executar {fc.name}: {_fe}"
+                        res = f"Erro ao executar {fc.name}: {_fe}"
+                
                 perf_state.setdefault("tool_calls", []).append({
                     "name": fc.name,
                     "duration_ms": max(0, _perf_now_ms() - tool_start_ms),
                 })
+                return (res, tool_invocation_data_local)
 
-                if break_loop:
-                    break
-
-                # Captura payload de edição pendente gerado por preparar_edicao_acao
-                if fc.name == 'preparar_edicao_acao' and isinstance(result, str) and result.startswith('{'):
-                    try:
-                        pending_edit_data = json.loads(result)
-                    except Exception:
-                        pass
-                # Captura metadados do relatório gerado por gerar_relatorio
-                if fc.name == 'gerar_relatorio' and isinstance(result, str) and result.startswith('{'):
-                    try:
-                        parsed_rep = json.loads(result)
-                        if parsed_rep.get('report_id'):
-                            report_data = parsed_rep
-                    except Exception:
-                        pass
-                if fc.name == 'salvar_memoria_global' and isinstance(result, str) and result.startswith('{'):
-                    try:
-                        parsed_mem = json.loads(result)
-                        if parsed_mem.get('status') == 'conflict':
-                            parsed_mem.setdefault('status_ui', 'pending')
-                            pending_memory_conflict = parsed_mem
-                        if session_ref:
+            with _ThreadPoolExecutor(max_workers=min(len(fcs), 8)) as _executor:
+                _futures = [_executor.submit(_execute_tool, i, fc) for i, fc in enumerate(fcs)]
+                for _i, _future in enumerate(_futures):
+                    result, tool_invocation_data_local = _future.result()
+                    _fc = fcs[_i]
+                    
+                    if tool_invocation_data_local:
+                        tool_invocation_data = tool_invocation_data_local
+                        break_loop = True
+                    
+                    # Processamento síncrono de efeitos colaterais
+                    if _fc.name == 'preparar_edicao_acao' and isinstance(result, str) and result.startswith('{'):
+                        try: pending_edit_data = json.loads(result)
+                        except: pass
+                    if _fc.name == 'gerar_relatorio' and isinstance(result, str) and result.startswith('{'):
+                        try:
+                            parsed_rep = json.loads(result)
+                            if parsed_rep.get('report_id'): report_data = parsed_rep
+                        except: pass
+                    if _fc.name == 'salvar_memoria_global' and isinstance(result, str) and result.startswith('{'):
+                        try:
+                            parsed_mem = json.loads(result)
                             if parsed_mem.get('status') == 'conflict':
-                                session_ref.set({
-                                    "pendingMemoryConflict": parsed_mem,
-                                    "lastMemoryConflictAt": firestore.SERVER_TIMESTAMP,
-                                }, merge=True)
-                            else:
-                                session_ref.update({
-                                    "pendingMemoryConflict": firestore.DELETE_FIELD,
-                                    "lastMemoryConflictAt": firestore.DELETE_FIELD
-                                })
-                    except Exception:
-                        pass
+                                parsed_mem.setdefault('status_ui', 'pending')
+                                pending_memory_conflict = parsed_mem
+                            if session_ref:
+                                if parsed_mem.get('status') == 'conflict':
+                                    session_ref.set({"pendingMemoryConflict": parsed_mem, "lastMemoryConflictAt": firestore.SERVER_TIMESTAMP}, merge=True)
+                                else:
+                                    session_ref.update({"pendingMemoryConflict": firestore.DELETE_FIELD, "lastMemoryConflictAt": firestore.DELETE_FIELD})
+                        except: pass
+                    if _fc.name == 'resolver_conflito_memoria' and isinstance(result, str) and result.startswith('{'):
+                        try:
+                            parsed_resolution = json.loads(result)
+                            if session_ref and parsed_resolution.get('status') in {'resolved', 'updated'}:
+                                session_ref.set({"pendingMemoryConflict": firestore.DELETE_FIELD, "lastMemoryConflictResolutionAt": firestore.SERVER_TIMESTAMP}, merge=True)
+                                try: session_ref.update({"lastMemoryConflictAt": firestore.DELETE_FIELD})
+                                except: pass
+                        except: pass
 
+                    if _fc.name not in _HIDDEN_TOOLS and _fc.name not in tools_used:
+                        tools_used.append(_fc.name)
 
-                if fc.name == 'resolver_conflito_memoria' and isinstance(result, str) and result.startswith('{'):
-                    try:
-                        parsed_resolution = json.loads(result)
-                        if session_ref and parsed_resolution.get('status') in {'resolved', 'updated'}:
-                            session_ref.set({
-                                "pendingMemoryConflict": firestore.DELETE_FIELD,
-                                "lastMemoryConflictResolutionAt": firestore.SERVER_TIMESTAMP,
-                            }, merge=True)
-
-                            # Also safely try to clear lastMemoryConflictAt if needed
-                            try:
-                                session_ref.update({
-                                    "lastMemoryConflictAt": firestore.DELETE_FIELD
-                                })
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-
-                if fc.name not in _HIDDEN_TOOLS and fc.name not in tools_used:
-                    tools_used.append(fc.name)
-
-                _result_str = str(result)
-                if len(_result_str) > 12000:
-                    _result_str = _result_str[:12000] + "\n[...resultado truncado por tamanho...]"
-                function_response_parts.append(
-                    types.Part.from_function_response(
-                        name=fc.name,
-                        response={"result": _result_str}
+                    _result_str = str(result)
+                    if len(_result_str) > 12000:
+                        _result_str = _result_str[:12000] + "\n[...resultado truncado por tamanho...]"
+                    
+                    function_response_parts.append(
+                        types.Part.from_function_response(
+                            name=_fc.name,
+                            response={"result": _result_str}
+                        )
                     )
-                )
 
             if break_loop:
                 break
@@ -9026,27 +9025,35 @@ def buscar_procedimento_internal(query_text: str, area_tematica: str = None):
         if len(_q_meaningful) < 2:
             return {"context": f"Nenhum registro encontrado para '{q_text}'.", "resultados": []}
 
+        from google.cloud.firestore_v1.vector import Vector
+        from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
+        from google.cloud.firestore_v1.base_query import FieldFilter
+
         query_embedding = _get_embedding(q_text, api_key)
-        # Protocolo de Segurança: Converte para floats
         query_vector = list(map(float, query_embedding))
 
-        collection_query = db.collection("knowledge_nodes").limit(200)
+        # Otimização: Uso de Vector Search Nativo do Firestore (find_nearest)
+        # Substitui a varredura manual de 200 documentos por filtragem no banco.
+        collection_ref = db.collection("knowledge_nodes")
+        vector_query = collection_ref
         if area_tematica:
-            collection_query = collection_query.where("area_tematica", "==", area_tematica)
+            vector_query = vector_query.where(filter=FieldFilter("area_tematica", "==", area_tematica))
+        
+        vector_query = vector_query.find_nearest(
+            vector_field="embedding",
+            query_vector=Vector(query_vector),
+            distance_measure=DistanceMeasure.COSINE,
+            limit=5
+        )
 
         nodes_raw = []
-        for ndoc in collection_query.stream():
+        for ndoc in vector_query.stream():
             nd = ndoc.to_dict() or {}
-            node_emb = nd.get("embedding")
-            if not node_emb: continue
-            sim = _cosine_similarity(query_vector, node_emb)
-            # Limiar mais flexível
-            if sim < 0.35: continue
             nodes_raw.append({
                 "titulo": nd.get("titulo"),
                 "resumo": nd.get("resumo"),
                 "area_tematica": nd.get("area_tematica"),
-                "score": sim
+                "score": nd.get("__vector_distance__", 0.0) # find_nearest retorna distância
             })
         
         nodes_raw.sort(key=lambda x: x["score"], reverse=True)

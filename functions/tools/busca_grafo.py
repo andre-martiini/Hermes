@@ -123,6 +123,7 @@ def buscar_tarefas(
     data_limite_inicio: str = None,
     data_limite_fim: str = None,
     status: str = None,
+    limite: int = 50,
 ) -> dict:
     """
     Busca tarefas no Firestore.
@@ -173,7 +174,7 @@ def buscar_tarefas(
                 continue
 
             resultados.append(_formatar_resultado(doc.id, data))
-            if len(resultados) >= RESULT_LIMIT:
+            if len(resultados) >= limite:
                 break
 
         response = {"resultados": resultados, "erro": None}
