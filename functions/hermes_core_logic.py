@@ -125,6 +125,103 @@ def _send_telegram_message(token: str, chat_id: str | int, text: str, parse_mode
         return None
 
 
+def _send_telegram_message_with_keyboard(
+    token: str, chat_id: str | int, text: str, inline_keyboard: list, parse_mode: str = "HTML"
+):
+    """POST sendMessage com InlineKeyboardMarkup."""
+    if len(text) > 4096:
+        text = text[:4090] + "\n..."
+    resp = _requests.post(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        json={
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": parse_mode,
+            "reply_markup": {"inline_keyboard": inline_keyboard},
+        },
+        timeout=30,
+    )
+    if not resp.ok:
+        print(f"[Telegram] sendMessage+keyboard failed: {resp.status_code} {resp.text[:300]}")
+        return None
+    try:
+        return resp.json().get("result", {}).get("message_id")
+    except Exception:
+        return None
+
+
+def _is_action_context_locked(session: dict | None) -> bool:
+    session = session or {}
+    return session.get("contexto_ativo") == "acao" and bool(session.get("acao_id") or session.get("acao_titulo"))
+
+
+def _merge_inline_keyboards(inline_keyboard: list | None, trailing_keyboard: list | None) -> list | None:
+    keyboards = []
+    seen_callbacks = set()
+
+    for keyboard in (inline_keyboard or [], trailing_keyboard or []):
+        if not isinstance(keyboard, list):
+            continue
+        if keyboard and isinstance(keyboard[0], dict):
+            keyboard = [keyboard]
+        for row in keyboard:
+            if not isinstance(row, list):
+                continue
+            row_copy = []
+            for button in row:
+                if not isinstance(button, dict):
+                    continue
+                callback_data = button.get("callback_data")
+                if callback_data and callback_data in seen_callbacks:
+                    continue
+                if callback_data:
+                    seen_callbacks.add(callback_data)
+                row_copy.append(button)
+            if row_copy:
+                keyboards.append(row_copy)
+
+    return keyboards or None
+
+
+def _send_telegram_session_message(
+    db,
+    token: str,
+    chat_id: str | int,
+    text: str,
+    session: dict | None = None,
+    inline_keyboard: list | None = None,
+    parse_mode: str = "HTML",
+):
+    session = session or _get_session(db, str(chat_id))
+    final_text = text
+    final_keyboard = inline_keyboard
+
+    if _is_action_context_locked(session):
+        acao_titulo = session.get("acao_titulo") or session.get("acao_id") or "acao"
+        if not final_text.lstrip().startswith("<b>[Contexto:"):
+            final_text = f"<b>[Contexto: {acao_titulo}]</b>\n\n{final_text}"
+        final_keyboard = _merge_inline_keyboards(final_keyboard, _EXIT_KEYBOARD)
+
+    if final_keyboard:
+        return _send_telegram_message_with_keyboard(token, chat_id, final_text, final_keyboard, parse_mode=parse_mode)
+    return _send_telegram_message(token, chat_id, final_text, parse_mode=parse_mode)
+
+
+def _answer_callback_query(token: str, callback_query_id: str, text: str = None):
+    """Confirma o recebimento de um callback_query (remove indicador de loading no Telegram)."""
+    payload: dict = {"callback_query_id": callback_query_id}
+    if text:
+        payload["text"] = text[:200]
+    try:
+        _requests.post(
+            f"https://api.telegram.org/bot{token}/answerCallbackQuery",
+            json=payload,
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
 def _send_telegram_chat_action(token: str, chat_id: str | int, action: str):
     try:
         _requests.post(
@@ -243,6 +340,15 @@ def _save_session(db, chat_id: str, session: dict):
     db.collection("telegram_sessions").document(chat_id).set(session)
 
 
+def _session_matches_processing_state(session: dict, contexto_ativo: str, acao_id: str | None) -> bool:
+    current_contexto = session.get("contexto_ativo", "geral")
+    if current_contexto != (contexto_ativo or "geral"):
+        return False
+    if (contexto_ativo or "geral") == "acao":
+        return session.get("acao_id") == acao_id
+    return True
+
+
 def _handle_command(text: str, session: dict) -> Optional[str]:
     """
     Returns a reply string if the message is a state-machine command, else None.
@@ -257,26 +363,227 @@ def _handle_command(text: str, session: dict) -> Optional[str]:
         return f"Contexto ativo definido como <b>{ctx}</b>. Histórico reiniciado."
 
     if re.match(r"^/sair$", text, re.IGNORECASE):
-        previous = session.get("contexto_ativo", "geral")
+        previous = session.get("acao_titulo") or session.get("contexto_ativo", "geral")
         session["contexto_ativo"] = "geral"
         session["history"] = []
+        session["acao_id"] = None
+        session["acao_titulo"] = None
+        session["acao_context_snapshot"] = None
+        session["history_acao"] = []
         return f"Saindo do contexto <b>{previous}</b>. Voltando ao modo geral."
 
     if re.match(r"^/start$", text, re.IGNORECASE):
         return (
             "👋 Olá! Sou o <b>Hermes Copiloto</b>.\n\n"
             "Comandos disponíveis:\n"
-            "• <code>/contexto [nome]</code> — foca em uma área específica (ex: /contexto finanças)\n"
-            "• <code>/sair</code> — retorna ao modo geral\n\n"
+            "• <code>/entrar [termo]</code> — busca ações e trava o contexto nelas\n"
+            "• <code>/sair</code> — sai do contexto trancado, retorna ao modo geral\n"
+            "• <code>/status</code> — mostra o contexto e histórico atuais\n\n"
             "Envie texto, áudio ou arquivos. Tamanho máximo: 20 MB."
         )
 
     if re.match(r"^/status$", text, re.IGNORECASE):
         ctx = session.get("contexto_ativo", "geral")
-        turns = len(session.get("history", [])) // 2
-        return f"Contexto ativo: <b>{ctx}</b>\nTurnos no histórico: {turns}"
+        acao_titulo = session.get("acao_titulo", "")
+        hist_key = "history_acao" if ctx == "acao" else "history"
+        turns = len(session.get(hist_key, [])) // 2
+        ctx_display = f"ação trancada — <b>{acao_titulo}</b>" if ctx == "acao" else f"<b>{ctx}</b>"
+        return f"Contexto ativo: {ctx_display}\nTurnos no histórico: {turns}"
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Action context helpers (session locking)
+# ---------------------------------------------------------------------------
+
+def _fetch_acao_snapshot(db, task_id: str) -> dict | None:
+    """Busca e formata dados de uma tarefa para persistir no snapshot da sessão."""
+    try:
+        import re as _re
+        from main import get_drive_service
+
+        _DRIVE_ID_RE = _re.compile(r"/d/([a-zA-Z0-9_-]{10,})")
+        doc = db.collection("tarefas").document(task_id).get()
+        if not doc.exists:
+            return None
+        data = doc.to_dict() or {}
+
+        acomp_raw = data.get("acompanhamento") or []
+        acomp_entries = []
+        diario_full = []
+        for entry in sorted(acomp_raw, key=lambda e: e.get("data", "")):
+            nota = (entry.get("nota") or "").strip()
+            data_entry = (entry.get("data") or "")[:10]
+            if nota:
+                diario_full.append(f"[{data_entry}] {nota[:500]}")
+        for entry in sorted(acomp_raw, key=lambda e: e.get("data", ""), reverse=True)[:3]:
+            nota = (entry.get("nota") or "").strip()
+            data_entry = (entry.get("data") or "")[:10]
+            if nota:
+                acomp_entries.append(f"[{data_entry}] {nota[:300]}")
+
+        plano_raw = data.get("plano_acao") or []
+        plano_entries = []
+        for passo in plano_raw:
+            if isinstance(passo, dict):
+                texto = (passo.get("text") or passo.get("titulo") or "").strip()
+                concluido = passo.get("completed", False)
+                if texto:
+                    marcador = "✓" if concluido else "○"
+                    plano_entries.append(f"{marcador} {texto[:200]}")
+            elif isinstance(passo, str) and passo.strip():
+                plano_entries.append(f"○ {passo.strip()[:200]}")
+
+        tags = data.get("kg_tags") or data.get("tags") or []
+        arquivos_disponiveis = []
+        drive_service = None
+        for item in data.get("pool_dados", []):
+            if item.get("tipo") != "arquivo":
+                continue
+            fid = item.get("drive_file_id")
+            if not fid:
+                match = _DRIVE_ID_RE.search(item.get("valor", ""))
+                fid = match.group(1) if match else None
+            if not fid:
+                continue
+            if drive_service is None:
+                try:
+                    drive_service = get_drive_service()
+                except Exception:
+                    drive_service = False
+            if drive_service:
+                try:
+                    meta = drive_service.files().get(fileId=fid, fields="id,trashed").execute()
+                    if meta.get("trashed"):
+                        continue
+                except Exception:
+                    continue
+            arquivos_disponiveis.append({
+                "nome": item.get("nome", "Arquivo sem nome"),
+                "drive_file_id": fid,
+            })
+
+        return {
+            "id": task_id,
+            "titulo": data.get("titulo", "sem titulo"),
+            "status": data.get("status", ""),
+            "area": data.get("area_tematica", ""),
+            "area_tematica": data.get("area_tematica", ""),
+            "sistema_id": data.get("sistema_id") or None,
+            "descricao": (data.get("descricao") or "")[:500],
+            "notas": (data.get("notas") or "")[:400],
+            "sintese": (data.get("sintese_demanda") or data.get("demanda") or "")[:400],
+            "plano_atual": data.get("plano_acao", []),
+            "plano_acao": plano_entries,
+            "diario_integral": "\n".join(diario_full)[-4000:],
+            "acompanhamento_recente": acomp_entries,
+            "tags": tags,
+            "arquivos_disponiveis": arquivos_disponiveis[:10],
+        }
+    except Exception as e:
+        print(f"[Session] Falha ao buscar tarefa {task_id}: {e}")
+        return None
+
+
+def _search_actions_for_context(db, query: str) -> list:
+    """Busca tarefas usando buscar_tarefas e retorna até 5 resultados para seleção."""
+    from tools.busca_grafo import buscar_tarefas
+
+    if query:
+        _STOPWORDS = {"de", "a", "o", "que", "e", "do", "da", "em", "um", "uma",
+                      "os", "as", "no", "na", "com", "por", "para"}
+        terms = [w for w in query.lower().split() if w not in _STOPWORDS and len(w) > 2]
+        mode = "all" if len(terms) >= 2 else "any"
+        res = buscar_tarefas(query, match_mode=mode, limite=5)
+        if mode == "all" and not res.get("resultados"):
+            res = buscar_tarefas(query, match_mode="any", limite=5)
+    else:
+        res = buscar_tarefas("", match_mode="any", limite=5)
+
+    return res.get("resultados", [])
+
+
+def _build_action_keyboard(results: list) -> list:
+    """Constrói InlineKeyboard com uma linha por resultado de ação."""
+    keyboard = []
+    for r in results:
+        task_id = r["id"]
+        titulo = (r.get("titulo") or "sem titulo")[:35]
+        area = r.get("area", "")
+        label = titulo + (f" [{area}]" if area else "")
+        keyboard.append([{"text": label[:60], "callback_data": f"lock:{task_id}"}])
+    return keyboard
+
+
+_EXIT_KEYBOARD = [[{"text": "🔓 Sair do Contexto", "callback_data": "exit_context"}]]
+
+
+def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn.Response":
+    """Processa um callback_query de botão inline de forma síncrona (sem LLM)."""
+    query_id = callback_query.get("id", "")
+    data = (callback_query.get("data") or "").strip()
+    message = callback_query.get("message") or {}
+    chat_id = str((message.get("chat") or {}).get("id", ""))
+
+    if not chat_id or not data:
+        _answer_callback_query(token, query_id)
+        return https_fn.Response("OK", status=200)
+
+    allowed = _get_allowed_chat_id()
+    if allowed and chat_id != allowed:
+        _answer_callback_query(token, query_id)
+        return https_fn.Response("OK", status=200)
+
+    session = _get_session(db, chat_id)
+
+    if data == "exit_context":
+        acao_titulo = session.get("acao_titulo") or "anterior"
+        _answer_callback_query(token, query_id, "Contexto liberado.")
+        session["contexto_ativo"] = "geral"
+        session["acao_id"] = None
+        session["acao_titulo"] = None
+        session["acao_context_snapshot"] = None
+        session["history_acao"] = []
+        _save_session(db, chat_id, session)
+        _send_telegram_message(
+            token, chat_id,
+            f"✅ Saindo do contexto <b>{acao_titulo}</b>. Voltando ao modo geral."
+        )
+
+    elif data.startswith("lock:"):
+        task_id = data[len("lock:"):]
+        _answer_callback_query(token, query_id, "Carregando contexto...")
+        snapshot = _fetch_acao_snapshot(db, task_id)
+        if not snapshot:
+            _send_telegram_session_message(
+                db,
+                token, chat_id,
+                f"⚠️ Ação <code>{task_id}</code> não encontrada."
+            )
+            return https_fn.Response("OK", status=200)
+
+        titulo = snapshot.get("titulo", task_id)
+        session["contexto_ativo"] = "acao"
+        session["acao_id"] = task_id
+        session["acao_titulo"] = titulo
+        session["acao_context_snapshot"] = snapshot
+        session["history_acao"] = []
+        _save_session(db, chat_id, session)
+
+        _send_telegram_message_with_keyboard(
+            token, chat_id,
+            f"🔒 <b>[Contexto: {titulo}]</b>\n\n"
+            f"Contexto trancado. Estou focado exclusivamente nesta ação.\n"
+            f"Histórico anterior isolado — nenhum ruído de conversas passadas.\n\n"
+            f"Use <i>Sair do Contexto</i> para retornar ao modo geral.",
+            _EXIT_KEYBOARD,
+        )
+
+    else:
+        _answer_callback_query(token, query_id)
+
+    return https_fn.Response("OK", status=200)
 
 
 # ---------------------------------------------------------------------------
@@ -392,7 +699,12 @@ def _build_system_instruction(copilot_core: str, copilot_soul: str, contexto_ati
         "6. Acione salvar_memoria_global apenas para fatos duráveis e preferências estáveis.\n"
     )
 
-def _build_system_instruction_guarded(copilot_core: str, copilot_soul: str, contexto_ativo: str) -> str:
+def _build_system_instruction_guarded(
+    copilot_core: str,
+    copilot_soul: str,
+    contexto_ativo: str,
+    acao_snapshot: dict | None = None,
+) -> str:
     from datetime import datetime as _dt
 
     today = _dt.now(timezone.utc).strftime("%Y-%m-%d")
@@ -401,7 +713,7 @@ def _build_system_instruction_guarded(copilot_core: str, copilot_soul: str, cont
         if contexto_ativo != "geral"
         else ""
     )
-    return (
+    base = (
         f"Voce e o Copiloto Hermes, estrategista senior de processos. Hoje e {today}."
         f"{ctx_hint}\n\n"
         "## CORE ESTATICO DO COPILOTO\n"
@@ -428,6 +740,113 @@ def _build_system_instruction_guarded(copilot_core: str, copilot_soul: str, cont
         "E PROIBIDO completar ou inferir informacoes da tarefa usando dados do RAG, acervo ou memoria global. "
         "Se um campo nao constar no retorno da ferramenta, diga 'nao informado' em vez de inventar.\n"
     )
+
+    if not acao_snapshot:
+        return base
+
+    titulo = acao_snapshot.get("titulo", "")
+    plano_lines = "\n".join(f"  {p}" for p in acao_snapshot.get("plano_acao", [])) or "  (sem passos registrados)"
+    diario_lines = "\n".join(f"  {d}" for d in acao_snapshot.get("acompanhamento_recente", [])) or "  (sem entradas recentes)"
+    tags_str = ", ".join(str(t) for t in acao_snapshot.get("tags", [])) or "nenhuma"
+
+    acao_section = (
+        "\n\n## ACAO VINCULADA — MODO CONTEXTO TRANCADO\n"
+        f"ID: {acao_snapshot.get('id', '')}\n"
+        f"Titulo: {titulo}\n"
+        f"Area: {acao_snapshot.get('area', '')}\n"
+        f"Status: {acao_snapshot.get('status', '')}\n"
+        f"Descricao: {acao_snapshot.get('descricao', '') or 'nao informada'}\n"
+        f"Sintese: {acao_snapshot.get('sintese', '') or 'nao informada'}\n"
+        f"Plano de Acao:\n{plano_lines}\n"
+        f"Diario Recente:\n{diario_lines}\n"
+        f"Notas: {acao_snapshot.get('notas', '') or 'nenhuma'}\n"
+        f"Tags: {tags_str}\n\n"
+        "MODO CONTEXTO TRANCADO ATIVADO — REGRAS ABSOLUTAS:\n"
+        "1. O historico de conversas anteriores foi isolado. Concentre-se exclusivamente nesta acao.\n"
+        "2. Use SOMENTE os dados desta secao ao descrever a acao. PROIBIDO usar RAG ou inferencia.\n"
+        "3. Ao receber perguntas sobre a acao, responda com base nos dados acima.\n"
+        "4. Se o usuario pedir para atualizar, criar passos ou registrar progresso, use as ferramentas disponiveis.\n"
+    )
+    return base + acao_section
+
+
+def _build_system_instruction_guarded_v2(
+    copilot_core: str,
+    copilot_soul: str,
+    contexto_ativo: str,
+    acao_snapshot: dict | None = None,
+) -> str:
+    from datetime import datetime as _dt
+
+    today = _dt.now(timezone.utc).strftime("%Y-%m-%d")
+    ctx_hint = (
+        f"\n\n<b>Contexto ativo:</b> {contexto_ativo}"
+        if contexto_ativo != "geral"
+        else ""
+    )
+    base = (
+        f"Voce e o Copiloto Hermes, estrategista senior de processos. Hoje e {today}."
+        f"{ctx_hint}\n\n"
+        "## CORE ESTATICO DO COPILOTO\n"
+        f"{copilot_core}\n\n"
+        "## PERSONALIDADE DINAMICA ATUAL\n"
+        f"{copilot_soul}\n\n"
+        "## CANAL DE COMUNICACAO: TELEGRAM\n"
+        "REGRA ABSOLUTA DE FORMATACAO: Voce esta respondendo via Telegram. "
+        "Use EXCLUSIVAMENTE as seguintes tags HTML suportadas pelo Telegram: "
+        "<b>negrito</b>, <i>italico</i>, <code>codigo inline</code>, <pre>bloco de codigo</pre>. "
+        "PROIBIDO usar Markdown. "
+        "Listas: use - ou bullet simples como prefixo de linha, sem Markdown. "
+        "Mantenha respostas concisas; Telegram tem limite de 4096 caracteres por mensagem.\n\n"
+        "## REGRAS ABSOLUTAS\n"
+        "1. JAMAIS expanda siglas arbitrariamente.\n"
+        "2. Se qualquer ferramenta retornar campo 'erro', reproduza o erro literal.\n"
+        "4. Se o pedido for sobre dados internos do Hermes, tarefas, acoes, historico, agenda ou documentos do sistema, NUNCA use internet como fallback. Nesses casos, use apenas ferramentas internas. Se nao encontrar nada apos usar as ferramentas, admita explicitamente que nao encontrou nos registros do sistema.\n"
+        "5. Agendamento/Agenda: Voce DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horario de funcionamento: 08:00 as 19:00, janela D+7. Se houver conflito em horario especifico, pergunte se forca insercao ou busca outro slot. Na criacao, use os campos horario_inicio e horario_fim.\n"
+        "6. Para criar uma acao, apresente um draft estruturado primeiro com Titulo, Inicio/Fim (se houver), Area Tematica e Tipo. Aguarde confirmacao explicita.\n"
+        "7. Links de tarefas: use o formato task:{ID} no texto (ex: 'Acao task:abc123').\n"
+        "8. Acione salvar_memoria_global apenas para fatos duraveis e preferencias estaveis.\n"
+        "9. GOVERNANCA DE FONTES: ao descrever uma tarefa encontrada por consultar_historico_acoes, use SOMENTE os campos retornados por essa ferramenta. Se um campo nao constar no retorno da ferramenta, diga 'nao informado' em vez de inventar.\n"
+    )
+
+    if not acao_snapshot:
+        return base
+
+    titulo = acao_snapshot.get("titulo", "")
+    plano_lines = "\n".join(f"  {p}" for p in acao_snapshot.get("plano_acao", [])) or "  (sem passos registrados)"
+    diario_lines = "\n".join(f"  {d}" for d in acao_snapshot.get("acompanhamento_recente", [])) or "  (sem entradas recentes)"
+    diario_integral = acao_snapshot.get("diario_integral", "") or "(sem diario integral)"
+    arquivos = acao_snapshot.get("arquivos_disponiveis", []) or []
+    arquivos_lines = (
+        "\n".join(f"  - {a.get('nome', 'Arquivo sem nome')} | DRIVE_FILE_ID: {a.get('drive_file_id', '')}" for a in arquivos)
+        or "  (sem arquivos disponiveis)"
+    )
+    tags_str = ", ".join(str(t) for t in acao_snapshot.get("tags", [])) or "nenhuma"
+
+    acao_section = (
+        "\n\n## ACAO VINCULADA - MODO CONTEXTO TRANCADO\n"
+        f"ID: {acao_snapshot.get('id', '')}\n"
+        f"Titulo: {titulo}\n"
+        f"Area: {acao_snapshot.get('area_tematica', acao_snapshot.get('area', ''))}\n"
+        f"Status: {acao_snapshot.get('status', '')}\n"
+        f"Sistema ID: {acao_snapshot.get('sistema_id') or 'nao informado'}\n"
+        f"Descricao: {acao_snapshot.get('descricao', '') or 'nao informada'}\n"
+        f"Sintese: {acao_snapshot.get('sintese', '') or 'nao informada'}\n"
+        f"Plano de Acao:\n{plano_lines}\n"
+        f"Plano Atual Estruturado: {json.dumps(acao_snapshot.get('plano_atual', []), ensure_ascii=False)}\n"
+        f"Diario Recente:\n{diario_lines}\n"
+        f"Diario Integral:\n{diario_integral}\n"
+        f"Notas: {acao_snapshot.get('notas', '') or 'nenhuma'}\n"
+        f"Tags: {tags_str}\n\n"
+        f"Arquivos Disponiveis:\n{arquivos_lines}\n\n"
+        "MODO CONTEXTO TRANCADO ATIVADO - REGRAS ABSOLUTAS:\n"
+        "1. O historico de conversas anteriores foi isolado. Concentre-se exclusivamente nesta acao.\n"
+        "2. Use SOMENTE os dados desta secao ao descrever a acao. PROIBIDO usar RAG ou inferencia.\n"
+        "3. Este payload replica a estrutura de contexto da interface web: sistema_id, plano atual, diario integral, tags e arquivos disponiveis.\n"
+        "4. Ao receber perguntas sobre a acao, responda com base nos dados acima.\n"
+        "5. Se o usuario pedir para atualizar, criar passos ou registrar progresso, use as ferramentas disponiveis.\n"
+    )
+    return base + acao_section
 
 
 def _normalize_for_matching(text: str) -> str:
@@ -669,6 +1088,16 @@ def _send_tts_failure_notice(token: str, chat_id: str | int):
     )
 
 
+def _send_tts_failure_notice_contextual(db, token: str, chat_id: str | int, session: dict | None = None):
+    _send_telegram_session_message(
+        db,
+        token,
+        chat_id,
+        "⚠️ Houve uma falha técnica ao gerar o áudio. Repita a solicitação ou peça a resposta em texto.",
+        session=session,
+    )
+
+
 def _run_gemini_turn(
     db,
     gemini_key: str,
@@ -793,23 +1222,51 @@ def _process_telegram_message(db, data: dict):
     keys = _get_api_keys(db)
     gemini_key = keys.get("gemini_api_key")
     token = keys.get("telegram_bot_token") or os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    session = _get_session(db, chat_id)
     if not gemini_key or not token:
-        _send_telegram_message(token, chat_id, "⚠️ Configuração incompleta. Contate o administrador.")
+        _send_telegram_session_message(db, token, chat_id, "⚠️ Configuração incompleta. Contate o administrador.", session=session)
         return
 
     _perf_mark(perf_state, "telegram.bootstrap")
-    session = _get_session(db, chat_id)
     response_mode, text = _extract_response_mode(text, session)
     voice_profile, text = _extract_voice_profile(text, "masculina")
     print(f"[Core] initial response_mode={response_mode} voice_profile={voice_profile}")
     _perf_mark(perf_state, "telegram.session_load")
+
+    # --- /entrar command — busca semântica de ações para travamento de contexto ---
+    if re.match(r"^/entrar(\s|$)", text, re.IGNORECASE):
+        query = text[len("/entrar"):].strip()
+        results = _search_actions_for_context(db, query)
+        if not results:
+            _send_telegram_session_message(
+                db,
+                token,
+                chat_id,
+                f"Nenhuma ação encontrada para <i>{query}</i>." if query
+                else "Nenhuma ação cadastrada no sistema.",
+                session=session,
+            )
+        else:
+            header = (
+                f"Resultados para <i>{query}</i>. Toque para entrar no contexto:" if query
+                else "Ações recentes. Toque para entrar no contexto:"
+            )
+            _send_telegram_session_message(
+                db,
+                token,
+                chat_id,
+                header,
+                session=session,
+                inline_keyboard=_build_action_keyboard(results),
+            )
+        return
 
     # --- Command handler ---
     if text.startswith("/"):
         reply = _handle_command(text, session)
         if reply:
             _save_session(db, chat_id, session)
-            _send_telegram_message(token, chat_id, reply)
+            _send_telegram_session_message(db, token, chat_id, reply, session=session)
             return
         # Unknown command — fall through to Gemini
 
@@ -826,10 +1283,14 @@ def _process_telegram_message(db, data: dict):
         copilot_soul = ""
 
     contexto_ativo = session.get("contexto_ativo", "geral")
-    system_instruction = _build_system_instruction_guarded(copilot_core, copilot_soul, contexto_ativo)
+    request_acao_id = session.get("acao_id")
+    # When locked to an action, pull its data snapshot for LLM injection
+    acao_snapshot = session.get("acao_context_snapshot") if contexto_ativo == "acao" else None
+    system_instruction = _build_system_instruction_guarded_v2(copilot_core, copilot_soul, contexto_ativo, acao_snapshot)
 
-    # --- Restore history (trimmed) ---
-    raw_history = session.get("history", [])
+    # --- Restore history (trimmed) — isolated buffer when action-locked ---
+    hist_key = "history_acao" if contexto_ativo == "acao" else "history"
+    raw_history = session.get(hist_key, [])
     # Keep last N turns (each turn = user + model = 2 items)
     if len(raw_history) > _MAX_HISTORY_TURNS * 2:
         raw_history = raw_history[-((_MAX_HISTORY_TURNS * 2)):]
@@ -1235,7 +1696,13 @@ def _process_telegram_message(db, data: dict):
 
     # --- Gemini call ---
     _send_telegram_typing(token, chat_id)
-    processing_msg_id = _send_telegram_message(token, chat_id, "⏳ <i>Estou processando seu pedido, aguarde um minuto...</i>")
+    processing_msg_id = _send_telegram_session_message(
+        db,
+        token,
+        chat_id,
+        "⏳ <i>Estou processando seu pedido, aguarde um minuto...</i>",
+        session=session,
+    )
 
     try:
         response_text = _run_gemini_turn(
@@ -1253,30 +1720,45 @@ def _process_telegram_message(db, data: dict):
             _delete_telegram_message(token, chat_id, processing_msg_id)
         print(f"[Core] Gemini error: {gemini_err}")
         _perf_log("telegram.request.error", perf_state, {"chat_id": chat_id, "error": str(gemini_err)})
-        _send_telegram_message(token, chat_id, f"⚠️ Erro ao processar: {gemini_err}")
+        latest_session = _get_session(db, chat_id)
+        _send_telegram_session_message(
+            db,
+            token,
+            chat_id,
+            f"⚠️ Erro ao processar: {gemini_err}",
+            session=latest_session,
+        )
         return
 
     if processing_msg_id:
         _delete_telegram_message(token, chat_id, processing_msg_id)
 
-    # --- Persist history ---
-    def _serialize_part(p):
-        return {"text": getattr(p, "text", "") or ""}
-
+    # --- Persist history — write to isolated buffer when action-locked ---
     user_turn = {"role": "user", "parts": [{"text": p.text} for p in user_parts if hasattr(p, "text") and p.text]}
     model_turn = {"role": "model", "parts": [{"text": response_text}]}
     new_history = raw_history + [user_turn, model_turn]
-    # Trim
     if len(new_history) > _MAX_HISTORY_TURNS * 2:
         new_history = new_history[-(_MAX_HISTORY_TURNS * 2):]
-    session["history"] = new_history
+    latest_session = _get_session(db, chat_id)
+    if not _session_matches_processing_state(latest_session, contexto_ativo, request_acao_id):
+        print(
+            f"[Session] Discarding stale response for chat_id={chat_id} "
+            f"contexto={contexto_ativo} acao_id={request_acao_id!r}"
+        )
+        _perf_log(
+            "telegram.request.discarded_stale_session",
+            perf_state,
+            {"chat_id": chat_id, "contexto_ativo": contexto_ativo, "acao_id": request_acao_id},
+        )
+        return
+    latest_session[hist_key] = new_history
 
     # --- Send response ---
     # Text goes out first; session is persisted after so it doesn't block the user.
-    _send_telegram_message(token, chat_id, response_text)
+    _send_telegram_session_message(db, token, chat_id, response_text, session=latest_session)
     _perf_mark(perf_state, "telegram.text_response")
 
-    _save_session(db, chat_id, session)
+    _save_session(db, chat_id, latest_session)
     _perf_mark(perf_state, "telegram.history_persist")
 
     if response_mode == "audio":
@@ -1305,7 +1787,7 @@ def _process_telegram_message(db, data: dict):
         except Exception as tts_err:
             print(f"[Core] TTS error: {tts_err}")
             _perf_log("telegram.request.tts_error", perf_state, {"chat_id": chat_id, "error": str(tts_err)})
-            _send_tts_failure_notice(token, chat_id)
+            _send_tts_failure_notice_contextual(db, token, chat_id, session=latest_session)
     _perf_log(
         "telegram.request.complete",
         perf_state,
@@ -1339,6 +1821,17 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
     except Exception:
         return https_fn.Response("OK", status=200)
 
+    db = _get_db()
+    try:
+        token = _get_telegram_token(db)
+    except Exception:
+        return https_fn.Response("OK", status=200)
+
+    # --- Handle callback_query (botões inline — travamento/destravamento de contexto) ---
+    callback_query = update.get("callback_query")
+    if callback_query:
+        return _handle_telegram_callback(db, token, callback_query)
+
     # --- Extrair mensagem ---
     message = update.get("message") or update.get("edited_message") or {}
     if not message:
@@ -1364,21 +1857,16 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
     media_bytes_b64 = None
     media_storage_path = None
 
-    db = _get_db()
-
-    try:
-        token = _get_telegram_token(db)
-    except Exception:
-        return https_fn.Response("OK", status=200)
-
     # Audio / Voice
     audio = message.get("audio") or message.get("voice")
     if audio:
         file_size = audio.get("file_size", 0)
         if file_size > _MAX_FILE_BYTES:
-            _send_telegram_message(
-                token, chat_id,
-                "⚠️ Áudio muito grande (máximo 20 MB). Use o portal Web para arquivos maiores."
+            _send_telegram_session_message(
+                db,
+                token,
+                chat_id,
+                "⚠️ Áudio muito grande (máximo 20 MB). Use o portal Web para arquivos maiores.",
             )
             return https_fn.Response("OK", status=200)
         try:
@@ -1398,9 +1886,11 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
             }
         except Exception as e:
             print(f"[Webhook] Audio download error: {e}")
-            _send_telegram_message(
-                token, chat_id,
-                f"⚠️ Não consegui baixar o áudio: {e}\nTente novamente ou envie o texto diretamente."
+            _send_telegram_session_message(
+                db,
+                token,
+                chat_id,
+                f"⚠️ Não consegui baixar o áudio: {e}\nTente novamente ou envie o texto diretamente.",
             )
             return https_fn.Response("OK", status=200)
 
@@ -1412,9 +1902,11 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
         if media_obj:
             file_size = media_obj.get("file_size", 0)
             if file_size > _MAX_FILE_BYTES:
-                _send_telegram_message(
-                    token, chat_id,
-                    "⚠️ Arquivo muito grande (máximo 20 MB). Use o portal Web para arquivos maiores."
+                _send_telegram_session_message(
+                    db,
+                    token,
+                    chat_id,
+                    "⚠️ Arquivo muito grande (máximo 20 MB). Use o portal Web para arquivos maiores.",
                 )
                 return https_fn.Response("OK", status=200)
             try:
@@ -1486,8 +1978,14 @@ def on_telegram_inbound(event: Event[DocumentSnapshot]) -> None:
         snap.reference.update({"error": str(e)})
         try:
             chat_id = data.get("chat_id")
-            token = _get_telegram_token(_get_db())
+            db = _get_db()
+            token = _get_telegram_token(db)
             if chat_id and token:
-                _send_telegram_message(token, chat_id, f"⚠️ Erro interno ao processar mensagem: {e}")
+                _send_telegram_session_message(
+                    db,
+                    token,
+                    chat_id,
+                    f"⚠️ Erro interno ao processar mensagem: {e}",
+                )
         except Exception:
             pass
