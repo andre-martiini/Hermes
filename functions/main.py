@@ -8,6 +8,7 @@ import base64
 from datetime import datetime, timedelta, timezone
 import math
 import time
+import threading
 import re
 import io
 import uuid
@@ -63,6 +64,23 @@ SYNC_LOCK_DOC_ID = 'sync_lock'
 SYNC_LOCK_STALE_SECONDS = 15 * 60
 MAX_SYNC_PASSES = 3
 
+# ---------------------------------------------------------------------------
+# In-process Firestore document cache (TTL = 60 s per Cloud Function instance)
+# Evita leituras repetidas de system/api_keys, system/copilot_core, etc.
+# ---------------------------------------------------------------------------
+_DOC_CACHE: dict = {}
+_DOC_CACHE_TTL = 60  # seconds
+
+def _cached_doc_get(db, collection: str, document: str):
+    key = f"{collection}/{document}"
+    now = time.monotonic()
+    cached = _DOC_CACHE.get(key)
+    if cached and (now - cached[0]) < _DOC_CACHE_TTL:
+        return cached[1]
+    doc = db.collection(collection).document(document).get()
+    _DOC_CACHE[key] = (now, doc)
+    return doc
+
 
 def get_genai_module():
     from google import genai
@@ -71,7 +89,7 @@ def get_genai_module():
 
 def get_gemini_api_key() -> str | None:
     db = get_db()
-    keys_doc = db.collection('system').document('api_keys').get()
+    keys_doc = _cached_doc_get(db, 'system', 'api_keys')
     return keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
 
 
@@ -110,6 +128,36 @@ def get_db():
     """Retorna a instância do Firestore de forma lazy"""
 
     return firestore.client()
+
+def _perf_now_ms() -> int:
+    return int(time.perf_counter() * 1000)
+
+
+def _perf_mark(perf_state: dict, name: str):
+    started_at = perf_state.get("_last_ms", perf_state["start_ms"])
+    now_ms = _perf_now_ms()
+    perf_state.setdefault("steps", []).append({
+        "name": name,
+        "duration_ms": max(0, now_ms - started_at),
+    })
+    perf_state["_last_ms"] = now_ms
+
+
+def _perf_log(prefix: str, perf_state: dict, extra: dict | None = None):
+    payload = {
+        "prefix": prefix,
+        "total_ms": max(0, _perf_now_ms() - perf_state["start_ms"]),
+        "steps": perf_state.get("steps", []),
+    }
+    if perf_state.get("tool_calls"):
+        payload["tool_calls"] = perf_state["tool_calls"]
+    if extra:
+        payload.update(extra)
+    try:
+        print(f"[Perf] {json.dumps(payload, ensure_ascii=False)}")
+    except Exception:
+        print(f"[Perf] {prefix} total_ms={payload['total_ms']}")
+
 
 GOOGLE_BASE_SCOPES = [
     'https://www.googleapis.com/auth/tasks',
@@ -1388,7 +1436,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
             return
 
         # Configurar Gemini
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
         if not api_key:
             log_to_firestore(sync_ref, logs, "ERRO: Gemini API Key não encontrada (em system/api_keys).")
@@ -2269,7 +2317,7 @@ def process_vectorization(task_id):
 
     # Buscar chave do Gemini
 
-    keys_doc = db.collection('system').document('api_keys').get()
+    keys_doc = _cached_doc_get(db, 'system', 'api_keys')
 
     GEMINI_API_KEY = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
 
@@ -2379,7 +2427,7 @@ def vectorizeKnowledgeItemCallable(req: https_fn.CallableRequest):
         return {'success': False, 'message': 'Nenhum texto bruto para vetorizar.'}
 
     try:
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         GEMINI_API_KEY = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
         if not GEMINI_API_KEY:
             raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION, message="Chave Gemini não configurada.")
@@ -2494,7 +2542,7 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
     today = datetime.now().date().isoformat()
 
     db = firestore.client()
-    keys_doc = db.collection('system').document('api_keys').get()
+    keys_doc = _cached_doc_get(db, 'system', 'api_keys')
     api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
 
     if not api_key:
@@ -2921,7 +2969,7 @@ def sync_github_repo(req: https_fn.CallableRequest):
     db = get_db()
 
     # Busca chaves da API
-    keys_doc = db.collection('system').document('api_keys').get()
+    keys_doc = _cached_doc_get(db, 'system', 'api_keys')
     keys = keys_doc.to_dict() if keys_doc.exists else {}
     gemini_key = keys.get('gemini_api_key')
     github_token = keys.get('github_token')  # opcional, para repos privados
@@ -3129,7 +3177,7 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
         db = get_db()
 
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
 
         if not keys_doc.exists:
 
@@ -3654,7 +3702,7 @@ def findSimilarKnowledge(req: https_fn.CallableRequest):
 
 
 
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
 
 
 
@@ -4086,7 +4134,7 @@ def on_knowledge_item_updated(event: firestore_fn.Event[firestore_fn.Change[fire
 
 
 
-            keys_doc = db.collection('system').document('api_keys').get()
+            keys_doc = _cached_doc_get(db, 'system', 'api_keys')
 
 
 
@@ -4277,7 +4325,7 @@ def _match_pop_directives(db, prompt: str) -> list[dict]:
 
 
 def _get_copilot_core(db):
-    doc = db.collection("system").document("copilot_core").get()
+    doc = _cached_doc_get(db, "system", "copilot_core")
     if doc.exists:
         data = doc.to_dict() or {}
         if data.get("content"):
@@ -4293,8 +4341,7 @@ def _get_copilot_core(db):
 
 
 def _get_copilot_soul(db):
-    ref = db.collection("system").document("copilot_soul")
-    doc = ref.get()
+    doc = _cached_doc_get(db, "system", "copilot_soul")
     if doc.exists:
         data = doc.to_dict() or {}
         if any(data.get(key) for key in ("tone", "detail_level", "interaction_style", "content")):
@@ -4311,6 +4358,7 @@ def _get_copilot_soul(db):
         "created_by": "system_bootstrap",
     }
     try:
+        ref = db.collection("system").document("copilot_soul")
         ref.set(payload, merge=True)
     except Exception:
         pass
@@ -4708,7 +4756,7 @@ def _format_pending_memory_conflict(conflict_data: dict | None) -> str:
 def consolidar_memorias_copiloto(event: scheduler_fn.ScheduledEvent):
     db = get_db()
     try:
-        keys_doc = db.collection("system").document("api_keys").get()
+        keys_doc = _cached_doc_get(db, "system", "api_keys")
         gemini_key = keys_doc.to_dict().get("gemini_api_key") if keys_doc.exists else None
         if not gemini_key:
             print("[Memoria] gemini_api_key indisponível; consolidação ignorada.")
@@ -4905,7 +4953,7 @@ def gerarSlidesIA(req: https_fn.CallableRequest):
 
         db = get_db()
 
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
 
         if not keys_doc.exists:
 
@@ -5283,7 +5331,7 @@ def diagnosticar_codigo(req: https_fn.CallableRequest):
         db = get_db()
 
         # ── Credenciais comuns ─────────────────────────────────────────────────
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         keys = keys_doc.to_dict() if keys_doc.exists else {}
         gemini_api_key = keys.get('gemini_api_key')
 
@@ -5776,7 +5824,7 @@ def corrigir_sintaxe_mermaid(req: https_fn.CallableRequest):
 
     try:
         db = get_db()
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
 
         if not gemini_key:
@@ -5863,7 +5911,7 @@ def processInvoiceOCR(req: https_fn.CallableRequest):
 
         db = get_db()
 
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
 
         GEMINI_API_KEY = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
 
@@ -6010,7 +6058,7 @@ def transcrever_audio(req: https_fn.CallableRequest):
         # vamos usar o padrão seguro: importar firestore.
         from firebase_admin import firestore
         db = firestore.client()
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         
         if not keys_doc.exists:
              raise https_fn.HttpsError(
@@ -6128,7 +6176,7 @@ def askTaskAssistant(req: https_fn.CallableRequest):
     try:
         db = get_db()
 
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
 
         if not gemini_key:
@@ -6277,7 +6325,7 @@ def askChatbot(req: https_fn.CallableRequest):
 
     try:
         db = get_db()
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
         if not gemini_key:
             raise https_fn.HttpsError(
@@ -6325,6 +6373,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
     from google.genai import types
 
     data = req.data or {}
+    perf_state = {"start_ms": _perf_now_ms(), "_last_ms": _perf_now_ms(), "steps": [], "tool_calls": []}
     prompt = (data.get('prompt') or "").strip()
     task_id = data.get('taskId')
     system_id = data.get('systemId')
@@ -6349,7 +6398,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
     try:
         db = get_db()
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
 
         if not gemini_key:
@@ -6362,9 +6411,14 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         copilot_core = _get_copilot_core(db)
         copilot_soul = _get_copilot_soul(db)
         ai_profile = _bootstrap_user_ai_profile(db, user_uid)
-        _save_user_profile_signal(db, user_uid, prompt, task_id, system_id)
+        threading.Thread(
+            target=_save_user_profile_signal,
+            args=(db, user_uid, prompt, task_id, system_id),
+            daemon=True,
+        ).start()
         memory_context = _build_memory_context(db, gemini_key, prompt, limit=4)
         matched_pop_directives = _match_pop_directives(db, prompt)
+        _perf_mark(perf_state, "web.bootstrap")
 
         tools_routing_context = ""
         if routing_index:
@@ -6391,6 +6445,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 print(f"[Memoria] Falha ao ler conflito pendente da sessão {session_id}: {session_err}")
 
         # --- DEFINIÇÃO DE FERRAMENTAS ---
+        _perf_mark(perf_state, "web.session_context")
         def consultar_historico_acoes(query: str, area_tematica: str = None, data_limite_inicio: str = None, data_limite_fim: str = None):
             """
             Busca no Grafo de Conhecimento. Retorna procedimentos cristalizados (semântica) 
@@ -6404,19 +6459,21 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             
             # 2. Busca em Tarefas Reais (Regex)
             from tools.busca_grafo import buscar_tarefas
-            # Tenta primeiro match estrito (AND)
-            res_exact = buscar_tarefas(query, 
-                                       area_tematica=area_tematica, 
-                                       match_mode="all", 
-                                       data_limite_inicio=data_limite_inicio, 
+            _STOPWORDS_Q = {"de", "a", "o", "que", "e", "do", "da", "em", "um", "uma",
+                            "os", "as", "no", "na", "com", "por", "para", "dos", "das",
+                            "nos", "nas", "ao", "os", "se", "ou"}
+            _q_terms = [w for w in query.lower().split() if w not in _STOPWORDS_Q and len(w) > 2]
+            _initial_mode = "all" if len(_q_terms) >= 2 else "any"
+            res_exact = buscar_tarefas(query,
+                                       area_tematica=area_tematica,
+                                       match_mode=_initial_mode,
+                                       data_limite_inicio=data_limite_inicio,
                                        data_limite_fim=data_limite_fim)
-            
-            # Se vier vazio, tenta match flexível (OR / ANY)
-            if not res_exact.get("resultados"):
-                res_exact = buscar_tarefas(query, 
-                                           area_tematica=area_tematica, 
-                                           match_mode="any", 
-                                           data_limite_inicio=data_limite_inicio, 
+            if _initial_mode == "all" and not res_exact.get("resultados"):
+                res_exact = buscar_tarefas(query,
+                                           area_tematica=area_tematica,
+                                           match_mode="any",
+                                           data_limite_inicio=data_limite_inicio,
                                            data_limite_fim=data_limite_fim)
 
             if res_exact.get("erro"):
@@ -6550,9 +6607,17 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             ou qualquer informação que possa estar desatualizada no seu conhecimento.
             Parâmetro: query — a frase de busca otimizada em português ou inglês.
             """
+            _prompt_lower = (prompt or "").lower()
+            _web_triggers = (
+                "http://", "https://", "www.", "internet", "na web", "busca online",
+                "pesquise", "pesquisar", "notícia", "noticias", "cotação", "cotacao",
+                "atualiz", "link", "site", "acesse",
+            )
+            if not any(t in _prompt_lower for t in _web_triggers):
+                return '{"blocked": true, "reason": "O prompt não menciona internet, URL ou busca atual. Use esta ferramenta apenas quando o usuário pedir explicitamente informações da web."}'
             import requests as _req
             try:
-                keys_doc_web = db.collection('system').document('api_keys').get()
+                keys_doc_web = _cached_doc_get(db, 'system', 'api_keys')
                 tavily_key = keys_doc_web.to_dict().get('tavily_api_key') if keys_doc_web.exists else None
                 if not tavily_key:
                     return '{"error": "Tavily API key não configurada. Informe ao usuário que a busca na internet está indisponível no momento."}'
@@ -7268,7 +7333,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     from knowledge_graph import _get_embedding
                     try:
                         kg_id = str(_uuid.uuid4())[:20]
-                        keys_doc = db.collection('system').document('api_keys').get()
+                        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
                         gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
                         if not gemini_key:
                             raise ValueError("Gemini API Key não encontrada (system/api_keys).")
@@ -8104,6 +8169,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             ),
             history=history
         )
+        _perf_mark(perf_state, "web.chat_create")
 
         # ─── INGESTÃO DOCUMENTAL ─────────────────────────────────────────────────
         # Se um driveFileId foi enviado, baixa o binário, extrai metadados via
@@ -8408,6 +8474,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         # ─────────────────────────────────────────────────────────────────────────
 
         # Injeta contexto inicial se houver task_id
+        _perf_mark(perf_state, "web.file_ingestion")
         initial_context = ""
         if task_id:
             initial_context = f"DICA DE CONTEXTO: O usuário está visualizando a tarefa {task_id}. " \
@@ -8442,6 +8509,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             pop_lines.append("[/DIRETRIZES OPERACIONAIS (POPs) CORRESPONDENTES - OBRIGATORIAS]")
             context_parts.append("\n".join(pop_lines))
         final_prompt = "\n\n".join(context_parts)
+        _perf_mark(perf_state, "web.prompt_build")
         # Loop manual de tool calling — intercepta cada chamada para rastrear ferramentas usadas
         tools_used: list[str] = []
         pending_edit_data = None
@@ -8449,6 +8517,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         report_data = None
         tool_invocation_data = None
         response = chat.send_message(final_prompt)
+        _perf_mark(perf_state, "web.first_model_response")
         _max_iter = 10
         for _ in range(_max_iter):
             fcs = response.function_calls
@@ -8458,6 +8527,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             break_loop = False
             for fc in fcs:
                 fn = _function_map.get(fc.name)
+                tool_start_ms = _perf_now_ms()
                 if fn is None:
                     result = f"Ferramenta '{fc.name}' não encontrada."
                 else:
@@ -8468,6 +8538,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                             break_loop = True
                     except Exception as _fe:
                         result = f"Erro ao executar {fc.name}: {_fe}"
+                perf_state.setdefault("tool_calls", []).append({
+                    "name": fc.name,
+                    "duration_ms": max(0, _perf_now_ms() - tool_start_ms),
+                })
 
                 if break_loop:
                     break
@@ -8544,6 +8618,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
             try:
                 response = chat.send_message(function_response_parts)
+                _perf_mark(perf_state, "web.tool_roundtrip")
             except Exception as _send_err:
                 from google.genai.errors import ServerError as _GeminiServerError
                 if isinstance(_send_err, _GeminiServerError) and '500' in str(_send_err):
@@ -8563,6 +8638,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         except Exception:
                             _reduced_parts.append(_p)
                     response = chat.send_message(_reduced_parts)
+                    _perf_mark(perf_state, "web.tool_roundtrip_retry")
                 else:
                     raise
 
@@ -8585,6 +8661,17 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 except Exception as e:
                     print(f"Erro ao salvar invocação de ferramenta no Firestore: {e}")
 
+            _perf_mark(perf_state, "web.tool_invocation_persist")
+            _perf_log(
+                "web.askCopiloto.complete",
+                perf_state,
+                {
+                    "session_id": session_id,
+                    "task_id": task_id,
+                    "mode": "tool_invocation",
+                    "tools_used": tools_used,
+                },
+            )
             return {
                 "result": clean_text,
                 "kg_nodes": kg_nodes_payload,
@@ -8671,10 +8758,21 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 print(f"Erro ao salvar resposta no Firestore: {e}")
 
         # Tenta extrair título sugerido se for início de sessão
+        _perf_mark(perf_state, "web.response_persist")
         suggested_title = None
         if prompt and len(prompt) < 100:
             suggested_title = prompt[:50]
 
+        _perf_log(
+            "web.askCopiloto.complete",
+            perf_state,
+            {
+                "session_id": session_id,
+                "task_id": task_id,
+                "mode": "assistant_text",
+                "tools_used": tools_used,
+            },
+        )
         return {
             "result": clean_text,
             "proposedPlan": proposal_data.get("items") if proposal_data else None,
@@ -8688,6 +8786,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
     except Exception as e:
         print(f"Erro em askCopilotoHermes: {e}")
+        _perf_log("web.askCopiloto.error", perf_state, {"session_id": session_id, "task_id": task_id, "error": str(e)})
         import traceback
         print(traceback.format_exc())
         raise https_fn.HttpsError(
@@ -8830,7 +8929,7 @@ def confirmarConflitoMemoria(req: https_fn.CallableRequest):
 
     try:
         db = get_db()
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
         if not gemini_key:
             raise https_fn.HttpsError(
@@ -8887,7 +8986,7 @@ def buscar_procedimento_internal(query_text: str, area_tematica: str = None):
     # Wrapper interno para chamar a lógica de buscar_procedimento sem o overhead do Callable HTTPS
     try:
         db = get_db()
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
         
         from knowledge_graph import _get_embedding, _cosine_similarity
@@ -9123,7 +9222,7 @@ def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
         if not contexto_tarefas:
             return {"success": False, "message": f"Não há tarefas concluídas suficientes em '{area_tematica}' para analisar padrões."}
 
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
         
         if not gemini_key:
@@ -9211,7 +9310,7 @@ def processar_correcoes_pendentes(event: scheduler_fn.ScheduledEvent) -> None:
     # Recupera chave Tavily para consenso web
     _tavily_key = ''
     try:
-        _keys_doc = _db.collection('system').document('api_keys').get()
+        _keys_doc = __cached_doc_get(db, 'system', 'api_keys')
         _tavily_key = (_keys_doc.to_dict() or {}).get('tavily_api_key', '')
     except Exception as _key_err:
         print(f"[EvoEngine] Aviso: não foi possível recuperar chave Tavily: {_key_err}")
@@ -9741,7 +9840,7 @@ def deep_research_worker(event: firestore_fn.Event[firestore_fn.DocumentSnapshot
         if not telegram_chat_id:
              print("[DeepResearch] No telegram_chat_id provided, skipping notification.")
              return
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         bot_token = keys_doc.to_dict().get('telegram_bot_token') if keys_doc.exists else None
         bot_token = bot_token or os.environ.get('TELEGRAM_BOT_TOKEN')
         if not bot_token:
@@ -9765,7 +9864,7 @@ def deep_research_worker(event: firestore_fn.Event[firestore_fn.DocumentSnapshot
             'started_at': firestore.SERVER_TIMESTAMP
         })
 
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
         if not api_key:
             api_key = os.environ.get("GEMINI_API_KEY")

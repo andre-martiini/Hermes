@@ -1,37 +1,32 @@
 # tools/busca_grafo.py
 import re
+from datetime import datetime, timedelta, timezone
+
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
-from datetime import datetime, timezone, timedelta
 
-GRAFO_COLLECTION  = "tarefas"
-FALLBACK_LIMIT    = 500   # quantos docs puxar antes do filtro em memória
-RESULT_LIMIT      = 50    # máximo de resultados retornados ao LLM
+GRAFO_COLLECTION = "tarefas"
+FALLBACK_LIMIT = 500
+RESULT_LIMIT = 50
 
-# Campos de texto que serão inspecionados em cada documento
+# Campos de texto inspecionados no filtro em memoria.
 CAMPOS_TEXTO = ["titulo", "descricao", "tags", "responsavel", "status"]
 
-# Valores canônicos de status reconhecidos para extração automática da query
 _STATUS_ALIASES = {
-    "em andamento":  "em andamento",
-    "andamento":     "em andamento",
-    "concluída":     "concluída",
-    "concluida":     "concluída",
-    "concluído":     "concluída",
-    "concluido":     "concluída",
-    "cancelada":     "cancelada",
-    "cancelado":     "cancelada",
-    "pendente":      "pendente",
-    "atrasada":      "atrasada",
-    "atrasado":      "atrasada",
+    "em andamento": "em andamento",
+    "andamento": "em andamento",
+    "concluida": "concluida",
+    "concluido": "concluida",
+    "cancelada": "cancelada",
+    "cancelado": "cancelada",
+    "pendente": "pendente",
+    "atrasada": "atrasada",
+    "atrasado": "atrasada",
 }
 
 
 def _extrair_status_da_query(query: str) -> tuple[str | None, str]:
-    """
-    Detecta status canônico mencionado na query e devolve (status, query_sem_status).
-    Tenta frases compostas antes de termos isolados.
-    """
+    """Detecta status canonico na query e devolve (status, query_limpa)."""
     lowered = query.lower()
     for alias in sorted(_STATUS_ALIASES, key=len, reverse=True):
         if alias in lowered:
@@ -46,7 +41,6 @@ def _compilar_padrao_estrito(termo: str) -> re.Pattern:
 
 
 def _doc_bate_com_padrao(doc_dict: dict, padrao: re.Pattern) -> bool:
-    """Retorna True se ao menos um campo de texto contiver o termo isolado."""
     for campo in CAMPOS_TEXTO:
         valor = doc_dict.get(campo)
         if isinstance(valor, str) and padrao.search(valor):
@@ -56,6 +50,69 @@ def _doc_bate_com_padrao(doc_dict: dict, padrao: re.Pattern) -> bool:
                 if isinstance(item, str) and padrao.search(item):
                     return True
     return False
+
+
+def _normalizar_status(status: str | None) -> str:
+    return (status or "").strip().lower()
+
+
+def _matches_filters(
+    data: dict,
+    termos: list[str],
+    match_mode: str,
+    area_tematica: str = None,
+    data_limite_inicio: str = None,
+    data_limite_fim: str = None,
+    status: str = None,
+    corte_str: str = None,
+) -> bool:
+    if status and _normalizar_status(data.get("status")) != _normalizar_status(status):
+        return False
+
+    if area_tematica and data.get("area_tematica") != area_tematica:
+        return False
+
+    data_limite = str(data.get("data_limite") or "")
+    if data_limite_inicio and (not data_limite or data_limite < data_limite_inicio):
+        return False
+    if data_limite_fim and (not data_limite or data_limite > data_limite_fim):
+        return False
+
+    if corte_str:
+        data_criacao = str(data.get("data_criacao") or "")
+        if not data_criacao or data_criacao < corte_str:
+            return False
+
+    if termos:
+        padroes = [_compilar_padrao_estrito(t) for t in termos]
+        if match_mode == "all":
+            return all(_doc_bate_com_padrao(data, p) for p in padroes)
+        return any(_doc_bate_com_padrao(data, p) for p in padroes)
+
+    return True
+
+
+def _formatar_resultado(doc_id: str, data: dict) -> dict:
+    return {
+        "id": doc_id,
+        "titulo": data.get("titulo", "sem titulo"),
+        "status": data.get("status", ""),
+        "responsavel": data.get("responsavel", ""),
+        "criado_em": str(data.get("data_criacao", "")),
+        "area": data.get("area_tematica", ""),
+        "data_limite": data.get("data_limite", ""),
+        "descricao": (data.get("descricao") or "")[:350],
+    }
+
+
+def _stream_with_index_fallback(query_ref, db):
+    try:
+        return query_ref.limit(FALLBACK_LIMIT).stream(), None
+    except Exception as err:
+        err_text = str(err).lower()
+        if type(err).__name__ != "FailedPrecondition" and "requires an index" not in err_text:
+            raise
+        return db.collection(GRAFO_COLLECTION).limit(FALLBACK_LIMIT).stream(), "composite_index_missing"
 
 
 def buscar_tarefas(
@@ -70,76 +127,62 @@ def buscar_tarefas(
     """
     Busca tarefas no Firestore.
 
-    - status: filtro nativo direto (ex: 'em andamento'). Se não fornecido, tenta
-      extrair da query automaticamente.
-    - Quando status é usado, o filtro de janela temporal é removido para garantir
-      que todas as tarefas com aquele status sejam encontradas.
+    Quando faltar indice composto, aplica fallback em memoria sem bloquear a busca.
     """
     db = firestore.Client()
 
     try:
-        # Auto-detectar status da query se não fornecido explicitamente
         if not status and query:
             status_detectado, query = _extrair_status_da_query(query)
             if status_detectado:
                 status = status_detectado
 
-        query_ref = db.collection(GRAFO_COLLECTION)
+        termos = [t.strip() for t in (query or "").split() if t.strip()]
+        corte_str = None
 
-        # Filtro por status nativo (não precisa de janela temporal)
+        query_ref = db.collection(GRAFO_COLLECTION)
         if status:
             query_ref = query_ref.where(filter=FieldFilter("status", "==", status))
         else:
-            # Sem status, aplica janela temporal para não varrer o banco todo
             corte_dt = datetime.now(tz=timezone.utc) - timedelta(days=dias_retroativos)
             corte_str = corte_dt.isoformat().replace("+00:00", "Z")
             query_ref = query_ref.where(filter=FieldFilter("data_criacao", ">=", corte_str))
 
         if area_tematica:
             query_ref = query_ref.where(filter=FieldFilter("area_tematica", "==", area_tematica))
-
         if data_limite_inicio:
             query_ref = query_ref.where(filter=FieldFilter("data_limite", ">=", data_limite_inicio))
-
         if data_limite_fim:
             query_ref = query_ref.where(filter=FieldFilter("data_limite", "<=", data_limite_fim))
 
-        docs_ref = query_ref.limit(FALLBACK_LIMIT).stream()
-
-        # Compilar padrões de texto restantes (após extração de status)
-        termos = [t.strip() for t in query.split() if t.strip()]
+        docs_ref, fallback_reason = _stream_with_index_fallback(query_ref, db)
 
         resultados = []
         for doc in docs_ref:
-            data = doc.to_dict()
+            data = doc.to_dict() or {}
+            if not _matches_filters(
+                data,
+                termos=termos,
+                match_mode=match_mode,
+                area_tematica=area_tematica,
+                data_limite_inicio=data_limite_inicio,
+                data_limite_fim=data_limite_fim,
+                status=status,
+                corte_str=corte_str,
+            ):
+                continue
 
-            if termos:
-                padroes = [_compilar_padrao_estrito(t) for t in termos]
-                if match_mode == "all":
-                    match = all(_doc_bate_com_padrao(data, p) for p in padroes)
-                else:
-                    match = any(_doc_bate_com_padrao(data, p) for p in padroes)
-                if not match:
-                    continue
-
-            resultados.append({
-                "id":          doc.id,
-                "titulo":      data.get("titulo", "sem título"),
-                "status":      data.get("status", ""),
-                "responsavel": data.get("responsavel", ""),
-                "criado_em":   str(data.get("data_criacao", "")),
-                "area":        data.get("area_tematica", ""),
-                "data_limite": data.get("data_limite", ""),
-                "descricao":   (data.get("descricao") or "")[:350],
-            })
-
+            resultados.append(_formatar_resultado(doc.id, data))
             if len(resultados) >= RESULT_LIMIT:
                 break
 
-        return {"resultados": resultados, "erro": None}
+        response = {"resultados": resultados, "erro": None}
+        if fallback_reason:
+            response["aviso"] = "Busca executada com fallback local por falta de indice composto no Firestore."
+        return response
 
     except Exception as e:
         return {
             "resultados": [],
-            "erro": f"[ERRO TÉCNICO BuscaGrafo] {type(e).__name__}: {str(e)}",
+            "erro": f"[ERRO TECNICO BuscaGrafo] {type(e).__name__}: {str(e)}",
         }

@@ -42,6 +42,36 @@ def _get_db():
     return firestore.client()
 
 
+def _perf_now_ms() -> int:
+    return int(time.perf_counter() * 1000)
+
+
+def _perf_mark(perf_state: dict, name: str):
+    started_at = perf_state.get("_last_ms", perf_state["start_ms"])
+    now_ms = _perf_now_ms()
+    perf_state.setdefault("steps", []).append({
+        "name": name,
+        "duration_ms": max(0, now_ms - started_at),
+    })
+    perf_state["_last_ms"] = now_ms
+
+
+def _perf_log(prefix: str, perf_state: dict, extra: dict | None = None):
+    payload = {
+        "prefix": prefix,
+        "total_ms": max(0, _perf_now_ms() - perf_state["start_ms"]),
+        "steps": perf_state.get("steps", []),
+    }
+    if perf_state.get("tool_calls"):
+        payload["tool_calls"] = perf_state["tool_calls"]
+    if extra:
+        payload.update(extra)
+    try:
+        print(f"[Perf] {json.dumps(payload, ensure_ascii=False)}")
+    except Exception:
+        print(f"[Perf] {prefix} total_ms={payload['total_ms']}")
+
+
 def _get_api_keys(db=None):
     db = db or _get_db()
     doc = db.collection("system").document("api_keys").get()
@@ -329,11 +359,85 @@ def _build_system_instruction(copilot_core: str, copilot_soul: str, contexto_ati
         "6. Acione salvar_memoria_global apenas para fatos duráveis e preferências estáveis.\n"
     )
 
+def _build_system_instruction_guarded(copilot_core: str, copilot_soul: str, contexto_ativo: str) -> str:
+    from datetime import datetime as _dt
+
+    today = _dt.now(timezone.utc).strftime("%Y-%m-%d")
+    ctx_hint = (
+        f"\n\n<b>Contexto ativo:</b> {contexto_ativo}"
+        if contexto_ativo != "geral"
+        else ""
+    )
+    return (
+        f"Voce e o Copiloto Hermes, estrategista senior de processos. Hoje e {today}."
+        f"{ctx_hint}\n\n"
+        "## CORE ESTATICO DO COPILOTO\n"
+        f"{copilot_core}\n\n"
+        "## PERSONALIDADE DINAMICA ATUAL\n"
+        f"{copilot_soul}\n\n"
+        "## CANAL DE COMUNICACAO: TELEGRAM\n"
+        "REGRA ABSOLUTA DE FORMATACAO: Voce esta respondendo via Telegram. "
+        "Use EXCLUSIVAMENTE as seguintes tags HTML suportadas pelo Telegram: "
+        "<b>negrito</b>, <i>italico</i>, <code>codigo inline</code>, <pre>bloco de codigo</pre>. "
+        "PROIBIDO usar Markdown. "
+        "Listas: use • ou - como prefixo de linha, sem Markdown. "
+        "Mantenha respostas concisas; Telegram tem limite de 4096 caracteres por mensagem.\n\n"
+        "## REGRAS ABSOLUTAS\n"
+        "1. JAMAIS expanda siglas arbitrariamente.\n"
+        "2. Se qualquer ferramenta retornar campo 'erro', reproduza o erro literal.\n"
+        "3. Se o pedido for sobre dados internos do Hermes, tarefas, acoes, historico, agenda ou documentos do sistema, NUNCA use internet como fallback. Nesses casos, use apenas ferramentas internas e deixe claro quando a busca interna falhar.\n"
+        "4. Agendamento/Agenda: Voce DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horario de funcionamento: 08:00 as 19:00, janela D+7. Se houver conflito em horario especifico, pergunte se forca insercao ou busca outro slot. Na criacao, use os campos horario_inicio e horario_fim.\n"
+        "5. Para criar uma acao, apresente um draft estruturado primeiro com Titulo, Inicio/Fim (se houver), Area Tematica e Tipo. Aguarde confirmacao explicita.\n"
+        "6. Links de tarefas: use o formato task:{ID} no texto (ex: 'Acao task:abc123').\n"
+        "7. Acione salvar_memoria_global apenas para fatos duraveis e preferencias estaveis.\n"
+    )
+
 
 def _normalize_for_matching(text: str) -> str:
     normalized = unicodedata.normalize("NFKD", text or "")
     normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
     return normalized.lower()
+
+
+def _is_explicit_web_request(text: str) -> bool:
+    lowered = _normalize_for_matching(text)
+    web_markers = [
+        "na internet",
+        "na web",
+        "pesquise na internet",
+        "busque na internet",
+        "pesquise no google",
+        "busque no google",
+        "noticia",
+        "noticias",
+        "site oficial",
+        "link externo",
+        "fonte externa",
+        "fonte oficial",
+    ]
+    return any(marker in lowered for marker in web_markers)
+
+
+def _is_internal_hermes_request(text: str) -> bool:
+    lowered = _normalize_for_matching(text)
+    internal_markers = [
+        "hermes",
+        "no sistema",
+        "no copilot",
+        "copiloto",
+        "acao",
+        "acoes",
+        "tarefa",
+        "tarefas",
+        "agendamento",
+        "documentacao",
+        "deferido",
+        "deferidos",
+        "assistencia estudantil",
+        "historico",
+        "cadastro",
+    ]
+    return any(marker in lowered for marker in internal_markers)
 
 
 def _extract_response_mode(text: str, session: dict) -> tuple[str, str]:
@@ -536,6 +640,7 @@ def _run_gemini_turn(
     user_message_parts: list,
     tools_list: list,
     function_map: dict,
+    perf_state: dict | None = None,
 ) -> str:
     """Runs a full Gemini multi-turn exchange and returns the final text response."""
     from google import genai
@@ -553,11 +658,15 @@ def _run_gemini_turn(
         ),
         history=history,
     )
+    if perf_state is not None:
+        _perf_mark(perf_state, "telegram.chat_create")
 
     response = chat.send_message(user_message_parts)
+    if perf_state is not None:
+        _perf_mark(perf_state, "telegram.first_model_response")
 
     # Agentic loop — processa tool calls até obter resposta de texto
-    for _ in range(10):
+    for _ in range(3):
         if not response.candidates:
             break
         candidate = response.candidates[0]
@@ -577,6 +686,7 @@ def _run_gemini_turn(
         tool_results = []
         for fc in func_calls:
             fn = function_map.get(fc.name)
+            tool_start_ms = _perf_now_ms()
             if fn is None:
                 result_text = f"Ferramenta '{fc.name}' não encontrada."
             else:
@@ -586,6 +696,11 @@ def _run_gemini_turn(
                     result_text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
                 except Exception as tool_err:
                     result_text = f"Erro ao executar {fc.name}: {tool_err}"
+            if perf_state is not None:
+                perf_state.setdefault("tool_calls", []).append({
+                    "name": fc.name,
+                    "duration_ms": max(0, _perf_now_ms() - tool_start_ms),
+                })
             tool_results.append(
                 types.Part.from_function_response(
                     name=fc.name,
@@ -594,6 +709,8 @@ def _run_gemini_turn(
             )
 
         response = chat.send_message(tool_results)
+        if perf_state is not None:
+            _perf_mark(perf_state, "telegram.tool_roundtrip")
 
     # Extrai texto final
     text_parts = []
@@ -613,6 +730,7 @@ def _process_telegram_message(db, data: dict):
     from google.genai import types
     from tools.busca_grafo import buscar_tarefas
     from tools.busca_acervo import buscar_acervo
+    perf_state = {"start_ms": _perf_now_ms(), "_last_ms": _perf_now_ms(), "steps": [], "tool_calls": []}
 
     chat_id = str(data.get("chat_id", ""))
     text = (data.get("text") or "").strip()
@@ -631,10 +749,12 @@ def _process_telegram_message(db, data: dict):
         _send_telegram_message(token, chat_id, "⚠️ Configuração incompleta. Contate o administrador.")
         return
 
+    _perf_mark(perf_state, "telegram.bootstrap")
     session = _get_session(db, chat_id)
     response_mode, text = _extract_response_mode(text, session)
     voice_profile, text = _extract_voice_profile(text, "masculina")
     print(f"[Core] initial response_mode={response_mode} voice_profile={voice_profile}")
+    _perf_mark(perf_state, "telegram.session_load")
 
     # --- Command handler ---
     if text.startswith("/"):
@@ -658,7 +778,7 @@ def _process_telegram_message(db, data: dict):
         copilot_soul = ""
 
     contexto_ativo = session.get("contexto_ativo", "geral")
-    system_instruction = _build_system_instruction(copilot_core, copilot_soul, contexto_ativo)
+    system_instruction = _build_system_instruction_guarded(copilot_core, copilot_soul, contexto_ativo)
 
     # --- Restore history (trimmed) ---
     raw_history = session.get("history", [])
@@ -706,6 +826,7 @@ def _process_telegram_message(db, data: dict):
                 user_parts.append(types.Part(text=file_context_text))
             else:
                 user_parts.append(types.Part(text="[?udio recebido mas transcri??o falhou]"))
+            _perf_mark(perf_state, "telegram.audio_transcription")
 
     # File/document
     elif file_info and (media_bytes_b64 or media_storage_path):
@@ -729,6 +850,7 @@ def _process_telegram_message(db, data: dict):
             except Exception as up_err:
                 file_context_text = f"[Arquivo recebido: {fname}] (falha no upload: {up_err})"
             user_parts.append(types.Part(text=file_context_text))
+            _perf_mark(perf_state, "telegram.file_upload")
 
     # Text
     if text:
@@ -737,11 +859,22 @@ def _process_telegram_message(db, data: dict):
     if not user_parts:
         user_parts.append(types.Part(text="[Mensagem sem conteúdo processável]"))
 
+    request_text_for_routing = " ".join(
+        p.text for p in user_parts if hasattr(p, "text") and getattr(p, "text", "")
+    )
+    internal_hermes_request = _is_internal_hermes_request(request_text_for_routing)
+    explicit_web_request = _is_explicit_web_request(request_text_for_routing)
+
     # --- Memory context ---
+    # Skips Firestore read for short/trivial messages (< 4 meaningful words)
     try:
-        from knowledge_graph import _get_embedding
         query_text = text or file_context_text or ""
-        if query_text:
+        _STOPWORDS_MEM = {"de", "a", "o", "que", "e", "do", "da", "em", "um", "uma",
+                          "os", "as", "no", "na", "com", "por", "para", "sim", "nao",
+                          "ok", "crie", "faça", "faz", "ola", "oi"}
+        _meaningful_words = [w for w in query_text.lower().split()
+                             if w not in _STOPWORDS_MEM and len(w) > 2]
+        if len(_meaningful_words) >= 4:
             memory_docs = (
                 db.collection("knowledge_nodes")
                 .order_by("data_criacao", direction=firestore.Query.DESCENDING)
@@ -760,6 +893,7 @@ def _process_telegram_message(db, data: dict):
                 system_instruction = system_instruction + "\n\n" + mem_text
     except Exception:
         pass
+    _perf_mark(perf_state, "telegram.memory_context")
 
     # --- Tool definitions ---
     def consultar_historico_acoes(
@@ -772,10 +906,15 @@ def _process_telegram_message(db, data: dict):
         """Busca ações e tarefas no Hermes. Use status para filtrar por estado (ex: 'em andamento', 'concluída', 'cancelada'). Use data_limite_inicio/fim (YYYY-MM-DD) para filtrar por prazo."""
         from tools.busca_grafo import buscar_tarefas
 
-        res = buscar_tarefas(query, area_tematica=area_tematica, match_mode="all",
+        _STOPWORDS_TG = {"de", "a", "o", "que", "e", "do", "da", "em", "um", "uma",
+                         "os", "as", "no", "na", "com", "por", "para", "dos", "das",
+                         "nos", "nas", "ao", "se", "ou"}
+        _tg_terms = [w for w in query.lower().split() if w not in _STOPWORDS_TG and len(w) > 2]
+        _tg_mode = "all" if len(_tg_terms) >= 2 else "any"
+        res = buscar_tarefas(query, area_tematica=area_tematica, match_mode=_tg_mode,
                              data_limite_inicio=data_limite_inicio, data_limite_fim=data_limite_fim,
                              status=status)
-        if not res.get("resultados"):
+        if _tg_mode == "all" and not res.get("resultados"):
             res = buscar_tarefas(query, area_tematica=area_tematica, match_mode="any",
                                  data_limite_inicio=data_limite_inicio, data_limite_fim=data_limite_fim,
                                  status=status)
@@ -785,6 +924,8 @@ def _process_telegram_message(db, data: dict):
         if not resultados:
             return f"Nenhum registro encontrado para '{query}'."
         lines = ["--- TAREFAS ENCONTRADAS ---"]
+        if res.get("aviso"):
+            lines.append(f"AVISO: {res['aviso']}")
         for r in resultados:
             lines.append(
                 f"ID: {r['id']} | {r['titulo']} | {r['status']} | "
@@ -809,6 +950,11 @@ def _process_telegram_message(db, data: dict):
     def pesquisar_internet(query: str):
         """Busca informações recentes na internet via Tavily."""
         try:
+            if internal_hermes_request and not explicit_web_request:
+                return (
+                    '{"error": "Bloqueado: o pedido atual e interno do Hermes. '
+                    'Nao use internet como substituto para consultas do sistema."}'
+                )
             tavily_key = _get_api_keys(db).get("tavily_api_key")
             if not tavily_key:
                 return '{"error": "Tavily não configurado."}'
@@ -1012,9 +1158,11 @@ def _process_telegram_message(db, data: dict):
             user_message_parts=user_parts,
             tools_list=tools_list,
             function_map=function_map,
+            perf_state=perf_state,
         )
     except Exception as gemini_err:
         print(f"[Core] Gemini error: {gemini_err}")
+        _perf_log("telegram.request.error", perf_state, {"chat_id": chat_id, "error": str(gemini_err)})
         _send_telegram_message(token, chat_id, f"⚠️ Erro ao processar: {gemini_err}")
         return
 
@@ -1030,8 +1178,14 @@ def _process_telegram_message(db, data: dict):
         new_history = new_history[-(_MAX_HISTORY_TURNS * 2):]
     session["history"] = new_history
     _save_session(db, chat_id, session)
+    _perf_mark(perf_state, "telegram.history_persist")
 
     # --- Send response ---
+    # Always deliver text first so the user gets a fast reply regardless of audio mode.
+    # If audio was requested, generate and send the voice note afterwards.
+    _send_telegram_message(token, chat_id, response_text)
+    _perf_mark(perf_state, "telegram.text_response")
+
     if response_mode == "audio":
         try:
             with _telegram_action_heartbeat(token, chat_id, "record_voice"):
@@ -1054,12 +1208,20 @@ def _process_telegram_message(db, data: dict):
                     wav_bytes, wav_mime, wav_name = _wrap_pcm_audio_as_wav(audio_bytes, audio_mime)
                     if not _send_telegram_document(token, chat_id, wav_bytes, wav_name, wav_mime, caption="Resposta em audio"):
                         raise RuntimeError("Falha ao enviar arquivo de audio pelo Telegram.")
+            _perf_mark(perf_state, "telegram.audio_response")
         except Exception as tts_err:
             print(f"[Core] TTS error: {tts_err}")
+            _perf_log("telegram.request.tts_error", perf_state, {"chat_id": chat_id, "error": str(tts_err)})
             _send_tts_failure_notice(token, chat_id)
-            return
-    else:
-        _send_telegram_message(token, chat_id, response_text)
+    _perf_log(
+        "telegram.request.complete",
+        perf_state,
+        {
+            "chat_id": chat_id,
+            "response_mode": response_mode,
+            "history_turns": len(raw_history) // 2,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
