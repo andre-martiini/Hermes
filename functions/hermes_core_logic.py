@@ -35,6 +35,22 @@ _DEFAULT_MALE_VOICE = "Charon"
 _MAX_TTS_TRANSCRIPT_CHARS = 1500
 
 # ---------------------------------------------------------------------------
+# In-process Firestore document cache (TTL = 60 s per Cloud Function instance)
+# ---------------------------------------------------------------------------
+_DOC_CACHE: dict = {}
+_DOC_CACHE_TTL = 60
+
+def _cached_doc_get(db, collection: str, document: str):
+    key = f"{collection}/{document}"
+    now = time.monotonic()
+    cached = _DOC_CACHE.get(key)
+    if cached and (now - cached[0]) < _DOC_CACHE_TTL:
+        return cached[1]
+    doc = db.collection(collection).document(document).get()
+    _DOC_CACHE[key] = (now, doc)
+    return doc
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -74,7 +90,7 @@ def _perf_log(prefix: str, perf_state: dict, extra: dict | None = None):
 
 def _get_api_keys(db=None):
     db = db or _get_db()
-    doc = db.collection("system").document("api_keys").get()
+    doc = _cached_doc_get(db, "system", "api_keys")
     return doc.to_dict() or {} if doc.exists else {}
 
 
@@ -767,12 +783,12 @@ def _process_telegram_message(db, data: dict):
 
     # --- Load copilot personality ---
     try:
-        core_doc = db.collection("system").document("copilot_core").get()
+        core_doc = _cached_doc_get(db, "system", "copilot_core")
         copilot_core = (core_doc.to_dict() or {}).get("content", "") if core_doc.exists else ""
     except Exception:
         copilot_core = ""
     try:
-        soul_doc = db.collection("system").document("copilot_soul").get()
+        soul_doc = _cached_doc_get(db, "system", "copilot_soul")
         copilot_soul = (soul_doc.to_dict() or {}).get("content", "") if soul_doc.exists else ""
     except Exception:
         copilot_soul = ""
@@ -1177,14 +1193,14 @@ def _process_telegram_message(db, data: dict):
     if len(new_history) > _MAX_HISTORY_TURNS * 2:
         new_history = new_history[-(_MAX_HISTORY_TURNS * 2):]
     session["history"] = new_history
-    _save_session(db, chat_id, session)
-    _perf_mark(perf_state, "telegram.history_persist")
 
     # --- Send response ---
-    # Always deliver text first so the user gets a fast reply regardless of audio mode.
-    # If audio was requested, generate and send the voice note afterwards.
+    # Text goes out first; session is persisted after so it doesn't block the user.
     _send_telegram_message(token, chat_id, response_text)
     _perf_mark(perf_state, "telegram.text_response")
+
+    _save_session(db, chat_id, session)
+    _perf_mark(perf_state, "telegram.history_persist")
 
     if response_mode == "audio":
         try:

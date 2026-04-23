@@ -71,6 +71,13 @@ MAX_SYNC_PASSES = 3
 _DOC_CACHE: dict = {}
 _DOC_CACHE_TTL = 60  # seconds
 
+# Cache da coleção pops_diretrizes (muda raramente — TTL 5 min)
+_POPS_DATA_CACHE: tuple | None = None  # (monotonic_ts, list[dict])
+_POPS_DATA_TTL = 300
+
+# Cache de _bootstrap_user_ai_profile por UID (TTL 60 s)
+_PROFILE_CACHE: dict = {}  # uid -> (monotonic_ts, dict)
+
 def _cached_doc_get(db, collection: str, document: str):
     key = f"{collection}/{document}"
     now = time.monotonic()
@@ -4275,6 +4282,7 @@ def _normalize_pop_text(text: str | None) -> str:
 
 
 def _match_pop_directives(db, prompt: str) -> list[dict]:
+    global _POPS_DATA_CACHE
     prompt_norm = _normalize_pop_text(prompt)
     if not prompt_norm:
         return []
@@ -4283,12 +4291,20 @@ def _match_pop_directives(db, prompt: str) -> list[dict]:
     matched: list[dict] = []
 
     try:
-        docs = db.collection("pops_diretrizes").stream()
-        for pop_doc in docs:
-            pop = pop_doc.to_dict() or {}
+        now = time.monotonic()
+        if _POPS_DATA_CACHE and (now - _POPS_DATA_CACHE[0]) < _POPS_DATA_TTL:
+            all_pops = _POPS_DATA_CACHE[1]
+        else:
+            all_pops = [
+                {"id": d.id, **( d.to_dict() or {})}
+                for d in db.collection("pops_diretrizes").stream()
+            ]
+            _POPS_DATA_CACHE = (now, all_pops)
+
+        for pop in all_pops:
             gatilhos = pop.get("gatilhos", []) or []
             instrucao = (pop.get("instrucao_sistema") or "").strip()
-            titulo = (pop.get("titulo") or pop_doc.id or "POP").strip()
+            titulo = (pop.get("titulo") or pop.get("id") or "POP").strip()
 
             if not instrucao or not isinstance(gatilhos, list):
                 continue
@@ -4310,7 +4326,7 @@ def _match_pop_directives(db, prompt: str) -> list[dict]:
 
             if matched_triggers:
                 matched.append({
-                    "id": pop_doc.id,
+                    "id": pop.get("id", ""),
                     "titulo": titulo,
                     "instrucao_sistema": instrucao,
                     "matched_triggers": matched_triggers,
@@ -4369,6 +4385,11 @@ def _bootstrap_user_ai_profile(db, uid: str | None):
     if not uid:
         return {}
 
+    now = time.monotonic()
+    cached = _PROFILE_CACHE.get(uid)
+    if cached and (now - cached[0]) < _DOC_CACHE_TTL:
+        return cached[1]
+
     user_ref = db.collection("usuarios").document(uid)
     snap = user_ref.get()
     base_data = snap.to_dict() if snap.exists else {}
@@ -4401,6 +4422,7 @@ def _bootstrap_user_ai_profile(db, uid: str | None):
         ai_profile["updated_at"] = firestore.SERVER_TIMESTAMP
         user_ref.set({"ai_profile": ai_profile}, merge=True)
 
+    _PROFILE_CACHE[uid] = (now, ai_profile)
     return ai_profile
 
 
@@ -4437,7 +4459,7 @@ def _find_similar_memory_nodes(db, fato: str, api_key: str, limit: int = 5):
         return []
 
     candidates = []
-    for snap in db.collection("knowledge_nodes").stream():
+    for snap in db.collection("knowledge_nodes").limit(200).stream():
         data = snap.to_dict() or {}
         if data.get("tipo") not in MEMORY_NODE_TYPES:
             continue
@@ -6416,7 +6438,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             args=(db, user_uid, prompt, task_id, system_id),
             daemon=True,
         ).start()
-        memory_context = _build_memory_context(db, gemini_key, prompt, limit=4)
+        _prompt_words = [w for w in prompt.lower().split() if len(w) > 2]
+        memory_context = _build_memory_context(db, gemini_key, prompt, limit=4) if len(_prompt_words) >= 4 else ""
         matched_pop_directives = _match_pop_directives(db, prompt)
         _perf_mark(perf_state, "web.bootstrap")
 
@@ -8988,19 +9011,26 @@ def buscar_procedimento_internal(query_text: str, area_tematica: str = None):
         db = get_db()
         keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
-        
+
         from knowledge_graph import _get_embedding, _cosine_similarity
-        
+
         # Sanitização de input
         q_text = (query_text or "").strip()
         if not q_text:
             q_text = "procedimentos operacionais"
 
+        # Short-query fast-path: skip embedding + scan for 1-word queries
+        _SW = {"de", "a", "o", "que", "e", "do", "da", "em", "um", "uma", "os", "as",
+               "no", "na", "com", "por", "para", "dos", "das"}
+        _q_meaningful = [w for w in q_text.lower().split() if w not in _SW and len(w) > 2]
+        if len(_q_meaningful) < 2:
+            return {"context": f"Nenhum registro encontrado para '{q_text}'.", "resultados": []}
+
         query_embedding = _get_embedding(q_text, api_key)
         # Protocolo de Segurança: Converte para floats
         query_vector = list(map(float, query_embedding))
 
-        collection_query = db.collection("knowledge_nodes")
+        collection_query = db.collection("knowledge_nodes").limit(200)
         if area_tematica:
             collection_query = collection_query.where("area_tematica", "==", area_tematica)
 
