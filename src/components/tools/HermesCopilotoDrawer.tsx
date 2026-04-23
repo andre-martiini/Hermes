@@ -423,6 +423,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     // ── Gravação de áudio por microfone ───────────────────────────────────────
     const [isRecording, setIsRecording] = useState(false);
     const [isProcessingMic, setIsProcessingMic] = useState(false);
+    const isBlocked = isLoading || uploadPhase !== 'idle' || isTranscribing || isProcessingMic;
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
     const micStreamRef = useRef<MediaStream | null>(null);
@@ -641,7 +642,6 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         if (!isCopilotoFileSupported(file)) {
             setAttachedFile(null);
             setFooterError(`Formato ainda não suportado no copiloto. Use ${COPILOTO_SUPPORTED_FORMATS_LABEL}.`);
-            e.target.value = '';
             return;
         }
 
@@ -1357,7 +1357,6 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         processing: 'Extraindo contexto e atualizando Acervo...'
     };
 
-    const isBlocked = isLoading || uploadPhase !== 'idle' || isTranscribing || isProcessingMic;
     const isEmbedded = variant === 'embedded';
     const shouldAutoCloseOnNavigate = !isEmbedded;
     const effectiveDrawerWidth = isEmbedded ? '100%' : isMobileViewport ? '100%' : `${drawerWidth}px`;
