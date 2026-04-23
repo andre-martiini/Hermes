@@ -995,12 +995,9 @@ export const TaskExecutionView = ({
       ══════════════════════════════════════════════════════════ */}
       <header className={`shrink-0 px-4 md:px-6 py-3 border-b flex flex-col gap-2 ${isDark ? 'border-white/10 bg-black/30' : 'border-slate-200 bg-white/80 backdrop-blur-sm'}`}>
         {/* Row 1: nav + title + controls */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="hidden">
           {/* Back */}
-          <button onClick={onClose} className={`order-1 shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'text-white/40 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}>
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
-            <span className="hidden sm:inline">Voltar</span>
-          </button>
+          <div className="flex items-start justify-between gap-4">
 
           {/* Label + Title */}
           <div className="order-3 sm:order-2 flex-1 min-w-0 w-full sm:w-auto">
@@ -1049,6 +1046,115 @@ export const TaskExecutionView = ({
           </div>
 
         </div>
+        </div>
+
+        <div className="sm:hidden flex flex-col gap-4 py-1">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <p className={`text-[10px] font-black uppercase tracking-[0.22em] ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>{'Sala de Opera\u00e7\u00f5es'}</p>
+              <h1 className={`mt-2 text-[1rem] font-black leading-[1.12] tracking-tight break-words ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                {currentTaskData.titulo}
+              </h1>
+            </div>
+
+            <div className="shrink-0 pt-1">
+              <SpeedDialMenu
+                notifications={notifications}
+                isSyncing={isSyncing}
+                isNotificationCenterOpen={isNotificationCenterOpen}
+                onOpenNotes={onOpenNotes}
+                onOpenLog={onOpenLog}
+                onOpenCopiloto={() => {
+                  if (isDesktopViewport) {
+                    setIsCopilotCollapsed(false);
+                    return;
+                  }
+                  onOpenCopiloto();
+                }}
+                onOpenShopping={onOpenShopping}
+                onOpenTranscription={onOpenTranscription}
+                onOpenMeetingTranscription={onOpenMeetingTranscription}
+                onToggleNotifications={onToggleNotifications}
+                onSync={onSync}
+                onOpenSettings={onOpenSettings}
+                onCloseNotifications={onCloseNotifications}
+                onMarkAsRead={onMarkAsRead}
+                onDismiss={onDismiss}
+                onCreateAction={onCreateAction}
+                direction="down"
+                triggerClassName="flex h-12 w-12 items-center justify-center rounded-[1.2rem] bg-white text-slate-700 border border-slate-200 shadow-[0_8px_18px_rgba(15,23,42,0.18)]"
+                triggerIconClassName="h-5 w-5"
+              />
+            </div>
+          </div>
+
+          <div className="relative flex min-h-[44px] items-center justify-center">
+            <button onClick={onClose} className={`absolute left-0 top-1/2 shrink-0 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-2xl transition-all ${isDark ? 'text-white/30 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
+            </button>
+
+            <select
+              value={currentTaskData.status}
+              onChange={e => handleStatusChange(e.target.value)}
+              className={`mx-auto min-w-[92px] max-w-full text-center text-[8px] font-black uppercase tracking-[0.16em] px-3 py-1.5 rounded-full border appearance-none cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 transition-all ${statusColor(currentTaskData.status)} ${isDark ? 'bg-transparent' : 'bg-white'}`}
+            >
+              <option value="em andamento">Em Andamento</option>
+              <option value="stand-by">Stand-by</option>
+              <option value="conclu?do">Conclu?do</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="hidden sm:flex flex-wrap items-center gap-x-3 gap-y-2">
+          <button onClick={onClose} className={`order-1 shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'text-white/40 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}>
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
+            <span className="hidden sm:inline">Voltar</span>
+          </button>
+
+          <div className="order-3 sm:order-2 flex-1 min-w-0 w-full sm:w-auto">
+            <p className={`text-[8px] font-black uppercase tracking-[0.3em] ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>Sala de OperaÃ§Ãµes</p>
+            <h1 className={`text-base md:text-xl font-black tracking-tight leading-tight break-words whitespace-normal ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              {currentTaskData.titulo}
+            </h1>
+          </div>
+
+          <div className="order-2 sm:order-3 shrink-0 flex items-center gap-2">
+            <SpeedDialMenu
+              notifications={notifications}
+              isSyncing={isSyncing}
+              isNotificationCenterOpen={isNotificationCenterOpen}
+              onOpenNotes={onOpenNotes}
+              onOpenLog={onOpenLog}
+              onOpenCopiloto={() => {
+                if (isDesktopViewport) {
+                  setIsCopilotCollapsed(false);
+                  return;
+                }
+                onOpenCopiloto();
+              }}
+              onOpenShopping={onOpenShopping}
+              onOpenTranscription={onOpenTranscription}
+              onOpenMeetingTranscription={onOpenMeetingTranscription}
+              onToggleNotifications={onToggleNotifications}
+              onSync={onSync}
+              onOpenSettings={onOpenSettings}
+              onCloseNotifications={onCloseNotifications}
+              onMarkAsRead={onMarkAsRead}
+              onDismiss={onDismiss}
+              onCreateAction={onCreateAction}
+              direction="down"
+            />
+            <select
+              value={currentTaskData.status}
+              onChange={e => handleStatusChange(e.target.value)}
+              className={`shrink-0 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl border appearance-none cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 transition-all ${statusColor(currentTaskData.status)} ${isDark ? 'bg-transparent' : 'bg-white'}`}
+            >
+              <option value="em andamento">Em Andamento</option>
+              <option value="stand-by">Stand-by</option>
+              <option value="conclu?do">Conclu?do</option>
+            </select>
+          </div>
+        </div>
 
         {/* Row 2: Progress bar */}
         {(currentTaskData.plano_acao || []).length > 0 && (
@@ -1096,14 +1202,14 @@ export const TaskExecutionView = ({
       {/* ══════════════════════════════════════════════════════════
           MAIN CONTENT — 3-column desktop / single tab mobile
       ══════════════════════════════════════════════════════════ */}
-      <div ref={workspaceRef} className="flex-1 flex flex-col gap-0 overflow-hidden lg:flex-row lg:gap-0 lg:p-4">
+      <div ref={workspaceRef} className="flex-1 min-h-0 flex flex-col gap-0 overflow-hidden lg:flex-row lg:gap-0 lg:p-4">
 
         {/* LEFT COLUMN — Mapa Operacional */}
         {isPlanPanelCollapsed ? (
           renderCollapsedPanelRail('plan', 'Plano', 'Sala de Operações', () => setIsPlanCollapsed(false))
         ) : (
         <>
-        <div className={`flex flex-col gap-3 overflow-y-auto p-4 lg:p-0 ${!showMapa ? 'hidden lg:flex' : 'flex'} shrink-0 min-h-0`}
+        <div className={`flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4 lg:flex-none lg:p-0 ${!showMapa ? 'hidden lg:flex' : 'flex'} shrink-0`}
           style={{ scrollbarWidth: 'thin', scrollbarColor: '#CBD5E0 transparent', width: isDesktopViewport ? mapPanelDesktopWidth : undefined }}>
           <div className="hidden lg:flex items-center justify-between px-1 pb-1">
             <div>
@@ -1772,3 +1878,4 @@ export const TaskExecutionView = ({
     </div>
   );
 };
+

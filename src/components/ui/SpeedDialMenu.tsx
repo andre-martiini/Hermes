@@ -23,6 +23,8 @@ interface SpeedDialMenuProps {
   onNavigate?: (link: string) => void;
   onCreateAction: () => void;
   direction?: 'up' | 'down';
+  triggerClassName?: string;
+  triggerIconClassName?: string;
 }
 
 export const SpeedDialMenu = ({
@@ -31,7 +33,9 @@ export const SpeedDialMenu = ({
   onSync, onOpenSettings, onCloseNotifications,
   onMarkAsRead, onDismiss, onUpdateOverdue, onNavigate,
   onCreateAction,
-  direction = 'down'
+  direction = 'down',
+  triggerClassName,
+  triggerIconClassName
 }: SpeedDialMenuProps) => {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -209,10 +213,10 @@ export const SpeedDialMenu = ({
         onClick={() => setOpen(prev => !prev)}
         aria-label="Ações Rápidas"
         aria-expanded={open}
-        className={`relative p-2 rounded-xl shadow-sm transition-all duration-200 active:scale-95 ${open ? 'bg-slate-900 border border-slate-900 text-white shadow-lg scale-105' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'}`}
+        className={`relative p-2 rounded-xl shadow-sm transition-all duration-200 active:scale-95 ${open ? 'bg-slate-900 border border-slate-900 text-white shadow-lg scale-105' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'} ${triggerClassName || ''}`}
       >
         {/* 3×3 grid dots = "more actions" */}
-        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+        <svg className={triggerIconClassName || 'w-5 h-5'} viewBox="0 0 24 24" fill="currentColor">
           <circle cx="5" cy="5" r="1.8" />
           <circle cx="12" cy="5" r="1.8" />
           <circle cx="19" cy="5" r="1.8" />
