@@ -438,12 +438,17 @@ export const TaskExecutionView = ({
   const handleFileUploadInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = e.target.files ? Array.from(e.target.files) : [];
     if (selectedFiles.length === 0) return;
+    handleDiaryFilesSelected(selectedFiles);
+    e.target.value = '';
+  };
+
+  const handleDiaryFilesSelected = (selectedFiles: File[]) => {
+    if (selectedFiles.length === 0) return;
     const initialNames = selectedFiles.reduce((acc, f) => { acc[getPendingFileKey(f)] = f.name; return acc; }, {} as Record<string, string>);
     setPendingFiles(selectedFiles);
     setPendingFileNames(initialNames);
     setModalConfig({ type: 'file_upload', isOpen: true });
     setShowAttachMenu(false);
-    e.target.value = '';
   };
 
   // ─── Audio Recording ──────────────────────────────────────────
@@ -1614,6 +1619,7 @@ export const TaskExecutionView = ({
               setShowAttachMenu={setShowAttachMenu}
               fileInputRef={fileInputRef}
               handleFileUploadInput={handleFileUploadInput}
+              handleDroppedFiles={handleDiaryFilesSelected}
               setModalConfig={setModalConfig}
               applyFormatting={() => { }}
               isTimerRunning={isDark}

@@ -361,6 +361,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const [footerError, setFooterError] = useState<string | null>(null);
     // Estado de transcrição de áudio colado
     const [isTranscribing, setIsTranscribing] = useState(false);
+    const [isDragActive, setIsDragActive] = useState(false);
+    const dragCounterRef = useRef(0);
 
     // Estado para rastrear qual diagnóstico está em processamento
     const [diagnosingId, setDiagnosingId] = useState<string | null>(null);
@@ -630,11 +632,9 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     };
 
     // ── Seleção de arquivo ────────────────────────────────────────────────────
-    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0] ?? null;
+    const attachFileToCopiloto = React.useCallback((file: File | null, source: 'input' | 'drop' = 'input') => {
         if (!file) {
             setAttachedFile(null);
-            e.target.value = '';
             return;
         }
 
@@ -647,6 +647,14 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
         setFooterError(null);
         setAttachedFile(file);
+        if (source === 'drop') {
+            setShowToolMenu(false);
+        }
+    }, []);
+
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0] ?? null;
+        attachFileToCopiloto(file, 'input');
         // Reset o input para permitir re-selecionar o mesmo arquivo
         e.target.value = '';
     };
@@ -654,6 +662,47 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const handleRemoveFile = () => {
         setAttachedFile(null);
     };
+
+    const handleComposerDragEnter = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
+        if (!Array.from(e.dataTransfer.types).includes('Files') || isBlocked) return;
+        e.preventDefault();
+        e.stopPropagation();
+        dragCounterRef.current += 1;
+        setIsDragActive(true);
+    }, [isBlocked]);
+
+    const handleComposerDragOver = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
+        if (!Array.from(e.dataTransfer.types).includes('Files') || isBlocked) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'copy';
+        setIsDragActive(true);
+    }, [isBlocked]);
+
+    const handleComposerDragLeave = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
+        if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+        if (dragCounterRef.current === 0) {
+            setIsDragActive(false);
+        }
+    }, []);
+
+    const handleComposerDrop = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
+        if (!Array.from(e.dataTransfer.types).includes('Files') || isBlocked) return;
+        e.preventDefault();
+        e.stopPropagation();
+        dragCounterRef.current = 0;
+        setIsDragActive(false);
+
+        const droppedFiles = Array.from(e.dataTransfer.files || []);
+        if (droppedFiles.length === 0) return;
+        if (droppedFiles.length > 1) {
+            setFooterError(`O copiloto aceita um arquivo por vez. Mantive apenas "${droppedFiles[0].name}".`);
+        }
+        attachFileToCopiloto(droppedFiles[0], 'drop');
+    }, [attachFileToCopiloto, isBlocked]);
 
     const handleDeleteSession = async (sessionId: string) => {
         if (deletingSessionId) return;
@@ -2111,7 +2160,27 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                     </div>
 
                     {/* Footer Input */}
-                    <div className={`relative z-20 shrink-0 overflow-visible p-6 border-t ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+                    <div
+                        onDragEnter={handleComposerDragEnter}
+                        onDragOver={handleComposerDragOver}
+                        onDragLeave={handleComposerDragLeave}
+                        onDrop={handleComposerDrop}
+                        className={`relative z-20 shrink-0 overflow-visible p-6 border-t ${isDark ? 'border-white/10' : 'border-slate-100'}`}
+                    >
+                        {isDragActive && (
+                            <div className={`pointer-events-none absolute inset-4 z-30 flex items-center justify-center rounded-3xl border-2 border-dashed backdrop-blur-sm ${
+                                isDark
+                                    ? 'border-blue-400 bg-blue-500/10'
+                                    : 'border-blue-400 bg-blue-50/90'
+                            }`}>
+                                <div className={`px-4 py-3 rounded-2xl text-center shadow-lg ${
+                                    isDark ? 'bg-slate-950/80 text-blue-200' : 'bg-white text-blue-700'
+                                }`}>
+                                    <p className="text-sm font-black uppercase tracking-widest">Solte para anexar</p>
+                                    <p className="text-[11px] mt-1 opacity-80">O copiloto vai usar o mesmo anexo do botão de upload.</p>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Banner de erro inline */}
                         {footerError && (
