@@ -970,11 +970,24 @@ def _process_telegram_message(db, data: dict):
             return f"⚠️ [ERRO] {res['erro']}"
         resultados = res.get("resultados", [])
         if not resultados:
-            return f"Nenhum registro encontrado para '{query}'."
+            filtros_desc = []
+            if query and query.strip():
+                filtros_desc.append(f"query='{query.strip()}'")
+            if status:
+                filtros_desc.append(f"status='{status}'")
+            if area_tematica:
+                filtros_desc.append(f"area='{area_tematica}'")
+            if data_limite_inicio or data_limite_fim:
+                filtros_desc.append(f"prazo=[{data_limite_inicio or '*'} a {data_limite_fim or '*'}]")
+            filtros_str = ", ".join(filtros_desc) if filtros_desc else "(sem filtros)"
+            return (
+                f"NENHUMA TAREFA ENCONTRADA com os filtros: {filtros_str}.\n"
+                "INSTRUCAO OBRIGATORIA: Informe ao usuario que nao encontrou. "
+                "NAO invente titulos, status ou dados. NAO use RAG para compensar."
+            )
         lines = [
-            "--- TAREFAS ENCONTRADAS (DADOS OFICIAIS DO SISTEMA) ---",
-            "INSTRUCAO: Use EXCLUSIVAMENTE os campos abaixo para descrever cada tarefa.",
-            "NAO complemente com dados do RAG, acervo ou memoria. Se um campo estiver vazio, diga 'nao informado'.",
+            "=== TAREFAS REAIS ENCONTRADAS NO BANCO DE DADOS ===",
+            "REGRA: Use EXCLUSIVAMENTE os campos abaixo. Nao invente, nao complete, nao use RAG.",
             "",
         ]
         if res.get("aviso"):

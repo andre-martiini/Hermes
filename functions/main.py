@@ -6469,19 +6469,14 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
         # --- DEFINIÇÃO DE FERRAMENTAS ---
         _perf_mark(perf_state, "web.session_context")
-        def consultar_historico_acoes(query: str, area_tematica: str = None, data_limite_inicio: str = None, data_limite_fim: str = None, ultimas_n_acoes: int = 20):
+        def consultar_historico_acoes(query: str, area_tematica: str = None, data_limite_inicio: str = None, data_limite_fim: str = None, ultimas_n_acoes: int = 20, status: str = None):
             """
-            Busca no Grafo de Conhecimento. Retorna procedimentos cristalizados (semântica) 
-            e histórico de execução real (regex flexível).
-            
-            Use 'ultimas_n_acoes' (default 20) para buscar em lote em vez de múltiplas chamadas sequenciais.
-            Use data_limite_inicio e data_limite_fim (formato YYYY-MM-DD) para filtrar por prazo/vencimento.
+            Busca tarefas reais no banco de dados do Hermes por texto, area, prazo e/ou status.
+            Retorna somente dados oficiais — nao mistura com RAG ou procedimentos.
+            Use status para filtrar (ex: 'em andamento', 'concluido', 'cancelado').
+            Use data_limite_inicio e data_limite_fim (YYYY-MM-DD) para filtrar por prazo.
+            Use ultimas_n_acoes (default 20) para buscar em lote.
             """
-            # 1. Busca Semântica (Nós Conceituais)
-            # Passamos a área temática para filtrar se o LLM fornecer
-            res_semantic = buscar_procedimento_internal(query, area_tematica)
-            
-            # 2. Busca em Tarefas Reais (Regex)
             from tools.busca_grafo import buscar_tarefas
             _STOPWORDS_Q = {"de", "a", "o", "que", "e", "do", "da", "em", "um", "uma",
                             "os", "as", "no", "na", "com", "por", "para", "dos", "das",
@@ -6493,33 +6488,29 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                                        match_mode=_initial_mode,
                                        data_limite_inicio=data_limite_inicio,
                                        data_limite_fim=data_limite_fim,
+                                       status=status,
                                        limite=ultimas_n_acoes)
+            # Tenta com match_mode=any se all nao encontrou
             if _initial_mode == "all" and not res_exact.get("resultados"):
                 res_exact = buscar_tarefas(query,
                                            area_tematica=area_tematica,
                                            match_mode="any",
                                            data_limite_inicio=data_limite_inicio,
                                            data_limite_fim=data_limite_fim,
+                                           status=status,
                                            limite=ultimas_n_acoes)
 
             if res_exact.get("erro"):
                 return f"⚠️ [ERRO TÉCNICO BuscaGrafo] {res_exact['erro']}"
 
-            # Construção do Relatório Híbrido
-            context_parts = []
-            
-            # Adiciona contexto semântico se houver resultados reais nele
-            semantic_text = res_semantic.get("context", "")
-            if "Nenhum registro encontrado" not in semantic_text:
-                context_parts.append(f"--- PROCEDIMENTOS E CONCEITOS ENCONTRADOS ---\n{semantic_text}")
-
-            # Adiciona tarefas reais com todos os campos estruturais
             resultados = res_exact.get("resultados", [])
+
+            # CAMINHO A: Tarefas reais encontradas — retorna SOMENTE elas.
+            # Nao inclui contexto semantico para evitar mistura de fontes (alucinacao de titulo/dados).
             if resultados:
                 lines = [
-                    "--- TAREFAS ENCONTRADAS (DADOS OFICIAIS DO SISTEMA) ---",
-                    "INSTRUCAO: Use EXCLUSIVAMENTE os campos abaixo para descrever cada tarefa.",
-                    "NAO complemente com dados do RAG, acervo ou memoria. Se um campo estiver vazio, diga 'nao informado'.",
+                    "=== TAREFAS REAIS ENCONTRADAS NO BANCO DE DADOS ===",
+                    "REGRA: Use EXCLUSIVAMENTE os campos abaixo. Nao invente, nao complete, nao use RAG.",
                     "",
                 ]
                 for r in resultados:
@@ -6550,12 +6541,26 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                             lines.append(f"  {entrada}")
                     lines.append(f"[Abrir Acao](task:{r['id']})")
                     lines.append("---")
-                context_parts.append("\n".join(lines))
+                return "\n".join(lines)
 
-            if not context_parts:
-                return f"Nenhum registro encontrado para '{query}' com os filtros aplicados."
-
-            return "\n\n".join(context_parts)
+            # CAMINHO B: Nenhuma tarefa real encontrada.
+            # Retorna mensagem direta sem fallback semantico.
+            # O modelo NAO deve inventar dados nem usar RAG para compensar.
+            filtros_desc = []
+            if query and query.strip():
+                filtros_desc.append(f"query='{query.strip()}'")
+            if status:
+                filtros_desc.append(f"status='{status}'")
+            if area_tematica:
+                filtros_desc.append(f"area='{area_tematica}'")
+            if data_limite_inicio or data_limite_fim:
+                filtros_desc.append(f"prazo=[{data_limite_inicio or '*'} a {data_limite_fim or '*'}]")
+            filtros_str = ", ".join(filtros_desc) if filtros_desc else "(sem filtros)"
+            return (
+                f"NENHUMA TAREFA ENCONTRADA no banco de dados com os filtros: {filtros_str}.\n"
+                "INSTRUCAO OBRIGATORIA: Informe ao usuario que nao encontrou. NAO invente titulos, "
+                "status, prazos ou qualquer dado de tarefa. NAO use RAG, acervo ou memoria para fabricar uma resposta."
+            )
 
         def buscar_arquivos_acervo(query: str):
             """Busca documentação, manuais e arquivos de referência no Acervo Global (FindNearest)."""
