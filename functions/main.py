@@ -6513,17 +6513,43 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             if "Nenhum registro encontrado" not in semantic_text:
                 context_parts.append(f"--- PROCEDIMENTOS E CONCEITOS ENCONTRADOS ---\n{semantic_text}")
 
-            # Adiciona tarefas reais
+            # Adiciona tarefas reais com todos os campos estruturais
             resultados = res_exact.get("resultados", [])
             if resultados:
-                lines = ["--- ÚLTIMAS TAREFAS EXECUTADAS (HISTÓRICO REAL) ---"]
+                lines = [
+                    "--- TAREFAS ENCONTRADAS (DADOS OFICIAIS DO SISTEMA) ---",
+                    "INSTRUCAO: Use EXCLUSIVAMENTE os campos abaixo para descrever cada tarefa.",
+                    "NAO complemente com dados do RAG, acervo ou memoria. Se um campo estiver vazio, diga 'nao informado'.",
+                    "",
+                ]
                 for r in resultados:
-                    lines.append(
-                        f"ID: {r['id']} | TÍTULO: {r['titulo']} | STATUS: {r['status']}\n"
-                        f"MÁXIMO: {r.get('data_limite', 'N/A')} | ÁREA: {r['area']} | DATA: {r['criado_em']}\n"
-                        f"DESCRIÇÃO: {r['descricao']}\n"
-                        f"[Abrir Ação](task:{r['id']})\n"
-                    )
+                    lines.append(f"ID: {r['id']}")
+                    lines.append(f"Titulo: {r['titulo']}")
+                    lines.append(f"Status: {r['status']} | Tipo: {r.get('tipo_acao') or 'nao informado'}")
+                    lines.append(f"Prazo: {r.get('data_limite', 'N/A')} | Area: {r['area']} | Criado em: {r['criado_em']}")
+                    lines.append(f"Responsavel: {r.get('responsavel') or 'nao informado'}")
+                    if r.get('tags'):
+                        tags_val = r['tags']
+                        tags_str = ', '.join(tags_val) if isinstance(tags_val, list) else str(tags_val)
+                        lines.append(f"Tags: {tags_str}")
+                    if r.get('sintese_demanda'):
+                        lines.append(f"Sintese da Demanda: {r['sintese_demanda']}")
+                    if r.get('descricao'):
+                        lines.append(f"Descricao: {r['descricao']}")
+                    if r.get('notas'):
+                        lines.append(f"Notas: {r['notas']}")
+                    plano = r.get('plano_acao', [])
+                    if plano:
+                        lines.append("Plano de Acao:")
+                        for passo in plano:
+                            lines.append(f"  {passo}")
+                    acomp = r.get('acompanhamento_recente', [])
+                    if acomp:
+                        lines.append("Diario de Bordo (ultimas entradas):")
+                        for entrada in acomp:
+                            lines.append(f"  {entrada}")
+                    lines.append(f"[Abrir Acao](task:{r['id']})")
+                    lines.append("---")
                 context_parts.append("\n".join(lines))
 
             if not context_parts:
@@ -8008,6 +8034,11 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "Não explique o diagrama antes de gerá-lo, a menos que seja explicitamente solicitado.\n"
             "Escolha o tipo de diagrama mais adequado: flowchart, sequenceDiagram, classDiagram, "
             "stateDiagram-v2, erDiagram, gantt, mindmap, timeline, pie, quadrantChart, xychart-beta, etc.\n\n"
+            "## GOVERNANCA DE FONTES — REGRA CRITICA\n"
+            "Quando descrever uma tarefa encontrada por consultar_historico_acoes, "
+            "use SOMENTE os campos retornados por essa ferramenta (Titulo, Status, Prazo, Area, Descricao, Tags, Sintese, Plano de Acao, Diario de Bordo, Notas). "
+            "E PROIBIDO completar, interpretar ou inferir informacoes da tarefa usando dados do RAG, acervo ou memoria global. "
+            "Se um campo nao constar no retorno da ferramenta, responda 'nao informado' em vez de inventar.\n"
         )
 
         # --- RECUPERAÇÃO DE HISTÓRICO DA SESSÃO ---
