@@ -118,6 +118,11 @@ def _send_telegram_message(token: str, chat_id: str | int, text: str, parse_mode
     )
     if not resp.ok:
         print(f"[Telegram] sendMessage failed: {resp.status_code} {resp.text[:300]}")
+        return None
+    try:
+        return resp.json().get("result", {}).get("message_id")
+    except Exception:
+        return None
 
 
 def _send_telegram_chat_action(token: str, chat_id: str | int, action: str):
@@ -125,6 +130,18 @@ def _send_telegram_chat_action(token: str, chat_id: str | int, action: str):
         _requests.post(
             f"https://api.telegram.org/bot{token}/sendChatAction",
             json={"chat_id": chat_id, "action": action},
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
+def _delete_telegram_message(token: str, chat_id: str | int, message_id: int):
+    if not message_id: return
+    try:
+        _requests.post(
+            f"https://api.telegram.org/bot{token}/deleteMessage",
+            json={"chat_id": chat_id, "message_id": message_id},
             timeout=5,
         )
     except Exception:
@@ -401,11 +418,15 @@ def _build_system_instruction_guarded(copilot_core: str, copilot_soul: str, cont
         "## REGRAS ABSOLUTAS\n"
         "1. JAMAIS expanda siglas arbitrariamente.\n"
         "2. Se qualquer ferramenta retornar campo 'erro', reproduza o erro literal.\n"
-        "3. Se o pedido for sobre dados internos do Hermes, tarefas, acoes, historico, agenda ou documentos do sistema, NUNCA use internet como fallback. Nesses casos, use apenas ferramentas internas e deixe claro quando a busca interna falhar.\n"
-        "4. Agendamento/Agenda: Voce DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horario de funcionamento: 08:00 as 19:00, janela D+7. Se houver conflito em horario especifico, pergunte se forca insercao ou busca outro slot. Na criacao, use os campos horario_inicio e horario_fim.\n"
-        "5. Para criar uma acao, apresente um draft estruturado primeiro com Titulo, Inicio/Fim (se houver), Area Tematica e Tipo. Aguarde confirmacao explicita.\n"
-        "6. Links de tarefas: use o formato task:{ID} no texto (ex: 'Acao task:abc123').\n"
-        "7. Acione salvar_memoria_global apenas para fatos duraveis e preferencias estaveis.\n"
+        "4. Se o pedido for sobre dados internos do Hermes, tarefas, acoes, historico, agenda ou documentos do sistema, NUNCA use internet como fallback. Nesses casos, use apenas ferramentas internas. Se nao encontrar nada apos usar as ferramentas, admita explicitamente que nao encontrou nos registros do sistema.\n"
+        "5. Agendamento/Agenda: Voce DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horario de funcionamento: 08:00 as 19:00, janela D+7. Se houver conflito em horario especifico, pergunte se forca insercao ou busca outro slot. Na criacao, use os campos horario_inicio e horario_fim.\n"
+        "6. Para criar uma acao, apresente um draft estruturado primeiro com Titulo, Inicio/Fim (se houver), Area Tematica e Tipo. Aguarde confirmacao explicita.\n"
+        "7. Links de tarefas: use o formato task:{ID} no texto (ex: 'Acao task:abc123').\n"
+        "8. Acione salvar_memoria_global apenas para fatos duraveis e preferencias estaveis.\n"
+        "9. GOVERNANCA DE FONTES: ao descrever uma tarefa encontrada por consultar_historico_acoes, "
+        "use SOMENTE os campos retornados por essa ferramenta (Titulo, Status, Prazo, Descricao, Notas, Diario). "
+        "E PROIBIDO completar ou inferir informacoes da tarefa usando dados do RAG, acervo ou memoria global. "
+        "Se um campo nao constar no retorno da ferramenta, diga 'nao informado' em vez de inventar.\n"
     )
 
 
@@ -671,6 +692,8 @@ def _run_gemini_turn(
             system_instruction=system_instruction,
             tools=tools_list,
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+            # Desabilita thinking: evita parts com thought=True que confundem a extração de texto
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
         ),
         history=history,
     )
@@ -682,7 +705,7 @@ def _run_gemini_turn(
         _perf_mark(perf_state, "telegram.first_model_response")
 
     # Agentic loop — processa tool calls até obter resposta de texto
-    for _ in range(3):
+    for _ in range(6):
         if not response.candidates:
             break
         candidate = response.candidates[0]
@@ -727,14 +750,23 @@ def _run_gemini_turn(
         response = chat.send_message(tool_results)
         if perf_state is not None:
             _perf_mark(perf_state, "telegram.tool_roundtrip")
+    else:
+        # Se saiu do loop por limite de iterações, força um turno final de texto
+        last_chance_msg = [types.Part(text="Limite de pesquisas atingido. Por favor, apresente uma resposta final ao usuário com base no que você encontrou (ou informe que não encontrou).")]
+        response = chat.send_message(last_chance_msg)
+        if perf_state is not None:
+            _perf_mark(perf_state, "telegram.safety_final_turn")
 
-    # Extrai texto final
+    # Extrai texto final — ignora parts de thinking (thought=True) que não são resposta
     text_parts = []
     if response.candidates:
         for part in (response.candidates[0].content.parts or []):
+            # Filtra parts de raciocínio interno (thinking) — não são texto de resposta
+            if getattr(part, "thought", False):
+                continue
             if hasattr(part, "text") and part.text:
                 text_parts.append(part.text)
-    return "\n".join(text_parts).strip() or "Não consegui gerar uma resposta. Tente novamente."
+    return "\n".join(text_parts).strip() or "Peço desculpas, mas não consegui formular uma resposta. Tente reformular sua pergunta."
 
 
 # ---------------------------------------------------------------------------
@@ -939,14 +971,39 @@ def _process_telegram_message(db, data: dict):
         resultados = res.get("resultados", [])
         if not resultados:
             return f"Nenhum registro encontrado para '{query}'."
-        lines = ["--- TAREFAS ENCONTRADAS ---"]
+        lines = [
+            "--- TAREFAS ENCONTRADAS (DADOS OFICIAIS DO SISTEMA) ---",
+            "INSTRUCAO: Use EXCLUSIVAMENTE os campos abaixo para descrever cada tarefa.",
+            "NAO complemente com dados do RAG, acervo ou memoria. Se um campo estiver vazio, diga 'nao informado'.",
+            "",
+        ]
         if res.get("aviso"):
-            lines.append(f"AVISO: {res['aviso']}")
+            lines.append(f"AVISO TECNICO: {res['aviso']}")
         for r in resultados:
-            lines.append(
-                f"ID: {r['id']} | {r['titulo']} | {r['status']} | "
-                f"Prazo: {r.get('data_limite','N/A')} | Área: {r['area']}"
-            )
+            lines.append(f"ID: {r['id']}")
+            lines.append(f"Titulo: {r['titulo']}")
+            lines.append(f"Status: {r['status']} | Tipo: {r.get('tipo_acao') or 'nao informado'}")
+            lines.append(f"Prazo: {r.get('data_limite', 'N/A')} | Area: {r['area']}")
+            lines.append(f"Responsavel: {r['responsavel'] or 'nao informado'}")
+            if r.get('tags'):
+                lines.append(f"Tags: {', '.join(r['tags'])}")
+            if r.get('sintese_demanda'):
+                lines.append(f"Sintese da Demanda: {r['sintese_demanda']}")
+            if r.get('descricao'):
+                lines.append(f"Descricao: {r['descricao']}")
+            if r.get('notas'):
+                lines.append(f"Notas: {r['notas']}")
+            plano = r.get('plano_acao', [])
+            if plano:
+                lines.append("Plano de Acao:")
+                for passo in plano:
+                    lines.append(f"  {passo}")
+            acomp = r.get('acompanhamento_recente', [])
+            if acomp:
+                lines.append("Diario de Bordo (ultimas entradas):")
+                for entrada in acomp:
+                    lines.append(f"  {entrada}")
+            lines.append("---")
         return "\n".join(lines)
 
     def buscar_arquivos_acervo(query: str):
@@ -1165,6 +1222,8 @@ def _process_telegram_message(db, data: dict):
 
     # --- Gemini call ---
     _send_telegram_typing(token, chat_id)
+    processing_msg_id = _send_telegram_message(token, chat_id, "⏳ <i>Estou processando seu pedido, aguarde um minuto...</i>")
+
     try:
         response_text = _run_gemini_turn(
             db=db,
@@ -1177,10 +1236,15 @@ def _process_telegram_message(db, data: dict):
             perf_state=perf_state,
         )
     except Exception as gemini_err:
+        if processing_msg_id:
+            _delete_telegram_message(token, chat_id, processing_msg_id)
         print(f"[Core] Gemini error: {gemini_err}")
         _perf_log("telegram.request.error", perf_state, {"chat_id": chat_id, "error": str(gemini_err)})
         _send_telegram_message(token, chat_id, f"⚠️ Erro ao processar: {gemini_err}")
         return
+
+    if processing_msg_id:
+        _delete_telegram_message(token, chat_id, processing_msg_id)
 
     # --- Persist history ---
     def _serialize_part(p):
