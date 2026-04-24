@@ -11,7 +11,21 @@ FALLBACK_LIMIT = 2000   # docs lidos do Firestore em cada passagem
 RESULT_LIMIT = 50       # resultados devolvidos ao chamador
 
 # Campos de texto inspecionados no filtro em memória.
-CAMPOS_TEXTO = ["titulo", "descricao", "tags", "responsavel", "status", "notas"]
+CAMPOS_TEXTO = [
+    "titulo",
+    "descricao",
+    "tags",
+    "kg_tags",
+    "responsavel",
+    "status",
+    "notas",
+    "area_tematica",
+    "processo_sei",
+    "sintese_demanda",
+    "demanda",
+    "projeto",
+    "sistema",
+]
 
 # Stopwords ignoradas na segmentação de termos de busca.
 _STOPWORDS = {
@@ -91,6 +105,32 @@ def _doc_bate_com_padrao(doc_dict: dict, padrao: re.Pattern) -> bool:
             for item in valor:
                 if isinstance(item, str) and padrao.search(_remover_acentos(item)):
                     return True
+                if isinstance(item, dict):
+                    if any(
+                        isinstance(v, str) and padrao.search(_remover_acentos(v))
+                        for v in item.values()
+                    ):
+                        return True
+        elif isinstance(valor, dict):
+            if any(
+                isinstance(v, str) and padrao.search(_remover_acentos(v))
+                for v in valor.values()
+            ):
+                return True
+
+    for item in doc_dict.get("pool_dados") or []:
+        if not isinstance(item, dict):
+            continue
+        searchable = " ".join(str(item.get(k) or "") for k in ("nome", "valor", "tipo"))
+        if padrao.search(_remover_acentos(searchable)):
+            return True
+
+    for item in doc_dict.get("acompanhamento") or []:
+        if not isinstance(item, dict):
+            continue
+        nota = item.get("nota")
+        if isinstance(nota, str) and padrao.search(_remover_acentos(nota)):
+            return True
     return False
 
 
@@ -173,6 +213,7 @@ def _formatar_resultado(doc_id: str, data: dict) -> dict:
         "criado_em": str(data.get("data_criacao", ""))[:10],
         "area": data.get("area_tematica", ""),
         "data_limite": data.get("data_limite", ""),
+        "processo_sei": data.get("processo_sei", ""),
         "tags": tags,
         "descricao": (data.get("descricao") or "")[:500],
         "notas": (data.get("notas") or "")[:400],
@@ -331,6 +372,46 @@ def buscar_tarefas(
                     continue
                 resultados.append(_formatar_resultado(doc.id, data))
                 if len(resultados) >= limite:
+                    break
+
+        # Terceira chance: alguns documentos usam data_criacao como Timestamp
+        # Firestore, outros como string ISO. A query inicial compara com string e
+        # pode excluir documentos reais sem erro. Aqui varremos documentos
+        # ordenados e ignoramos apenas o corte por data_criacao.
+        if not resultados and termos and not status:
+            aviso = (aviso or "") + "|varredura_sem_corte_data"
+            try:
+                fallback_docs = list(
+                    db.collection(GRAFO_COLLECTION)
+                    .order_by("data_criacao", direction=firestore.Query.DESCENDING)
+                    .limit(FALLBACK_LIMIT)
+                    .stream()
+                )
+            except Exception:
+                fallback_docs = []
+
+            fallback_modes = [match_mode]
+            if match_mode == "all":
+                fallback_modes.append("any")
+
+            for fallback_mode in fallback_modes:
+                for doc in fallback_docs:
+                    data = doc.to_dict() or {}
+                    if not _matches_filters(
+                        data,
+                        termos=termos,
+                        match_mode=fallback_mode,
+                        area_tematica=area_tematica,
+                        data_limite_inicio=data_limite_inicio,
+                        data_limite_fim=data_limite_fim,
+                        status=status,
+                        corte_str=None,
+                    ):
+                        continue
+                    resultados.append(_formatar_resultado(doc.id, data))
+                    if len(resultados) >= limite:
+                        break
+                if resultados:
                     break
 
         response: dict = {"resultados": resultados, "erro": None}

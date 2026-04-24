@@ -6695,6 +6695,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     lines.append(f"Titulo: {r['titulo']}")
                     lines.append(f"Status: {r['status']} | Tipo: {r.get('tipo_acao') or 'nao informado'}")
                     lines.append(f"Prazo: {r.get('data_limite', 'N/A')} | Area: {r['area']} | Criado em: {r['criado_em']}")
+                    if r.get('processo_sei'):
+                        lines.append(f"Processo SEI: {r['processo_sei']}")
                     lines.append(f"Responsavel: {r.get('responsavel') or 'nao informado'}")
                     if r.get('tags'):
                         tags_val = r['tags']

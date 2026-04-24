@@ -1814,6 +1814,8 @@ def _process_telegram_message(db, data: dict):
             lines.append(f"Titulo: {r['titulo']}")
             lines.append(f"Status: {r['status']} | Tipo: {r.get('tipo_acao') or 'nao informado'}")
             lines.append(f"Prazo: {r.get('data_limite', 'N/A')} | Area: {r['area']}")
+            if r.get('processo_sei'):
+                lines.append(f"Processo SEI: {r['processo_sei']}")
             lines.append(f"Responsavel: {r['responsavel'] or 'nao informado'}")
             if r.get('tags'):
                 lines.append(f"Tags: {', '.join(r['tags'])}")
