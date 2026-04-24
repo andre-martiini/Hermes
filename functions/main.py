@@ -1790,6 +1790,63 @@ def scheduled_sync(event: scheduler_fn.ScheduledEvent) -> None:
 
     run_full_sync('scheduled')
 
+
+def _normalize_notification_title(title: str | None) -> str:
+    normalized = unicodedata.normalize("NFKD", str(title or ""))
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return normalized.strip().lower()
+
+
+def _should_mirror_notification_to_telegram(notif: dict) -> bool:
+    """Mantem o Telegram restrito as categorias importantes e acionaveis."""
+    title = _normalize_notification_title(notif.get('title'))
+
+    exact_titles = {
+        "erro de sincronizacao",
+        "novo pix recebido",
+        "novos boletos",
+        "acoes vencidas",
+        "alerta de orcamento",
+        "auditoria pgd",
+        "apresentacao concluida",
+        "pesquisa concluida",
+        "pesquisa profunda concluida",
+        "pesquisa profunda falhou",
+    }
+    if title in exact_titles:
+        return True
+
+    if title in {"hermes: proxima tarefa", "hermes: encerramento de tarefa"}:
+        return True
+
+    # Lembretes especificos de acao ja sao enviados ao Telegram pelo scheduler
+    # com mensagem mais detalhada; nao duplicamos via espelhamento generico.
+    if title.startswith("lembrete:"):
+        return False
+
+    return False
+
+
+def _build_telegram_notification_message(notif: dict) -> str:
+    title = str(notif.get('title') or 'Hermes').strip()
+    message = str(notif.get('message') or '').strip()
+    n_type = str(notif.get('type') or 'info').strip()
+    link = str(notif.get('link') or '').strip()
+
+    icons = {
+        'success': '✅',
+        'warning': '⚠️',
+        'error': '🚨',
+        'info': '🔔',
+    }
+    lines = [f"{icons.get(n_type, '🔔')} Hermes - {title}"]
+    if message:
+        lines.extend(["", message])
+    if link:
+        label = "Link" if link.startswith(("http://", "https://")) else "Destino no Hermes"
+        lines.extend(["", f"{label}: {link}"])
+    return "\n".join(lines)
+
 @firestore_fn.on_document_created(document="notificacoes/{notification_id}")
 
 def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]):
@@ -1800,7 +1857,7 @@ def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapsh
 
     notif = event.data.to_dict()
 
-    if not notif or notif.get('sent_to_push'): return
+    if not notif: return
 
     title = notif.get('title', 'Hermes')
 
@@ -1808,11 +1865,45 @@ def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapsh
 
     db = get_db()
 
+    updates = {}
+
+    if not notif.get('sent_to_telegram') and _should_mirror_notification_to_telegram(notif):
+
+        telegram_chat_id = _resolve_default_telegram_chat_id(db)
+
+        if telegram_chat_id:
+
+            sent = _send_telegram_message_raw(db, telegram_chat_id, _build_telegram_notification_message(notif))
+
+            updates['sent_to_telegram'] = bool(sent)
+
+            if not sent:
+
+                updates['telegram_error'] = 'send_failed'
+
+        else:
+
+            updates['sent_to_telegram'] = False
+
+            updates['telegram_error'] = 'chat_id_not_configured'
+
+    if notif.get('sent_to_push'):
+
+        if updates:
+
+            event.data.reference.update(updates)
+
+        return
+
     tokens_docs = db.collection('fcm_tokens').stream()
     tokens = list({doc.id for doc in tokens_docs if doc.id})
     if not tokens:
 
         print("Nenhum token FCM encontrado para enviar push.")
+
+        if updates:
+
+            event.data.reference.update(updates)
 
         return
 
@@ -1844,11 +1935,17 @@ def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapsh
 
                         db.collection('fcm_tokens').document(bad_token).delete()
 
-        event.data.reference.update({'sent_to_push': True})
+        updates['sent_to_push'] = True
+
+        event.data.reference.update(updates)
 
     except Exception as e:
 
         print(f"Erro ao enviar push notification: {str(e)}")
+
+        if updates:
+
+            event.data.reference.update(updates)
 
 
 
