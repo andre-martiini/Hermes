@@ -4915,6 +4915,7 @@ def _resolve_telegram_chat_id_for_uid(db, uid: str | None):
 
 
 def _resolve_default_telegram_chat_id(db):
+    # 1. Tenta encontrar chat_id na coleção de usuários
     try:
         candidates = (
             db.collection("usuarios")
@@ -4928,11 +4929,35 @@ def _resolve_default_telegram_chat_id(db):
             if isinstance(value, (str, int)) and str(value).strip():
                 return str(value).strip()
     except Exception as exc:
-        print(f"[Telegram] Falha ao resolver chat_id padrao: {exc}")
-    # Fallback para sistema mono-usuário: usa a variável de ambiente já configurada para o bot
+        print(f"[Telegram] Falha ao resolver chat_id via usuarios: {exc}")
+
+    # 2. Fallback Firestore: system/api_keys (mesmo doc do bot token)
+    for key in ("telegram_chat_id", "telegram_allowed_chat_id", "allowed_telegram_chat_id"):
+        try:
+            keys_doc = _cached_doc_get(db, "system", "api_keys")
+            if keys_doc.exists:
+                value = (keys_doc.to_dict() or {}).get(key)
+                if isinstance(value, (str, int)) and str(value).strip():
+                    return str(value).strip()
+        except Exception:
+            pass
+
+    # 3. Fallback Firestore: configuracoes/geral
+    for key in ("telegram_chat_id", "telegram_allowed_chat_id"):
+        try:
+            cfg_doc = _cached_doc_get(db, "configuracoes", "geral")
+            if cfg_doc.exists:
+                value = (cfg_doc.to_dict() or {}).get(key)
+                if isinstance(value, (str, int)) and str(value).strip():
+                    return str(value).strip()
+        except Exception:
+            pass
+
+    # 4. Fallback variável de ambiente
     env_chat_id = os.environ.get("ALLOWED_TELEGRAM_CHAT_ID")
     if env_chat_id and str(env_chat_id).strip():
         return str(env_chat_id).strip()
+
     return None
 
 

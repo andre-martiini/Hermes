@@ -617,6 +617,7 @@ Responda:"""
 def on_tarefa_created_kg(event: firestore_fn.Event[firestore_fn.DocumentSnapshot]):
     """
     Fase 1 — Instanciação: gera kg_tags via Retrieval-First logo após a criação da tarefa.
+    Disparado para QUALQUER origem (frontend, Copiloto, Google Tasks sync, Telegram, etc).
     Não acessa o diário (ainda vazio). Custo: 1 chamada LLM leve.
     """
     if not event.data or not event.data.exists:
@@ -625,11 +626,15 @@ def on_tarefa_created_kg(event: firestore_fn.Event[firestore_fn.DocumentSnapshot
     task_data = event.data.to_dict() or {}
     task_id = event.params["taskId"]
 
-    # Não processa tarefas de sistema ou já com tags
+    # Já tem tags: nada a fazer
     if task_data.get("kg_tags"):
         return
-    if task_data.get("area_tematica") in ("SISTEMAS", None, ""):
+    # Única área excluída: tarefas internas do sistema
+    if task_data.get("area_tematica") == "SISTEMAS":
         return
+    # Fallback para tarefas sem area_tematica (ex: importadas do Google Tasks)
+    if not task_data.get("area_tematica"):
+        task_data["area_tematica"] = "GERAL"
 
     db = _get_db()
     api_key = _get_api_key(db)
@@ -651,7 +656,9 @@ def on_tarefa_created_kg(event: firestore_fn.Event[firestore_fn.DocumentSnapshot
                 )
             except Exception as exc:
                 print(f"[KG Fase1] Erro ao atualizar tag_vocabulary: {exc}")
-            print(f"[KG Fase1] Tags geradas para {task_id}: {tags}")
+            print(f"[KG Fase1] Tags geradas para {task_id} (área={task_data['area_tematica']}): {tags}")
+        else:
+            print(f"[KG Fase1] Nenhuma tag gerada para tarefa {task_id}")
     except Exception as e:
         print(f"[KG Fase1] Erro ao gerar tags para {task_id}: {e}")
 
