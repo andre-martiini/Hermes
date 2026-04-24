@@ -3,6 +3,7 @@ Hermes Core Logic — Telegram Integration
 Webhook receiver + Firestore-triggered async processor.
 """
 import json
+import html
 import os
 import re
 import tempfile
@@ -11,7 +12,7 @@ import time
 import unicodedata
 import wave
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Optional
 
@@ -106,8 +107,26 @@ def _get_allowed_chat_id() -> Optional[str]:
     return os.environ.get("ALLOWED_TELEGRAM_CHAT_ID")
 
 
+_HTML_ANCHOR_RE = re.compile(r"<a\s+[^>]*href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>", re.IGNORECASE | re.DOTALL)
+
+
+def _neutralize_hidden_links(text: str) -> str:
+    """Keep URLs visible in Telegram instead of allowing hidden anchor text."""
+    def repl(match: re.Match) -> str:
+        href = html.unescape((match.group(1) or "").strip())
+        label = re.sub(r"<[^>]+>", "", match.group(2) or "").strip() or href
+        safe_label = html.escape(label)
+        if href.startswith(("http://", "https://", "task:")):
+            safe_href = html.escape(href, quote=False)
+            return safe_label if href in label else f"{safe_label} ({safe_href})"
+        return safe_label
+
+    return _HTML_ANCHOR_RE.sub(repl, text or "")
+
+
 def _send_telegram_message(token: str, chat_id: str | int, text: str, parse_mode: str = "HTML"):
     """POST direto à Telegram Bot API."""
+    text = _neutralize_hidden_links(text)
     # Telegram HTML: truncate at 4096 chars
     if len(text) > 4096:
         text = text[:4090] + "\n..."
@@ -129,6 +148,7 @@ def _send_telegram_message_with_keyboard(
     token: str, chat_id: str | int, text: str, inline_keyboard: list, parse_mode: str = "HTML"
 ):
     """POST sendMessage com InlineKeyboardMarkup."""
+    text = _neutralize_hidden_links(text)
     if len(text) > 4096:
         text = text[:4090] + "\n..."
     resp = _requests.post(
@@ -397,13 +417,235 @@ def _handle_command(text: str, session: dict) -> Optional[str]:
 # Action context helpers (session locking)
 # ---------------------------------------------------------------------------
 
+_DRIVE_ID_PATTERNS = [
+    re.compile(r"/d/([a-zA-Z0-9_-]{10,})"),
+    re.compile(r"[?&]id=([a-zA-Z0-9_-]{10,})"),
+    re.compile(r"/folders/([a-zA-Z0-9_-]{10,})"),
+]
+
+
+def _extract_drive_file_id(value: str | None) -> str | None:
+    value = (value or "").strip()
+    if re.fullmatch(r"[a-zA-Z0-9_-]{10,}", value):
+        return value
+    for pattern in _DRIVE_ID_PATTERNS:
+        match = pattern.search(value)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _parse_diary_file_note(note: str | None) -> dict | None:
+    """Parse FILE:: diary rich notes created by the web diary UI."""
+    note = (note or "").strip()
+    if not note.startswith("FILE::"):
+        return None
+
+    payload = note[len("FILE::"):]
+    name = ""
+    value = ""
+    if payload.startswith("JSON::"):
+        try:
+            parsed = json.loads(payload[len("JSON::"):])
+            if isinstance(parsed, dict):
+                name = str(parsed.get("n") or "")
+                value = str(parsed.get("v") or "")
+        except Exception:
+            return None
+    else:
+        separator_index = payload.find("::")
+        if separator_index == -1:
+            value = payload
+        else:
+            name = payload[:separator_index]
+            value = payload[separator_index + 2:]
+
+    if not value:
+        return None
+    return {"nome": name or "Arquivo", "url": value}
+
+
+def _drive_url_from_file(file_info: dict) -> str:
+    url = (file_info.get("url") or "").strip()
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    fid = file_info.get("drive_file_id")
+    return f"https://drive.google.com/file/d/{fid}/view" if fid else ""
+
+
+def _extract_natural_context_query(text: str) -> str | None:
+    """Detects natural-language requests such as 'entre no contexto da acao X'."""
+    lowered = _normalize_for_matching(text).strip()
+    if not lowered:
+        return None
+
+    patterns = [
+        r"^(?:entre|entra|entrar)\s+(?:no|na|em)?\s*contexto\s*(?:da|do|de)?\s*(?:acao|tarefa)?\s*(?:da|do|de)?\s*(.*)$",
+        r"^(?:ative|ativa|ativar)\s+(?:o\s+)?contexto\s*(?:da|do|de)?\s*(?:acao|tarefa)?\s*(?:da|do|de)?\s*(.*)$",
+    ]
+    for pattern in patterns:
+        match = re.match(pattern, lowered, flags=re.IGNORECASE)
+        if match:
+            return (match.group(1) or "").strip(" .,:;-")
+    return None
+
+
+def _select_context_result(query: str, results: list) -> dict | None:
+    if not results:
+        return None
+    if len(results) == 1:
+        return results[0]
+
+    norm_query = _normalize_for_matching(query).strip()
+    if not norm_query:
+        return None
+
+    exact = [r for r in results if _normalize_for_matching(r.get("titulo", "")) == norm_query]
+    if len(exact) == 1:
+        return exact[0]
+
+    contained = [r for r in results if norm_query in _normalize_for_matching(r.get("titulo", ""))]
+    if len(contained) == 1:
+        return contained[0]
+    return None
+
+
+def _lock_action_session(session: dict, task_id: str, snapshot: dict) -> None:
+    session["contexto_ativo"] = "acao"
+    session["acao_id"] = task_id
+    session["acao_titulo"] = snapshot.get("titulo") or task_id
+    session["acao_context_snapshot"] = snapshot
+    session["history_acao"] = []
+
+
+def _format_context_locked_message(snapshot: dict) -> str:
+    titulo = html.escape(snapshot.get("titulo") or "acao")
+    arquivos_count = len(snapshot.get("arquivos_disponiveis") or [])
+    return (
+        f"🔒 <b>[Contexto: {titulo}]</b>\n\n"
+        "Contexto trancado. Estou focado exclusivamente nesta ação.\n"
+        f"Arquivos detectados no contexto: <b>{arquivos_count}</b>.\n\n"
+        "Use <i>Sair do Contexto</i> para retornar ao modo geral."
+    )
+
+
+def _is_context_file_request(text: str) -> bool:
+    lowered = _normalize_for_matching(text)
+    file_markers = (
+        "link",
+        "links",
+        "documento",
+        "documentos",
+        "arquivo",
+        "arquivos",
+        "anexo",
+        "anexos",
+    )
+    request_markers = (
+        "qual",
+        "quais",
+        "mande",
+        "manda",
+        "envie",
+        "enviar",
+        "me manda",
+        "pode me mandar",
+        "listar",
+        "liste",
+        "mostre",
+        "mostrar",
+    )
+    return any(marker in lowered for marker in file_markers) and any(marker in lowered for marker in request_markers)
+
+
+def _requested_date_from_text(text: str) -> str | None:
+    lowered = _normalize_for_matching(text)
+    try:
+        from zoneinfo import ZoneInfo
+        today = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    except Exception:
+        today = datetime.now(timezone.utc).date()
+
+    if "ontem" in lowered:
+        return (today - timedelta(days=1)).isoformat()
+    if "hoje" in lowered:
+        return today.isoformat()
+
+    match = re.search(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\b", lowered)
+    if not match:
+        return None
+    day = int(match.group(1))
+    month = int(match.group(2))
+    year_raw = match.group(3)
+    year = int(year_raw) if year_raw else today.year
+    if year < 100:
+        year += 2000
+    try:
+        return datetime(year, month, day).date().isoformat()
+    except ValueError:
+        return None
+
+
+def _format_context_files_response(acao_snapshot: dict, request_text: str) -> str:
+    arquivos = list(acao_snapshot.get("arquivos_disponiveis") or [])
+    date_filter = _requested_date_from_text(request_text)
+    if date_filter:
+        arquivos = [
+            a for a in arquivos
+            if str(a.get("data_diario") or a.get("data_criacao") or "").startswith(date_filter)
+        ]
+
+    lowered = _normalize_for_matching(request_text)
+    requested_terms = []
+    if "deferid" in lowered:
+        requested_terms.append("deferid")
+    if "indeferid" in lowered:
+        requested_terms.append("indeferid")
+    if requested_terms:
+        term_filtered = [
+            a for a in arquivos
+            if any(term in _normalize_for_matching(a.get("nome", "")) for term in requested_terms)
+        ]
+        if term_filtered:
+            arquivos = term_filtered
+
+    titulo = html.escape(acao_snapshot.get("titulo") or "acao")
+    if not arquivos:
+        when = f" em {date_filter}" if date_filter else ""
+        return (
+            f"<b>[Contexto: {titulo}]</b>\n\n"
+            f"Nao encontrei anexos ou links registrados{when} nesse contexto.\n"
+            "Nao vou criar links de exemplo. Se o arquivo estiver visivel no diario mas nao aparecer aqui, "
+            "provavelmente ele nao foi gravado no pool/snapshot da tarefa."
+        )
+
+    lines = [
+        f"<b>[Contexto: {titulo}]</b>",
+        "",
+        "Encontrei estes arquivos registrados no contexto. Estou mostrando a URL completa para evitar link oculto incorreto:",
+        "",
+    ]
+    for file_info in arquivos[:12]:
+        name = html.escape(file_info.get("nome") or "Arquivo sem nome")
+        url = html.escape(_drive_url_from_file(file_info), quote=False)
+        date_label = (file_info.get("data_diario") or file_info.get("data_criacao") or "")[:10]
+        date_suffix = f" ({html.escape(date_label)})" if date_label else ""
+        if url:
+            lines.append(f"- <b>{name}</b>{date_suffix}\n  {url}")
+        else:
+            fid = html.escape(file_info.get("drive_file_id") or "sem drive_file_id")
+            lines.append(f"- <b>{name}</b>{date_suffix}\n  DRIVE_FILE_ID: <code>{fid}</code>")
+
+    if len(arquivos) > 12:
+        lines.append(f"\nMais {len(arquivos) - 12} arquivo(s) omitido(s) para caber no Telegram.")
+    return "\n".join(lines)
+
+
 def _fetch_acao_snapshot(db, task_id: str) -> dict | None:
     """Busca e formata dados de uma tarefa para persistir no snapshot da sessão."""
     try:
-        import re as _re
         from main import get_drive_service
 
-        _DRIVE_ID_RE = _re.compile(r"/d/([a-zA-Z0-9_-]{10,})")
         doc = db.collection("tarefas").document(task_id).get()
         if not doc.exists:
             return None
@@ -437,16 +679,26 @@ def _fetch_acao_snapshot(db, task_id: str) -> dict | None:
 
         tags = data.get("kg_tags") or data.get("tags") or []
         arquivos_disponiveis = []
+        arquivos_seen = set()
         drive_service = None
-        for item in data.get("pool_dados", []):
-            if item.get("tipo") != "arquivo":
-                continue
-            fid = item.get("drive_file_id")
+
+        def add_file_candidate(nome: str, url: str, data_criacao: str = "", data_diario: str = ""):
+            nonlocal drive_service
+            fid = _extract_drive_file_id(url)
             if not fid:
-                match = _DRIVE_ID_RE.search(item.get("valor", ""))
-                fid = match.group(1) if match else None
-            if not fid:
-                continue
+                return
+            key = fid or f"{nome}|{url}"
+            if key in arquivos_seen:
+                for existing in arquivos_disponiveis:
+                    if existing.get("drive_file_id") == fid:
+                        if data_diario and not existing.get("data_diario"):
+                            existing["data_diario"] = data_diario
+                        if data_criacao and not existing.get("data_criacao"):
+                            existing["data_criacao"] = data_criacao
+                        if url and not existing.get("url"):
+                            existing["url"] = url
+                        break
+                return
             if drive_service is None:
                 try:
                     drive_service = get_drive_service()
@@ -456,13 +708,39 @@ def _fetch_acao_snapshot(db, task_id: str) -> dict | None:
                 try:
                     meta = drive_service.files().get(fileId=fid, fields="id,trashed").execute()
                     if meta.get("trashed"):
-                        continue
+                        return
                 except Exception:
-                    continue
+                    return
+            arquivos_seen.add(key)
             arquivos_disponiveis.append({
-                "nome": item.get("nome", "Arquivo sem nome"),
+                "nome": nome or "Arquivo sem nome",
                 "drive_file_id": fid,
+                "url": url,
+                "data_criacao": data_criacao or "",
+                "data_diario": data_diario or "",
             })
+
+        for item in data.get("pool_dados", []):
+            if item.get("tipo") != "arquivo":
+                continue
+            fid = item.get("drive_file_id")
+            raw_url = item.get("valor", "") or ""
+            url = raw_url if _extract_drive_file_id(raw_url) else (f"https://drive.google.com/file/d/{fid}/view" if fid else raw_url)
+            add_file_candidate(
+                item.get("nome", "Arquivo sem nome"),
+                url,
+                data_criacao=str(item.get("data_criacao") or ""),
+            )
+
+        for entry in acomp_raw:
+            parsed_file = _parse_diary_file_note(entry.get("nota"))
+            if not parsed_file:
+                continue
+            add_file_candidate(
+                parsed_file.get("nome") or "Arquivo",
+                parsed_file.get("url") or "",
+                data_diario=str(entry.get("data") or ""),
+            )
 
         return {
             "id": task_id,
@@ -479,7 +757,7 @@ def _fetch_acao_snapshot(db, task_id: str) -> dict | None:
             "diario_integral": "\n".join(diario_full)[-4000:],
             "acompanhamento_recente": acomp_entries,
             "tags": tags,
-            "arquivos_disponiveis": arquivos_disponiveis[:10],
+            "arquivos_disponiveis": arquivos_disponiveis[:20],
         }
     except Exception as e:
         print(f"[Session] Falha ao buscar tarefa {task_id}: {e}")
@@ -807,6 +1085,7 @@ def _build_system_instruction_guarded_v2(
         "7. Links de tarefas: use o formato task:{ID} no texto (ex: 'Acao task:abc123').\n"
         "8. Acione salvar_memoria_global apenas para fatos duraveis e preferencias estaveis.\n"
         "9. GOVERNANCA DE FONTES: ao descrever uma tarefa encontrada por consultar_historico_acoes, use SOMENTE os campos retornados por essa ferramenta. Se um campo nao constar no retorno da ferramenta, diga 'nao informado' em vez de inventar.\n"
+        "10. LINKS E ARQUIVOS: nunca crie hiperlinks, texto-ancora ou URLs que nao aparecam literalmente no contexto, em uma ferramenta ou em um DRIVE_FILE_ID real. Se o usuario pedir links e eles nao estiverem disponiveis, diga que nao encontrou.\n"
     )
 
     if not acao_snapshot:
@@ -845,6 +1124,7 @@ def _build_system_instruction_guarded_v2(
         "3. Este payload replica a estrutura de contexto da interface web: sistema_id, plano atual, diario integral, tags e arquivos disponiveis.\n"
         "4. Ao receber perguntas sobre a acao, responda com base nos dados acima.\n"
         "5. Se o usuario pedir para atualizar, criar passos ou registrar progresso, use as ferramentas disponiveis.\n"
+        "6. Se o usuario pedir links ou anexos, cite apenas as URLs/DRIVE_FILE_ID listados em Arquivos Disponiveis. Nunca use rotulos clicaveis como 'Acessar Pasta' sem mostrar a URL real.\n"
     )
     return base + acao_section
 
@@ -1261,6 +1541,57 @@ def _process_telegram_message(db, data: dict):
             )
         return
 
+    # --- Natural-language context lock ("entre no contexto da acao X") ---
+    natural_context_query = _extract_natural_context_query(text)
+    if natural_context_query is not None:
+        results = _search_actions_for_context(db, natural_context_query)
+        selected = _select_context_result(natural_context_query, results)
+        if selected:
+            snapshot = _fetch_acao_snapshot(db, selected["id"])
+            if not snapshot:
+                _send_telegram_session_message(
+                    db,
+                    token,
+                    chat_id,
+                    "Encontrei a acao, mas nao consegui carregar o snapshot real do contexto. Tente novamente em instantes.",
+                    session=session,
+                )
+                return
+            _lock_action_session(session, selected["id"], snapshot)
+            _save_session(db, chat_id, session)
+            _send_telegram_session_message(
+                db,
+                token,
+                chat_id,
+                _format_context_locked_message(snapshot),
+                session=session,
+            )
+            return
+
+        if results:
+            header = (
+                f"Encontrei mais de uma acao para <i>{html.escape(natural_context_query or 'sua busca')}</i>. "
+                "Toque na correta para eu travar o contexto real:"
+            )
+            _send_telegram_session_message(
+                db,
+                token,
+                chat_id,
+                header,
+                session=session,
+                inline_keyboard=_build_action_keyboard(results),
+            )
+            return
+
+        _send_telegram_session_message(
+            db,
+            token,
+            chat_id,
+            f"Nenhuma acao encontrada para <i>{html.escape(natural_context_query or text)}</i>. Nao ativei contexto sem uma acao real.",
+            session=session,
+        )
+        return
+
     # --- Command handler ---
     if text.startswith("/"):
         reply = _handle_command(text, session)
@@ -1286,6 +1617,12 @@ def _process_telegram_message(db, data: dict):
     request_acao_id = session.get("acao_id")
     # When locked to an action, pull its data snapshot for LLM injection
     acao_snapshot = session.get("acao_context_snapshot") if contexto_ativo == "acao" else None
+    if contexto_ativo == "acao" and request_acao_id:
+        fresh_snapshot = _fetch_acao_snapshot(db, request_acao_id)
+        if fresh_snapshot:
+            acao_snapshot = fresh_snapshot
+            session["acao_context_snapshot"] = fresh_snapshot
+            session["acao_titulo"] = fresh_snapshot.get("titulo") or session.get("acao_titulo")
     system_instruction = _build_system_instruction_guarded_v2(copilot_core, copilot_soul, contexto_ativo, acao_snapshot)
 
     # --- Restore history (trimmed) — isolated buffer when action-locked ---
@@ -1373,6 +1710,25 @@ def _process_telegram_message(db, data: dict):
     )
     internal_hermes_request = _is_internal_hermes_request(request_text_for_routing)
     explicit_web_request = _is_explicit_web_request(request_text_for_routing)
+
+    # Deterministic path for links/docs in a locked action context. This avoids
+    # the model inventing anchor text or Drive URLs when the user asks for files.
+    if contexto_ativo == "acao" and acao_snapshot and _is_context_file_request(request_text_for_routing):
+        response_text = _format_context_files_response(acao_snapshot, request_text_for_routing)
+        user_turn = {"role": "user", "parts": [{"text": p.text} for p in user_parts if hasattr(p, "text") and p.text]}
+        model_turn = {"role": "model", "parts": [{"text": response_text}]}
+        new_history = raw_history + [user_turn, model_turn]
+        if len(new_history) > _MAX_HISTORY_TURNS * 2:
+            new_history = new_history[-(_MAX_HISTORY_TURNS * 2):]
+        session[hist_key] = new_history
+        _save_session(db, chat_id, session)
+        _send_telegram_session_message(db, token, chat_id, response_text, session=session)
+        _perf_log(
+            "telegram.request.direct_context_files",
+            perf_state,
+            {"chat_id": chat_id, "acao_id": request_acao_id},
+        )
+        return
 
     # --- Memory context ---
     # Skips Firestore read for short/trivial messages (< 4 meaningful words)

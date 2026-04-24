@@ -31,6 +31,10 @@ interface FerramentasViewProps {
   onUploadFile: (file: File) => Promise<ConhecimentoItem | null>;
   initialDraftId?: string;
   initialDiagnosisId?: string;
+  pendingSharedAudioFile?: File | null;
+  onPendingSharedAudioFileConsumed?: () => void;
+  pendingSharedVideoFile?: File | null;
+  onPendingSharedVideoFileConsumed?: () => void;
 }
 
 export const FerramentasView: React.FC<FerramentasViewProps> = ({
@@ -51,6 +55,10 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   onUploadFile,
   initialDraftId,
   initialDiagnosisId,
+  pendingSharedAudioFile,
+  onPendingSharedAudioFileConsumed,
+  pendingSharedVideoFile,
+  onPendingSharedVideoFileConsumed,
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [textInput, setTextInput] = useState('');
@@ -116,15 +124,17 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   }
 
   if (activeTool === 'transcription') {
-    return <TranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} />;
+    return <TranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} initialFile={pendingSharedAudioFile} onInitialFileConsumed={onPendingSharedAudioFileConsumed} />;
   }
 
   if (activeTool === 'choir_rehearsals') {
-    return <ChoirRehearsalsTool 
-             onBack={() => setActiveTool(null)} 
-             showToast={showToast} 
-             knowledgeItems={knowledgeItems} 
-             onUploadFile={onUploadFile} 
+    return <ChoirRehearsalsTool
+             onBack={() => setActiveTool(null)}
+             showToast={showToast}
+             knowledgeItems={knowledgeItems}
+             onUploadFile={onUploadFile}
+             initialFile={pendingSharedVideoFile}
+             onInitialFileConsumed={onPendingSharedVideoFileConsumed}
            />;
   }
 
