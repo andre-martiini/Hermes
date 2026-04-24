@@ -7177,16 +7177,98 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 _real_name = _file_meta.get('name', 'documento')
                 _mime = _file_meta.get('mimeType', 'application/octet-stream')
 
-                # 2. Baixa o binário
+                from googleapiclient.http import MediaIoBaseDownload
+
+                # 2a. Google Workspace files must be exported, not downloaded
+                _GAPPS_EXPORT_MAP = {
+                    'application/vnd.google-apps.document': 'text/plain',
+                    'application/vnd.google-apps.spreadsheet': 'text/csv',
+                    'application/vnd.google-apps.presentation': 'text/plain',
+                }
+                if _mime in _GAPPS_EXPORT_MAP:
+                    _export_mime = _GAPPS_EXPORT_MAP[_mime]
+                    _req_dl = _drive_service.files().export_media(
+                        fileId=drive_file_id, mimeType=_export_mime
+                    )
+                    _fh = _io.BytesIO()
+                    _dl = MediaIoBaseDownload(_fh, _req_dl)
+                    _done = False
+                    while not _done:
+                        _, _done = _dl.next_chunk()
+                    _exported_text = _fh.getvalue().decode('utf-8', errors='replace').strip()
+                    _response = client.models.generate_content(
+                        model=model_id,
+                        contents=[(
+                            f"Você recebeu o conteúdo exportado do arquivo '{_real_name}'. "
+                            f"Responda exclusivamente à pergunta abaixo com base nesse conteúdo.\n\n"
+                            f"PERGUNTA: {query_especifica}\n\n"
+                            "REGRAS:\n"
+                            "- Se a informação existir, responda de forma precisa e cite o trecho de origem.\n"
+                            "- Se a informação não existir, declare: 'A informação solicitada não foi encontrada neste documento.'\n"
+                            "- Não invente dados externos.\n\n"
+                            f"CONTEÚDO DO DOCUMENTO:\n{_exported_text[:120000]}"
+                        )]
+                    )
+                    _answer = (_response.text or "").strip()
+                    return f"[Leitura de '{_real_name}']\n{_answer}" if _answer else "Não foi possível extrair a resposta do documento."
+
+                # 2b. Download binary for all other file types
                 _req_dl = _drive_service.files().get_media(fileId=drive_file_id)
                 _fh = _io.BytesIO()
-                from googleapiclient.http import MediaIoBaseDownload
                 _dl = MediaIoBaseDownload(_fh, _req_dl)
                 _done = False
                 while not _done:
                     _, _done = _dl.next_chunk()
                 _fh.seek(0)
                 _file_bytes = _fh.read()
+
+                # 2c. Office formats: extract text locally — Gemini File API does not support them
+                _OFFICE_DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                _OFFICE_PPTX = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+                _OFFICE_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                if _mime == _OFFICE_DOCX or _real_name.lower().endswith('.docx'):
+                    import mammoth as _mammoth
+                    _docx_result = _mammoth.extract_raw_text(_io.BytesIO(_file_bytes))
+                    _office_text = (_docx_result.value or '').strip()
+                    _response = client.models.generate_content(
+                        model=model_id,
+                        contents=[(
+                            f"Você recebeu o conteúdo extraído do arquivo Word '{_real_name}'. "
+                            f"Responda exclusivamente à pergunta abaixo com base nesse conteúdo.\n\n"
+                            f"PERGUNTA: {query_especifica}\n\n"
+                            "REGRAS:\n"
+                            "- Se a informação existir, responda de forma precisa e cite o trecho de origem.\n"
+                            "- Se a informação não existir, declare: 'A informação solicitada não foi encontrada neste documento.'\n"
+                            "- Não invente dados externos.\n\n"
+                            f"CONTEÚDO DO DOCUMENTO:\n{_office_text[:120000]}"
+                        )]
+                    )
+                    _answer = (_response.text or "").strip()
+                    return f"[Leitura de '{_real_name}']\n{_answer}" if _answer else "Não foi possível extrair a resposta do documento."
+                if _mime == _OFFICE_PPTX or _real_name.lower().endswith('.pptx'):
+                    from pptx import Presentation as _Presentation
+                    _prs = _Presentation(_io.BytesIO(_file_bytes))
+                    _slides_text = []
+                    for _slide in _prs.slides:
+                        for _shape in _slide.shapes:
+                            if hasattr(_shape, 'text') and _shape.text.strip():
+                                _slides_text.append(_shape.text.strip())
+                    _office_text = '\n'.join(_slides_text).strip()
+                    _response = client.models.generate_content(
+                        model=model_id,
+                        contents=[(
+                            f"Você recebeu o conteúdo extraído da apresentação PowerPoint '{_real_name}'. "
+                            f"Responda exclusivamente à pergunta abaixo com base nesse conteúdo.\n\n"
+                            f"PERGUNTA: {query_especifica}\n\n"
+                            "REGRAS:\n"
+                            "- Se a informação existir, responda de forma precisa e cite o trecho de origem.\n"
+                            "- Se a informação não existir, declare: 'A informação solicitada não foi encontrada neste documento.'\n"
+                            "- Não invente dados externos.\n\n"
+                            f"CONTEÚDO DO DOCUMENTO:\n{_office_text[:120000]}"
+                        )]
+                    )
+                    _answer = (_response.text or "").strip()
+                    return f"[Leitura de '{_real_name}']\n{_answer}" if _answer else "Não foi possível extrair a resposta do documento."
 
                 if is_pdf_mime_type(_real_name, _mime):
                     _pdf_result = extract_pdf_text_with_fallback(
