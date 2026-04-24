@@ -1438,6 +1438,63 @@ def _send_tts_failure_notice_contextual(db, token: str, chat_id: str | int, sess
     )
 
 
+def _send_contextual_response(
+    db,
+    token: str,
+    chat_id: str | int,
+    text: str,
+    session: dict | None = None,
+    response_mode: str = "texto",
+    gemini_key: str | None = None,
+    voice_profile: str = "masculina",
+    inline_keyboard: list | None = None,
+    perf_state: dict | None = None,
+):
+    """Envia resposta factual pronta e, se pedido, converte o mesmo texto em audio."""
+    message_id = _send_telegram_session_message(
+        db,
+        token,
+        chat_id,
+        text,
+        session=session,
+        inline_keyboard=inline_keyboard,
+    )
+    if response_mode != "audio":
+        return message_id
+    if not gemini_key:
+        _send_tts_failure_notice_contextual(db, token, chat_id, session=session)
+        return message_id
+
+    try:
+        with _telegram_action_heartbeat(token, chat_id, "record_voice"):
+            tts_script = _run_gemini_text(
+                gemini_key=gemini_key,
+                system_instruction=_build_tts_director_instruction(voice_profile),
+                user_prompt=text,
+            )
+            audio_bytes, audio_mime = _run_gemini_tts(
+                gemini_key=gemini_key,
+                script_text=tts_script or text,
+                voice_profile=voice_profile,
+            )
+            tg_audio_bytes, tg_audio_mime, tg_audio_name = _transcode_audio_for_telegram_voice(audio_bytes, audio_mime)
+            if tg_audio_bytes:
+                if not _send_telegram_voice(token, chat_id, tg_audio_bytes, tg_audio_name, tg_audio_mime):
+                    raise RuntimeError("Falha ao enviar voice note pelo Telegram.")
+            else:
+                wav_bytes, wav_mime, wav_name = _wrap_pcm_audio_as_wav(audio_bytes, audio_mime)
+                if not _send_telegram_document(token, chat_id, wav_bytes, wav_name, wav_mime, caption="Resposta em audio"):
+                    raise RuntimeError("Falha ao enviar arquivo de audio.")
+        if perf_state is not None:
+            _perf_mark(perf_state, "telegram.audio_response")
+    except Exception as tts_err:
+        print(f"[Core] Deterministic TTS error: {tts_err}")
+        if perf_state is not None:
+            _perf_log("telegram.request.deterministic_tts_error", perf_state, {"chat_id": str(chat_id), "error": str(tts_err)})
+        _send_tts_failure_notice_contextual(db, token, chat_id, session=session)
+    return message_id
+
+
 def _run_gemini_turn(
     db,
     gemini_key: str,
@@ -1610,22 +1667,30 @@ def _process_telegram_message(db, data: dict):
         if selected:
             snapshot = _fetch_acao_snapshot(db, selected["id"])
             if not snapshot:
-                _send_telegram_session_message(
+                _send_contextual_response(
                     db,
                     token,
                     chat_id,
                     "Encontrei a acao, mas nao consegui carregar o snapshot real do contexto. Tente novamente em instantes.",
                     session=session,
+                    response_mode=response_mode,
+                    gemini_key=gemini_key,
+                    voice_profile=voice_profile,
+                    perf_state=perf_state,
                 )
                 return
             _lock_action_session(session, selected["id"], snapshot)
             _save_session(db, chat_id, session)
-            _send_telegram_session_message(
+            _send_contextual_response(
                 db,
                 token,
                 chat_id,
                 _format_context_locked_message(snapshot),
                 session=session,
+                response_mode=response_mode,
+                gemini_key=gemini_key,
+                voice_profile=voice_profile,
+                perf_state=perf_state,
             )
             return
 
@@ -1634,22 +1699,30 @@ def _process_telegram_message(db, data: dict):
                 f"Encontrei algumas acoes para <i>{html.escape(action_search_context_query)}</i>. "
                 "Toque na correta para eu travar o contexto real:"
             )
-            _send_telegram_session_message(
+            _send_contextual_response(
                 db,
                 token,
                 chat_id,
                 header,
                 session=session,
                 inline_keyboard=_build_action_keyboard(results),
+                response_mode=response_mode,
+                gemini_key=gemini_key,
+                voice_profile=voice_profile,
+                perf_state=perf_state,
             )
             return
 
-        _send_telegram_session_message(
+        _send_contextual_response(
             db,
             token,
             chat_id,
             f"Nenhuma acao encontrada para <i>{html.escape(action_search_context_query)}</i>. Nao ativei contexto sem uma acao real.",
             session=session,
+            response_mode=response_mode,
+            gemini_key=gemini_key,
+            voice_profile=voice_profile,
+            perf_state=perf_state,
         )
         return
 
@@ -1661,22 +1734,30 @@ def _process_telegram_message(db, data: dict):
         if selected:
             snapshot = _fetch_acao_snapshot(db, selected["id"])
             if not snapshot:
-                _send_telegram_session_message(
+                _send_contextual_response(
                     db,
                     token,
                     chat_id,
                     "Encontrei a acao, mas nao consegui carregar o snapshot real do contexto. Tente novamente em instantes.",
                     session=session,
+                    response_mode=response_mode,
+                    gemini_key=gemini_key,
+                    voice_profile=voice_profile,
+                    perf_state=perf_state,
                 )
                 return
             _lock_action_session(session, selected["id"], snapshot)
             _save_session(db, chat_id, session)
-            _send_telegram_session_message(
+            _send_contextual_response(
                 db,
                 token,
                 chat_id,
                 _format_context_locked_message(snapshot),
                 session=session,
+                response_mode=response_mode,
+                gemini_key=gemini_key,
+                voice_profile=voice_profile,
+                perf_state=perf_state,
             )
             return
 
@@ -1685,22 +1766,30 @@ def _process_telegram_message(db, data: dict):
                 f"Encontrei mais de uma acao para <i>{html.escape(natural_context_query or 'sua busca')}</i>. "
                 "Toque na correta para eu travar o contexto real:"
             )
-            _send_telegram_session_message(
+            _send_contextual_response(
                 db,
                 token,
                 chat_id,
                 header,
                 session=session,
                 inline_keyboard=_build_action_keyboard(results),
+                response_mode=response_mode,
+                gemini_key=gemini_key,
+                voice_profile=voice_profile,
+                perf_state=perf_state,
             )
             return
 
-        _send_telegram_session_message(
+        _send_contextual_response(
             db,
             token,
             chat_id,
             f"Nenhuma acao encontrada para <i>{html.escape(natural_context_query or text)}</i>. Nao ativei contexto sem uma acao real.",
             session=session,
+            response_mode=response_mode,
+            gemini_key=gemini_key,
+            voice_profile=voice_profile,
+            perf_state=perf_state,
         )
         return
 
@@ -1834,7 +1923,17 @@ def _process_telegram_message(db, data: dict):
             new_history = new_history[-(_MAX_HISTORY_TURNS * 2):]
         session[hist_key] = new_history
         _save_session(db, chat_id, session)
-        _send_telegram_session_message(db, token, chat_id, response_text, session=session)
+        _send_contextual_response(
+            db,
+            token,
+            chat_id,
+            response_text,
+            session=session,
+            response_mode=response_mode,
+            gemini_key=gemini_key,
+            voice_profile=voice_profile,
+            perf_state=perf_state,
+        )
         _perf_log(
             "telegram.request.direct_context_files",
             perf_state,
