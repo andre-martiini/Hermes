@@ -2056,10 +2056,9 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
         t = task_doc.to_dict()
 
         title = t.get('titulo', 'Ação Pendente')
-
-        task_id = task_doc.id
-
-        
+        task_reminders = _normalize_task_reminders(t)
+        due_reminder = next((reminder for reminder in task_reminders if not reminder.get('reminder_sent')), None)
+        reminder_iso = due_reminder.get('reminder_at') if due_reminder else t.get('reminder_at')
 
         emit_notification_backend(
 
@@ -2075,9 +2074,28 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
 
         
 
+        owner_uid = t.get('created_by_uid')
+        telegram_chat_id = _resolve_telegram_chat_id_for_uid(db, owner_uid) or _resolve_default_telegram_chat_id(db)
+        telegram_message = _build_task_reminder_telegram_message(t, reminder_iso)
+        if telegram_chat_id:
+            _send_telegram_message_raw(db, telegram_chat_id, telegram_message)
+        else:
+            print(f"[Telegram] Nenhum chat_id encontrado para lembrete da tarefa {task_doc.id}")
+
         # Marca como enviado para não repetir
 
-        task_doc.reference.update({'reminder_sent': True})
+        if due_reminder:
+            updated_reminders = []
+            matched = False
+            for reminder in task_reminders:
+                if not matched and reminder.get('id') == due_reminder.get('id'):
+                    updated_reminders.append({**reminder, 'reminder_sent': True})
+                    matched = True
+                else:
+                    updated_reminders.append(reminder)
+            task_doc.reference.update(_build_task_reminder_state_payload(updated_reminders))
+        else:
+            task_doc.reference.update({'reminder_sent': True})
 
 
 
@@ -4894,6 +4912,136 @@ def _resolve_telegram_chat_id_for_uid(db, uid: str | None):
     except Exception as exc:
         print(f"[DeepResearch] Falha ao resolver telegram_chat_id para uid={uid}: {exc}")
     return None
+
+
+def _resolve_default_telegram_chat_id(db):
+    try:
+        candidates = (
+            db.collection("usuarios")
+            .where("telegram_chat_id", "!=", None)
+            .limit(1)
+            .stream()
+        )
+        for doc in candidates:
+            data = doc.to_dict() or {}
+            value = data.get("telegram_chat_id")
+            if isinstance(value, (str, int)) and str(value).strip():
+                return str(value).strip()
+    except Exception as exc:
+        print(f"[Telegram] Falha ao resolver chat_id padrao: {exc}")
+    return None
+
+
+def _send_telegram_message_raw(db, chat_id: str | int | None, text: str):
+    if not chat_id or not text:
+        return False
+    try:
+        import requests
+
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
+        bot_token = keys_doc.to_dict().get('telegram_bot_token') if keys_doc.exists else None
+        bot_token = bot_token or os.environ.get('TELEGRAM_BOT_TOKEN')
+        if not bot_token:
+            print("[Telegram] TELEGRAM_BOT_TOKEN nao configurado.")
+            return False
+
+        resp = requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={"chat_id": str(chat_id), "text": text},
+            timeout=10
+        )
+        if not resp.ok:
+            print(f"[Telegram] Falha ao enviar lembrete: {resp.status_code} {resp.text[:300]}")
+            return False
+        return True
+    except Exception as exc:
+        print(f"[Telegram] Erro ao enviar lembrete: {exc}")
+        return False
+
+
+def _build_task_reminder_telegram_message(task: dict, reminder_iso: str | None):
+    title = (task.get('titulo') or 'Ação pendente').strip()
+    status = (task.get('status') or 'não informado').strip()
+    descricao = (task.get('descricao') or '').strip()
+    reminder_label = ''
+    if reminder_iso:
+        try:
+            reminder_dt = datetime.fromisoformat(str(reminder_iso))
+            reminder_label = reminder_dt.strftime('%d/%m/%Y às %H:%M')
+        except Exception:
+            reminder_label = str(reminder_iso)
+
+    plan_items = task.get('plano_acao') or []
+    pending_steps = []
+    for item in plan_items:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get('text') or '').strip()
+        if text and not item.get('completed'):
+            pending_steps.append(text)
+        if len(pending_steps) >= 3:
+            break
+
+    lines = [
+        "Lembrete de ação",
+        f"Título: {title}",
+    ]
+
+    if reminder_label:
+        lines.append(f"Agendado para: {reminder_label}")
+    lines.append(f"Status atual: {status}")
+
+    if descricao:
+        resumo = descricao if len(descricao) <= 220 else f"{descricao[:217]}..."
+        lines.append(f"Contexto: {resumo}")
+
+    if pending_steps:
+        lines.append("Próximas etapas:")
+        for idx, step in enumerate(pending_steps, start=1):
+            lines.append(f"{idx}. {step}")
+    else:
+        lines.append("Próximas etapas: revise a ação e defina o próximo passo operacional.")
+
+    return "\n".join(lines)
+
+
+def _normalize_task_reminders(task: dict):
+    reminders = task.get('reminders') or []
+    normalized = []
+    if isinstance(reminders, list):
+        for idx, reminder in enumerate(reminders):
+            if not isinstance(reminder, dict):
+                continue
+            reminder_at = reminder.get('reminder_at')
+            if not reminder_at:
+                continue
+            normalized.append({
+                'id': str(reminder.get('id') or f"legacy-{idx}"),
+                'reminder_at': str(reminder_at),
+                'reminder_sent': bool(reminder.get('reminder_sent')),
+                'created_at': str(reminder.get('created_at') or reminder_at),
+            })
+
+    if not normalized and task.get('reminder_at'):
+        normalized.append({
+            'id': 'legacy-reminder',
+            'reminder_at': str(task.get('reminder_at')),
+            'reminder_sent': bool(task.get('reminder_sent')),
+            'created_at': str(task.get('data_atualizacao') or task.get('data_criacao') or task.get('reminder_at')),
+        })
+
+    normalized.sort(key=lambda item: item.get('reminder_at') or '')
+    return normalized
+
+
+def _build_task_reminder_state_payload(reminders: list[dict]):
+    ordered = sorted(reminders, key=lambda item: item.get('reminder_at') or '')
+    next_pending = next((item for item in ordered if not item.get('reminder_sent')), None)
+    return {
+        'reminders': ordered,
+        'reminder_at': next_pending.get('reminder_at') if next_pending else None,
+        'reminder_sent': bool(next_pending.get('reminder_sent')) if next_pending else True,
+    }
 
 @https_fn.on_call(
 

@@ -38,6 +38,13 @@ export interface ActionPlanHistory {
     items: ActionPlanItem[];
 }
 
+export interface TaskReminder {
+    id: string;
+    reminder_at: string; // ISO date string for reminder
+    reminder_sent: boolean;
+    created_at: string;
+}
+
 export interface Tarefa {
     id: string;
     titulo: string;
@@ -68,6 +75,7 @@ export interface Tarefa {
     ordem?: number;
     reminder_at?: string; // ISO date string for reminder
     reminder_sent?: boolean;
+    reminders?: TaskReminder[];
     tipo_acao?: TipoAcao;
     plano_acao?: ActionPlanItem[];
     plano_acao_historico?: ActionPlanHistory[];
