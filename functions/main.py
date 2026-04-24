@@ -4929,6 +4929,10 @@ def _resolve_default_telegram_chat_id(db):
                 return str(value).strip()
     except Exception as exc:
         print(f"[Telegram] Falha ao resolver chat_id padrao: {exc}")
+    # Fallback para sistema mono-usuário: usa a variável de ambiente já configurada para o bot
+    env_chat_id = os.environ.get("ALLOWED_TELEGRAM_CHAT_ID")
+    if env_chat_id and str(env_chat_id).strip():
+        return str(env_chat_id).strip()
     return None
 
 
