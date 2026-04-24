@@ -32,6 +32,10 @@ _STOPWORDS = {
     "de", "a", "o", "que", "e", "do", "da", "em", "um", "uma",
     "os", "as", "no", "na", "com", "por", "para", "dos", "das",
     "nos", "nas", "ao", "se", "ou", "is", "the", "and", "of",
+    "acao", "acoes", "tarefa", "tarefas", "pesquisa", "pesquisar",
+    "pesquise", "busca", "buscar", "busque", "procura", "procurar",
+    "procure", "localiza", "localizar", "localize", "ative", "ativar",
+    "ativa", "contexto",
 }
 
 # Aliases de status: normalizado sem acento → valor canônico (também sem acento)
@@ -132,6 +136,59 @@ def _doc_bate_com_padrao(doc_dict: dict, padrao: re.Pattern) -> bool:
         if isinstance(nota, str) and padrao.search(_remover_acentos(nota)):
             return True
     return False
+
+
+def _texto_normalizado(valor) -> str:
+    if isinstance(valor, str):
+        return _remover_acentos(valor).lower()
+    if isinstance(valor, list):
+        return " ".join(_texto_normalizado(item) for item in valor)
+    if isinstance(valor, dict):
+        return " ".join(_texto_normalizado(item) for item in valor.values())
+    return _remover_acentos(str(valor or "")).lower()
+
+
+def _calcular_score(data: dict, termos: list[str]) -> int:
+    if not termos:
+        return 0
+
+    termos_norm = [_remover_acentos(t).lower() for t in termos if t]
+    titulo = _texto_normalizado(data.get("titulo"))
+    processo = _texto_normalizado(data.get("processo_sei"))
+    descricao = _texto_normalizado(data.get("descricao"))
+    notas = _texto_normalizado(data.get("notas"))
+    sintese = _texto_normalizado(data.get("sintese_demanda") or data.get("demanda"))
+    tags = _texto_normalizado(data.get("kg_tags") or data.get("tags"))
+    pool = _texto_normalizado(data.get("pool_dados"))
+    diario = _texto_normalizado(data.get("acompanhamento"))
+
+    score = 0
+    title_hits = 0
+    for termo in termos_norm:
+        if termo in titulo:
+            score += 12
+            title_hits += 1
+        if termo in processo:
+            score += 14
+        if termo in descricao:
+            score += 5
+        if termo in sintese:
+            score += 5
+        if termo in tags:
+            score += 4
+        if termo in notas:
+            score += 3
+        if termo in pool:
+            score += 3
+        if termo in diario:
+            score += 2
+
+    if title_hits == len(termos_norm):
+        score += 30
+    elif title_hits >= max(1, len(termos_norm) - 1):
+        score += 18
+
+    return score
 
 
 def _matches_filters(
@@ -252,10 +309,11 @@ def buscar_tarefas(
                 status = status_detectado
 
         # Filtra stopwords e termos muito curtos dos termos de busca
-        termos_raw = [t.strip() for t in (query or "").split() if t.strip()]
+        termos_raw = re.findall(r"[\w./-]+", query or "", flags=re.UNICODE)
         termos = [t for t in termos_raw if _remover_acentos(t).lower() not in _STOPWORDS and len(t) > 2]
         if not termos and termos_raw:
             termos = termos_raw  # preserva se tudo era stopword (ex: busca por "oi")
+        collect_limit = min(FALLBACK_LIMIT, max(limite * 10, limite, RESULT_LIMIT))
 
         # ── Estratégia: UM único filtro Firestore para evitar índice composto ─
         # Se houver status, filtra só por status (igualdade — índice automático).
@@ -350,8 +408,10 @@ def buscar_tarefas(
                 corte_str=corte_str,
             ):
                 continue
-            resultados.append(_formatar_resultado(doc.id, data))
-            if len(resultados) >= limite:
+            result = _formatar_resultado(doc.id, data)
+            result["_match_score"] = _calcular_score(data, termos)
+            resultados.append(result)
+            if len(resultados) >= collect_limit:
                 break
 
         # ── Segunda chance: relaxa match_mode para "any" ──────────────────────
@@ -370,8 +430,10 @@ def buscar_tarefas(
                     corte_str=None,  # ignora corte temporal na segunda chance
                 ):
                     continue
-                resultados.append(_formatar_resultado(doc.id, data))
-                if len(resultados) >= limite:
+                result = _formatar_resultado(doc.id, data)
+                result["_match_score"] = _calcular_score(data, termos)
+                resultados.append(result)
+                if len(resultados) >= collect_limit:
                     break
 
         # Terceira chance: alguns documentos usam data_criacao como Timestamp
@@ -408,11 +470,17 @@ def buscar_tarefas(
                         corte_str=None,
                     ):
                         continue
-                    resultados.append(_formatar_resultado(doc.id, data))
-                    if len(resultados) >= limite:
+                    result = _formatar_resultado(doc.id, data)
+                    result["_match_score"] = _calcular_score(data, termos)
+                    resultados.append(result)
+                    if len(resultados) >= collect_limit:
                         break
                 if resultados:
                     break
+
+        resultados = sorted(resultados, key=lambda r: r.get("_match_score", 0), reverse=True)[:limite]
+        for result in resultados:
+            result.pop("_match_score", None)
 
         response: dict = {"resultados": resultados, "erro": None}
         if aviso:

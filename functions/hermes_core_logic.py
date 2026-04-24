@@ -473,6 +473,54 @@ def _drive_url_from_file(file_info: dict) -> str:
     return f"https://drive.google.com/file/d/{fid}/view" if fid else ""
 
 
+_ACTION_SEARCH_STOPWORDS = {
+    "de", "a", "o", "que", "e", "do", "da", "em", "um", "uma",
+    "os", "as", "no", "na", "com", "por", "para", "dos", "das",
+    "nos", "nas", "ao", "se", "ou", "acao", "acoes", "tarefa", "tarefas",
+    "pesquisa", "pesquisar", "pesquise", "busca", "buscar", "busque",
+    "procura", "procurar", "procure", "localiza", "localizar", "localize",
+    "ative", "ativar", "ativa", "contexto", "hermes", "por", "favor",
+}
+
+
+def _action_query_terms(text: str) -> list[str]:
+    normalized = _normalize_for_matching(text)
+    return [
+        term
+        for term in re.findall(r"[\w./-]+", normalized, flags=re.UNICODE)
+        if term not in _ACTION_SEARCH_STOPWORDS and len(term) > 2
+    ]
+
+
+def _clean_action_search_query(text: str) -> str:
+    query = _normalize_for_matching(text)
+    query = re.sub(r"\b(?:hermes|por favor)\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\b(?:pesquise|pesquisa|pesquisar|busque|busca|buscar|procure|procura|procurar|localize|localiza|localizar)\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\b(?:a|uma|o|um)?\s*(?:acao|acoes|tarefa|tarefas)\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\b(?:e\s+)?(?:ative|ativa|ativar|entre|entra|entrar)\b.*\bcontexto\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\b(?:no|na|em|o)?\s*contexto\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\s+", " ", query)
+    return query.strip(" .,:;-")
+
+
+def _extract_action_search_context_query(text: str) -> str | None:
+    lowered = _normalize_for_matching(text).strip()
+    if not lowered:
+        return None
+    wants_search = any(marker in lowered for marker in (
+        "pesquisa", "pesquise", "buscar", "busca", "busque",
+        "procura", "procure", "localiza", "localize",
+    ))
+    mentions_action = any(marker in lowered for marker in ("acao", "acoes", "tarefa", "tarefas"))
+    wants_context = "contexto" in lowered and any(marker in lowered for marker in (
+        "ative", "ativa", "ativar", "entre", "entra", "entrar",
+    ))
+    if not (wants_search and mentions_action and wants_context):
+        return None
+    cleaned = _clean_action_search_query(text)
+    return cleaned or None
+
+
 def _extract_natural_context_query(text: str) -> str | None:
     """Detects natural-language requests such as 'entre no contexto da acao X'."""
     lowered = _normalize_for_matching(text).strip()
@@ -507,6 +555,19 @@ def _select_context_result(query: str, results: list) -> dict | None:
     contained = [r for r in results if norm_query in _normalize_for_matching(r.get("titulo", ""))]
     if len(contained) == 1:
         return contained[0]
+
+    query_terms = set(_action_query_terms(query))
+    if query_terms:
+        scored = []
+        for r in results:
+            title_terms = set(_action_query_terms(r.get("titulo", "")))
+            overlap = len(query_terms & title_terms)
+            scored.append((overlap, r))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        best_score = scored[0][0]
+        second_score = scored[1][0] if len(scored) > 1 else 0
+        if best_score >= 2 and best_score > second_score:
+            return scored[0][1]
     return None
 
 
@@ -769,9 +830,7 @@ def _search_actions_for_context(db, query: str) -> list:
     from tools.busca_grafo import buscar_tarefas
 
     if query:
-        _STOPWORDS = {"de", "a", "o", "que", "e", "do", "da", "em", "um", "uma",
-                      "os", "as", "no", "na", "com", "por", "para"}
-        terms = [w for w in query.lower().split() if w not in _STOPWORDS and len(w) > 2]
+        terms = _action_query_terms(query)
         mode = "all" if len(terms) >= 2 else "any"
         res = buscar_tarefas(query, match_mode=mode, limite=5)
         if mode == "all" and not res.get("resultados"):
@@ -1086,6 +1145,7 @@ def _build_system_instruction_guarded_v2(
         "8. Acione salvar_memoria_global apenas para fatos duraveis e preferencias estaveis.\n"
         "9. GOVERNANCA DE FONTES: ao descrever uma tarefa encontrada por consultar_historico_acoes, use SOMENTE os campos retornados por essa ferramenta. Se um campo nao constar no retorno da ferramenta, diga 'nao informado' em vez de inventar.\n"
         "10. LINKS E ARQUIVOS: nunca crie hiperlinks, texto-ancora ou URLs que nao aparecam literalmente no contexto, em uma ferramenta ou em um DRIVE_FILE_ID real. Se o usuario pedir links e eles nao estiverem disponiveis, diga que nao encontrou.\n"
+        "11. PESQUISA DE ACOES: se o usuario pedir para pesquisar/localizar uma acao ou tarefa, use consultar_historico_acoes primeiro. Nao substitua resultado ausente por acervo, email ou internet, salvo se o usuario pedir explicitamente essa ampliacao.\n"
     )
 
     if not acao_snapshot:
@@ -1541,6 +1601,58 @@ def _process_telegram_message(db, data: dict):
             )
         return
 
+    # --- Natural-language action search + context lock
+    # Ex: "pesquisa a acao de X e ative o contexto"
+    action_search_context_query = _extract_action_search_context_query(text)
+    if action_search_context_query:
+        results = _search_actions_for_context(db, action_search_context_query)
+        selected = _select_context_result(action_search_context_query, results)
+        if selected:
+            snapshot = _fetch_acao_snapshot(db, selected["id"])
+            if not snapshot:
+                _send_telegram_session_message(
+                    db,
+                    token,
+                    chat_id,
+                    "Encontrei a acao, mas nao consegui carregar o snapshot real do contexto. Tente novamente em instantes.",
+                    session=session,
+                )
+                return
+            _lock_action_session(session, selected["id"], snapshot)
+            _save_session(db, chat_id, session)
+            _send_telegram_session_message(
+                db,
+                token,
+                chat_id,
+                _format_context_locked_message(snapshot),
+                session=session,
+            )
+            return
+
+        if results:
+            header = (
+                f"Encontrei algumas acoes para <i>{html.escape(action_search_context_query)}</i>. "
+                "Toque na correta para eu travar o contexto real:"
+            )
+            _send_telegram_session_message(
+                db,
+                token,
+                chat_id,
+                header,
+                session=session,
+                inline_keyboard=_build_action_keyboard(results),
+            )
+            return
+
+        _send_telegram_session_message(
+            db,
+            token,
+            chat_id,
+            f"Nenhuma acao encontrada para <i>{html.escape(action_search_context_query)}</i>. Nao ativei contexto sem uma acao real.",
+            session=session,
+        )
+        return
+
     # --- Natural-language context lock ("entre no contexto da acao X") ---
     natural_context_query = _extract_natural_context_query(text)
     if natural_context_query is not None:
@@ -1773,8 +1885,12 @@ def _process_telegram_message(db, data: dict):
 
         _STOPWORDS_TG = {"de", "a", "o", "que", "e", "do", "da", "em", "um", "uma",
                          "os", "as", "no", "na", "com", "por", "para", "dos", "das",
-                         "nos", "nas", "ao", "se", "ou"}
-        _tg_terms = [w for w in query.lower().split() if w not in _STOPWORDS_TG and len(w) > 2]
+                         "nos", "nas", "ao", "se", "ou", "acao", "acoes", "tarefa",
+                         "tarefas", "pesquisa", "pesquisar", "pesquise", "busca",
+                         "buscar", "busque", "procura", "procurar", "procure",
+                         "localiza", "localizar", "localize", "ative", "ativar",
+                         "ativa", "contexto"}
+        _tg_terms = [w for w in re.findall(r"[\w./-]+", _normalize_for_matching(query), flags=re.UNICODE) if w not in _STOPWORDS_TG and len(w) > 2]
         _tg_mode = "all" if len(_tg_terms) >= 2 else "any"
         res = buscar_tarefas(query, area_tematica=area_tematica, match_mode=_tg_mode,
                              data_limite_inicio=data_limite_inicio, data_limite_fim=data_limite_fim,
