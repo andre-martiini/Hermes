@@ -225,7 +225,7 @@ export const TimeGrid = ({
             clientY >= sidebarRect.top &&
             clientY <= sidebarRect.bottom
           ) {
-            onTaskUpdate(dragging.id, { horario_inicio: null, horario_fim: null });
+            onTaskUpdate(dragging.id, { horario_inicio: undefined, horario_fim: undefined });
             setDragging(null);
             return;
           }
@@ -455,7 +455,7 @@ export const TimeGrid = ({
                          <div className="w-8 h-1 bg-slate-300 rounded-full shadow-sm"></div>
                        </div>
                      </div>
-                     {isResizing && (
+                     {isResizing && resizing && (
                          (() => {
                            const deltaY = resizing.currentY - resizing.startY;
                            const deltaMin = Math.round((deltaY / hourHeight) * 60 / step) * step;

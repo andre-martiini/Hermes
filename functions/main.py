@@ -10484,3 +10484,6 @@ def deep_research_worker(event: firestore_fn.Event[firestore_fn.DocumentSnapshot
         })
 
         send_telegram_notification(f"❌ A pesquisa profunda sobre '{topic}' falhou ou excedeu o limite de tempo.\nErro: {error_msg[:100]}")
+
+# Import daily WIP reset job
+from daily_reset_job import daily_wip_reset_and_degradation

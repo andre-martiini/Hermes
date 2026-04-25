@@ -2657,6 +2657,43 @@ const App: React.FC = () => {
   const handleUpdateTarefa = async (id: string, updates: Partial<Tarefa>, suppressToast = false) => {
     const previousTask = tarefas.find(t => t.id === id);
 
+    // Bloqueio de WIP para raia de 'avanco'
+    const isWipConstrained = (t?: Tarefa, payload?: Partial<Tarefa>) => {
+      const lane = payload?.execution_lane ?? t?.execution_lane ?? 'avanco';
+      return lane === 'avanco';
+    };
+
+    const willBeSetToToday = () => {
+      const todayStr = formatDateLocalISO(new Date());
+      const hasDateLimit = Object.prototype.hasOwnProperty.call(updates, 'data_limite');
+      const hasDateStart = Object.prototype.hasOwnProperty.call(updates, 'data_inicio');
+      const singleDate = (updates.data_limite ?? updates.data_inicio ?? '') as string;
+      return (hasDateLimit || hasDateStart) && singleDate === todayStr;
+    };
+
+    if (willBeSetToToday() && previousTask && isWipConstrained(previousTask, updates)) {
+      const oldDate = previousTask.data_limite || previousTask.data_inicio;
+      const todayStr = formatDateLocalISO(new Date());
+      // Só contar se a data estiver REALMENTE mudando para hoje (e não já era hoje)
+      if (oldDate !== todayStr) {
+         // Contar WIP atual de 'avanco' agendado para hoje e em andamento
+         const wipCount = tarefas.filter(t => {
+           if (normalizeStatus(t.status) === 'concluido' || t.status === 'excluído') return false;
+           const tLane = t.execution_lane || 'avanco';
+           if (tLane !== 'avanco') return false;
+           const tDate = t.data_limite || t.data_inicio;
+           return tDate === todayStr && t.id !== id;
+         }).length;
+
+         const wipLimit = appSettings.wipLimit || 5;
+
+         if (wipCount >= wipLimit) {
+           showToast(`Limite de WIP (${wipLimit}) atingido! Conclua ou repactue tarefas de avanço.`, 'error');
+           return;
+         }
+      }
+    }
+
     try {
       const docRef = doc(db, 'tarefas', id);
       const now = new Date().toISOString();
@@ -3565,6 +3602,31 @@ const App: React.FC = () => {
   };
 
   const handleCreateTarefa = async (data: Partial<Tarefa>) => {
+    // Bloqueio de WIP
+    const todayStr = formatDateLocalISO(new Date());
+    const isWipConstrained = data.execution_lane === 'avanco' || !data.execution_lane;
+    const isToday = (data.data_limite === todayStr || data.data_inicio === todayStr);
+
+    if (isWipConstrained && isToday) {
+         const wipCount = tarefas.filter(t => {
+           if (normalizeStatus(t.status) === 'concluido' || t.status === 'excluído') return false;
+           const tLane = t.execution_lane || 'avanco';
+           if (tLane !== 'avanco') return false;
+           const tDate = t.data_limite || t.data_inicio;
+           return tDate === todayStr;
+         }).length;
+
+         const wipLimit = appSettings.wipLimit || 5;
+
+         if (wipCount >= wipLimit) {
+           showToast(`Limite de WIP (${wipLimit}) atingido! A tarefa será adicionada ao Backlog.`, 'warning');
+           data.data_limite = '';
+           data.data_inicio = '';
+           data.horario_inicio = null;
+           data.horario_fim = null;
+         }
+    }
+
     try {
       setLoading(true);
       const { is_single_day: _ignoredSingleDay, ...inputData } = data as any;
@@ -4524,6 +4586,15 @@ const App: React.FC = () => {
         mesesFuturos[key].tasks.push(t);
       }
     });
+
+    // Ações em Stand-by (Backlog) ordenadas por antiguidade
+    if (buckets.standBy.length > 0) {
+      buckets.standBy.sort((a, b) => {
+        const tA = new Date(a.data_criacao).getTime();
+        const tB = new Date(b.data_criacao).getTime();
+        return tA - tB; // Antigas no topo
+      });
+    }
 
     // Build final object preserving desired order
     const finalGroups: Record<string, Tarefa[]> = {};

@@ -75,7 +75,7 @@ export const DayView = ({
       onDrop={(e) => {
         const taskId = e.dataTransfer.getData('task-id');
         if (taskId) {
-          onTaskUpdate(taskId, { horario_inicio: null, horario_fim: null });
+          onTaskUpdate(taskId, { horario_inicio: undefined, horario_fim: undefined });
         }
       }}
     >
@@ -87,7 +87,19 @@ export const DayView = ({
       </div>
 
       <div className="space-y-3">
-        {dayTasks.map(taskItem => (
+        {dayTasks.map(taskItem => {
+          const degradationCount = taskItem.degradation_count || 0;
+          let degradationClasses = "bg-white border-slate-200 hover:border-slate-300";
+
+          if (degradationCount === 1) {
+             degradationClasses = "bg-yellow-50 border-yellow-200 hover:border-yellow-300";
+          } else if (degradationCount === 2) {
+             degradationClasses = "bg-orange-50 border-orange-300 hover:border-orange-400";
+          } else if (degradationCount >= 3) {
+             degradationClasses = "bg-red-50 border-red-400 hover:border-red-500 animate-pulse-slow";
+          }
+
+          return (
           <div
             key={taskItem.id}
             draggable
@@ -102,6 +114,11 @@ export const DayView = ({
               }
             }}
             onClick={() => {
+              // Bloqueio se task estiver muito degradada (só permite edição/click detalhado, ou expurgo se estivéssemos num modal forçado aqui)
+              if (degradationCount >= 3) {
+                 onTaskClick(taskItem); // abre o modal normal para edição ou resolução
+                 return;
+              }
               if (window.innerWidth < 768) {
                 const now = new Date();
                 const hour = now.getHours();
@@ -115,7 +132,7 @@ export const DayView = ({
                 if (showToast) showToast("Alocado para agora!", "success");
               }
             }}
-            className="bg-white p-4 rounded-none md:rounded-2xl border border-slate-200 shadow-sm hover:border-blue-400 hover:shadow-md transition-all cursor-pointer md:cursor-grab active:cursor-grabbing"
+            className={`p-4 rounded-none md:rounded-2xl border shadow-sm hover:shadow-md transition-all cursor-pointer md:cursor-grab active:cursor-grabbing ${degradationClasses}`}
           >
             <div className="text-[10px] font-bold text-slate-700 leading-tight mb-2">{taskItem.titulo}</div>
             <div className="flex items-center gap-2 mb-3">
@@ -150,7 +167,8 @@ export const DayView = ({
             </div>
             <p className="md:hidden mt-3 text-[8px] font-black text-blue-600 uppercase tracking-widest">Toque para alocar agora</p>
           </div>
-        ))}
+          );
+        })}
         {dayTasks.length === 0 && (
           <div className="py-12 text-center border-2 border-dashed border-slate-200 rounded-none md:rounded-[2rem]">
             <p className="text-slate-300 text-[10px] font-black uppercase italic">Tudo alocado</p>

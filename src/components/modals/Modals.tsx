@@ -150,6 +150,34 @@ export const SettingsModal = ({
         <div className="p-8 space-y-10 overflow-y-auto custom-scrollbar flex-1">
           {activeTab === 'notifications' ? (
             <>
+              {/* Priorização / Foco Section */}
+              <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500">
+                <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
+                  <span className="w-2 h-2 bg-indigo-500 rounded-full"></span>
+                  Priorização / Foco Diário
+                </h4>
+
+                <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-indigo-200 transition-all">
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-slate-900 mb-1">Limite de WIP (Trabalho em Progresso)</p>
+                    <p className="text-[11px] text-slate-500 font-medium">Quantidade máxima de tarefas de "Avanço" permitidas por dia.</p>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <input
+                      type="number"
+                      min="1"
+                      max="20"
+                      value={localSettings.wipLimit || 5}
+                      onChange={(e) => setLocalSettings({
+                        ...localSettings,
+                        wipLimit: parseInt(e.target.value, 10) || 5
+                      })}
+                      className="bg-white border-2 border-slate-200 rounded-xl px-4 py-2 text-sm font-black text-slate-700 w-24 text-center focus:outline-none focus:border-indigo-500 transition-colors"
+                    />
+                  </div>
+                </div>
+              </div>
+
               {/* Geral / SaÃºde Section */}
               <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500">
                 <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
