@@ -10708,5 +10708,117 @@ def deep_research_worker(event: firestore_fn.Event[firestore_fn.DocumentSnapshot
 
         send_telegram_notification(f"❌ A pesquisa profunda sobre '{topic}' falhou ou excedeu o limite de tempo.\nErro: {error_msg[:100]}")
 
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=30
+)
+def analisarInsightProativo(req: https_fn.CallableRequest):
+    """
+    Analisa o contexto de uma tarefa e retorna um insight proativo (se relevante).
+    Chamado com debounce após mudanças no diário ou plano de ação.
+    Retorna: { nivel: 1|2|null, texto: str|null, alvo: "diario"|"plano"|null, planoProposto: list|null }
+    """
+    from google import genai as _genai
+    import json as _json
+
+    data = req.data or {}
+    task_id = (data.get('taskId') or '').strip()
+    titulo = (data.get('titulo') or '').strip()
+    status = (data.get('status') or '').strip()
+    data_limite = (data.get('dataLimite') or '').strip()
+    plano_acao = data.get('planoAcao') or []
+    acompanhamento_recente = data.get('acompanhamentoRecente') or []
+
+    if not task_id:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="taskId é obrigatório."
+        )
+
+    try:
+        db = get_db()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
+        gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+
+        if not gemini_key:
+            return {"nivel": None, "texto": None, "alvo": None, "planoProposto": None}
+
+        client = _genai.Client(api_key=gemini_key)
+
+        plano_txt = '\n'.join([
+            f"{i+1}. [{'X' if item.get('completed') else ' '}] {item.get('text', '')}"
+            for i, item in enumerate(plano_acao)
+        ]) or 'Nenhum passo definido.'
+
+        diario_txt = '\n'.join([
+            f"[{entry.get('data', '')}] {entry.get('nota', '')}"
+            for entry in acompanhamento_recente[-10:]
+        ]) or 'Nenhum registro.'
+
+        prompt = f"""Você é um analista de produtividade. Analise o estado atual desta ação e determine se há um insight genuinamente útil.
+
+CONTEXTO:
+Título: {titulo}
+Status: {status}
+Prazo: {data_limite or 'Não definido'}
+
+PLANO DE AÇÃO:
+{plano_txt}
+
+DIÁRIO (entradas recentes):
+{diario_txt}
+
+CLASSIFICAÇÃO:
+- NIVEL_1 (Crítico): contradição lógica clara, prazo inatingível evidente, gargalo crítico não mapeado
+- NIVEL_2 (Otimização): sugestão de melhoria, reorganização, passo faltante importante
+- SEM_INSIGHT: situação está adequada
+
+REGRAS:
+- Só retorne insight se for genuinamente valioso. Evite insights genéricos ou óbvios.
+- Para alvo "plano", inclua plano_proposto com todos os itens revisados (array de objetos com "id", "text", "completed").
+- Use IDs de 8 chars para itens novos. Preserve id e completed dos itens existentes quando mantidos.
+- Para alvo "diario", plano_proposto deve ser null.
+
+RESPONDA APENAS COM JSON VÁLIDO (sem markdown):
+{{"nivel": 1|2|null, "texto": "...", "alvo": "diario"|"plano"|null, "plano_proposto": [...]|null}}
+
+Se SEM_INSIGHT: {{"nivel": null, "texto": null, "alvo": null, "plano_proposto": null}}"""
+
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+            config={"temperature": 0.3, "max_output_tokens": 1024}
+        )
+
+        result_text = (response.text or '').strip()
+        if result_text.startswith('```'):
+            lines = result_text.split('\n')
+            lines = [l for l in lines if not l.startswith('```')]
+            result_text = '\n'.join(lines).strip()
+
+        parsed = _json.loads(result_text)
+        nivel = parsed.get('nivel')
+        texto = parsed.get('texto')
+        alvo = parsed.get('alvo')
+        plano_proposto = parsed.get('plano_proposto')
+
+        if nivel not in (1, 2, None):
+            nivel = None
+        if alvo not in ('diario', 'plano', None):
+            alvo = None
+
+        return {
+            "nivel": nivel,
+            "texto": texto,
+            "alvo": alvo,
+            "planoProposto": plano_proposto if alvo == 'plano' and isinstance(plano_proposto, list) else None
+        }
+
+    except Exception as e:
+        print(f"[analisarInsightProativo] Erro: {e}")
+        return {"nivel": None, "texto": None, "alvo": None, "planoProposto": None}
+
+
 # Import daily WIP reset job
 from daily_reset_job import daily_wip_reset_and_degradation

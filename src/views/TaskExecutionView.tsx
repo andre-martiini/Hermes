@@ -190,6 +190,54 @@ export const TaskExecutionView = ({
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
+  const insightDiarioSignature = useMemo(
+    () => JSON.stringify((currentTaskData.acompanhamento || []).slice(-3).map(e => e.nota)),
+    [currentTaskData.acompanhamento]
+  );
+  const insightPlanoSignature = useMemo(
+    () => JSON.stringify((currentTaskData.plano_acao || []).map(i => `${i.text}|${i.completed}`)),
+    [currentTaskData.plano_acao]
+  );
+
+  // Proactive insight: debounce 8s after diary or plan changes
+  useEffect(() => {
+    if (!insightMountedRef.current) {
+      insightMountedRef.current = true;
+      return;
+    }
+    if (insightApplyingRef.current) return;
+
+    if (insightDebounceRef.current) clearTimeout(insightDebounceRef.current);
+
+    insightDebounceRef.current = setTimeout(async () => {
+      if (isAnalyzingInsight) return;
+      setIsAnalyzingInsight(true);
+      setInsightState(null);
+      try {
+        const fn = httpsCallable(functions, 'analisarInsightProativo');
+        const res = await fn({
+          taskId: task.id,
+          titulo: currentTaskData.titulo,
+          status: currentTaskData.status,
+          dataLimite: currentTaskData.data_limite || null,
+          planoAcao: (currentTaskData.plano_acao || []).map(i => ({ id: i.id, text: i.text, completed: i.completed })),
+          acompanhamentoRecente: (currentTaskData.acompanhamento || []).slice(-10).map(e => ({ data: e.data, nota: e.nota })),
+        });
+        const d = res.data as any;
+        if (d.nivel != null && d.texto) {
+          setInsightState({ nivel: d.nivel, texto: d.texto, alvo: d.alvo, planoProposto: d.planoProposto });
+        }
+      } catch {
+        // silent fail — insight is non-critical
+      } finally {
+        setIsAnalyzingInsight(false);
+      }
+    }, 8000);
+
+    return () => { if (insightDebounceRef.current) clearTimeout(insightDebounceRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [insightDiarioSignature, insightPlanoSignature, newFollowUp]);
+
   // Inline editing
   const [editingStatus, setEditingStatus] = useState(false);
   const [pendingStatus, setPendingStatus] = useState(task.status);
@@ -226,6 +274,15 @@ export const TaskExecutionView = ({
   // Plan history viewer (Feature 5)
   const [showPlanHistory, setShowPlanHistory] = useState(false);
 
+  // Proactive insight system
+  type InsightState = { nivel: 1 | 2; texto: string; alvo: 'diario' | 'plano'; planoProposto?: ActionPlanItem[] } | null;
+  const [insightState, setInsightState] = useState<InsightState>(null);
+  const [isAnalyzingInsight, setIsAnalyzingInsight] = useState(false);
+  const [showInsightModal, setShowInsightModal] = useState(false);
+  const insightDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const insightMountedRef = useRef(false);
+  const insightApplyingRef = useRef(false);
+
   // Tags
   const [tagInput, setTagInput] = useState('');
   const [isGeneratingTags, setIsGeneratingTags] = useState(false);
@@ -257,6 +314,7 @@ export const TaskExecutionView = ({
     const done = items.filter(i => i.completed).length;
     return Math.round((done / items.length) * 100);
   }, [currentTaskData.plano_acao]);
+
 
   const taskReminders = useMemo(() => {
     const reminders = Array.isArray(currentTaskData.reminders) ? currentTaskData.reminders : [];
@@ -911,6 +969,37 @@ export const TaskExecutionView = ({
     onSave(task.id, { plano_acao: planDraft });
     setShowPlanModal(false);
     showToast('Plano atualizado!', 'success');
+  };
+
+  const handleInsightApply = () => {
+    if (!insightState) return;
+    insightApplyingRef.current = true;
+
+    if (insightState.alvo === 'diario') {
+      const aiEntry: Acompanhamento = {
+        data: new Date().toISOString(),
+        nota: `[🤖 Insight] ${insightState.texto}`
+      };
+      onSave(task.id, { acompanhamento: [...(currentTaskData.acompanhamento || []), aiEntry] });
+      showToast('Insight registrado no Diário!', 'success');
+    } else if (insightState.alvo === 'plano' && insightState.planoProposto) {
+      const currentPlan = currentTaskData.plano_acao || [];
+      const existingHistory = currentTaskData.plano_acao_historico || [];
+      const updatedHistory = currentPlan.length > 0
+        ? [...existingHistory.slice(-4), { data: new Date().toISOString(), items: currentPlan }]
+        : existingHistory;
+      onSave(task.id, { plano_acao: insightState.planoProposto, plano_acao_historico: updatedHistory });
+      showToast('Plano atualizado com o insight!', 'success');
+    }
+
+    setInsightState(null);
+    setShowInsightModal(false);
+    setTimeout(() => { insightApplyingRef.current = false; }, 3000);
+  };
+
+  const handleInsightDiscard = () => {
+    setInsightState(null);
+    setShowInsightModal(false);
   };
 
   // ─── Extra Context File Upload ────────────────────────────────
@@ -1734,11 +1823,36 @@ export const TaskExecutionView = ({
                 </svg>
                 <span className={labelCls}>Diário de Missão</span>
               </div>
-              <button onClick={handleSummarizeWithAI}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200'}`}>
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-                Resumir com IA
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Proactive insight indicator */}
+                {(isAnalyzingInsight || insightState) && (
+                  <button
+                    onClick={() => insightState && setShowInsightModal(true)}
+                    title={
+                      isAnalyzingInsight ? 'Analisando contexto...' :
+                      insightState?.nivel === 1 ? 'Insight Crítico — clique para ver' :
+                      'Sugestão de otimização — clique para ver'
+                    }
+                    disabled={isAnalyzingInsight}
+                    className={`flex items-center justify-center w-8 h-8 rounded-xl transition-all disabled:cursor-default ${
+                      isAnalyzingInsight
+                        ? `opacity-40 ${isDark ? 'bg-white/5 text-white/30' : 'bg-slate-100 text-slate-400'}`
+                        : insightState?.nivel === 1
+                          ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 animate-pulse'
+                          : `${isDark ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20' : 'bg-blue-50 text-blue-500 hover:bg-blue-100'}`
+                    }`}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                  </button>
+                )}
+                <button onClick={handleSummarizeWithAI}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200'}`}>
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                  Resumir com IA
+                </button>
+              </div>
             </div>
 
             {/* Diary body — uses DiarioBordoUI unchanged */}
@@ -1949,6 +2063,84 @@ export const TaskExecutionView = ({
         </div>
       )}
 
+
+      {/* ══════════════════════════════════════════════════════════
+          INSIGHT MODAL
+      ══════════════════════════════════════════════════════════ */}
+      {showInsightModal && insightState && (
+        <div className="fixed inset-0 z-[400] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={handleInsightDiscard} />
+          <div className={`relative w-full max-w-md rounded-2xl border shadow-2xl p-6 ${isDark ? 'bg-[#0f1724] border-white/10' : 'bg-white border-slate-200'}`}>
+
+            {/* Header */}
+            <div className="flex items-center gap-3 mb-5">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                insightState.nivel === 1
+                  ? 'bg-amber-500/20 text-amber-400'
+                  : isDark ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600'
+              }`}>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
+              </div>
+              <div>
+                <p className={`text-[9px] font-black uppercase tracking-widest ${insightState.nivel === 1 ? 'text-amber-400' : isDark ? 'text-blue-400' : 'text-blue-600'}`}>
+                  {insightState.nivel === 1 ? 'Insight Crítico' : 'Sugestão de Otimização'}
+                </p>
+                <p className={`text-[10px] font-bold ${isDark ? 'text-white/50' : 'text-slate-500'}`}>
+                  {insightState.alvo === 'diario' ? 'Aplicar ao Diário de Bordo' : 'Aplicar ao Plano de Ação'}
+                </p>
+              </div>
+              <button
+                onClick={handleInsightDiscard}
+                className={`ml-auto p-1.5 rounded-xl transition-all ${isDark ? 'text-white/30 hover:text-white/60 hover:bg-white/10' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            {/* Insight text */}
+            <div className={`rounded-xl p-4 mb-4 ${isDark ? 'bg-white/5 border border-white/10' : 'bg-slate-50 border border-slate-200'}`}>
+              <p className={`text-sm leading-relaxed ${isDark ? 'text-white/80' : 'text-slate-700'}`}>
+                {insightState.texto}
+              </p>
+            </div>
+
+            {/* Proposed plan preview (when alvo = plano) */}
+            {insightState.alvo === 'plano' && insightState.planoProposto && insightState.planoProposto.length > 0 && (
+              <div className={`rounded-xl p-3 mb-4 ${isDark ? 'bg-blue-500/5 border border-blue-500/10' : 'bg-blue-50 border border-blue-100'}`}>
+                <p className={`text-[9px] font-black uppercase tracking-widest mb-2 ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
+                  Plano Proposto
+                </p>
+                <div className="space-y-1.5">
+                  {insightState.planoProposto.map((item, idx) => (
+                    <div key={item.id || idx} className={`flex gap-2 text-[11px] ${isDark ? 'text-white/70' : 'text-slate-600'}`}>
+                      <span className={`shrink-0 font-black ${isDark ? 'text-blue-400' : 'text-blue-500'}`}>{idx + 1}.</span>
+                      <span className={item.completed ? 'line-through opacity-40' : ''}>{item.text}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex gap-3">
+              <button
+                onClick={handleInsightApply}
+                className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black uppercase tracking-widest transition-all shadow-lg"
+              >
+                Aplicar
+              </button>
+              <button
+                onClick={handleInsightDiscard}
+                className={`flex-1 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all border ${isDark ? 'border-white/10 text-white/50 hover:bg-white/10' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+              >
+                Descartar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ══════════════════════════════════════════════════════════
           MODAL SYSTEM (link / contact / edit / delete / upload / reminder)
