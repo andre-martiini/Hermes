@@ -1,9 +1,8 @@
-﻿
-import React, { useState, useMemo } from 'react';
+﻿import React, { useState, useMemo } from 'react';
 import { Tarefa, GoogleCalendarEvent, formatDateLocalISO } from '../../types';
 import { normalizeStatus, isStandbyStatus } from '../utils/helpers';
 import { TimeGrid } from '../components/calendar/TimeGrid';
-import { PROJECT_COLORS } from '../../constants';
+import { TaskCard } from '../components/calendar/TaskCard';
 import { addDoc, collection } from 'firebase/firestore';
 import { db } from '../../firebase';
 
@@ -15,7 +14,12 @@ export const DayView = ({
   onTaskUpdate,
   onExecuteTask,
   onReorderTasks,
-  showToast
+  showToast,
+  isDark,
+  hourHeight,
+  showStandby,
+  showPrevious,
+  disableExecuteOnClick
 }: {
   tasks: Tarefa[],
   googleEvents?: GoogleCalendarEvent[],
@@ -24,162 +28,113 @@ export const DayView = ({
   onTaskUpdate: (id: string, updates: Partial<Tarefa>, suppressToast?: boolean) => void,
   onExecuteTask: (t: Tarefa) => void,
   onReorderTasks?: (taskId: string, targetTaskId: string, label?: string) => void,
-  showToast?: (message: string, type: 'success' | 'error' | 'info') => void
+  showToast?: (message: string, type: 'success' | 'error' | 'info') => void,
+  isDark?: boolean,
+  hourHeight?: number,
+  showStandby?: boolean,
+  showPrevious?: boolean,
+  disableExecuteOnClick?: boolean
 }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const dayStr = formatDateLocalISO(currentDate);
 
-  const dayTasks = useMemo(() => tasks.filter(t => {
-    if ((t.status as any) === 'excluído') return false;
-    
-    const isConcluido = normalizeStatus(t.status) === 'concluido';
+  const dayTasks = useMemo(() => {
+    return tasks.filter(t => {
+      if ((t.status as any) === 'excluído') return false;
 
-    // Tarefas concluídas nunca devem aparecer em "Aguardando Alocação"
-    if (isConcluido) return false;
+      const isConcluido = normalizeStatus(t.status) === 'concluido';
+      if (isConcluido) return false;
 
-    const isStandBy = isStandbyStatus(t.status);
-    if (isStandBy) return true; // Stand-by actions always appear in sidebar
-    
-    const scheduledDate = t.data_limite || t.data_inicio;
-    if (t.horario_inicio && scheduledDate) return false;
-    
-    const end = t.data_limite || t.data_inicio;
-    const hasDeadline = end && end !== '-' && end !== '0000-00-00';
-    if (!hasDeadline) return true; // Show in sidebar (sem prazo)
-    return dayStr >= end; // Show overdue or today's unallocated
-  }).sort((a, b) => (a.ordem || 0) - (b.ordem || 0)), [tasks, dayStr]);
+      // Novo critério: Standby = Status de standby OU data_limite vazia
+      const noDate = !t.data_limite || t.data_limite === '-' || t.data_limite === '0000-00-00';
+      const isStandBy = isStandbyStatus(t.status) || noDate;
 
-  const handleTaskCreate = async (task: Partial<Tarefa>) => {
+      // Se o botão de standby estiver desligado, oculta tudo que se encaixa no critério acima
+      if (isStandBy && !showStandby) return false;
+
+      const scheduledDate = t.data_limite || t.data_inicio;
+
+      // Se não quiser ver atrasadas (dia anterior)
+      if (!showPrevious && scheduledDate && scheduledDate < dayStr && scheduledDate !== '-' && scheduledDate !== '0000-00-00') {
+        return false;
+      }
+
+      if (t.horario_inicio && scheduledDate) return false;
+
+      const end = t.data_limite || t.data_inicio;
+      const hasDeadline = end && end !== '-' && end !== '0000-00-00';
+      if (!hasDeadline) return true;
+      return dayStr >= end;
+    }).sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+  }, [tasks, dayStr, showStandby, showPrevious]);
+
+  const handleCreateTarefa = async (titulo: string) => {
     try {
       await addDoc(collection(db, 'tarefas'), {
-        ...task,
-        titulo: 'Nova Tarefa',
-        status: 'em andamento',
-        area_tematica: 'GERAL',
-        projeto: 'GERAL',
-        contabilizar_meta: true,
-        data_criacao: new Date().toISOString()
+        titulo,
+        status: 'pendente',
+        data_criacao: new Date().toISOString(),
+        data_limite: dayStr,
+        ordem: dayTasks.length
       });
-      if (showToast) showToast("Tarefa criada!", "success");
-    } catch (e) {
-      console.error(e);
-      if (showToast) showToast("Erro ao criar tarefa.", "error");
+      if (showToast) showToast('Ação criada com sucesso!', 'success');
+    } catch (error) {
+      console.error('Erro ao criar ação:', error);
+      if (showToast) showToast('Erro ao criar ação', 'error');
     }
   };
 
-  const Sidebar = (
-    <div
-      id="unallocated-sidebar"
-      className={`${isSidebarOpen ? 'fixed inset-0 z-[100] bg-white' : 'hidden'} md:relative md:block md:w-64 bg-slate-50 border-l border-slate-200 p-6 overflow-y-auto custom-scrollbar animate-in slide-in-from-right duration-300`}
-      onDragOver={e => e.preventDefault()}
-      onDrop={(e) => {
-        const taskId = e.dataTransfer.getData('task-id');
-        if (taskId) {
-          onTaskUpdate(taskId, { horario_inicio: undefined, horario_fim: undefined });
-        }
-      }}
-    >
-      <div className="flex items-center justify-between mb-8">
-        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Aguardando Alocação</h4>
-        <button onClick={() => setIsSidebarOpen(false)} className="md:hidden p-2 bg-slate-200 rounded-full">
-           <svg className="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+  const sidebar = (
+    <div className={`w-full md:w-80 h-full flex flex-col border-r ${isDark ? 'bg-[#020817] border-slate-800' : 'bg-white border-slate-200'}`}>
+      <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+        <h3 className={`text-xs font-black uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Ações Disponíveis</h3>
+        <button
+          onClick={() => {
+            const titulo = prompt('Título da nova ação:');
+            if (titulo) handleCreateTarefa(titulo);
+          }}
+          className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all active:scale-95 shadow-lg shadow-blue-500/20"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
         </button>
       </div>
 
-      <div className="space-y-3">
-        {dayTasks.map(taskItem => {
-          const degradationCount = taskItem.degradation_count || 0;
-          let degradationClasses = "bg-white border-slate-200 hover:border-slate-300";
-
-          if (degradationCount === 1) {
-             degradationClasses = "bg-yellow-50 border-yellow-200 hover:border-yellow-300";
-          } else if (degradationCount === 2) {
-             degradationClasses = "bg-orange-50 border-orange-300 hover:border-orange-400";
-          } else if (degradationCount >= 3) {
-             degradationClasses = "bg-red-50 border-red-400 hover:border-red-500 animate-pulse-slow";
-          }
-
-          return (
-          <div
+      <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+        {dayTasks.map(taskItem => (
+          <TaskCard
             key={taskItem.id}
-            draggable
-            onDragStart={(e) => e.dataTransfer.setData('task-id', taskItem.id)}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
+            task={taskItem}
+            isDark={isDark}
+            onTaskClick={onTaskClick}
+            onTaskUpdate={(id, updates) => onTaskUpdate(id, updates)}
+            onExecuteTask={onExecuteTask}
+            dayStr={dayStr}
+            onDrop={(e: React.DragEvent) => {
               const draggedId = e.dataTransfer.getData('task-id');
-              if (draggedId && draggedId !== taskItem.id && onReorderTasks) {
-                onReorderTasks(draggedId, taskItem.id);
+              if (draggedId && draggedId !== taskItem.id) {
+                onReorderTasks?.(draggedId, taskItem.id);
               }
             }}
-            onClick={() => {
-              // Bloqueio se task estiver muito degradada (só permite edição/click detalhado, ou expurgo se estivéssemos num modal forçado aqui)
-              if (degradationCount >= 3) {
-                 onTaskClick(taskItem); // abre o modal normal para edição ou resolução
-                 return;
-              }
-              if (window.innerWidth < 768) {
-                const now = new Date();
-                const hour = now.getHours();
-                onTaskUpdate(taskItem.id, {
-                  horario_inicio: `${hour.toString().padStart(2, '0')}:00`,
-                  horario_fim: `${(hour + 1).toString().padStart(2, '0')}:00`,
-                  data_limite: dayStr,
-                  data_inicio: dayStr
-                });
-                setIsSidebarOpen(false);
-                if (showToast) showToast("Alocado para agora!", "success");
-              }
+            onDragOver={(e: React.DragEvent) => {
+              e.preventDefault();
+              (e.currentTarget as HTMLElement).style.backgroundColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.02)';
             }}
-            className={`p-4 rounded-none md:rounded-2xl border shadow-sm hover:shadow-md transition-all cursor-pointer md:cursor-grab active:cursor-grabbing ${degradationClasses}`}
-          >
-            <div className="text-[10px] font-bold text-slate-700 leading-tight mb-2">{taskItem.titulo}</div>
-            <div className="flex items-center gap-2 mb-3">
-              <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${PROJECT_COLORS[taskItem.projeto] || 'bg-slate-100 text-slate-600'}`}>{taskItem.projeto}</span>
-              {(!taskItem.data_limite || taskItem.data_limite === '-' || taskItem.data_limite === '0000-00-00') && (
-                <span className="text-[8px] font-black px-1.5 py-0.5 rounded uppercase bg-amber-100 text-amber-700">Sem Prazo</span>
-              )}
-            </div>
+          />
+        ))}
 
-            <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-2 mt-2">
-              <button
-                onClick={(e) => { e.stopPropagation(); onTaskClick(taskItem); }}
-                className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                title="Editar"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); onTaskUpdate(taskItem.id, { status: 'concluído', data_conclusao: new Date().toISOString() }); }}
-                className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                title="Concluir"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); if(confirm('Excluir esta tarefa?')) onTaskUpdate(taskItem.id, { status: 'excluído' as any }); }}
-                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                title="Excluir"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-              </button>
-            </div>
-            <p className="md:hidden mt-3 text-[8px] font-black text-blue-600 uppercase tracking-widest">Toque para alocar agora</p>
-          </div>
-          );
-        })}
         {dayTasks.length === 0 && (
-          <div className="py-12 text-center border-2 border-dashed border-slate-200 rounded-none md:rounded-[2rem]">
-            <p className="text-slate-300 text-[10px] font-black uppercase italic">Tudo alocado</p>
+          <div className={`py-12 text-center border-2 border-dashed rounded-[2rem] ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+            <p className={`${isDark ? 'text-slate-700' : 'text-slate-300'} text-[10px] font-black uppercase italic`}>Tudo alocado</p>
           </div>
         )}
       </div>
+
+      <p className="md:hidden mt-6 text-[8px] font-black text-blue-600 uppercase tracking-widest text-center">Toque para alocar agora</p>
     </div>
   );
 
   return (
-    <div className="flex flex-col h-[600px] overflow-hidden bg-slate-50 border-t border-slate-100 relative">
+    <div className={`flex flex-col h-[600px] overflow-hidden border-t relative ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-100'}`}>
       <TimeGrid
         days={[currentDate]}
         tasks={tasks}
@@ -187,16 +142,14 @@ export const DayView = ({
         onTaskClick={onTaskClick}
         onTaskUpdate={onTaskUpdate}
         onExecuteTask={onExecuteTask}
-        onTaskCreate={handleTaskCreate}
-        sidebar={Sidebar}
+        onReorderTasks={onReorderTasks}
         showToast={showToast}
+        isDark={isDark}
+        sidebar={sidebar}
+        hourHeight={hourHeight}
+        showStandby={showStandby}
+        disableExecuteOnClick={disableExecuteOnClick}
       />
-      <button
-          onClick={() => setIsSidebarOpen(true)}
-          className="md:hidden fixed bottom-24 right-6 z-[60] w-14 h-14 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center animate-bounce"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
-        </button>
     </div>
   );
 };

@@ -507,13 +507,12 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
             onClick={isProcessing ? undefined : (isRecording ? stopRecording : startRecording)}
             disabled={isProcessing}
             aria-label={isProcessing ? 'Processando transcrição' : isRecording ? 'Parar gravação' : 'Iniciar gravação'}
-            className={`relative flex items-center justify-center shadow-2xl transition-all active:scale-95 w-[62vw] h-[18vw] min-w-[180px] min-h-[58px] max-w-[320px] max-h-[76px] rounded-[1.6rem] border-4 border-white ${
-              isProcessing
-                ? 'bg-indigo-600 text-white'
-                : isRecording
-                  ? 'bg-rose-700 text-white animate-pulse'
-                  : 'bg-rose-600 text-white hover:bg-rose-700'
-            }`}
+            className={`relative flex items-center justify-center shadow-2xl transition-all active:scale-95 w-[62vw] h-[18vw] min-w-[180px] min-h-[58px] max-w-[320px] max-h-[76px] rounded-[1.6rem] border-4 border-white ${isProcessing
+              ? 'bg-indigo-600 text-white'
+              : isRecording
+                ? 'bg-rose-700 text-white animate-pulse'
+                : 'bg-rose-600 text-white hover:bg-rose-700'
+              }`}
           >
             {isProcessing ? (
               <span className="inline-flex h-9 w-9 rounded-full border-4 border-white border-t-transparent animate-spin" />
@@ -2004,7 +2003,7 @@ const App: React.FC = () => {
       };
     }
   }, []);
-  
+
   // Escuta abertura de tarefa via URL (?task=ID)
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -2022,8 +2021,8 @@ const App: React.FC = () => {
             const snap = await getDoc(doc(db, 'tarefas', taskId));
             if (snap.exists()) {
               const data = snap.data();
-              setSelectedTask({ 
-                id: snap.id, 
+              setSelectedTask({
+                id: snap.id,
                 ...data,
                 area_tematica: data.area_tematica || data.categoria,
                 data_limite: data.data_limite || data.data_inicio || '',
@@ -2038,7 +2037,7 @@ const App: React.FC = () => {
         // Limpa a URL sem dar reload para não reabrir ao atualizar
         window.history.replaceState({}, document.title, window.location.pathname);
       };
-      
+
       // Se tarefas já carregou, executa. Se não, espera um pouco para garantir que o onSnapshot rodou.
       if (tarefas.length > 0) {
         loadTask();
@@ -2676,21 +2675,21 @@ const App: React.FC = () => {
       const todayStr = formatDateLocalISO(new Date());
       // Só contar se a data estiver REALMENTE mudando para hoje (e não já era hoje)
       if (oldDate !== todayStr) {
-         // Contar WIP atual de 'avanco' agendado para hoje e em andamento
-         const wipCount = tarefas.filter(t => {
-           if (normalizeStatus(t.status) === 'concluido' || t.status === 'excluído') return false;
-           const tLane = t.execution_lane || 'avanco';
-           if (tLane !== 'avanco') return false;
-           const tDate = t.data_limite || t.data_inicio;
-           return tDate === todayStr && t.id !== id;
-         }).length;
+        // Contar WIP atual de 'avanco' agendado para hoje e em andamento
+        const wipCount = tarefas.filter(t => {
+          if (normalizeStatus(t.status) === 'concluido' || t.status === 'excluído') return false;
+          const tLane = t.execution_lane || 'avanco';
+          if (tLane !== 'avanco') return false;
+          const tDate = t.data_limite || t.data_inicio;
+          return tDate === todayStr && t.id !== id;
+        }).length;
 
-         const wipLimit = appSettings.wipLimit || 5;
+        const wipLimit = appSettings.wipLimit || 5;
 
-         if (wipCount >= wipLimit) {
-           showToast(`Limite de WIP (${wipLimit}) atingido! Conclua ou repactue tarefas de avanço.`, 'error');
-           return;
-         }
+        if (wipCount >= wipLimit) {
+          showToast(`Limite de WIP (${wipLimit}) atingido! Conclua ou repactue tarefas de avanço.`, 'error');
+          return;
+        }
       }
     }
 
@@ -3608,23 +3607,23 @@ const App: React.FC = () => {
     const isToday = (data.data_limite === todayStr || data.data_inicio === todayStr);
 
     if (isWipConstrained && isToday) {
-         const wipCount = tarefas.filter(t => {
-           if (normalizeStatus(t.status) === 'concluido' || t.status === 'excluído') return false;
-           const tLane = t.execution_lane || 'avanco';
-           if (tLane !== 'avanco') return false;
-           const tDate = t.data_limite || t.data_inicio;
-           return tDate === todayStr;
-         }).length;
+      const wipCount = tarefas.filter(t => {
+        if (normalizeStatus(t.status) === 'concluido' || t.status === 'excluído') return false;
+        const tLane = t.execution_lane || 'avanco';
+        if (tLane !== 'avanco') return false;
+        const tDate = t.data_limite || t.data_inicio;
+        return tDate === todayStr;
+      }).length;
 
-         const wipLimit = appSettings.wipLimit || 5;
+      const wipLimit = appSettings.wipLimit || 5;
 
-         if (wipCount >= wipLimit) {
-           showToast(`Limite de WIP (${wipLimit}) atingido! A tarefa será adicionada ao Backlog.`, 'warning');
-           data.data_limite = '';
-           data.data_inicio = '';
-           data.horario_inicio = null;
-           data.horario_fim = null;
-         }
+      if (wipCount >= wipLimit) {
+        showToast(`Limite de WIP (${wipLimit}) atingido! A tarefa será adicionada ao Backlog.`, 'warning');
+        data.data_limite = '';
+        data.data_inicio = '';
+        data.horario_inicio = null;
+        data.horario_fim = null;
+      }
     }
 
     try {
@@ -5593,7 +5592,7 @@ const App: React.FC = () => {
                           <select
                             value={areaFilter}
                             onChange={(e) => setAreaFilter(e.target.value)}
-                            className="h-11 w-full appearance-none bg-white pl-3 md:pl-4 pr-8 md:pr-10 rounded-xl border border-slate-200 text-[10px] font-black uppercase tracking-tight md:tracking-widest text-slate-700 outline-none focus:ring-2 focus:ring-slate-900 shadow-sm hover:border-slate-300 transition-all cursor-pointer truncate"
+                            className={`h-11 w-full appearance-none pl-3 md:pl-4 pr-8 md:pr-10 rounded-xl border text-[10px] font-black uppercase tracking-tight md:tracking-widest outline-none focus:ring-2 shadow-sm transition-all cursor-pointer truncate ${isDarkTheme ? 'bg-slate-800 border-slate-700 text-slate-100 focus:ring-slate-600 hover:border-slate-600' : 'bg-white border-slate-200 text-slate-700 focus:ring-slate-900 hover:border-slate-300'}`}
                           >
                             <option value="TODAS">TODAS</option>
                             <option value="CLC">CLC</option>
@@ -5604,7 +5603,7 @@ const App: React.FC = () => {
                               <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
                             ))}
                           </select>
-                          <div className="absolute inset-y-0 right-0 flex items-center px-2 md:px-3 pointer-events-none text-slate-400">
+                          <div className={`absolute inset-y-0 right-0 flex items-center px-2 md:px-3 pointer-events-none ${isDarkTheme ? 'text-slate-500' : 'text-slate-400'}`}>
                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
                           </div>
                         </div>
@@ -5612,17 +5611,17 @@ const App: React.FC = () => {
                         {/* Lado Direito: Modos de Visualização e Organizar Dia */}
                         <div className="flex items-center gap-1 md:gap-2 flex-shrink-0">
                           {searchTerm !== 'filter:unclassified' && (
-                            <div className="h-11 bg-slate-100 p-1 rounded-xl shadow-inner inline-flex border border-slate-200">
+                            <div className={`h-11 p-1 rounded-xl shadow-inner inline-flex border ${isDarkTheme ? 'bg-slate-800 border-slate-700' : 'bg-slate-100 border-slate-200'}`}>
                               <button
                                 onClick={() => setDashboardViewMode('list')}
-                                className={`px-2 md:px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${dashboardViewMode === 'list' ? 'bg-white shadow-md text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+                                className={`px-2 md:px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${dashboardViewMode === 'list' ? (isDarkTheme ? 'bg-slate-600 shadow-md text-white' : 'bg-white shadow-md text-slate-900') : (isDarkTheme ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600')}`}
                               >
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
                                 <span className="hidden lg:inline">Lista</span>
                               </button>
                               <button
                                 onClick={() => setDashboardViewMode('calendar')}
-                                className={`px-2 md:px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${dashboardViewMode === 'calendar' ? 'bg-white shadow-md text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+                                className={`px-2 md:px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${dashboardViewMode === 'calendar' ? (isDarkTheme ? 'bg-slate-600 shadow-md text-white' : 'bg-white shadow-md text-slate-900') : (isDarkTheme ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600')}`}
                               >
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2-2v12a2 2 0 002 2z" /></svg>
                                 <span className="hidden lg:inline">Calendário</span>
@@ -5630,17 +5629,6 @@ const App: React.FC = () => {
                             </div>
                           )}
 
-                          <button
-                            onClick={() => {
-                              setDashboardViewMode('calendar');
-                              setCalendarViewMode('day');
-                              setCalendarDate(new Date());
-                            }}
-                            className="h-11 bg-slate-900 text-white px-3 md:px-6 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center justify-center gap-2 active:scale-95"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                            <span className="hidden sm:inline">Organizar</span>
-                          </button>
                         </div>
                       </div>
                     </div>
@@ -5658,13 +5646,14 @@ const App: React.FC = () => {
                         onExecuteTask={(t) => { setSelectedTask(t); setTaskModalMode('execute'); }}
                         onReorderTasks={handleReorderTasks}
                         showToast={showToast}
+                        isDark={isDarkTheme}
                       />
                     ) : (
                       <>
                         {searchTerm === 'filter:unclassified' ? (
-                          <div className="animate-in bg-white border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl">
-                            <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                              <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3">
+                          <div className={`animate-in border rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl ${isDarkTheme ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                            <div className={`p-8 border-b flex flex-col md:flex-row md:items-center justify-between gap-4 ${isDarkTheme ? 'border-slate-800 bg-slate-800/50' : 'border-slate-100 bg-slate-50/50'}`}>
+                              <h3 className={`text-xl font-black tracking-tight flex items-center gap-3 ${isDarkTheme ? 'text-slate-100' : 'text-slate-900'}`}>
                                 <span className="w-2 h-8 bg-rose-600 rounded-full"></span>
                                 Organização Rápida
                               </h3>
@@ -5682,19 +5671,19 @@ const App: React.FC = () => {
                             <div className="overflow-x-auto">
                               {/* Desktop Table */}
                               <table className="w-full text-left hidden md:table">
-                                <thead className="bg-slate-50 border-b border-slate-200">
+                                <thead className={`border-b ${isDarkTheme ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
                                   <tr>
-                                    <th className="px-8 py-4 w-12 text-center text-[10px] font-black text-slate-400 uppercase tracking-widest italic">#</th>
-                                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Descrição da Tarefa</th>
-                                    <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-40 text-center">Data Limite</th>
+                                    <th className={`px-8 py-4 w-12 text-center text-[10px] font-black uppercase tracking-widest italic ${isDarkTheme ? 'text-slate-500' : 'text-slate-400'}`}>#</th>
+                                    <th className={`px-8 py-4 text-[10px] font-black uppercase tracking-widest ${isDarkTheme ? 'text-slate-500' : 'text-slate-400'}`}>Descrição da Tarefa</th>
+                                    <th className={`px-8 py-4 text-[10px] font-black uppercase tracking-widest w-40 text-center ${isDarkTheme ? 'text-slate-500' : 'text-slate-400'}`}>Data Limite</th>
                                   </tr>
                                 </thead>
-                                <tbody className="divide-y divide-slate-50">
+                                <tbody className={`divide-y ${isDarkTheme ? 'divide-slate-800' : 'divide-slate-50'}`}>
                                   {filteredAndSortedTarefas.map((task) => (
                                     <tr
                                       key={task.id}
                                       onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
-                                      className={`hover:bg-slate-50 transition-colors cursor-pointer ${selectedTaskIds.includes(task.id) ? 'bg-blue-50/30' : ''}`}
+                                      className={`transition-colors cursor-pointer ${isDarkTheme ? 'hover:bg-slate-800/50' : 'hover:bg-slate-50'} ${selectedTaskIds.includes(task.id) ? (isDarkTheme ? 'bg-blue-900/20' : 'bg-blue-50/30') : ''}`}
                                     >
                                       <td className="px-8 py-4 text-center">
                                         <input

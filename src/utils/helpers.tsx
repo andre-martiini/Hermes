@@ -90,7 +90,7 @@ export const normalizeStatus = (status: string): string => {
 
 export const isStandbyStatus = (status?: string | null) => {
   const normalized = normalizeStatus(status || '');
-  return normalized === 'stand-by' || normalized === 'cgby';
+  return normalized === 'stand-by' || normalized === 'standby' || normalized === 'stand by' || normalized === 'cgby';
 };
 export const isCompletedStatus = (status?: string | null) => normalizeStatus(status || '') === 'concluido';
 

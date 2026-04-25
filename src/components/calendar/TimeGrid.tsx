@@ -4,6 +4,7 @@ import { Tarefa, GoogleCalendarEvent, formatDateLocalISO } from '../../../types'
 import { normalizeStatus, isStandbyStatus } from '../../utils/helpers';
 import { timeToMinutes, minutesToTime, getYFromTime, getTimeFromY, snapToGrid, getColumnFromX } from '../../utils/calendarUtils';
 import { PROJECT_COLORS } from '../../../constants';
+import { TaskActionSelector } from './TaskActionSelector';
 
 interface TimeGridProps {
   days: Date[];
@@ -16,6 +17,10 @@ interface TimeGridProps {
   onReorderTasks?: (taskId: string, targetTaskId: string, label?: string) => void;
   showToast?: (message: string, type: 'success' | 'error' | 'info') => void;
   sidebar?: React.ReactNode;
+  isDark?: boolean;
+  hourHeight?: number;
+  showStandby?: boolean;
+  disableExecuteOnClick?: boolean;
 }
 
 export const TimeGrid = ({
@@ -26,9 +31,14 @@ export const TimeGrid = ({
   onTaskUpdate,
   onExecuteTask,
   onTaskCreate,
-  sidebar
+  sidebar,
+  isDark,
+  hourHeight = 60,
+  showStandby = false,
+  disableExecuteOnClick = false
 }: TimeGridProps) => {
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [dragging, setDragging] = useState<{
@@ -53,9 +63,9 @@ export const TimeGrid = ({
 
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const isLongPress = useRef(false);
-  const startPos = useRef<{x: number, y: number} | null>(null);
+  const startPos = useRef<{ x: number, y: number } | null>(null);
 
-  const hourHeight = 60;
+  // Removido const fixo para usar prop
   const step = 15;
 
   useEffect(() => {
@@ -78,7 +88,7 @@ export const TimeGrid = ({
       });
       const dayTasks = tasks.filter(t => {
         if ((t.status as any) === 'excluído') return false;
-        if (isStandbyStatus(t.status)) return false;
+        if (!showStandby && isStandbyStatus(t.status)) return false;
         const taskDate = t.data_limite || t.data_inicio;
         if (t.horario_inicio && taskDate) return taskDate === dayStr;
         return false;
@@ -144,16 +154,16 @@ export const TimeGrid = ({
     longPressTimer.current = setTimeout(() => {
       isLongPress.current = true;
       if (containerRef.current && onTaskCreate) {
-         const rect = containerRef.current.getBoundingClientRect();
-         const y = clientY - rect.top + containerRef.current.scrollTop;
-         const timeStr = getTimeFromY(y, hourHeight, step);
+        const rect = containerRef.current.getBoundingClientRect();
+        const y = clientY - rect.top + containerRef.current.scrollTop;
+        const timeStr = getTimeFromY(y, hourHeight, step);
 
-         onTaskCreate({
-           data_limite: formatDateLocalISO(day),
-           data_inicio: formatDateLocalISO(day),
-           horario_inicio: timeStr,
-           horario_fim: minutesToTime(timeToMinutes(timeStr) + 60)
-         });
+        onTaskCreate({
+          data_limite: formatDateLocalISO(day),
+          data_inicio: formatDateLocalISO(day),
+          horario_inicio: timeStr,
+          horario_fim: minutesToTime(timeToMinutes(timeStr) + 60)
+        });
       }
     }, 600);
   };
@@ -232,52 +242,52 @@ export const TimeGrid = ({
         }
 
         if (containerRef.current) {
-           const rect = containerRef.current.getBoundingClientRect();
+          const rect = containerRef.current.getBoundingClientRect();
 
-           const deltaY = dragging.currentY - dragging.startY;
-           const deltaMin = Math.round((deltaY / hourHeight) * 60 / step) * step;
-           const newStartMin = Math.max(0, Math.min(1440 - dragging.duration, dragging.originalStartMin + deltaMin));
+          const deltaY = dragging.currentY - dragging.startY;
+          const deltaMin = Math.round((deltaY / hourHeight) * 60 / step) * step;
+          const newStartMin = Math.max(0, Math.min(1440 - dragging.duration, dragging.originalStartMin + deltaMin));
 
-           const timeAxisWidth = 48;
-           const gridWidth = rect.width - timeAxisWidth;
-           const relativeX = dragging.currentX - rect.left - timeAxisWidth + containerRef.current.scrollLeft;
+          const timeAxisWidth = 48;
+          const gridWidth = rect.width - timeAxisWidth;
+          const relativeX = dragging.currentX - rect.left - timeAxisWidth + containerRef.current.scrollLeft;
 
-           const newColIndex = getColumnFromX(relativeX, gridWidth, days.length);
-           const newDate = days[newColIndex];
+          const newColIndex = getColumnFromX(relativeX, gridWidth, days.length);
+          const newDate = days[newColIndex];
 
-           if (newDate) {
-             const newDateStr = formatDateLocalISO(newDate);
-             const previousDate = dragging.task.data_limite || dragging.task.data_inicio || '';
-             if (Math.abs(deltaMin) > 0 || newDateStr !== previousDate) {
-                onTaskUpdate(dragging.id, {
-                  data_limite: newDateStr,
-                  data_inicio: newDateStr,
-                  horario_inicio: minutesToTime(newStartMin),
-                  horario_fim: minutesToTime(newStartMin + dragging.duration)
-                });
-             }
-           }
+          if (newDate) {
+            const newDateStr = formatDateLocalISO(newDate);
+            const previousDate = dragging.task.data_limite || dragging.task.data_inicio || '';
+            if (Math.abs(deltaMin) > 0 || newDateStr !== previousDate) {
+              onTaskUpdate(dragging.id, {
+                data_limite: newDateStr,
+                data_inicio: newDateStr,
+                horario_inicio: minutesToTime(newStartMin),
+                horario_fim: minutesToTime(newStartMin + dragging.duration)
+              });
+            }
+          }
         }
         setDragging(null);
       } else if (resizing) {
-         const deltaY = resizing.currentY - resizing.startY;
-         const deltaMin = Math.round((deltaY / hourHeight) * 60 / step) * step;
-         let newStart = resizing.originalStartMin;
-         let newEnd = resizing.originalEndMin;
-         if (resizing.type === 'top') {
-           newStart = Math.min(newStart + deltaMin, newEnd - 15);
-           newStart = Math.max(0, newStart);
-         } else {
-           newEnd = Math.max(newStart + 15, newEnd + deltaMin);
-           newEnd = Math.min(1440, newEnd);
-         }
-         if (newStart !== resizing.originalStartMin || newEnd !== resizing.originalEndMin) {
-            onTaskUpdate(resizing.id, {
-              horario_inicio: minutesToTime(newStart),
-              horario_fim: minutesToTime(newEnd)
-            });
-         }
-         setResizing(null);
+        const deltaY = resizing.currentY - resizing.startY;
+        const deltaMin = Math.round((deltaY / hourHeight) * 60 / step) * step;
+        let newStart = resizing.originalStartMin;
+        let newEnd = resizing.originalEndMin;
+        if (resizing.type === 'top') {
+          newStart = Math.min(newStart + deltaMin, newEnd - 15);
+          newStart = Math.max(0, newStart);
+        } else {
+          newEnd = Math.max(newStart + 15, newEnd + deltaMin);
+          newEnd = Math.min(1440, newEnd);
+        }
+        if (newStart !== resizing.originalStartMin || newEnd !== resizing.originalEndMin) {
+          onTaskUpdate(resizing.id, {
+            horario_inicio: minutesToTime(newStart),
+            horario_fim: minutesToTime(newEnd)
+          });
+        }
+        setResizing(null);
       }
     };
 
@@ -296,81 +306,85 @@ export const TimeGrid = ({
   }, [dragging, resizing, days, onTaskUpdate]);
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-slate-50 border-t border-slate-100 relative select-none">
+    <div className={`flex flex-col h-full overflow-hidden border-t relative select-none ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-100'}`}>
       <div className="flex flex-1 overflow-hidden relative">
         <div className="flex-1 overflow-y-auto custom-scrollbar relative flex" ref={containerRef}>
-          <div className="w-12 flex-shrink-0 bg-white border-r border-slate-100 relative sticky left-0 z-20" style={{ height: 24 * hourHeight }}>
+          <div className={`w-12 flex-shrink-0 border-r relative sticky left-0 z-20 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`} style={{ height: 24 * hourHeight }}>
             {Array.from({ length: 24 }).map((_, i) => (
-              <div key={i} className="absolute right-2 text-[10px] text-slate-300 font-mono" style={{ top: i * hourHeight - 6 }}>
+              <div key={i} className={`absolute right-2 text-[10px] font-mono ${isDark ? 'text-slate-600' : 'text-slate-300'}`} style={{ top: i * hourHeight - 6 }}>
                 {i.toString().padStart(2, '0')}:00
               </div>
             ))}
           </div>
 
           {days.map((day, dayIndex) => {
-             const dayStr = formatDateLocalISO(day);
-             const isToday = formatDateLocalISO(currentTime) === dayStr;
-             const positioned = getPositionedEvents(dayIndex);
+            const dayStr = formatDateLocalISO(day);
+            const isToday = formatDateLocalISO(currentTime) === dayStr;
+            const positioned = getPositionedEvents(dayIndex);
 
-             return (
-               <div
-                 key={dayStr}
-                 className="flex-1 relative border-r border-slate-100 min-w-[150px] cursor-crosshair active:cursor-grabbing"
-                 style={{ height: 24 * hourHeight }}
-                 onMouseDown={(e) => handleGridMouseDown(e, day)}
-                 onMouseUp={handleGridMouseUp}
-                 onMouseMove={handleGridMouseMove}
-                 onTouchStart={(e) => handleGridMouseDown(e, day)}
-                 onTouchEnd={handleGridMouseUp}
-                 onTouchMove={handleGridMouseMove}
-                 onDragOver={(e) => e.preventDefault()}
-                 onDrop={(e) => handleDropFromSidebar(e, dayIndex)}
-               >
-                 {Array.from({ length: 24 }).map((_, i) => (
-                    <div key={i} className="absolute left-0 right-0 border-t border-slate-50" style={{ top: i * hourHeight, height: hourHeight }}></div>
-                 ))}
+            return (
+              <div
+                key={dayStr}
+                className={`flex-1 relative border-r min-w-[150px] cursor-crosshair active:cursor-grabbing ${isDark ? 'border-slate-800' : 'border-slate-100'} ${day.getDay() === 0 || day.getDay() === 6 ? isDark ? 'bg-black/20' : 'bg-slate-50/40' : 'bg-transparent'}`}
+                style={{ height: 24 * hourHeight }}
+                onMouseDown={(e) => handleGridMouseDown(e, day)}
+                onMouseUp={handleGridMouseUp}
+                onMouseMove={handleGridMouseMove}
+                onTouchStart={(e) => handleGridMouseDown(e, day)}
+                onTouchEnd={handleGridMouseUp}
+                onTouchMove={handleGridMouseMove}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => handleDropFromSidebar(e, dayIndex)}
+              >
+                {Array.from({ length: 24 }).map((_, i) => (
+                  <div key={i} className={`absolute left-0 right-0 border-t ${isDark ? 'border-slate-800/50' : 'border-slate-50'}`} style={{ top: i * hourHeight, height: hourHeight }}></div>
+                ))}
 
-                 {isToday && (
-                    <div className="absolute left-0 right-0 border-t-2 border-red-500 z-20 pointer-events-none" style={{ top: (currentTime.getHours() * 60 + currentTime.getMinutes()) / 60 * hourHeight }}>
-                      <div className="absolute -left-1.5 -top-1.5 w-3 h-3 bg-red-500 rounded-full"></div>
-                    </div>
-                 )}
+                {isToday && (
+                  <div className="absolute left-0 right-0 border-t-2 border-red-500 z-20 pointer-events-none" style={{ top: (currentTime.getHours() * 60 + currentTime.getMinutes()) / 60 * hourHeight }}>
+                    <div className="absolute -left-1.5 -top-1.5 w-3 h-3 bg-red-500 rounded-full"></div>
+                  </div>
+                )}
 
-                 {positioned.map(event => {
-                   const isDragging = dragging?.id === event.id;
-                   const isResizing = resizing?.id === event.id;
-                   const startMin = event.start;
-                   const endMin = event.end;
-                   const top = (startMin / 60) * hourHeight;
-                   const height = ((endMin - startMin) / 60) * hourHeight;
-                   const columnWidth = 100 / event.totalCols;
-                   const left = event.colIndex * columnWidth;
+                {positioned.map(event => {
+                  const isDragging = dragging?.id === event.id;
+                  const isResizing = resizing?.id === event.id;
+                  const startMin = event.start;
+                  const endMin = event.end;
+                  const top = (startMin / 60) * hourHeight;
+                  const height = ((endMin - startMin) / 60) * hourHeight;
+                  const columnWidth = 100 / event.totalCols;
+                  const left = event.colIndex * columnWidth;
 
-                   if (event.type === 'google') {
-                      return (
-                        <div
-                          key={event.id}
-                          className="absolute rounded-lg border-l-4 p-1 shadow-sm bg-amber-50/90 border-amber-500 text-slate-800 overflow-hidden"
-                          style={{ top, height: Math.max(20, height), left: `${left}%`, width: `${columnWidth}%`, zIndex: 5 }}
-                          onMouseDown={e => e.stopPropagation()}
-                          onTouchStart={e => e.stopPropagation()}
-                        >
-                           <div className="text-[9px] font-black leading-tight line-clamp-1">{event.title}</div>
-                        </div>
-                      );
-                   }
+                  if (event.type === 'google') {
+                    return (
+                      <div
+                        key={event.id}
+                        className={`absolute rounded-lg border-l-4 p-1 shadow-sm overflow-hidden ${isDark ? 'bg-amber-900/20 border-amber-500 text-amber-200' : 'bg-amber-50/90 border-amber-500 text-slate-800'}`}
+                        style={{ top, height: Math.max(20, height), left: `${left}%`, width: `${columnWidth}%`, zIndex: 5 }}
+                        onMouseDown={e => e.stopPropagation()}
+                        onTouchStart={e => e.stopPropagation()}
+                      >
+                        <div className="text-[9px] font-black leading-tight line-clamp-1">{event.title}</div>
+                      </div>
+                    );
+                  }
 
-                   const taskItem = event.data as Tarefa;
-                   return (
-                     <React.Fragment key={event.id}>
-                       <div
-                          className={`absolute rounded-lg border p-1 shadow-sm group transition-all overflow-hidden hover:z-30 cursor-grab active:cursor-grabbing
-                             ${taskItem.area_tematica === 'CLC' ? 'bg-blue-50 border-blue-200 text-blue-800' :
-                               taskItem.area_tematica === 'ASSISTÊNCIA' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
-                               'bg-white border-slate-200 text-slate-800'}
+                  const taskItem = event.data as Tarefa;
+                  return (
+                    <React.Fragment key={event.id}>
+                      <div
+                        className={`absolute rounded-lg border p-1 shadow-sm group transition-all hover:z-30 cursor-grab active:cursor-grabbing
+                             ${taskItem.area_tematica === 'CLC' ? isDark ? 'bg-blue-900/20 border-blue-800 text-blue-200' : 'bg-blue-50 border-blue-200 text-blue-800' :
+                            taskItem.area_tematica === 'ASSISTÊNCIA' ? isDark ? 'bg-emerald-900/20 border-emerald-800 text-emerald-200' : 'bg-emerald-50 border-emerald-200 text-emerald-800' :
+                              isDark ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-800'}
                              ${isDragging || isResizing ? 'opacity-30' : ''}
                           `}
-                          style={{ top, height: Math.max(30, height), left: `${left}%`, width: `${columnWidth}%`, zIndex: 10, touchAction: 'none' }}
+                        style={{ top, height: Math.max(60, height), left: `${left}%`, width: `${columnWidth}%`, zIndex: activeMenuId === event.id ? 100 : 10, touchAction: 'none' }}
+                        onClick={(e) => {
+                          if ((e.target as HTMLElement).closest('button')) return;
+                          if (!disableExecuteOnClick) onExecuteTask(taskItem);
+                        }}
                         onMouseDown={(e) => {
                           if ((e.target as HTMLElement).classList.contains('resize-handle')) return;
                           e.stopPropagation();
@@ -403,129 +417,145 @@ export const TimeGrid = ({
                             duration: endMin - startMin
                           });
                         }}
-                     >
-                       <div className="flex justify-between items-start gap-1 relative h-full">
-                         <div className="text-[10px] font-bold leading-tight line-clamp-2 flex-1 pr-4">{taskItem.titulo}</div>
-                         <div className="absolute -top-1 -right-1 flex gap-1 md:gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white/95 p-1 rounded-bl-xl shadow-sm backdrop-blur-md z-10 border-b border-l border-slate-200/60">
+                      >
+                        <div className="flex justify-between items-start gap-1 relative h-full">
+                          <div className="text-[10px] font-bold leading-tight line-clamp-2 flex-1 pr-4">{taskItem.titulo}</div>
+                          <div className="absolute top-1 right-1 flex items-center gap-1 z-40">
                             <button
-                              onClick={(e) => { e.stopPropagation(); onTaskUpdate(taskItem.id, { status: normalizeStatus(taskItem.status) === 'concluido' ? 'em andamento' : 'concluído' }); }}
-                              className={`p-1.5 md:p-2 rounded-lg hover:scale-105 active:scale-95 transition-all ${taskItem.status === 'concluído' ? 'text-emerald-500 bg-emerald-50 shadow-inner' : 'text-slate-400 bg-slate-50 hover:text-emerald-600 hover:bg-emerald-50 hover:shadow-sm'}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onTaskUpdate(taskItem.id, { horario_inicio: null as any, horario_fim: null as any });
+                              }}
+                              className={`p-1 rounded-lg transition-all shadow-sm scale-100 opacity-0 group-hover:opacity-100 ${isDark ? 'bg-slate-700 text-slate-200 hover:bg-slate-600' : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-100'}`}
+                              title="Devolver para ações disponíveis"
                             >
-                              <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M3 12l6.414 6.414a2 2 0 001.414.586H19a2 2 0 002-2V7a2 2 0 00-2-2h-8.172a2 2 0 00-1.414.586L3 12z" />
+                              </svg>
                             </button>
-                            <button onClick={(e) => { e.stopPropagation(); onExecuteTask(taskItem); }} className="p-1.5 md:p-2 rounded-lg text-indigo-500 bg-indigo-50 hover:bg-indigo-100 hover:scale-105 active:scale-95 transition-all hover:shadow-sm" title="Executar">
-                              <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /></svg>
-                            </button>
-                            <button onClick={(e) => { e.stopPropagation(); onTaskClick(taskItem); }} className="p-1.5 md:p-2 rounded-lg text-blue-500 bg-blue-50 hover:bg-blue-100 hover:scale-105 active:scale-95 transition-all hover:shadow-sm" title="Editar">
-                              <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                            </button>
-                         </div>
-                       </div>
+                            <TaskActionSelector
+                              task={taskItem}
+                              isDark={!!isDark}
+                              onToggle={(open) => setActiveMenuId(open ? event.id : null)}
+                              onTaskUpdate={onTaskUpdate}
+                              onTaskClick={onTaskClick}
+                              onExecuteTask={onExecuteTask}
+                              position="static"
+                            />
+                          </div>
+                        </div>
+                        <div className="absolute bottom-1 left-1 flex items-center gap-1.5 overflow-hidden">
+                          {taskItem.area_tematica && (
+                            <span className={`text-[7px] font-black uppercase px-1.5 py-0.5 rounded-sm ${isDark ? 'bg-white/10 text-slate-300' : 'bg-black/5 text-slate-600'}`}>
+                              {taskItem.area_tematica}
+                            </span>
+                          )}
+                        </div>
 
-                       <div
-                         className="resize-handle absolute -top-2 left-0 right-0 h-6 cursor-ns-resize z-20 flex items-center justify-center opacity-0 hover:opacity-100 active:opacity-100 transition-opacity"
-                         style={{ touchAction: 'none' }}
-                         onMouseDown={(e) => {
-                           e.stopPropagation();
-                           e.preventDefault();
-                           setResizing({ id: event.id, type: 'top', startY: e.clientY, currentY: e.clientY, originalStartMin: startMin, originalEndMin: endMin });
-                         }}
-                         onTouchStart={(e) => {
-                           e.stopPropagation();
-                           e.preventDefault();
-                           setResizing({ id: event.id, type: 'top', startY: e.touches[0].clientY, currentY: e.touches[0].clientY, originalStartMin: startMin, originalEndMin: endMin });
-                         }}
-                       >
-                         <div className="w-8 h-1 bg-slate-300 rounded-full shadow-sm"></div>
-                       </div>
-                       <div
-                         className="resize-handle absolute -bottom-2 left-0 right-0 h-6 cursor-ns-resize z-20 flex items-center justify-center opacity-0 hover:opacity-100 active:opacity-100 transition-opacity"
-                         style={{ touchAction: 'none' }}
-                         onMouseDown={(e) => {
-                           e.stopPropagation();
-                           e.preventDefault();
-                           setResizing({ id: event.id, type: 'bottom', startY: e.clientY, currentY: e.clientY, originalStartMin: startMin, originalEndMin: endMin });
-                         }}
-                         onTouchStart={(e) => {
-                           e.stopPropagation();
-                           e.preventDefault();
-                           setResizing({ id: event.id, type: 'bottom', startY: e.touches[0].clientY, currentY: e.touches[0].clientY, originalStartMin: startMin, originalEndMin: endMin });
-                         }}
-                       >
-                         <div className="w-8 h-1 bg-slate-300 rounded-full shadow-sm"></div>
-                       </div>
-                     </div>
-                     {isResizing && resizing && (
-                         (() => {
-                           const deltaY = resizing.currentY - resizing.startY;
-                           const deltaMin = Math.round((deltaY / hourHeight) * 60 / step) * step;
-                           let previewStart = resizing.originalStartMin;
-                           let previewEnd = resizing.originalEndMin;
-                           if (resizing.type === 'top') {
-                             previewStart = Math.min(previewStart + deltaMin, previewEnd - 15);
-                             previewStart = Math.max(0, previewStart);
-                           } else {
-                             previewEnd = Math.max(previewStart + 15, previewEnd + deltaMin);
-                             previewEnd = Math.min(1440, previewEnd);
-                           }
-                           const previewTop = (previewStart / 60) * hourHeight;
-                           const previewHeight = ((previewEnd - previewStart) / 60) * hourHeight;
+                        <div
+                          className="resize-handle absolute -top-2 left-0 right-0 h-6 cursor-ns-resize z-20 flex items-center justify-center opacity-0 hover:opacity-100 active:opacity-100 transition-opacity"
+                          style={{ touchAction: 'none' }}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            setResizing({ id: event.id, type: 'top', startY: e.clientY, currentY: e.clientY, originalStartMin: startMin, originalEndMin: endMin });
+                          }}
+                          onTouchStart={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            setResizing({ id: event.id, type: 'top', startY: e.touches[0].clientY, currentY: e.touches[0].clientY, originalStartMin: startMin, originalEndMin: endMin });
+                          }}
+                        >
+                          <div className="w-8 h-1 bg-slate-300 rounded-full shadow-sm"></div>
+                        </div>
+                        <div
+                          className="resize-handle absolute -bottom-2 left-0 right-0 h-6 cursor-ns-resize z-20 flex items-center justify-center opacity-0 hover:opacity-100 active:opacity-100 transition-opacity"
+                          style={{ touchAction: 'none' }}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            setResizing({ id: event.id, type: 'bottom', startY: e.clientY, currentY: e.clientY, originalStartMin: startMin, originalEndMin: endMin });
+                          }}
+                          onTouchStart={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            setResizing({ id: event.id, type: 'bottom', startY: e.touches[0].clientY, currentY: e.touches[0].clientY, originalStartMin: startMin, originalEndMin: endMin });
+                          }}
+                        >
+                          <div className="w-8 h-1 bg-slate-300 rounded-full shadow-sm"></div>
+                        </div>
+                      </div>
+                      {isResizing && resizing && (
+                        (() => {
+                          const deltaY = resizing.currentY - resizing.startY;
+                          const deltaMin = Math.round((deltaY / hourHeight) * 60 / step) * step;
+                          let previewStart = resizing.originalStartMin;
+                          let previewEnd = resizing.originalEndMin;
+                          if (resizing.type === 'top') {
+                            previewStart = Math.min(previewStart + deltaMin, previewEnd - 15);
+                            previewStart = Math.max(0, previewStart);
+                          } else {
+                            previewEnd = Math.max(previewStart + 15, previewEnd + deltaMin);
+                            previewEnd = Math.min(1440, previewEnd);
+                          }
+                          const previewTop = (previewStart / 60) * hourHeight;
+                          const previewHeight = ((previewEnd - previewStart) / 60) * hourHeight;
 
-                           return (
-                             <div
-                               className="absolute rounded-lg border-2 border-dashed border-indigo-500 bg-indigo-50/50 p-1 z-50 pointer-events-none"
-                               style={{ top: previewTop, height: Math.max(30, previewHeight), left: `${left}%`, width: `${columnWidth}%` }}
-                             >
-                               <div className="text-[9px] font-bold text-indigo-800">
-                                 {minutesToTime(previewStart)} - {minutesToTime(previewEnd)}
-                               </div>
-                             </div>
-                           );
-                         })()
+                          return (
+                            <div
+                              className="absolute rounded-lg border-2 border-dashed border-indigo-500 bg-indigo-50/50 p-1 z-50 pointer-events-none"
+                              style={{ top: previewTop, height: Math.max(30, previewHeight), left: `${left}%`, width: `${columnWidth}%` }}
+                            >
+                              <div className="text-[9px] font-bold text-indigo-800">
+                                {minutesToTime(previewStart)} - {minutesToTime(previewEnd)}
+                              </div>
+                            </div>
+                          );
+                        })()
                       )}
                     </React.Fragment>
-                   );
-                 })}
-               </div>
-             );
+                  );
+                })}
+              </div>
+            );
           })}
 
           {dragging && (
-             (() => {
-               const deltaY = dragging.currentY - dragging.startY;
-               const newStartMin = Math.max(0, Math.min(1440 - dragging.duration, dragging.originalStartMin + (deltaY / hourHeight) * 60));
+            (() => {
+              const deltaY = dragging.currentY - dragging.startY;
+              const newStartMin = Math.max(0, Math.min(1440 - dragging.duration, dragging.originalStartMin + (deltaY / hourHeight) * 60));
 
-               const snappedStartMin = snapToGrid(newStartMin, step);
-               const top = (snappedStartMin / 60) * hourHeight;
-               const height = (dragging.duration / 60) * hourHeight;
+              const snappedStartMin = snapToGrid(newStartMin, step);
+              const top = (snappedStartMin / 60) * hourHeight;
+              const height = (dragging.duration / 60) * hourHeight;
 
-               let left = 0;
-               let width = 0;
+              let left = 0;
+              let width = 0;
 
-               if (containerRef.current) {
-                 const rect = containerRef.current.getBoundingClientRect();
-                 const timeAxisWidth = 48;
-                 const gridWidth = rect.width - timeAxisWidth;
-                 const relativeX = dragging.currentX - rect.left - timeAxisWidth + containerRef.current.scrollLeft;
-                 const colIndex = getColumnFromX(relativeX, gridWidth, days.length);
+              if (containerRef.current) {
+                const rect = containerRef.current.getBoundingClientRect();
+                const timeAxisWidth = 48;
+                const gridWidth = rect.width - timeAxisWidth;
+                const relativeX = dragging.currentX - rect.left - timeAxisWidth + containerRef.current.scrollLeft;
+                const colIndex = getColumnFromX(relativeX, gridWidth, days.length);
 
-                 const colWidth = gridWidth / days.length;
-                 left = timeAxisWidth + (colIndex * colWidth);
-                 width = colWidth - 8;
-               }
+                const colWidth = gridWidth / days.length;
+                left = timeAxisWidth + (colIndex * colWidth);
+                width = colWidth - 8;
+              }
 
-               return (
-                 <div
-                   className="absolute rounded-lg border-2 border-dashed border-blue-500 bg-blue-50/50 p-1 z-50 pointer-events-none"
-                   style={{ top, left, width, height }}
-                 >
-                   <div className="text-[9px] font-bold text-blue-800">
-                     {minutesToTime(snappedStartMin)} - {minutesToTime(snappedStartMin + dragging.duration)}
-                   </div>
-                   <div className="text-[10px] font-bold leading-tight line-clamp-2 opacity-50">{dragging.task.titulo}</div>
-                 </div>
-               );
-             })()
+              return (
+                <div
+                  className="absolute rounded-lg border-2 border-dashed border-blue-500 bg-blue-50/50 p-1 z-50 pointer-events-none"
+                  style={{ top, left, width, height }}
+                >
+                  <div className="text-[9px] font-bold text-blue-800">
+                    {minutesToTime(snappedStartMin)} - {minutesToTime(snappedStartMin + dragging.duration)}
+                  </div>
+                  <div className="text-[10px] font-bold leading-tight line-clamp-2 opacity-50">{dragging.task.titulo}</div>
+                </div>
+              );
+            })()
           )}
         </div>
         {sidebar}
