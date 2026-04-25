@@ -103,6 +103,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
   const [meetingEndedAt, setMeetingEndedAt] = useState<Date | null>(null);
   const [meetingHistory, setMeetingHistory] = useState<MeetingHistoryEntry[]>([]);
   const [isTitleGenerating, setIsTitleGenerating] = useState(false);
+  const [showShareGuide, setShowShareGuide] = useState(false);
 
   const micRecorderRef = useRef<MediaRecorder | null>(null);
   const systemRecorderRef = useRef<MediaRecorder | null>(null);
@@ -304,12 +305,16 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
   const startRecording = async () => {
     try {
       const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const systemStream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
+      const systemStream = await navigator.mediaDevices.getDisplayMedia({
+        audio: { suppressLocalAudioPlayback: false },
+        video: true,
+        systemAudio: 'include',
+      } as DisplayMediaStreamOptions);
 
       systemStream.getVideoTracks().forEach(track => track.stop());
 
       if (systemStream.getAudioTracks().length === 0) {
-        showToast('O áudio do sistema não foi compartilhado.', 'error');
+        showToast('Áudio não capturado. Selecione "Tela inteira" e marque "Compartilhar áudio do sistema".', 'error');
         systemStream.getTracks().forEach(track => track.stop());
         micStream.getTracks().forEach(track => track.stop());
         return;
@@ -719,7 +724,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
                 {isChatOpen ? 'Minimizar Chat' : 'Abrir Chat'}
               </button>
               <button
-                onClick={() => (isRecording ? stopRecording(true) : startRecording())}
+                onClick={() => (isRecording ? stopRecording(true) : setShowShareGuide(true))}
                 disabled={isSavingToDrive}
                 className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-sm disabled:opacity-50 ${
                   isRecording ? 'bg-rose-100 text-rose-600 hover:bg-rose-200' : 'bg-slate-900 text-white hover:bg-blue-600'
@@ -912,6 +917,60 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
         >
           Chat da Reunião
         </button>
+      )}
+
+      {showShareGuide && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full mx-4 p-8 flex flex-col gap-6">
+            <div>
+              <h3 className="text-2xl font-black text-slate-900 tracking-tight mb-1">Como compartilhar o áudio</h3>
+              <p className="text-slate-500 text-sm font-medium">Siga esses passos no diálogo que vai abrir para capturar o áudio da sua reunião.</p>
+            </div>
+
+            <ol className="flex flex-col gap-4">
+              <li className="flex items-start gap-3">
+                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-slate-900 text-white text-xs font-black flex items-center justify-center mt-0.5">1</span>
+                <div>
+                  <p className="font-bold text-slate-900 text-sm">Selecione "Tela inteira"</p>
+                  <p className="text-slate-500 text-xs mt-0.5">Não escolha a janela do Teams — escolha a aba <strong>Tela inteira</strong> para que o áudio do sistema fique disponível.</p>
+                </div>
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-slate-900 text-white text-xs font-black flex items-center justify-center mt-0.5">2</span>
+                <div>
+                  <p className="font-bold text-slate-900 text-sm">Ative "Compartilhar áudio do sistema"</p>
+                  <p className="text-slate-500 text-xs mt-0.5">Marque a opção na parte inferior do diálogo antes de clicar em Compartilhar.</p>
+                </div>
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-slate-900 text-white text-xs font-black flex items-center justify-center mt-0.5">3</span>
+                <div>
+                  <p className="font-bold text-slate-900 text-sm">Clique em "Compartilhar"</p>
+                  <p className="text-slate-500 text-xs mt-0.5">A gravação começa automaticamente após o compartilhamento.</p>
+                </div>
+              </li>
+            </ol>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-xs text-amber-800 font-medium">
+              <strong>Dica para Teams:</strong> O Teams desktop bloqueia o áudio quando apenas a janela é compartilhada. Compartilhe a tela inteira para contornar essa restrição.
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowShareGuide(false)}
+                className="flex-1 px-4 py-3 rounded-2xl text-sm font-black uppercase tracking-widest bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => { setShowShareGuide(false); startRecording(); }}
+                className="flex-1 px-4 py-3 rounded-2xl text-sm font-black uppercase tracking-widest bg-slate-900 text-white hover:bg-blue-600 transition-all"
+              >
+                Entendido, iniciar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
