@@ -16,6 +16,18 @@ export const PainelControleUI = ({
   task, chatUrl, setChatUrl, handleSaveChatUrl, handleCompleteTaskRequest,
   setModalConfig, setReminderDate, setReminderTime, showToast
 }: PainelControleUIProps) => {
+  const reminders = useMemo(() => {
+    const taskReminders = Array.isArray(task.reminders) ? [...task.reminders] : [];
+    taskReminders.sort((a, b) => new Date(a.reminder_at).getTime() - new Date(b.reminder_at).getTime());
+    if (taskReminders.length > 0) return taskReminders;
+    if (task.reminder_at) return [{ reminder_at: task.reminder_at, reminder_sent: Boolean(task.reminder_sent) }];
+    return [];
+  }, [task.reminder_at, task.reminder_sent, task.reminders]);
+
+  const nextPendingReminder = useMemo(
+    () => reminders.find((reminder: any) => !reminder.reminder_sent),
+    [reminders]
+  );
 
   return (
     <div className="flex flex-col gap-4 md:gap-6 overflow-hidden px-0">
@@ -56,8 +68,8 @@ export const PainelControleUI = ({
       <div className="grid grid-cols-2 gap-2">
         <button
           onClick={() => {
-            if (task.reminder_at) {
-              const [date, time] = task.reminder_at.split('T');
+            if (nextPendingReminder?.reminder_at) {
+              const [date, time] = nextPendingReminder.reminder_at.split('T');
               setReminderDate(date);
               setReminderTime(time.slice(0, 5));
             } else {
@@ -67,7 +79,7 @@ export const PainelControleUI = ({
             }
             setModalConfig({ type: 'reminder', isOpen: true });
           }}
-          className={`h-16 flex flex-col items-center justify-center gap-1 rounded-none md:rounded-2xl transition-all border ${task.reminder_at && !task.reminder_sent ? 'bg-amber-500 text-white border-amber-600 shadow-lg' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-50'}`}
+          className={`h-16 flex flex-col items-center justify-center gap-1 rounded-none md:rounded-2xl transition-all border ${nextPendingReminder ? 'bg-amber-500 text-white border-amber-600 shadow-lg' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-50'}`}
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" strokeWidth="2.5" /></svg>
           <span className="text-[8px] font-black uppercase tracking-widest">Lembrete</span>
@@ -83,4 +95,4 @@ export const PainelControleUI = ({
       </div>
     </div>
   );
-};
+};

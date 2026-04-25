@@ -17,12 +17,14 @@ export interface Musica {
   data_criacao: string;
 }
 
-export const ChoirRehearsalsTool: React.FC<{ 
-  onBack: () => void; 
+export const ChoirRehearsalsTool: React.FC<{
+  onBack: () => void;
   showToast: (m: string, t: 'success' | 'error' | 'info') => void;
   knowledgeItems?: ConhecimentoItem[];
   onUploadFile?: (file: File) => Promise<ConhecimentoItem | null>;
-}> = ({ onBack, showToast, knowledgeItems = [], onUploadFile }) => {
+  initialFile?: File | null;
+  onInitialFileConsumed?: () => void;
+}> = ({ onBack, showToast, knowledgeItems = [], onUploadFile, initialFile, onInitialFileConsumed }) => {
   const [musicas, setMusicas] = useState<Musica[]>([]);
   const [selectedMusica, setSelectedMusica] = useState<Musica | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -47,6 +49,11 @@ export const ChoirRehearsalsTool: React.FC<{
         setSharedVideoWizard('options');
       }
     };
+    if (initialFile) {
+      setIncomingSharedFile(initialFile);
+      setSharedVideoWizard('options');
+      onInitialFileConsumed?.();
+    }
     window.addEventListener('hermes-shared-video', handleSharedVideo);
     return () => window.removeEventListener('hermes-shared-video', handleSharedVideo);
   }, []);

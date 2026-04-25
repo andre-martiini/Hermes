@@ -318,6 +318,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const [sessions, setSessions] = useState<Session[]>([]);
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
     const [messages, setMessages] = useState<Message[]>([]);
+    const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [showHistory, setShowHistory] = useState(false);
@@ -366,6 +367,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const [footerError, setFooterError] = useState<string | null>(null);
     // Estado de transcrição de áudio colado
     const [isTranscribing, setIsTranscribing] = useState(false);
+    const [isDragActive, setIsDragActive] = useState(false);
+    const dragCounterRef = useRef(0);
 
     // Estado para rastrear qual diagnóstico está em processamento
     const [diagnosingId, setDiagnosingId] = useState<string | null>(null);
@@ -426,6 +429,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     // ── Gravação de áudio por microfone ───────────────────────────────────────
     const [isRecording, setIsRecording] = useState(false);
     const [isProcessingMic, setIsProcessingMic] = useState(false);
+    const isBlocked = isLoading || uploadPhase !== 'idle' || isTranscribing || isProcessingMic;
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
     const micStreamRef = useRef<MediaStream | null>(null);
@@ -635,23 +639,28 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     };
 
     // ── Seleção de arquivo ────────────────────────────────────────────────────
-    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0] ?? null;
+    const attachFileToCopiloto = React.useCallback((file: File | null, source: 'input' | 'drop' = 'input') => {
         if (!file) {
             setAttachedFile(null);
-            e.target.value = '';
             return;
         }
 
         if (!isCopilotoFileSupported(file)) {
             setAttachedFile(null);
             setFooterError(`Formato ainda não suportado no copiloto. Use ${COPILOTO_SUPPORTED_FORMATS_LABEL}.`);
-            e.target.value = '';
             return;
         }
 
         setFooterError(null);
         setAttachedFile(file);
+        if (source === 'drop') {
+            setShowToolMenu(false);
+        }
+    }, []);
+
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0] ?? null;
+        attachFileToCopiloto(file, 'input');
         // Reset o input para permitir re-selecionar o mesmo arquivo
         e.target.value = '';
     };
@@ -659,6 +668,47 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const handleRemoveFile = () => {
         setAttachedFile(null);
     };
+
+    const handleComposerDragEnter = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
+        if (!Array.from(e.dataTransfer.types).includes('Files') || isBlocked) return;
+        e.preventDefault();
+        e.stopPropagation();
+        dragCounterRef.current += 1;
+        setIsDragActive(true);
+    }, [isBlocked]);
+
+    const handleComposerDragOver = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
+        if (!Array.from(e.dataTransfer.types).includes('Files') || isBlocked) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'copy';
+        setIsDragActive(true);
+    }, [isBlocked]);
+
+    const handleComposerDragLeave = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
+        if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+        if (dragCounterRef.current === 0) {
+            setIsDragActive(false);
+        }
+    }, []);
+
+    const handleComposerDrop = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
+        if (!Array.from(e.dataTransfer.types).includes('Files') || isBlocked) return;
+        e.preventDefault();
+        e.stopPropagation();
+        dragCounterRef.current = 0;
+        setIsDragActive(false);
+
+        const droppedFiles = Array.from(e.dataTransfer.files || []);
+        if (droppedFiles.length === 0) return;
+        if (droppedFiles.length > 1) {
+            setFooterError(`O copiloto aceita um arquivo por vez. Mantive apenas "${droppedFiles[0].name}".`);
+        }
+        attachFileToCopiloto(droppedFiles[0], 'drop');
+    }, [attachFileToCopiloto, isBlocked]);
 
     const handleDeleteSession = async (sessionId: string) => {
         if (deletingSessionId) return;
@@ -739,6 +789,46 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         }
         setDiagnosisCopyDone(true);
         window.setTimeout(() => setDiagnosisCopyDone(false), 2000);
+    };
+
+    const handleCopyChatMessage = async (messageKey: string, content: string) => {
+        try {
+            await navigator.clipboard.writeText(content);
+        } catch {
+            const el = document.createElement('textarea');
+            el.value = content;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+        }
+        setCopiedMessageKey(messageKey);
+        window.setTimeout(() => setCopiedMessageKey((current) => current === messageKey ? null : current), 1600);
+    };
+
+    const formatMessageTimestamp = (timestamp: any) => {
+        if (!timestamp) return '';
+
+        let date: Date | null = null;
+        if (timestamp instanceof Date) {
+            date = timestamp;
+        } else if (typeof timestamp?.toDate === 'function') {
+            date = timestamp.toDate();
+        } else if (typeof timestamp?.seconds === 'number') {
+            date = new Date(timestamp.seconds * 1000);
+        } else if (typeof timestamp === 'string' || typeof timestamp === 'number') {
+            const parsed = new Date(timestamp);
+            if (!Number.isNaN(parsed.getTime())) date = parsed;
+        }
+
+        if (!date || Number.isNaN(date.getTime())) return '';
+
+        return new Intl.DateTimeFormat('pt-BR', {
+            day: '2-digit',
+            month: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+        }).format(date);
     };
 
     // ── Quick replies (botões de confirmação de draft) ────────────────────────
@@ -1273,7 +1363,6 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         processing: 'Extraindo contexto e atualizando Acervo...'
     };
 
-    const isBlocked = isLoading || uploadPhase !== 'idle' || isTranscribing || isProcessingMic;
     const isEmbedded = variant === 'embedded';
     const shouldAutoCloseOnNavigate = !isEmbedded;
     const effectiveDrawerWidth = isEmbedded ? '100%' : isMobileViewport ? '100%' : `${drawerWidth}px`;
@@ -1417,9 +1506,12 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                             </div>
                         )}
 
-                        {messages.map((msg, i) => (
-                            <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                                <div className={`max-w-[90%] min-w-0 px-4 py-3 rounded-2xl text-xs font-medium leading-relaxed shadow-sm break-words [overflow-wrap:anywhere] [&_*]:max-w-full ${msg.role === 'user'
+                        {messages.map((msg, i) => {
+                            const messageKey = msg.id || `${msg.role}-${i}`;
+                            const messageTimestamp = formatMessageTimestamp(msg.timestamp);
+                            return (
+                            <div key={messageKey} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                                <div className={`group relative max-w-[90%] min-w-0 px-4 py-3 rounded-2xl text-xs font-medium leading-relaxed shadow-sm break-words [overflow-wrap:anywhere] [&_*]:max-w-full ${msg.role === 'user'
                                     ? isDark
                                         ? 'bg-blue-600 text-white rounded-br-none'
                                         : 'bg-blue-600 text-white rounded-br-none'
@@ -1427,6 +1519,19 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         ? 'bg-slate-800 text-slate-100 border border-slate-700 rounded-bl-none'
                                         : 'bg-slate-100 text-slate-700 rounded-bl-none'
                                     }`}>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleCopyChatMessage(messageKey, msg.content || '')}
+                                        className={`absolute right-2 top-2 rounded-md p-1 opacity-0 transition-all group-hover:opacity-100 hover:scale-105 ${isDark ? 'bg-black/20 text-white/60 hover:text-white hover:bg-black/30' : 'bg-white/70 text-slate-400 hover:text-slate-700 hover:bg-white'}`}
+                                        title={copiedMessageKey === messageKey ? 'Copiado!' : 'Copiar mensagem'}
+                                        aria-label={copiedMessageKey === messageKey ? 'Mensagem copiada' : 'Copiar mensagem'}
+                                    >
+                                        {copiedMessageKey === messageKey ? (
+                                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                                        ) : (
+                                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V5a2 2 0 012-2h7a2 2 0 012 2v7a2 2 0 01-2 2h-2m-1 4H7a2 2 0 01-2-2V9a2 2 0 012-2h7a2 2 0 012 2v7a2 2 0 01-2 2z" /></svg>
+                                        )}
+                                    </button>
                                     {msg.toolsUsed && msg.toolsUsed.length > 0 && (
                                         <div className="mb-2.5">
                                             <div className={`mb-1 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
@@ -2015,9 +2120,17 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             </div>
                                         </div>
                                     )}
+                                    {messageTimestamp && (
+                                        <div className={`mt-2 flex justify-end text-[9px] font-medium opacity-0 transition-opacity group-hover:opacity-100 ${msg.role === 'user'
+                                            ? 'text-white/65'
+                                            : isDark ? 'text-slate-400' : 'text-slate-400'
+                                            }`}>
+                                            <span>{messageTimestamp}</span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
-                        ))}
+                        )})}
 
                         {/* Indicador de loading com mensagem de fase */}
                         {isBlocked && (
@@ -2052,7 +2165,27 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                     </div>
 
                     {/* Footer Input */}
-                    <div className={`relative z-20 shrink-0 overflow-visible p-6 border-t ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+                    <div
+                        onDragEnter={handleComposerDragEnter}
+                        onDragOver={handleComposerDragOver}
+                        onDragLeave={handleComposerDragLeave}
+                        onDrop={handleComposerDrop}
+                        className={`relative z-20 shrink-0 overflow-visible p-6 border-t ${isDark ? 'border-white/10' : 'border-slate-100'}`}
+                    >
+                        {isDragActive && (
+                            <div className={`pointer-events-none absolute inset-4 z-30 flex items-center justify-center rounded-3xl border-2 border-dashed backdrop-blur-sm ${
+                                isDark
+                                    ? 'border-blue-400 bg-blue-500/10'
+                                    : 'border-blue-400 bg-blue-50/90'
+                            }`}>
+                                <div className={`px-4 py-3 rounded-2xl text-center shadow-lg ${
+                                    isDark ? 'bg-slate-950/80 text-blue-200' : 'bg-white text-blue-700'
+                                }`}>
+                                    <p className="text-sm font-black uppercase tracking-widest">Solte para anexar</p>
+                                    <p className="text-[11px] mt-1 opacity-80">O copiloto vai usar o mesmo anexo do botão de upload.</p>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Banner de erro inline */}
                         {footerError && (

@@ -7,6 +7,8 @@ interface TranscriptionToolProps {
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
   initialText?: string;
   isEmbedded?: boolean;
+  initialFile?: File | null;
+  onInitialFileConsumed?: () => void;
 }
 
 const TRANSCRIPTION_HISTORY_KEY = 'hermes_transcription_history';
@@ -22,7 +24,7 @@ interface TranscriptionHistoryEntry {
 
 type ThemeMode = 'light' | 'dark' | 'system';
 
-export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, showToast, initialText, isEmbedded }) => {
+export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, showToast, initialText, isEmbedded, initialFile, onInitialFileConsumed }) => {
   const [file, setFile] = useState<File | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -92,6 +94,13 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
     window.addEventListener('hermes-shared-audio', handleSharedAudio);
     return () => window.removeEventListener('hermes-shared-audio', handleSharedAudio);
   }, []);
+
+  useEffect(() => {
+    if (initialFile) {
+      handleFileSelection(initialFile);
+      onInitialFileConsumed?.();
+    }
+  }, [initialFile]);
 
   const saveToHistory = (data: { raw: string, refined: string }, fileName: string, fileSize: number) => {
     const newEntry: TranscriptionHistoryEntry = {

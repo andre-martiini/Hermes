@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Tarefa, AppSettings, PoolItem, ConhecimentoItem, Acompanhamento, ActionPlanItem,
-  ChatMessage, BaseConhecimento, formatDate, formatDateLocalISO
+  ChatMessage, BaseConhecimento, formatDate, formatDateLocalISO, TaskReminder
 } from '../../types';
 import { normalizeStatus } from '../utils/helpers';
 import { buildDiaryRichNote, ensureHttpUrl, getRenamedFileName, parseDiaryRichNote } from '../utils/diaryEntries';
@@ -67,6 +67,22 @@ const COPILOT_PANEL_MIN_WIDTH = 320;
 const DIARY_PANEL_MIN_WIDTH = 480;
 const PLAN_PANEL_DEFAULT_WIDTH = 360;
 const COPILOT_PANEL_DEFAULT_WIDTH = 440;
+
+const sortTaskReminders = (reminders: TaskReminder[] = []) =>
+  [...reminders].sort((a, b) => new Date(a.reminder_at).getTime() - new Date(b.reminder_at).getTime());
+
+const getNextPendingReminder = (reminders: TaskReminder[] = []) =>
+  sortTaskReminders(reminders).find(reminder => !reminder.reminder_sent);
+
+const buildReminderPayload = (reminders: TaskReminder[]) => {
+  const sortedReminders = sortTaskReminders(reminders);
+  const nextReminder = getNextPendingReminder(sortedReminders);
+  return {
+    reminders: sortedReminders,
+    reminder_at: nextReminder?.reminder_at || null,
+    reminder_sent: nextReminder ? nextReminder.reminder_sent : true,
+  };
+};
 
 export const TaskExecutionView = ({
   task,
@@ -188,6 +204,7 @@ export const TaskExecutionView = ({
   const [modalInputName, setModalInputName] = useState('');
   const [reminderDate, setReminderDate] = useState('');
   const [reminderTime, setReminderTime] = useState('');
+  const [showReminderHistory, setShowReminderHistory] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [pendingFileNames, setPendingFileNames] = useState<Record<string, string>>({});
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
@@ -240,6 +257,32 @@ export const TaskExecutionView = ({
     const done = items.filter(i => i.completed).length;
     return Math.round((done / items.length) * 100);
   }, [currentTaskData.plano_acao]);
+
+  const taskReminders = useMemo(() => {
+    const reminders = Array.isArray(currentTaskData.reminders) ? currentTaskData.reminders : [];
+    if (reminders.length > 0) {
+      return sortTaskReminders(reminders);
+    }
+    if (currentTaskData.reminder_at) {
+      return [{
+        id: 'legacy-reminder',
+        reminder_at: currentTaskData.reminder_at,
+        reminder_sent: Boolean(currentTaskData.reminder_sent),
+        created_at: currentTaskData.data_atualizacao || currentTaskData.data_criacao || currentTaskData.reminder_at,
+      }] satisfies TaskReminder[];
+    }
+    return [];
+  }, [currentTaskData.data_atualizacao, currentTaskData.data_criacao, currentTaskData.reminder_at, currentTaskData.reminder_sent, currentTaskData.reminders]);
+
+  const pendingReminderCount = useMemo(
+    () => taskReminders.filter(reminder => !reminder.reminder_sent).length,
+    [taskReminders]
+  );
+
+  const nextPendingReminder = useMemo(
+    () => getNextPendingReminder(taskReminders),
+    [taskReminders]
+  );
 
   useEffect(() => {
     const handleViewportResize = () => setDesktopViewportWidth(window.innerWidth);
@@ -351,6 +394,26 @@ export const TaskExecutionView = ({
     }
   };
 
+  const openReminderModal = (reminder?: TaskReminder) => {
+    const baseIso = reminder?.reminder_at || nextPendingReminder?.reminder_at;
+    if (baseIso) {
+      const [date, time] = baseIso.split('T');
+      setReminderDate(date || '');
+      setReminderTime((time || '').slice(0, 5));
+    } else {
+      const now = new Date();
+      setReminderDate(now.toISOString().split('T')[0]);
+      setReminderTime(now.toTimeString().slice(0, 5));
+    }
+    setModalConfig({ type: 'reminder', isOpen: true });
+  };
+
+  const handleDeleteReminder = (reminderId: string) => {
+    const updatedReminders = taskReminders.filter(reminder => reminder.id !== reminderId && reminder.id !== 'legacy-reminder');
+    onSave(task.id, buildReminderPayload(updatedReminders));
+    showToast('Lembrete removido.', 'success');
+  };
+
   // Feature 3: envia mensagem ao copiloto para revisar etapas restantes
   const handleSuggestPlanAdjustment = () => {
     const completed = (currentTaskData.plano_acao || []).filter(i => i.completed);
@@ -438,12 +501,17 @@ export const TaskExecutionView = ({
   const handleFileUploadInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = e.target.files ? Array.from(e.target.files) : [];
     if (selectedFiles.length === 0) return;
+    handleDiaryFilesSelected(selectedFiles);
+    e.target.value = '';
+  };
+
+  const handleDiaryFilesSelected = (selectedFiles: File[]) => {
+    if (selectedFiles.length === 0) return;
     const initialNames = selectedFiles.reduce((acc, f) => { acc[getPendingFileKey(f)] = f.name; return acc; }, {} as Record<string, string>);
     setPendingFiles(selectedFiles);
     setPendingFileNames(initialNames);
     setModalConfig({ type: 'file_upload', isOpen: true });
     setShowAttachMenu(false);
-    e.target.value = '';
   };
 
   // ─── Audio Recording ──────────────────────────────────────────
@@ -541,7 +609,13 @@ export const TaskExecutionView = ({
         break;
       case 'reminder':
         if (reminderDate && reminderTime) {
-          onSave(task.id, { reminder_at: `${reminderDate}T${reminderTime}:00`, reminder_sent: false });
+          const newReminder: TaskReminder = {
+            id: crypto.randomUUID(),
+            reminder_at: `${reminderDate}T${reminderTime}:00`,
+            reminder_sent: false,
+            created_at: new Date().toISOString(),
+          };
+          onSave(task.id, buildReminderPayload([...taskReminders.filter(reminder => reminder.id !== 'legacy-reminder'), newReminder]));
           showToast('Lembrete agendado!', 'success');
         }
         break;
@@ -1004,12 +1078,9 @@ export const TaskExecutionView = ({
       ══════════════════════════════════════════════════════════ */}
       <header className={`shrink-0 px-4 md:px-6 py-3 border-b flex flex-col gap-2 ${isDark ? 'border-white/10 bg-black/30' : 'border-slate-200 bg-white/80 backdrop-blur-sm'}`}>
         {/* Row 1: nav + title + controls */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="hidden">
           {/* Back */}
-          <button onClick={onClose} className={`order-1 shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'text-white/40 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}>
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
-            <span className="hidden sm:inline">Voltar</span>
-          </button>
+          <div className="flex items-start justify-between gap-4">
 
           {/* Label + Title */}
           <div className="order-3 sm:order-2 flex-1 min-w-0 w-full sm:w-auto">
@@ -1057,6 +1128,115 @@ export const TaskExecutionView = ({
             </select>
           </div>
 
+        </div>
+        </div>
+
+        <div className="sm:hidden flex flex-col gap-4 py-1">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <p className={`text-[10px] font-black uppercase tracking-[0.22em] ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>{'Sala de Opera\u00e7\u00f5es'}</p>
+              <h1 className={`mt-2 text-[1rem] font-black leading-[1.12] tracking-tight break-words ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                {currentTaskData.titulo}
+              </h1>
+            </div>
+
+            <div className="shrink-0 pt-1">
+              <SpeedDialMenu
+                notifications={notifications}
+                isSyncing={isSyncing}
+                isNotificationCenterOpen={isNotificationCenterOpen}
+                onOpenNotes={onOpenNotes}
+                onOpenLog={onOpenLog}
+                onOpenCopiloto={() => {
+                  if (isDesktopViewport) {
+                    setIsCopilotCollapsed(false);
+                    return;
+                  }
+                  onOpenCopiloto();
+                }}
+                onOpenShopping={onOpenShopping}
+                onOpenTranscription={onOpenTranscription}
+                onOpenMeetingTranscription={onOpenMeetingTranscription}
+                onToggleNotifications={onToggleNotifications}
+                onSync={onSync}
+                onOpenSettings={onOpenSettings}
+                onCloseNotifications={onCloseNotifications}
+                onMarkAsRead={onMarkAsRead}
+                onDismiss={onDismiss}
+                onCreateAction={onCreateAction}
+                direction="down"
+                triggerClassName="flex h-12 w-12 items-center justify-center rounded-[1.2rem] bg-white text-slate-700 border border-slate-200 shadow-[0_8px_18px_rgba(15,23,42,0.18)]"
+                triggerIconClassName="h-5 w-5"
+              />
+            </div>
+          </div>
+
+          <div className="relative flex min-h-[44px] items-center justify-center">
+            <button onClick={onClose} className={`absolute left-0 top-1/2 shrink-0 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-2xl transition-all ${isDark ? 'text-white/30 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
+            </button>
+
+            <select
+              value={currentTaskData.status}
+              onChange={e => handleStatusChange(e.target.value)}
+              className={`mx-auto min-w-[92px] max-w-full text-center text-[8px] font-black uppercase tracking-[0.16em] px-3 py-1.5 rounded-full border appearance-none cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 transition-all ${statusColor(currentTaskData.status)} ${isDark ? 'bg-transparent' : 'bg-white'}`}
+            >
+              <option value="em andamento">Em Andamento</option>
+              <option value="stand-by">Stand-by</option>
+              <option value="conclu?do">Conclu?do</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="hidden sm:flex flex-wrap items-center gap-x-3 gap-y-2">
+          <button onClick={onClose} className={`order-1 shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'text-white/40 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}>
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
+            <span className="hidden sm:inline">Voltar</span>
+          </button>
+
+          <div className="order-3 sm:order-2 flex-1 min-w-0 w-full sm:w-auto">
+            <p className={`text-[8px] font-black uppercase tracking-[0.3em] ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>Sala de Operações</p>
+            <h1 className={`text-base md:text-xl font-black tracking-tight leading-tight break-words whitespace-normal ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              {currentTaskData.titulo}
+            </h1>
+          </div>
+
+          <div className="order-2 sm:order-3 shrink-0 flex items-center gap-2">
+            <SpeedDialMenu
+              notifications={notifications}
+              isSyncing={isSyncing}
+              isNotificationCenterOpen={isNotificationCenterOpen}
+              onOpenNotes={onOpenNotes}
+              onOpenLog={onOpenLog}
+              onOpenCopiloto={() => {
+                if (isDesktopViewport) {
+                  setIsCopilotCollapsed(false);
+                  return;
+                }
+                onOpenCopiloto();
+              }}
+              onOpenShopping={onOpenShopping}
+              onOpenTranscription={onOpenTranscription}
+              onOpenMeetingTranscription={onOpenMeetingTranscription}
+              onToggleNotifications={onToggleNotifications}
+              onSync={onSync}
+              onOpenSettings={onOpenSettings}
+              onCloseNotifications={onCloseNotifications}
+              onMarkAsRead={onMarkAsRead}
+              onDismiss={onDismiss}
+              onCreateAction={onCreateAction}
+              direction="down"
+            />
+            <select
+              value={currentTaskData.status}
+              onChange={e => handleStatusChange(e.target.value)}
+              className={`shrink-0 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl border appearance-none cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 transition-all ${statusColor(currentTaskData.status)} ${isDark ? 'bg-transparent' : 'bg-white'}`}
+            >
+              <option value="em andamento">Em Andamento</option>
+              <option value="stand-by">Stand-by</option>
+              <option value="conclu?do">Conclu?do</option>
+            </select>
+          </div>
         </div>
 
         {/* Row 2: Progress bar */}
@@ -1106,14 +1286,14 @@ export const TaskExecutionView = ({
       {/* ══════════════════════════════════════════════════════════
           MAIN CONTENT — 3-column desktop / single tab mobile
       ══════════════════════════════════════════════════════════ */}
-      <div ref={workspaceRef} className="flex-1 flex flex-col gap-0 overflow-hidden lg:flex-row lg:gap-0 lg:p-4">
+      <div ref={workspaceRef} className="flex-1 min-h-0 flex flex-col gap-0 overflow-hidden lg:flex-row lg:gap-0 lg:p-4">
 
         {/* LEFT COLUMN — Mapa Operacional */}
         {isPlanPanelCollapsed ? (
           renderCollapsedPanelRail('plan', 'Plano', 'Sala de Operações', () => setIsPlanCollapsed(false))
         ) : (
         <>
-        <div className={`flex flex-col gap-3 overflow-y-auto p-4 lg:p-0 ${!showMapa ? 'hidden lg:flex' : 'flex'} shrink-0 min-h-0`}
+        <div className={`flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4 lg:flex-none lg:p-0 ${!showMapa ? 'hidden lg:flex' : 'flex'} shrink-0`}
           style={{ scrollbarWidth: 'thin', scrollbarColor: '#CBD5E0 transparent', width: isDesktopViewport ? mapPanelDesktopWidth : undefined }}>
           <div className="hidden lg:flex items-center justify-between px-1 pb-1">
             <div>
@@ -1394,11 +1574,74 @@ export const TaskExecutionView = ({
                     className={`w-full px-3 py-2 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 border transition-all ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-slate-100 text-slate-900'}`} />
                 </div>
               </div>
+              {taskReminders.length > 0 && (
+                <div className={`rounded-xl border px-3 py-2 ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-slate-50'}`}>
+                  <button
+                    onClick={() => setShowReminderHistory(prev => !prev)}
+                    className="w-full flex items-center gap-2 text-left"
+                  >
+                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${pendingReminderCount > 0
+                      ? isDark ? 'bg-amber-500/15 text-amber-300' : 'bg-amber-100 text-amber-700'
+                      : isDark ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
+                      }`}>
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-white/75' : 'text-slate-700'}`}>Lembretes</p>
+                      <p className={`text-[10px] truncate ${mutedText}`}>
+                        {nextPendingReminder
+                          ? `Próximo: ${new Date(nextPendingReminder.reminder_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}`
+                          : 'Todos os lembretes já foram enviados'}
+                      </p>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-black ${pendingReminderCount > 0
+                      ? isDark ? 'bg-amber-500/15 text-amber-300' : 'bg-amber-100 text-amber-700'
+                      : isDark ? 'bg-white/10 text-white/45' : 'bg-slate-200 text-slate-500'
+                      }`}>
+                      {taskReminders.length}
+                    </span>
+                    <svg className={`w-3 h-3 transition-transform ${mutedText} ${showReminderHistory ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeWidth="2.5" /></svg>
+                  </button>
+                  {showReminderHistory && (
+                    <div className="mt-3 space-y-2">
+                      {taskReminders.map(reminder => (
+                        <div
+                          key={reminder.id}
+                          className={`flex items-center gap-2 rounded-xl border px-2.5 py-2 ${reminder.reminder_sent
+                            ? isDark ? 'border-white/10 bg-white/5 text-white/45' : 'border-slate-200 bg-white text-slate-400'
+                            : isDark ? 'border-amber-500/20 bg-amber-500/10 text-white' : 'border-amber-200 bg-amber-50 text-slate-700'
+                            }`}
+                        >
+                          <div className={`w-2 h-2 rounded-full shrink-0 ${reminder.reminder_sent ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[11px] font-bold">
+                              {new Date(reminder.reminder_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                            </p>
+                            <p className={`text-[9px] ${reminder.reminder_sent ? mutedText : isDark ? 'text-amber-200' : 'text-amber-700'}`}>
+                              {reminder.reminder_sent ? 'Enviado' : 'Agendado'}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteReminder(reminder.id)}
+                            className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${isDark ? 'hover:bg-white/10 text-white/40 hover:text-rose-300' : 'hover:bg-white text-slate-400 hover:text-rose-600'}`}
+                            aria-label="Excluir lembrete"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M6 18L18 6M6 6l12 12" /></svg>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               <button
-                onClick={() => setModalConfig({ type: 'reminder', isOpen: true })}
-                className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'border-white/10 text-white/40 hover:bg-white/5 hover:text-white/70' : 'border-slate-200 text-slate-400 hover:bg-slate-50 hover:text-slate-700'}`}>
+                onClick={() => openReminderModal()}
+                className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${pendingReminderCount > 0
+                  ? isDark ? 'border-amber-500/20 text-amber-300 hover:bg-amber-500/10' : 'border-amber-200 text-amber-700 hover:bg-amber-50'
+                  : isDark ? 'border-white/10 text-white/40 hover:bg-white/5 hover:text-white/70' : 'border-slate-200 text-slate-400 hover:bg-slate-50 hover:text-slate-700'
+                  }`}>
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-                Agendar Lembrete
+                {taskReminders.length > 0 ? 'Novo Lembrete' : 'Agendar Lembrete'}
               </button>
             </div>
           </div>
@@ -1515,6 +1758,7 @@ export const TaskExecutionView = ({
               setShowAttachMenu={setShowAttachMenu}
               fileInputRef={fileInputRef}
               handleFileUploadInput={handleFileUploadInput}
+              handleDroppedFiles={handleDiaryFilesSelected}
               setModalConfig={setModalConfig}
               applyFormatting={() => { }}
               isTimerRunning={isDark}
@@ -1779,3 +2023,4 @@ export const TaskExecutionView = ({
     </div>
   );
 };
+

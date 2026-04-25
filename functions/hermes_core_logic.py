@@ -1,11 +1,9 @@
 """
-Hermes Core Logic — Telegram Integration (Low-Latency Refactor)
-
-Pipeline:
-  telegramWebhook  → auth + idempotência + enfileira em telegram_inbound
-  on_telegram_inbound → roteamento 2 estágios + slot-filling + execução de tool
+Hermes Core Logic — Telegram Integration
+Webhook receiver + Firestore-triggered async processor.
 """
 import json
+import html
 import os
 import re
 import tempfile
@@ -14,41 +12,86 @@ import time
 import unicodedata
 import wave
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Optional
 
 import requests as _requests
 from firebase_admin import firestore, get_app, initialize_app, storage
-from firebase_functions import firestore_fn, https_fn, options, pubsub_fn
-from firebase_functions.firestore_fn import Event, DocumentSnapshot
+from firebase_functions import firestore_fn, https_fn, options
+from firebase_functions.firestore_fn import Event, Change, DocumentSnapshot
+from google.cloud.firestore_v1 import DocumentReference
 
 try:
     get_app()
 except ValueError:
     initialize_app()
 
-_MAX_FILE_BYTES = 20 * 1024 * 1024
-_MAX_INLINE_MEDIA_BYTES = 700 * 1024
+_MAX_HISTORY_TURNS = 20
+_MAX_FILE_BYTES = 20 * 1024 * 1024  # 20 MB
+_MAX_INLINE_MEDIA_BYTES = 700 * 1024  # base64 stays safely below Firestore field limit
 _TTS_MODEL_ID = "gemini-3.1-flash-tts-preview"
 _TEXT_MODEL_ID = "gemini-3-flash-preview"
-_GENERAL_RESPONSE_MODEL = "gemini-3-flash-preview"
 _DEFAULT_MALE_VOICE = "Charon"
 _MAX_TTS_TRANSCRIPT_CHARS = 1500
-_TELEGRAM_TOOL_TIMEOUT_SEC = 540
-
 
 # ---------------------------------------------------------------------------
-# Infra helpers
+# In-process Firestore document cache (TTL = 60 s per Cloud Function instance)
+# ---------------------------------------------------------------------------
+_DOC_CACHE: dict = {}
+_DOC_CACHE_TTL = 60
+
+def _cached_doc_get(db, collection: str, document: str):
+    key = f"{collection}/{document}"
+    now = time.monotonic()
+    cached = _DOC_CACHE.get(key)
+    if cached and (now - cached[0]) < _DOC_CACHE_TTL:
+        return cached[1]
+    doc = db.collection(collection).document(document).get()
+    _DOC_CACHE[key] = (now, doc)
+    return doc
+
+# ---------------------------------------------------------------------------
+# Helpers
 # ---------------------------------------------------------------------------
 
 def _get_db():
     return firestore.client()
 
 
+def _perf_now_ms() -> int:
+    return int(time.perf_counter() * 1000)
+
+
+def _perf_mark(perf_state: dict, name: str):
+    started_at = perf_state.get("_last_ms", perf_state["start_ms"])
+    now_ms = _perf_now_ms()
+    perf_state.setdefault("steps", []).append({
+        "name": name,
+        "duration_ms": max(0, now_ms - started_at),
+    })
+    perf_state["_last_ms"] = now_ms
+
+
+def _perf_log(prefix: str, perf_state: dict, extra: dict | None = None):
+    payload = {
+        "prefix": prefix,
+        "total_ms": max(0, _perf_now_ms() - perf_state["start_ms"]),
+        "steps": perf_state.get("steps", []),
+    }
+    if perf_state.get("tool_calls"):
+        payload["tool_calls"] = perf_state["tool_calls"]
+    if extra:
+        payload.update(extra)
+    try:
+        print(f"[Perf] {json.dumps(payload, ensure_ascii=False)}")
+    except Exception:
+        print(f"[Perf] {prefix} total_ms={payload['total_ms']}")
+
+
 def _get_api_keys(db=None):
     db = db or _get_db()
-    doc = db.collection("system").document("api_keys").get()
+    doc = _cached_doc_get(db, "system", "api_keys")
     return doc.to_dict() or {} if doc.exists else {}
 
 
@@ -64,11 +107,27 @@ def _get_allowed_chat_id() -> Optional[str]:
     return os.environ.get("ALLOWED_TELEGRAM_CHAT_ID")
 
 
-# ---------------------------------------------------------------------------
-# Telegram API helpers (kept inline for backward-compat with audio/TTS path)
-# ---------------------------------------------------------------------------
+_HTML_ANCHOR_RE = re.compile(r"<a\s+[^>]*href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>", re.IGNORECASE | re.DOTALL)
 
-def _send_telegram_message(token: str, chat_id: str | int, text: str, parse_mode: str = "HTML") -> Optional[int]:
+
+def _neutralize_hidden_links(text: str) -> str:
+    """Keep URLs visible in Telegram instead of allowing hidden anchor text."""
+    def repl(match: re.Match) -> str:
+        href = html.unescape((match.group(1) or "").strip())
+        label = re.sub(r"<[^>]+>", "", match.group(2) or "").strip() or href
+        safe_label = html.escape(label)
+        if href.startswith(("http://", "https://", "task:")):
+            safe_href = html.escape(href, quote=False)
+            return safe_label if href in label else f"{safe_label} ({safe_href})"
+        return safe_label
+
+    return _HTML_ANCHOR_RE.sub(repl, text or "")
+
+
+def _send_telegram_message(token: str, chat_id: str | int, text: str, parse_mode: str = "HTML"):
+    """POST direto à Telegram Bot API."""
+    text = _neutralize_hidden_links(text)
+    # Telegram HTML: truncate at 4096 chars
     if len(text) > 4096:
         text = text[:4090] + "\n..."
     resp = _requests.post(
@@ -76,21 +135,111 @@ def _send_telegram_message(token: str, chat_id: str | int, text: str, parse_mode
         json={"chat_id": chat_id, "text": text, "parse_mode": parse_mode},
         timeout=30,
     )
-    if resp.ok:
+    if not resp.ok:
+        print(f"[Telegram] sendMessage failed: {resp.status_code} {resp.text[:300]}")
+        return None
+    try:
         return resp.json().get("result", {}).get("message_id")
-    print(f"[Telegram] sendMessage failed: {resp.status_code} {resp.text[:300]}")
-    return None
+    except Exception:
+        return None
 
 
-def _edit_telegram_message(token: str, chat_id: str | int, message_id: int, text: str, parse_mode: str = "HTML") -> bool:
+def _send_telegram_message_with_keyboard(
+    token: str, chat_id: str | int, text: str, inline_keyboard: list, parse_mode: str = "HTML"
+):
+    """POST sendMessage com InlineKeyboardMarkup."""
+    text = _neutralize_hidden_links(text)
     if len(text) > 4096:
         text = text[:4090] + "\n..."
     resp = _requests.post(
-        f"https://api.telegram.org/bot{token}/editMessageText",
-        json={"chat_id": chat_id, "message_id": message_id, "text": text, "parse_mode": parse_mode},
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        json={
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": parse_mode,
+            "reply_markup": {"inline_keyboard": inline_keyboard},
+        },
         timeout=30,
     )
-    return resp.ok
+    if not resp.ok:
+        print(f"[Telegram] sendMessage+keyboard failed: {resp.status_code} {resp.text[:300]}")
+        return None
+    try:
+        return resp.json().get("result", {}).get("message_id")
+    except Exception:
+        return None
+
+
+def _is_action_context_locked(session: dict | None) -> bool:
+    session = session or {}
+    return session.get("contexto_ativo") == "acao" and bool(session.get("acao_id") or session.get("acao_titulo"))
+
+
+def _merge_inline_keyboards(inline_keyboard: list | None, trailing_keyboard: list | None) -> list | None:
+    keyboards = []
+    seen_callbacks = set()
+
+    for keyboard in (inline_keyboard or [], trailing_keyboard or []):
+        if not isinstance(keyboard, list):
+            continue
+        if keyboard and isinstance(keyboard[0], dict):
+            keyboard = [keyboard]
+        for row in keyboard:
+            if not isinstance(row, list):
+                continue
+            row_copy = []
+            for button in row:
+                if not isinstance(button, dict):
+                    continue
+                callback_data = button.get("callback_data")
+                if callback_data and callback_data in seen_callbacks:
+                    continue
+                if callback_data:
+                    seen_callbacks.add(callback_data)
+                row_copy.append(button)
+            if row_copy:
+                keyboards.append(row_copy)
+
+    return keyboards or None
+
+
+def _send_telegram_session_message(
+    db,
+    token: str,
+    chat_id: str | int,
+    text: str,
+    session: dict | None = None,
+    inline_keyboard: list | None = None,
+    parse_mode: str = "HTML",
+):
+    session = session or _get_session(db, str(chat_id))
+    final_text = text
+    final_keyboard = inline_keyboard
+
+    if _is_action_context_locked(session):
+        acao_titulo = session.get("acao_titulo") or session.get("acao_id") or "acao"
+        if not final_text.lstrip().startswith("<b>[Contexto:"):
+            final_text = f"<b>[Contexto: {acao_titulo}]</b>\n\n{final_text}"
+        final_keyboard = _merge_inline_keyboards(final_keyboard, _EXIT_KEYBOARD)
+
+    if final_keyboard:
+        return _send_telegram_message_with_keyboard(token, chat_id, final_text, final_keyboard, parse_mode=parse_mode)
+    return _send_telegram_message(token, chat_id, final_text, parse_mode=parse_mode)
+
+
+def _answer_callback_query(token: str, callback_query_id: str, text: str = None):
+    """Confirma o recebimento de um callback_query (remove indicador de loading no Telegram)."""
+    payload: dict = {"callback_query_id": callback_query_id}
+    if text:
+        payload["text"] = text[:200]
+    try:
+        _requests.post(
+            f"https://api.telegram.org/bot{token}/answerCallbackQuery",
+            json=payload,
+            timeout=5,
+        )
+    except Exception:
+        pass
 
 
 def _send_telegram_chat_action(token: str, chat_id: str | int, action: str):
@@ -98,6 +247,18 @@ def _send_telegram_chat_action(token: str, chat_id: str | int, action: str):
         _requests.post(
             f"https://api.telegram.org/bot{token}/sendChatAction",
             json={"chat_id": chat_id, "action": action},
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
+def _delete_telegram_message(token: str, chat_id: str | int, message_id: int):
+    if not message_id: return
+    try:
+        _requests.post(
+            f"https://api.telegram.org/bot{token}/deleteMessage",
+            json={"chat_id": chat_id, "message_id": message_id},
             timeout=5,
         )
     except Exception:
@@ -127,13 +288,19 @@ def _telegram_action_heartbeat(token: str, chat_id: str | int, action: str, inte
 
 
 def _send_telegram_voice(token: str, chat_id: str | int, audio_bytes: bytes, filename: str, mime_type: str, caption: str = "") -> bool:
-    files = {"voice": (filename, audio_bytes, mime_type)}
-    data = {"chat_id": str(chat_id)}
+    files = {
+        "voice": (filename, audio_bytes, mime_type),
+    }
+    data = {
+        "chat_id": str(chat_id),
+    }
     if caption:
         data["caption"] = caption[:1024]
     resp = _requests.post(
         f"https://api.telegram.org/bot{token}/sendVoice",
-        data=data, files=files, timeout=120,
+        data=data,
+        files=files,
+        timeout=120,
     )
     if not resp.ok:
         print(f"[Telegram] sendVoice failed: {resp.status_code} {resp.text[:500]}")
@@ -141,13 +308,19 @@ def _send_telegram_voice(token: str, chat_id: str | int, audio_bytes: bytes, fil
 
 
 def _send_telegram_document(token: str, chat_id: str | int, file_bytes: bytes, filename: str, mime_type: str, caption: str = "") -> bool:
-    files = {"document": (filename, file_bytes, mime_type)}
-    data = {"chat_id": str(chat_id)}
+    files = {
+        "document": (filename, file_bytes, mime_type),
+    }
+    data = {
+        "chat_id": str(chat_id),
+    }
     if caption:
         data["caption"] = caption[:1024]
     resp = _requests.post(
         f"https://api.telegram.org/bot{token}/sendDocument",
-        data=data, files=files, timeout=120,
+        data=data,
+        files=files,
+        timeout=120,
     )
     if not resp.ok:
         print(f"[Telegram] sendDocument failed: {resp.status_code} {resp.text[:500]}")
@@ -155,61 +328,607 @@ def _send_telegram_document(token: str, chat_id: str | int, file_bytes: bytes, f
 
 
 def _get_telegram_file(token: str, file_id: str) -> dict:
+    """Calls getFile and returns the file metadata dict."""
     resp = _requests.get(
         f"https://api.telegram.org/bot{token}/getFile",
-        params={"file_id": file_id}, timeout=15,
+        params={"file_id": file_id},
+        timeout=15,
     )
     resp.raise_for_status()
-    return resp.json().get("result", {})
+    data = resp.json()
+    return data.get("result", {})
 
 
 def _download_telegram_file(token: str, file_path: str) -> bytes:
-    resp = _requests.get(f"https://api.telegram.org/file/bot{token}/{file_path}", timeout=60)
+    url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+    resp = _requests.get(url, timeout=60)
     resp.raise_for_status()
     return resp.content
 
 
 # ---------------------------------------------------------------------------
-# Media storage
+# Session state machine
 # ---------------------------------------------------------------------------
 
-def _store_telegram_media(file_bytes: bytes, file_name: str, mime_type: str, chat_id: str) -> tuple[str | None, str | None]:
-    import base64
-    if len(file_bytes) <= _MAX_INLINE_MEDIA_BYTES:
-        return base64.b64encode(file_bytes).decode(), None
-    safe_name = os.path.basename(file_name or f"upload_{int(time.time())}")
-    bucket = storage.bucket()
-    path = f"telegram_uploads/{chat_id}/{int(time.time())}_{safe_name}"
-    blob = bucket.blob(path)
-    blob.upload_from_string(file_bytes, content_type=mime_type)
-    return None, path
+def _get_session(db, chat_id: str) -> dict:
+    doc = db.collection("telegram_sessions").document(chat_id).get()
+    return doc.to_dict() or {"chat_id": chat_id, "contexto_ativo": "geral", "history": []}
 
 
-def _load_telegram_media_bytes(media_bytes_b64: str | None, storage_path: str | None) -> bytes | None:
-    if media_bytes_b64:
-        import base64
-        return base64.b64decode(media_bytes_b64)
-    if storage_path:
-        bucket = storage.bucket()
-        blob = bucket.blob(storage_path)
-        return blob.download_as_bytes()
+def _save_session(db, chat_id: str, session: dict):
+    session["updated_at"] = firestore.SERVER_TIMESTAMP
+    db.collection("telegram_sessions").document(chat_id).set(session)
+
+
+def _session_matches_processing_state(session: dict, contexto_ativo: str, acao_id: str | None) -> bool:
+    current_contexto = session.get("contexto_ativo", "geral")
+    if current_contexto != (contexto_ativo or "geral"):
+        return False
+    if (contexto_ativo or "geral") == "acao":
+        return session.get("acao_id") == acao_id
+    return True
+
+
+def _handle_command(text: str, session: dict) -> Optional[str]:
+    """
+    Returns a reply string if the message is a state-machine command, else None.
+    Side-effects: mutates session.
+    """
+    text = (text or "").strip()
+    m = re.match(r"^/contexto\s+(.+)$", text, re.IGNORECASE)
+    if m:
+        ctx = m.group(1).strip()
+        session["contexto_ativo"] = ctx
+        session["history"] = []  # fresh history for new context
+        return f"Contexto ativo definido como <b>{ctx}</b>. Histórico reiniciado."
+
+    if re.match(r"^/sair$", text, re.IGNORECASE):
+        previous = session.get("acao_titulo") or session.get("contexto_ativo", "geral")
+        session["contexto_ativo"] = "geral"
+        session["history"] = []
+        session["acao_id"] = None
+        session["acao_titulo"] = None
+        session["acao_context_snapshot"] = None
+        session["history_acao"] = []
+        return f"Saindo do contexto <b>{previous}</b>. Voltando ao modo geral."
+
+    if re.match(r"^/start$", text, re.IGNORECASE):
+        return (
+            "👋 Olá! Sou o <b>Hermes Copiloto</b>.\n\n"
+            "Comandos disponíveis:\n"
+            "• <code>/entrar [termo]</code> — busca ações e trava o contexto nelas\n"
+            "• <code>/sair</code> — sai do contexto trancado, retorna ao modo geral\n"
+            "• <code>/status</code> — mostra o contexto e histórico atuais\n\n"
+            "Envie texto, áudio ou arquivos. Tamanho máximo: 20 MB."
+        )
+
+    if re.match(r"^/status$", text, re.IGNORECASE):
+        ctx = session.get("contexto_ativo", "geral")
+        acao_titulo = session.get("acao_titulo", "")
+        hist_key = "history_acao" if ctx == "acao" else "history"
+        turns = len(session.get(hist_key, [])) // 2
+        ctx_display = f"ação trancada — <b>{acao_titulo}</b>" if ctx == "acao" else f"<b>{ctx}</b>"
+        return f"Contexto ativo: {ctx_display}\nTurnos no histórico: {turns}"
+
     return None
 
 
-def _upload_to_storage(file_bytes: bytes, file_name: str, mime_type: str, chat_id: str) -> str:
-    bucket = storage.bucket()
-    path = f"telegram_uploads/{chat_id}/{file_name}"
-    blob = bucket.blob(path)
-    blob.upload_from_string(file_bytes, content_type=mime_type)
-    blob.make_public()
-    return blob.public_url
+# ---------------------------------------------------------------------------
+# Action context helpers (session locking)
+# ---------------------------------------------------------------------------
+
+_DRIVE_ID_PATTERNS = [
+    re.compile(r"/d/([a-zA-Z0-9_-]{10,})"),
+    re.compile(r"[?&]id=([a-zA-Z0-9_-]{10,})"),
+    re.compile(r"/folders/([a-zA-Z0-9_-]{10,})"),
+]
+
+
+def _extract_drive_file_id(value: str | None) -> str | None:
+    value = (value or "").strip()
+    if re.fullmatch(r"[a-zA-Z0-9_-]{10,}", value):
+        return value
+    for pattern in _DRIVE_ID_PATTERNS:
+        match = pattern.search(value)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _parse_diary_file_note(note: str | None) -> dict | None:
+    """Parse FILE:: diary rich notes created by the web diary UI."""
+    note = (note or "").strip()
+    if not note.startswith("FILE::"):
+        return None
+
+    payload = note[len("FILE::"):]
+    name = ""
+    value = ""
+    if payload.startswith("JSON::"):
+        try:
+            parsed = json.loads(payload[len("JSON::"):])
+            if isinstance(parsed, dict):
+                name = str(parsed.get("n") or "")
+                value = str(parsed.get("v") or "")
+        except Exception:
+            return None
+    else:
+        separator_index = payload.find("::")
+        if separator_index == -1:
+            value = payload
+        else:
+            name = payload[:separator_index]
+            value = payload[separator_index + 2:]
+
+    if not value:
+        return None
+    return {"nome": name or "Arquivo", "url": value}
+
+
+def _drive_url_from_file(file_info: dict) -> str:
+    url = (file_info.get("url") or "").strip()
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    fid = file_info.get("drive_file_id")
+    return f"https://drive.google.com/file/d/{fid}/view" if fid else ""
+
+
+_ACTION_SEARCH_STOPWORDS = {
+    "de", "a", "o", "que", "e", "do", "da", "em", "um", "uma",
+    "os", "as", "no", "na", "com", "por", "para", "dos", "das",
+    "nos", "nas", "ao", "se", "ou", "acao", "acoes", "tarefa", "tarefas",
+    "pesquisa", "pesquisar", "pesquise", "busca", "buscar", "busque",
+    "procura", "procurar", "procure", "localiza", "localizar", "localize",
+    "ative", "ativar", "ativa", "contexto", "hermes", "por", "favor",
+}
+
+
+def _action_query_terms(text: str) -> list[str]:
+    normalized = _normalize_for_matching(text)
+    return [
+        term
+        for term in re.findall(r"[\w./-]+", normalized, flags=re.UNICODE)
+        if term not in _ACTION_SEARCH_STOPWORDS and len(term) > 2
+    ]
+
+
+def _clean_action_search_query(text: str) -> str:
+    query = _normalize_for_matching(text)
+    query = re.sub(r"\b(?:hermes|por favor)\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\b(?:pesquise|pesquisa|pesquisar|busque|busca|buscar|procure|procura|procurar|localize|localiza|localizar)\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\b(?:a|uma|o|um)?\s*(?:acao|acoes|tarefa|tarefas)\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\b(?:e\s+)?(?:ative|ativa|ativar|entre|entra|entrar)\b.*\bcontexto\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\b(?:no|na|em|o)?\s*contexto\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\s+", " ", query)
+    return query.strip(" .,:;-")
+
+
+def _extract_action_search_context_query(text: str) -> str | None:
+    lowered = _normalize_for_matching(text).strip()
+    if not lowered:
+        return None
+    wants_search = any(marker in lowered for marker in (
+        "pesquisa", "pesquise", "buscar", "busca", "busque",
+        "procura", "procure", "localiza", "localize",
+    ))
+    mentions_action = any(marker in lowered for marker in ("acao", "acoes", "tarefa", "tarefas"))
+    wants_context = "contexto" in lowered and any(marker in lowered for marker in (
+        "ative", "ativa", "ativar", "entre", "entra", "entrar",
+    ))
+    if not (wants_search and mentions_action and wants_context):
+        return None
+    cleaned = _clean_action_search_query(text)
+    return cleaned or None
+
+
+def _extract_natural_context_query(text: str) -> str | None:
+    """Detects natural-language requests such as 'entre no contexto da acao X'."""
+    lowered = _normalize_for_matching(text).strip()
+    if not lowered:
+        return None
+
+    patterns = [
+        r"^(?:entre|entra|entrar)\s+(?:no|na|em)?\s*contexto\s*(?:da|do|de)?\s*(?:acao|tarefa)?\s*(?:da|do|de)?\s*(.*)$",
+        r"^(?:ative|ativa|ativar)\s+(?:o\s+)?contexto\s*(?:da|do|de)?\s*(?:acao|tarefa)?\s*(?:da|do|de)?\s*(.*)$",
+    ]
+    for pattern in patterns:
+        match = re.match(pattern, lowered, flags=re.IGNORECASE)
+        if match:
+            return (match.group(1) or "").strip(" .,:;-")
+    return None
+
+
+def _select_context_result(query: str, results: list) -> dict | None:
+    if not results:
+        return None
+    if len(results) == 1:
+        return results[0]
+
+    norm_query = _normalize_for_matching(query).strip()
+    if not norm_query:
+        return None
+
+    exact = [r for r in results if _normalize_for_matching(r.get("titulo", "")) == norm_query]
+    if len(exact) == 1:
+        return exact[0]
+
+    contained = [r for r in results if norm_query in _normalize_for_matching(r.get("titulo", ""))]
+    if len(contained) == 1:
+        return contained[0]
+
+    query_terms = set(_action_query_terms(query))
+    if query_terms:
+        scored = []
+        for r in results:
+            title_terms = set(_action_query_terms(r.get("titulo", "")))
+            overlap = len(query_terms & title_terms)
+            scored.append((overlap, r))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        best_score = scored[0][0]
+        second_score = scored[1][0] if len(scored) > 1 else 0
+        if best_score >= 2 and best_score > second_score:
+            return scored[0][1]
+    return None
+
+
+def _lock_action_session(session: dict, task_id: str, snapshot: dict) -> None:
+    session["contexto_ativo"] = "acao"
+    session["acao_id"] = task_id
+    session["acao_titulo"] = snapshot.get("titulo") or task_id
+    session["acao_context_snapshot"] = snapshot
+    session["history_acao"] = []
+
+
+def _format_context_locked_message(snapshot: dict) -> str:
+    titulo = html.escape(snapshot.get("titulo") or "acao")
+    arquivos_count = len(snapshot.get("arquivos_disponiveis") or [])
+    return (
+        f"🔒 <b>[Contexto: {titulo}]</b>\n\n"
+        "Contexto trancado. Estou focado exclusivamente nesta ação.\n"
+        f"Arquivos detectados no contexto: <b>{arquivos_count}</b>.\n\n"
+        "Use <i>Sair do Contexto</i> para retornar ao modo geral."
+    )
+
+
+def _is_context_file_request(text: str) -> bool:
+    lowered = _normalize_for_matching(text)
+    file_markers = (
+        "link",
+        "links",
+        "documento",
+        "documentos",
+        "arquivo",
+        "arquivos",
+        "anexo",
+        "anexos",
+    )
+    request_markers = (
+        "qual",
+        "quais",
+        "mande",
+        "manda",
+        "envie",
+        "enviar",
+        "me manda",
+        "pode me mandar",
+        "listar",
+        "liste",
+        "mostre",
+        "mostrar",
+    )
+    return any(marker in lowered for marker in file_markers) and any(marker in lowered for marker in request_markers)
+
+
+def _requested_date_from_text(text: str) -> str | None:
+    lowered = _normalize_for_matching(text)
+    try:
+        from zoneinfo import ZoneInfo
+        today = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    except Exception:
+        today = datetime.now(timezone.utc).date()
+
+    if "ontem" in lowered:
+        return (today - timedelta(days=1)).isoformat()
+    if "hoje" in lowered:
+        return today.isoformat()
+
+    match = re.search(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\b", lowered)
+    if not match:
+        return None
+    day = int(match.group(1))
+    month = int(match.group(2))
+    year_raw = match.group(3)
+    year = int(year_raw) if year_raw else today.year
+    if year < 100:
+        year += 2000
+    try:
+        return datetime(year, month, day).date().isoformat()
+    except ValueError:
+        return None
+
+
+def _format_context_files_response(acao_snapshot: dict, request_text: str) -> str:
+    arquivos = list(acao_snapshot.get("arquivos_disponiveis") or [])
+    date_filter = _requested_date_from_text(request_text)
+    if date_filter:
+        arquivos = [
+            a for a in arquivos
+            if str(a.get("data_diario") or a.get("data_criacao") or "").startswith(date_filter)
+        ]
+
+    lowered = _normalize_for_matching(request_text)
+    requested_terms = []
+    if "deferid" in lowered:
+        requested_terms.append("deferid")
+    if "indeferid" in lowered:
+        requested_terms.append("indeferid")
+    if requested_terms:
+        term_filtered = [
+            a for a in arquivos
+            if any(term in _normalize_for_matching(a.get("nome", "")) for term in requested_terms)
+        ]
+        if term_filtered:
+            arquivos = term_filtered
+
+    titulo = html.escape(acao_snapshot.get("titulo") or "acao")
+    if not arquivos:
+        when = f" em {date_filter}" if date_filter else ""
+        return (
+            f"<b>[Contexto: {titulo}]</b>\n\n"
+            f"Nao encontrei anexos ou links registrados{when} nesse contexto.\n"
+            "Nao vou criar links de exemplo. Se o arquivo estiver visivel no diario mas nao aparecer aqui, "
+            "provavelmente ele nao foi gravado no pool/snapshot da tarefa."
+        )
+
+    lines = [
+        f"<b>[Contexto: {titulo}]</b>",
+        "",
+        "Encontrei estes arquivos registrados no contexto. Estou mostrando a URL completa para evitar link oculto incorreto:",
+        "",
+    ]
+    for file_info in arquivos[:12]:
+        name = html.escape(file_info.get("nome") or "Arquivo sem nome")
+        url = html.escape(_drive_url_from_file(file_info), quote=False)
+        date_label = (file_info.get("data_diario") or file_info.get("data_criacao") or "")[:10]
+        date_suffix = f" ({html.escape(date_label)})" if date_label else ""
+        if url:
+            lines.append(f"- <b>{name}</b>{date_suffix}\n  {url}")
+        else:
+            fid = html.escape(file_info.get("drive_file_id") or "sem drive_file_id")
+            lines.append(f"- <b>{name}</b>{date_suffix}\n  DRIVE_FILE_ID: <code>{fid}</code>")
+
+    if len(arquivos) > 12:
+        lines.append(f"\nMais {len(arquivos) - 12} arquivo(s) omitido(s) para caber no Telegram.")
+    return "\n".join(lines)
+
+
+def _fetch_acao_snapshot(db, task_id: str) -> dict | None:
+    """Busca e formata dados de uma tarefa para persistir no snapshot da sessão."""
+    try:
+        from main import get_drive_service
+
+        doc = db.collection("tarefas").document(task_id).get()
+        if not doc.exists:
+            return None
+        data = doc.to_dict() or {}
+
+        acomp_raw = data.get("acompanhamento") or []
+        acomp_entries = []
+        diario_full = []
+        for entry in sorted(acomp_raw, key=lambda e: e.get("data", "")):
+            nota = (entry.get("nota") or "").strip()
+            data_entry = (entry.get("data") or "")[:10]
+            if nota:
+                diario_full.append(f"[{data_entry}] {nota[:500]}")
+        for entry in sorted(acomp_raw, key=lambda e: e.get("data", ""), reverse=True)[:3]:
+            nota = (entry.get("nota") or "").strip()
+            data_entry = (entry.get("data") or "")[:10]
+            if nota:
+                acomp_entries.append(f"[{data_entry}] {nota[:300]}")
+
+        plano_raw = data.get("plano_acao") or []
+        plano_entries = []
+        for passo in plano_raw:
+            if isinstance(passo, dict):
+                texto = (passo.get("text") or passo.get("titulo") or "").strip()
+                concluido = passo.get("completed", False)
+                if texto:
+                    marcador = "✓" if concluido else "○"
+                    plano_entries.append(f"{marcador} {texto[:200]}")
+            elif isinstance(passo, str) and passo.strip():
+                plano_entries.append(f"○ {passo.strip()[:200]}")
+
+        tags = data.get("kg_tags") or data.get("tags") or []
+        arquivos_disponiveis = []
+        arquivos_seen = set()
+        drive_service = None
+
+        def add_file_candidate(nome: str, url: str, data_criacao: str = "", data_diario: str = ""):
+            nonlocal drive_service
+            fid = _extract_drive_file_id(url)
+            if not fid:
+                return
+            key = fid or f"{nome}|{url}"
+            if key in arquivos_seen:
+                for existing in arquivos_disponiveis:
+                    if existing.get("drive_file_id") == fid:
+                        if data_diario and not existing.get("data_diario"):
+                            existing["data_diario"] = data_diario
+                        if data_criacao and not existing.get("data_criacao"):
+                            existing["data_criacao"] = data_criacao
+                        if url and not existing.get("url"):
+                            existing["url"] = url
+                        break
+                return
+            if drive_service is None:
+                try:
+                    drive_service = get_drive_service()
+                except Exception:
+                    drive_service = False
+            if drive_service:
+                try:
+                    meta = drive_service.files().get(fileId=fid, fields="id,trashed").execute()
+                    if meta.get("trashed"):
+                        return
+                except Exception:
+                    return
+            arquivos_seen.add(key)
+            arquivos_disponiveis.append({
+                "nome": nome or "Arquivo sem nome",
+                "drive_file_id": fid,
+                "url": url,
+                "data_criacao": data_criacao or "",
+                "data_diario": data_diario or "",
+            })
+
+        for item in data.get("pool_dados", []):
+            if item.get("tipo") != "arquivo":
+                continue
+            fid = item.get("drive_file_id")
+            raw_url = item.get("valor", "") or ""
+            url = raw_url if _extract_drive_file_id(raw_url) else (f"https://drive.google.com/file/d/{fid}/view" if fid else raw_url)
+            add_file_candidate(
+                item.get("nome", "Arquivo sem nome"),
+                url,
+                data_criacao=str(item.get("data_criacao") or ""),
+            )
+
+        for entry in acomp_raw:
+            parsed_file = _parse_diary_file_note(entry.get("nota"))
+            if not parsed_file:
+                continue
+            add_file_candidate(
+                parsed_file.get("nome") or "Arquivo",
+                parsed_file.get("url") or "",
+                data_diario=str(entry.get("data") or ""),
+            )
+
+        return {
+            "id": task_id,
+            "titulo": data.get("titulo", "sem titulo"),
+            "status": data.get("status", ""),
+            "area": data.get("area_tematica", ""),
+            "area_tematica": data.get("area_tematica", ""),
+            "sistema_id": data.get("sistema_id") or None,
+            "descricao": (data.get("descricao") or "")[:500],
+            "notas": (data.get("notas") or "")[:400],
+            "sintese": (data.get("sintese_demanda") or data.get("demanda") or "")[:400],
+            "plano_atual": data.get("plano_acao", []),
+            "plano_acao": plano_entries,
+            "diario_integral": "\n".join(diario_full)[-4000:],
+            "acompanhamento_recente": acomp_entries,
+            "tags": tags,
+            "arquivos_disponiveis": arquivos_disponiveis[:20],
+        }
+    except Exception as e:
+        print(f"[Session] Falha ao buscar tarefa {task_id}: {e}")
+        return None
+
+
+def _search_actions_for_context(db, query: str) -> list:
+    """Busca tarefas usando buscar_tarefas e retorna até 5 resultados para seleção."""
+    from tools.busca_grafo import buscar_tarefas
+
+    if query:
+        terms = _action_query_terms(query)
+        mode = "all" if len(terms) >= 2 else "any"
+        res = buscar_tarefas(query, match_mode=mode, limite=5)
+        if mode == "all" and not res.get("resultados"):
+            res = buscar_tarefas(query, match_mode="any", limite=5)
+    else:
+        res = buscar_tarefas("", match_mode="any", limite=5)
+
+    return res.get("resultados", [])
+
+
+def _build_action_keyboard(results: list) -> list:
+    """Constrói InlineKeyboard com uma linha por resultado de ação."""
+    keyboard = []
+    for r in results:
+        task_id = r["id"]
+        titulo = (r.get("titulo") or "sem titulo")[:35]
+        area = r.get("area", "")
+        label = titulo + (f" [{area}]" if area else "")
+        keyboard.append([{"text": label[:60], "callback_data": f"lock:{task_id}"}])
+    return keyboard
+
+
+_EXIT_KEYBOARD = [[{"text": "🔓 Sair do Contexto", "callback_data": "exit_context"}]]
+
+
+def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn.Response":
+    """Processa um callback_query de botão inline de forma síncrona (sem LLM)."""
+    query_id = callback_query.get("id", "")
+    data = (callback_query.get("data") or "").strip()
+    message = callback_query.get("message") or {}
+    chat_id = str((message.get("chat") or {}).get("id", ""))
+
+    if not chat_id or not data:
+        _answer_callback_query(token, query_id)
+        return https_fn.Response("OK", status=200)
+
+    allowed = _get_allowed_chat_id()
+    if allowed and chat_id != allowed:
+        _answer_callback_query(token, query_id)
+        return https_fn.Response("OK", status=200)
+
+    session = _get_session(db, chat_id)
+
+    if data == "exit_context":
+        acao_titulo = session.get("acao_titulo") or "anterior"
+        _answer_callback_query(token, query_id, "Contexto liberado.")
+        session["contexto_ativo"] = "geral"
+        session["acao_id"] = None
+        session["acao_titulo"] = None
+        session["acao_context_snapshot"] = None
+        session["history_acao"] = []
+        _save_session(db, chat_id, session)
+        _send_telegram_message(
+            token, chat_id,
+            f"✅ Saindo do contexto <b>{acao_titulo}</b>. Voltando ao modo geral."
+        )
+
+    elif data.startswith("lock:"):
+        task_id = data[len("lock:"):]
+        _answer_callback_query(token, query_id, "Carregando contexto...")
+        snapshot = _fetch_acao_snapshot(db, task_id)
+        if not snapshot:
+            _send_telegram_session_message(
+                db,
+                token, chat_id,
+                f"⚠️ Ação <code>{task_id}</code> não encontrada."
+            )
+            return https_fn.Response("OK", status=200)
+
+        titulo = snapshot.get("titulo", task_id)
+        session["contexto_ativo"] = "acao"
+        session["acao_id"] = task_id
+        session["acao_titulo"] = titulo
+        session["acao_context_snapshot"] = snapshot
+        session["history_acao"] = []
+        _save_session(db, chat_id, session)
+
+        _send_telegram_message_with_keyboard(
+            token, chat_id,
+            f"🔒 <b>[Contexto: {titulo}]</b>\n\n"
+            f"Contexto trancado. Estou focado exclusivamente nesta ação.\n"
+            f"Histórico anterior isolado — nenhum ruído de conversas passadas.\n\n"
+            f"Use <i>Sair do Contexto</i> para retornar ao modo geral.",
+            _EXIT_KEYBOARD,
+        )
+
+    else:
+        _answer_callback_query(token, query_id)
+
+    return https_fn.Response("OK", status=200)
 
 
 # ---------------------------------------------------------------------------
-# Audio transcription
+# Audio transcription (reusing Groq / Gemini pattern from main.py)
 # ---------------------------------------------------------------------------
 
 def _transcribe_audio_bytes(audio_bytes: bytes, extension: str, db) -> str:
+    import base64 as _b64
     keys = _get_api_keys(db)
     groq_key = keys.get("groq_api_key")
     if not groq_key:
@@ -239,12 +958,282 @@ def _transcribe_audio_bytes(audio_bytes: bytes, extension: str, db) -> str:
 
 
 # ---------------------------------------------------------------------------
-# TTS helpers
+# Media upload to Firebase Storage
 # ---------------------------------------------------------------------------
+
+def _upload_to_storage(file_bytes: bytes, file_name: str, mime_type: str, chat_id: str) -> str:
+    """Uploads to Firebase Storage and returns the public URL (gs://)."""
+    bucket = storage.bucket()
+    path = f"telegram_uploads/{chat_id}/{file_name}"
+    blob = bucket.blob(path)
+    blob.upload_from_string(file_bytes, content_type=mime_type)
+    blob.make_public()
+    return blob.public_url
+
+
+def _store_telegram_media(file_bytes: bytes, file_name: str, mime_type: str, chat_id: str) -> tuple[str | None, str | None]:
+    """
+    Stores media inline when small enough; otherwise uploads to Storage and returns the blob path.
+    Returns: (media_bytes_b64, storage_path)
+    """
+    import base64
+
+    if len(file_bytes) <= _MAX_INLINE_MEDIA_BYTES:
+        return base64.b64encode(file_bytes).decode(), None
+
+    safe_name = os.path.basename(file_name or f"upload_{int(time.time())}")
+    bucket = storage.bucket()
+    path = f"telegram_uploads/{chat_id}/{int(time.time())}_{safe_name}"
+    blob = bucket.blob(path)
+    blob.upload_from_string(file_bytes, content_type=mime_type)
+    return None, path
+
+
+def _load_telegram_media_bytes(media_bytes_b64: str | None, storage_path: str | None) -> bytes | None:
+    if media_bytes_b64:
+        import base64
+
+        return base64.b64decode(media_bytes_b64)
+    if storage_path:
+        bucket = storage.bucket()
+        blob = bucket.blob(storage_path)
+        return blob.download_as_bytes()
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Gemini orchestration
+# ---------------------------------------------------------------------------
+
+def _build_system_instruction(copilot_core: str, copilot_soul: str, contexto_ativo: str) -> str:
+    from datetime import datetime as _dt
+    today = _dt.now(timezone.utc).strftime("%Y-%m-%d")
+    ctx_hint = (
+        f"\n\n<b>Contexto ativo:</b> {contexto_ativo}"
+        if contexto_ativo != "geral"
+        else ""
+    )
+    return (
+        f"Você é o Copiloto Hermes, estrategista sênior de processos. Hoje é {today}."
+        f"{ctx_hint}\n\n"
+        "## CORE ESTÁTICO DO COPILOTO\n"
+        f"{copilot_core}\n\n"
+        "## PERSONALIDADE DINÂMICA ATUAL\n"
+        f"{copilot_soul}\n\n"
+        "## CANAL DE COMUNICAÇÃO: TELEGRAM\n"
+        "REGRA ABSOLUTA DE FORMATAÇÃO: Você está respondendo via Telegram. "
+        "Use EXCLUSIVAMENTE as seguintes tags HTML suportadas pelo Telegram: "
+        "<b>negrito</b>, <i>itálico</i>, <code>código inline</code>, <pre>bloco de código</pre>. "
+        "PROIBIDO usar Markdown (asteriscos, underlines, backticks, #, ##). "
+        "Listas: use • ou - como prefixo de linha, sem Markdown. "
+        "Mantenha respostas concisas — Telegram tem limite de 4096 caracteres por mensagem.\n\n"
+        "## REGRAS ABSOLUTAS\n"
+        "1. JAMAIS expanda siglas arbitrariamente.\n"
+        "2. Se qualquer ferramenta retornar campo 'erro', reproduza o erro literal.\n"
+        "3. Agendamento/Agenda: Você DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horário de funcionamento: 08:00 às 19:00, janela D+7. Se houver conflito em horário específico, pergunte se força inserção ou busca outro slot. Na criação, use os campos horario_inicio e horario_fim.\n"
+        "4. Para criar uma ação, apresente um draft estruturado primeiro com Título, Início/Fim (se houver), Área Temática e Tipo. Aguarde confirmação explicita.\n"
+        "5. Links de tarefas: use o formato task:{ID} no texto (ex: 'Ação task:abc123').\n"
+        "6. Acione salvar_memoria_global apenas para fatos duráveis e preferências estáveis.\n"
+    )
+
+def _build_system_instruction_guarded(
+    copilot_core: str,
+    copilot_soul: str,
+    contexto_ativo: str,
+    acao_snapshot: dict | None = None,
+) -> str:
+    from datetime import datetime as _dt
+
+    today = _dt.now(timezone.utc).strftime("%Y-%m-%d")
+    ctx_hint = (
+        f"\n\n<b>Contexto ativo:</b> {contexto_ativo}"
+        if contexto_ativo != "geral"
+        else ""
+    )
+    base = (
+        f"Voce e o Copiloto Hermes, estrategista senior de processos. Hoje e {today}."
+        f"{ctx_hint}\n\n"
+        "## CORE ESTATICO DO COPILOTO\n"
+        f"{copilot_core}\n\n"
+        "## PERSONALIDADE DINAMICA ATUAL\n"
+        f"{copilot_soul}\n\n"
+        "## CANAL DE COMUNICACAO: TELEGRAM\n"
+        "REGRA ABSOLUTA DE FORMATACAO: Voce esta respondendo via Telegram. "
+        "Use EXCLUSIVAMENTE as seguintes tags HTML suportadas pelo Telegram: "
+        "<b>negrito</b>, <i>italico</i>, <code>codigo inline</code>, <pre>bloco de codigo</pre>. "
+        "PROIBIDO usar Markdown. "
+        "Listas: use • ou - como prefixo de linha, sem Markdown. "
+        "Mantenha respostas concisas; Telegram tem limite de 4096 caracteres por mensagem.\n\n"
+        "## REGRAS ABSOLUTAS\n"
+        "1. JAMAIS expanda siglas arbitrariamente.\n"
+        "2. Se qualquer ferramenta retornar campo 'erro', reproduza o erro literal.\n"
+        "4. Se o pedido for sobre dados internos do Hermes, tarefas, acoes, historico, agenda ou documentos do sistema, NUNCA use internet como fallback. Nesses casos, use apenas ferramentas internas. Se nao encontrar nada apos usar as ferramentas, admita explicitamente que nao encontrou nos registros do sistema.\n"
+        "5. Agendamento/Agenda: Voce DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horario de funcionamento: 08:00 as 19:00, janela D+7. Se houver conflito em horario especifico, pergunte se forca insercao ou busca outro slot. Na criacao, use os campos horario_inicio e horario_fim.\n"
+        "6. Para criar uma acao, apresente um draft estruturado primeiro com Titulo, Inicio/Fim (se houver), Area Tematica e Tipo. Aguarde confirmacao explicita.\n"
+        "7. Links de tarefas: use o formato task:{ID} no texto (ex: 'Acao task:abc123').\n"
+        "8. Acione salvar_memoria_global apenas para fatos duraveis e preferencias estaveis.\n"
+        "9. GOVERNANCA DE FONTES: ao descrever uma tarefa encontrada por consultar_historico_acoes, "
+        "use SOMENTE os campos retornados por essa ferramenta (Titulo, Status, Prazo, Descricao, Notas, Diario). "
+        "E PROIBIDO completar ou inferir informacoes da tarefa usando dados do RAG, acervo ou memoria global. "
+        "Se um campo nao constar no retorno da ferramenta, diga 'nao informado' em vez de inventar.\n"
+    )
+
+    if not acao_snapshot:
+        return base
+
+    titulo = acao_snapshot.get("titulo", "")
+    plano_lines = "\n".join(f"  {p}" for p in acao_snapshot.get("plano_acao", [])) or "  (sem passos registrados)"
+    diario_lines = "\n".join(f"  {d}" for d in acao_snapshot.get("acompanhamento_recente", [])) or "  (sem entradas recentes)"
+    tags_str = ", ".join(str(t) for t in acao_snapshot.get("tags", [])) or "nenhuma"
+
+    acao_section = (
+        "\n\n## ACAO VINCULADA — MODO CONTEXTO TRANCADO\n"
+        f"ID: {acao_snapshot.get('id', '')}\n"
+        f"Titulo: {titulo}\n"
+        f"Area: {acao_snapshot.get('area', '')}\n"
+        f"Status: {acao_snapshot.get('status', '')}\n"
+        f"Descricao: {acao_snapshot.get('descricao', '') or 'nao informada'}\n"
+        f"Sintese: {acao_snapshot.get('sintese', '') or 'nao informada'}\n"
+        f"Plano de Acao:\n{plano_lines}\n"
+        f"Diario Recente:\n{diario_lines}\n"
+        f"Notas: {acao_snapshot.get('notas', '') or 'nenhuma'}\n"
+        f"Tags: {tags_str}\n\n"
+        "MODO CONTEXTO TRANCADO ATIVADO — REGRAS ABSOLUTAS:\n"
+        "1. O historico de conversas anteriores foi isolado. Concentre-se exclusivamente nesta acao.\n"
+        "2. Use SOMENTE os dados desta secao ao descrever a acao. PROIBIDO usar RAG ou inferencia.\n"
+        "3. Ao receber perguntas sobre a acao, responda com base nos dados acima.\n"
+        "4. Se o usuario pedir para atualizar, criar passos ou registrar progresso, use as ferramentas disponiveis.\n"
+    )
+    return base + acao_section
+
+
+def _build_system_instruction_guarded_v2(
+    copilot_core: str,
+    copilot_soul: str,
+    contexto_ativo: str,
+    acao_snapshot: dict | None = None,
+) -> str:
+    from datetime import datetime as _dt
+
+    today = _dt.now(timezone.utc).strftime("%Y-%m-%d")
+    ctx_hint = (
+        f"\n\n<b>Contexto ativo:</b> {contexto_ativo}"
+        if contexto_ativo != "geral"
+        else ""
+    )
+    base = (
+        f"Voce e o Copiloto Hermes, estrategista senior de processos. Hoje e {today}."
+        f"{ctx_hint}\n\n"
+        "## CORE ESTATICO DO COPILOTO\n"
+        f"{copilot_core}\n\n"
+        "## PERSONALIDADE DINAMICA ATUAL\n"
+        f"{copilot_soul}\n\n"
+        "## CANAL DE COMUNICACAO: TELEGRAM\n"
+        "REGRA ABSOLUTA DE FORMATACAO: Voce esta respondendo via Telegram. "
+        "Use EXCLUSIVAMENTE as seguintes tags HTML suportadas pelo Telegram: "
+        "<b>negrito</b>, <i>italico</i>, <code>codigo inline</code>, <pre>bloco de codigo</pre>. "
+        "PROIBIDO usar Markdown. "
+        "Listas: use - ou bullet simples como prefixo de linha, sem Markdown. "
+        "Mantenha respostas concisas; Telegram tem limite de 4096 caracteres por mensagem.\n\n"
+        "## REGRAS ABSOLUTAS\n"
+        "1. JAMAIS expanda siglas arbitrariamente.\n"
+        "2. Se qualquer ferramenta retornar campo 'erro', reproduza o erro literal.\n"
+        "4. Se o pedido for sobre dados internos do Hermes, tarefas, acoes, historico, agenda ou documentos do sistema, NUNCA use internet como fallback. Nesses casos, use apenas ferramentas internas. Se nao encontrar nada apos usar as ferramentas, admita explicitamente que nao encontrou nos registros do sistema.\n"
+        "5. Agendamento/Agenda: Voce DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horario de funcionamento: 08:00 as 19:00, janela D+7. Se houver conflito em horario especifico, pergunte se forca insercao ou busca outro slot. Na criacao, use os campos horario_inicio e horario_fim.\n"
+        "6. Para criar uma acao, apresente um draft estruturado primeiro com Titulo, Inicio/Fim (se houver), Area Tematica e Tipo. Aguarde confirmacao explicita.\n"
+        "7. Links de tarefas: use o formato task:{ID} no texto (ex: 'Acao task:abc123').\n"
+        "8. Acione salvar_memoria_global apenas para fatos duraveis e preferencias estaveis.\n"
+        "9. GOVERNANCA DE FONTES: ao descrever uma tarefa encontrada por consultar_historico_acoes, use SOMENTE os campos retornados por essa ferramenta. Se um campo nao constar no retorno da ferramenta, diga 'nao informado' em vez de inventar.\n"
+        "10. LINKS E ARQUIVOS: nunca crie hiperlinks, texto-ancora ou URLs que nao aparecam literalmente no contexto, em uma ferramenta ou em um DRIVE_FILE_ID real. Se o usuario pedir links e eles nao estiverem disponiveis, diga que nao encontrou.\n"
+        "11. PESQUISA DE ACOES: se o usuario pedir para pesquisar/localizar uma acao ou tarefa, use consultar_historico_acoes primeiro. Nao substitua resultado ausente por acervo, email ou internet, salvo se o usuario pedir explicitamente essa ampliacao.\n"
+    )
+
+    if not acao_snapshot:
+        return base
+
+    titulo = acao_snapshot.get("titulo", "")
+    plano_lines = "\n".join(f"  {p}" for p in acao_snapshot.get("plano_acao", [])) or "  (sem passos registrados)"
+    diario_lines = "\n".join(f"  {d}" for d in acao_snapshot.get("acompanhamento_recente", [])) or "  (sem entradas recentes)"
+    diario_integral = acao_snapshot.get("diario_integral", "") or "(sem diario integral)"
+    arquivos = acao_snapshot.get("arquivos_disponiveis", []) or []
+    arquivos_lines = (
+        "\n".join(f"  - {a.get('nome', 'Arquivo sem nome')} | DRIVE_FILE_ID: {a.get('drive_file_id', '')}" for a in arquivos)
+        or "  (sem arquivos disponiveis)"
+    )
+    tags_str = ", ".join(str(t) for t in acao_snapshot.get("tags", [])) or "nenhuma"
+
+    acao_section = (
+        "\n\n## ACAO VINCULADA - MODO CONTEXTO TRANCADO\n"
+        f"ID: {acao_snapshot.get('id', '')}\n"
+        f"Titulo: {titulo}\n"
+        f"Area: {acao_snapshot.get('area_tematica', acao_snapshot.get('area', ''))}\n"
+        f"Status: {acao_snapshot.get('status', '')}\n"
+        f"Sistema ID: {acao_snapshot.get('sistema_id') or 'nao informado'}\n"
+        f"Descricao: {acao_snapshot.get('descricao', '') or 'nao informada'}\n"
+        f"Sintese: {acao_snapshot.get('sintese', '') or 'nao informada'}\n"
+        f"Plano de Acao:\n{plano_lines}\n"
+        f"Plano Atual Estruturado: {json.dumps(acao_snapshot.get('plano_atual', []), ensure_ascii=False)}\n"
+        f"Diario Recente:\n{diario_lines}\n"
+        f"Diario Integral:\n{diario_integral}\n"
+        f"Notas: {acao_snapshot.get('notas', '') or 'nenhuma'}\n"
+        f"Tags: {tags_str}\n\n"
+        f"Arquivos Disponiveis:\n{arquivos_lines}\n\n"
+        "MODO CONTEXTO TRANCADO ATIVADO - REGRAS ABSOLUTAS:\n"
+        "1. O historico de conversas anteriores foi isolado. Concentre-se exclusivamente nesta acao.\n"
+        "2. Use SOMENTE os dados desta secao ao descrever a acao. PROIBIDO usar RAG ou inferencia.\n"
+        "3. Este payload replica a estrutura de contexto da interface web: sistema_id, plano atual, diario integral, tags e arquivos disponiveis.\n"
+        "4. Ao receber perguntas sobre a acao, responda com base nos dados acima.\n"
+        "5. Se o usuario pedir para atualizar, criar passos ou registrar progresso, use as ferramentas disponiveis.\n"
+        "6. Se o usuario pedir links ou anexos, cite apenas as URLs/DRIVE_FILE_ID listados em Arquivos Disponiveis. Nunca use rotulos clicaveis como 'Acessar Pasta' sem mostrar a URL real.\n"
+    )
+    return base + acao_section
+
 
 def _normalize_for_matching(text: str) -> str:
     normalized = unicodedata.normalize("NFKD", text or "")
-    return "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower()
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return normalized.lower()
+
+
+def _is_explicit_web_request(text: str) -> bool:
+    lowered = _normalize_for_matching(text)
+    web_markers = [
+        "na internet",
+        "na web",
+        "pesquise na internet",
+        "busque na internet",
+        "pesquise no google",
+        "busque no google",
+        "noticia",
+        "noticias",
+        "site oficial",
+        "link externo",
+        "fonte externa",
+        "fonte oficial",
+    ]
+    return any(marker in lowered for marker in web_markers)
+
+
+def _is_internal_hermes_request(text: str) -> bool:
+    lowered = _normalize_for_matching(text)
+    internal_markers = [
+        "hermes",
+        "no sistema",
+        "no copilot",
+        "copiloto",
+        "acao",
+        "acoes",
+        "tarefa",
+        "tarefas",
+        "agendamento",
+        "documentacao",
+        "deferido",
+        "deferidos",
+        "assistencia estudantil",
+        "historico",
+        "cadastro",
+    ]
+    return any(marker in lowered for marker in internal_markers)
 
 
 def _extract_response_mode(text: str, session: dict) -> tuple[str, str]:
@@ -253,7 +1242,14 @@ def _extract_response_mode(text: str, session: dict) -> tuple[str, str]:
         return session.get("response_mode", "texto"), raw_text
 
     lowered = _normalize_for_matching(raw_text)
-    explicit_audio_markers = ("/audio", "#audio", "[audio]", "mensagem de voz", "em voz", "por voz")
+    explicit_audio_markers = (
+        "/audio",
+        "#audio",
+        "[audio]",
+        "mensagem de voz",
+        "em voz",
+        "por voz",
+    )
     audio_keywords = ("audio", "voz")
     request_verbs = ("responda", "resposta", "mande", "manda", "envie", "quero")
     wants_audio = any(marker in lowered for marker in explicit_audio_markers)
@@ -262,16 +1258,15 @@ def _extract_response_mode(text: str, session: dict) -> tuple[str, str]:
 
     if wants_audio:
         cleaned = raw_text
-        for pat in [
-            r"^/audio\b", r"#audio|\[audio\]",
-            r"(me\s+)?responda\s+(em|por|para|pro?)\s+(o\s+)?[aá]udio",
-            r"resposta\s+(em|por|para|pro?)\s+(o\s+)?[aá]udio",
-            r"envie\s+(em|por|para|pro?)\s+(o\s+)?[aá]udio",
-            r"(me\s+)?mande\s+(em|por|para|pro?)\s+(o\s+)?[aá]udio",
-            r"quero\s+(em|por|para|pro?)\s+(o\s+)?[aá]udio",
-            r"mensagem de voz", r"\b(em|por)\s+voz\b",
-        ]:
-            cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"^/audio\b", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"#audio|\[audio\]", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"(me\s+)?responda\s+(em|por|para|pro?)\s+(o\s+)?[aá]udio", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"resposta\s+(em|por|para|pro?)\s+(o\s+)?[aá]udio", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"envie\s+(em|por|para|pro?)\s+(o\s+)?[aá]udio", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"(me\s+)?mande\s+(em|por|para|pro?)\s+(o\s+)?[aá]udio", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"quero\s+(em|por|para|pro?)\s+(o\s+)?[aá]udio", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"mensagem de voz", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"\b(em|por)\s+voz\b", "", cleaned, flags=re.IGNORECASE).strip()
         return "audio", cleaned.strip(" ,.-")
 
     explicit_text_markers = ("/texto", "#texto", "[texto]")
@@ -288,28 +1283,27 @@ def _extract_voice_profile(text: str, default_voice: str = "masculina") -> tuple
         return default_voice, raw_text
 
     lowered = _normalize_for_matching(raw_text)
-    masculine_markers = ("#voz:masculina", "[voz:masculina]", "/voz masculina", "voz masculina", "na voz masculina", "com voz masculina")
+    masculine_markers = (
+        "#voz:masculina",
+        "[voz:masculina]",
+        "/voz masculina",
+        "voz masculina",
+        "na voz masculina",
+        "com voz masculina",
+    )
+
     if any(marker in lowered for marker in masculine_markers):
         cleaned = re.sub(r"#voz:masculina|\[voz:masculina\]|/voz masculina", "", raw_text, flags=re.IGNORECASE).strip()
         cleaned = re.sub(r"\b(na|com)?\s*voz masculina\b", "", cleaned, flags=re.IGNORECASE).strip()
         return "masculina", cleaned
+
     return default_voice, raw_text
-
-
-def _build_tts_director_instruction(voice_profile: str) -> str:
-    return (
-        "Voce e o diretor de TTS do Hermes. "
-        "Recebera uma resposta factual pronta e deve apenas converte-la em um roteiro curto para fala natural. "
-        "Nao adicione fatos novos. Nao inclua links, nomes tecnicos longos nem listas densas. "
-        "Nao use tags, colchetes nem anotacoes de palco. Entregue apenas o texto a ser falado. "
-        "Mantenha tom de assistente operacional, conversa um a um, sem soar como narrador. "
-        f"Perfil de voz desejado: {voice_profile}. Responda apenas com o roteiro final."
-    )
 
 
 def _run_gemini_text(gemini_key: str, system_instruction: str, user_prompt: str, model_id: str = _TEXT_MODEL_ID) -> str:
     from google import genai
     from google.genai import types
+
     client = genai.Client(api_key=gemini_key)
     response = client.models.generate_content(
         model=model_id,
@@ -319,15 +1313,34 @@ def _run_gemini_text(gemini_key: str, system_instruction: str, user_prompt: str,
     return (response.text or "").strip()
 
 
+def _build_tts_director_instruction(voice_profile: str) -> str:
+    return (
+        "Voce e o diretor de TTS do Hermes. "
+        "Recebera uma resposta factual pronta e deve apenas converte-la em um roteiro curto para fala natural. "
+        "Nao adicione fatos novos. "
+        "Nao inclua links, nomes tecnicos longos nem listas densas. "
+        "Nao use tags, colchetes nem anotacoes de palco. "
+        "Entregue apenas o texto a ser falado. "
+        "Mantenha tom de assistente operacional, conversa um a um, sem soar como narrador. "
+        "Priorize objetividade, proximidade e sobriedade. "
+        f"Perfil de voz desejado: {voice_profile}. "
+        "Responda apenas com o roteiro final."
+    )
+
+
 def _run_gemini_tts(gemini_key: str, script_text: str, voice_profile: str) -> tuple[bytes, str]:
     from google import genai
     from google.genai import types
+
+    voice_name = _DEFAULT_MALE_VOICE
     client = genai.Client(api_key=gemini_key)
     style_prompt = (
         "### DIRECTOR'S NOTES\n"
         "Style: concise operational assistant, one-to-one, practical and calm.\n"
-        "Pacing: natural conversational pace.\n"
-        "Tone: professional, direct, grounded, helpful and discreet.\n\n"
+        "Pacing: natural conversational pace, with short pauses only when meaning changes.\n"
+        "Tone: professional, direct, grounded, helpful and discreet.\n"
+        "Delivery: do not sound like a narrator, announcer, storyteller, presenter or commercial voice-over.\n"
+        "Delivery: sound like a senior assistant speaking directly to one person.\n\n"
         "### SCRIPT\n"
         f"\"{script_text[:_MAX_TTS_TRANSCRIPT_CHARS]}\""
     )
@@ -338,17 +1351,18 @@ def _run_gemini_tts(gemini_key: str, script_text: str, voice_profile: str) -> tu
             response_modalities=["AUDIO"],
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=_DEFAULT_MALE_VOICE)
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
                 )
             ),
         ),
     )
+
     for candidate in (response.candidates or []):
         for part in (candidate.content.parts or []):
             inline_data = getattr(part, "inline_data", None)
             if inline_data and getattr(inline_data, "data", None):
                 return inline_data.data, getattr(inline_data, "mime_type", "audio/L16;rate=24000")
-    raise RuntimeError("Gemini TTS não retornou áudio.")
+    raise RuntimeError("Gemini TTS nÃ£o retornou Ã¡udio.")
 
 
 def _transcode_audio_for_telegram_voice(audio_bytes: bytes, mime_type: str) -> tuple[bytes, str, str] | tuple[None, None, None]:
@@ -372,7 +1386,17 @@ def _transcode_audio_for_telegram_voice(audio_bytes: bytes, mime_type: str) -> t
             wav_file.setsampwidth(2)
             wav_file.setframerate(sample_rate)
             wav_file.writeframes(audio_bytes)
-        cmd = [ffmpeg_bin, "-y", "-i", wav_path, "-c:a", "libopus", "-b:a", "32k", ogg_path]
+        cmd = [
+            ffmpeg_bin,
+            "-y",
+            "-i",
+            wav_path,
+            "-c:a",
+            "libopus",
+            "-b:a",
+            "32k",
+            ogg_path,
+        ]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
         if proc.returncode != 0 or not os.path.exists(ogg_path):
             print(f"[TTS] ffmpeg transcode failed: {proc.stderr[:400]}")
@@ -386,6 +1410,7 @@ def _wrap_pcm_audio_as_wav(audio_bytes: bytes, mime_type: str) -> tuple[bytes, s
     rate_match = re.search(r"rate=(\d+)", (mime_type or "").lower())
     if rate_match:
         sample_rate = int(rate_match.group(1))
+
     wav_buffer = BytesIO()
     with wave.open(wav_buffer, "wb") as wav_file:
         wav_file.setnchannels(1)
@@ -396,15 +1421,923 @@ def _wrap_pcm_audio_as_wav(audio_bytes: bytes, mime_type: str) -> tuple[bytes, s
 
 
 def _send_tts_failure_notice(token: str, chat_id: str | int):
-    _send_telegram_message(token, chat_id, "⚠️ Falha técnica ao gerar o áudio. Repita a solicitação ou peça resposta em texto.")
+    _send_telegram_message(
+        token,
+        chat_id,
+        "⚠️ Houve uma falha tÃ©cnica ao gerar o Ã¡udio. Repita a solicitaÃ§Ã£o ou peÃ§a a resposta em texto.",
+    )
 
 
-def _deliver_response(token: str, chat_id: str | int, response_text: str, response_mode: str,
-                       voice_profile: str, gemini_key: str, message_id_to_edit: Optional[int] = None):
-    """Entrega a resposta final ao usuário — texto ou áudio."""
+def _send_tts_failure_notice_contextual(db, token: str, chat_id: str | int, session: dict | None = None):
+    _send_telegram_session_message(
+        db,
+        token,
+        chat_id,
+        "⚠️ Houve uma falha técnica ao gerar o áudio. Repita a solicitação ou peça a resposta em texto.",
+        session=session,
+    )
+
+
+def _send_contextual_response(
+    db,
+    token: str,
+    chat_id: str | int,
+    text: str,
+    session: dict | None = None,
+    response_mode: str = "texto",
+    gemini_key: str | None = None,
+    voice_profile: str = "masculina",
+    inline_keyboard: list | None = None,
+    perf_state: dict | None = None,
+):
+    """Envia resposta factual pronta e, se pedido, converte o mesmo texto em audio."""
+    message_id = _send_telegram_session_message(
+        db,
+        token,
+        chat_id,
+        text,
+        session=session,
+        inline_keyboard=inline_keyboard,
+    )
+    if response_mode != "audio":
+        return message_id
+    if not gemini_key:
+        _send_tts_failure_notice_contextual(db, token, chat_id, session=session)
+        return message_id
+
+    try:
+        with _telegram_action_heartbeat(token, chat_id, "record_voice"):
+            tts_script = _run_gemini_text(
+                gemini_key=gemini_key,
+                system_instruction=_build_tts_director_instruction(voice_profile),
+                user_prompt=text,
+            )
+            audio_bytes, audio_mime = _run_gemini_tts(
+                gemini_key=gemini_key,
+                script_text=tts_script or text,
+                voice_profile=voice_profile,
+            )
+            tg_audio_bytes, tg_audio_mime, tg_audio_name = _transcode_audio_for_telegram_voice(audio_bytes, audio_mime)
+            if tg_audio_bytes:
+                if not _send_telegram_voice(token, chat_id, tg_audio_bytes, tg_audio_name, tg_audio_mime):
+                    raise RuntimeError("Falha ao enviar voice note pelo Telegram.")
+            else:
+                wav_bytes, wav_mime, wav_name = _wrap_pcm_audio_as_wav(audio_bytes, audio_mime)
+                if not _send_telegram_document(token, chat_id, wav_bytes, wav_name, wav_mime, caption="Resposta em audio"):
+                    raise RuntimeError("Falha ao enviar arquivo de audio.")
+        if perf_state is not None:
+            _perf_mark(perf_state, "telegram.audio_response")
+    except Exception as tts_err:
+        print(f"[Core] Deterministic TTS error: {tts_err}")
+        if perf_state is not None:
+            _perf_log("telegram.request.deterministic_tts_error", perf_state, {"chat_id": str(chat_id), "error": str(tts_err)})
+        _send_tts_failure_notice_contextual(db, token, chat_id, session=session)
+    return message_id
+
+
+def _run_gemini_turn(
+    db,
+    gemini_key: str,
+    system_instruction: str,
+    history: list,
+    user_message_parts: list,
+    tools_list: list,
+    function_map: dict,
+    perf_state: dict | None = None,
+) -> str:
+    """Runs a full Gemini multi-turn exchange and returns the final text response."""
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=gemini_key)
+    model_id = "gemini-3-flash-preview"
+
+    chat = client.chats.create(
+        model=model_id,
+        config=types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            tools=tools_list,
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+            # Desabilita thinking: evita parts com thought=True que confundem a extração de texto
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
+        ),
+        history=history,
+    )
+    if perf_state is not None:
+        _perf_mark(perf_state, "telegram.chat_create")
+
+    response = chat.send_message(user_message_parts)
+    if perf_state is not None:
+        _perf_mark(perf_state, "telegram.first_model_response")
+
+    # Agentic loop — processa tool calls até obter resposta de texto
+    for _ in range(6):
+        if not response.candidates:
+            break
+        candidate = response.candidates[0]
+        if candidate.finish_reason and candidate.finish_reason.name not in ("STOP", "MAX_TOKENS", ""):
+            break
+
+        # Coleta function calls neste turno
+        func_calls = []
+        for part in (candidate.content.parts or []):
+            if hasattr(part, "function_call") and part.function_call and part.function_call.name:
+                func_calls.append(part.function_call)
+
+        if not func_calls:
+            break
+
+        # Executa todas as tool calls e coleta resultados
+        tool_results = []
+        for fc in func_calls:
+            fn = function_map.get(fc.name)
+            tool_start_ms = _perf_now_ms()
+            if fn is None:
+                result_text = f"Ferramenta '{fc.name}' não encontrada."
+            else:
+                try:
+                    kwargs = dict(fc.args or {})
+                    result = fn(**kwargs)
+                    result_text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+                except Exception as tool_err:
+                    result_text = f"Erro ao executar {fc.name}: {tool_err}"
+            if perf_state is not None:
+                perf_state.setdefault("tool_calls", []).append({
+                    "name": fc.name,
+                    "duration_ms": max(0, _perf_now_ms() - tool_start_ms),
+                })
+            tool_results.append(
+                types.Part.from_function_response(
+                    name=fc.name,
+                    response={"result": result_text},
+                )
+            )
+
+        response = chat.send_message(tool_results)
+        if perf_state is not None:
+            _perf_mark(perf_state, "telegram.tool_roundtrip")
+    else:
+        # Se saiu do loop por limite de iterações, força um turno final de texto
+        last_chance_msg = [types.Part(text="Limite de pesquisas atingido. Por favor, apresente uma resposta final ao usuário com base no que você encontrou (ou informe que não encontrou).")]
+        response = chat.send_message(last_chance_msg)
+        if perf_state is not None:
+            _perf_mark(perf_state, "telegram.safety_final_turn")
+
+    # Extrai texto final — ignora parts de thinking (thought=True) que não são resposta
+    text_parts = []
+    if response.candidates:
+        for part in (response.candidates[0].content.parts or []):
+            # Filtra parts de raciocínio interno (thinking) — não são texto de resposta
+            if getattr(part, "thought", False):
+                continue
+            if hasattr(part, "text") and part.text:
+                text_parts.append(part.text)
+    return "\n".join(text_parts).strip() or "Peço desculpas, mas não consegui formular uma resposta. Tente reformular sua pergunta."
+
+
+# ---------------------------------------------------------------------------
+# Main processing logic
+# ---------------------------------------------------------------------------
+
+def _process_telegram_message(db, data: dict):
+    """Full processing pipeline for one incoming Telegram message."""
+    from google.genai import types
+    from tools.busca_grafo import buscar_tarefas
+    from tools.busca_acervo import buscar_acervo
+    perf_state = {"start_ms": _perf_now_ms(), "_last_ms": _perf_now_ms(), "steps": [], "tool_calls": []}
+
+    chat_id = str(data.get("chat_id", ""))
+    text = (data.get("text") or "").strip()
+    file_info = data.get("file_info")   # {file_id, file_unique_id, file_size, mime_type, file_name}
+    audio_info = data.get("audio_info") # {file_id, file_size, mime_type, duration}
+    media_bytes_b64 = data.get("media_bytes_b64")  # base64 of already-downloaded file
+    media_storage_path = data.get("media_storage_path")
+
+    if not chat_id:
+        return
+
+    keys = _get_api_keys(db)
+    gemini_key = keys.get("gemini_api_key")
+    token = keys.get("telegram_bot_token") or os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    session = _get_session(db, chat_id)
+    if not gemini_key or not token:
+        _send_telegram_session_message(db, token, chat_id, "⚠️ Configuração incompleta. Contate o administrador.", session=session)
+        return
+
+    _perf_mark(perf_state, "telegram.bootstrap")
+    response_mode, text = _extract_response_mode(text, session)
+    voice_profile, text = _extract_voice_profile(text, "masculina")
+    print(f"[Core] initial response_mode={response_mode} voice_profile={voice_profile}")
+    _perf_mark(perf_state, "telegram.session_load")
+
+    # --- /entrar command — busca semântica de ações para travamento de contexto ---
+    if re.match(r"^/entrar(\s|$)", text, re.IGNORECASE):
+        query = text[len("/entrar"):].strip()
+        results = _search_actions_for_context(db, query)
+        if not results:
+            _send_telegram_session_message(
+                db,
+                token,
+                chat_id,
+                f"Nenhuma ação encontrada para <i>{query}</i>." if query
+                else "Nenhuma ação cadastrada no sistema.",
+                session=session,
+            )
+        else:
+            header = (
+                f"Resultados para <i>{query}</i>. Toque para entrar no contexto:" if query
+                else "Ações recentes. Toque para entrar no contexto:"
+            )
+            _send_telegram_session_message(
+                db,
+                token,
+                chat_id,
+                header,
+                session=session,
+                inline_keyboard=_build_action_keyboard(results),
+            )
+        return
+
+    # --- Natural-language action search + context lock
+    # Ex: "pesquisa a acao de X e ative o contexto"
+    action_search_context_query = _extract_action_search_context_query(text)
+    if action_search_context_query:
+        results = _search_actions_for_context(db, action_search_context_query)
+        selected = _select_context_result(action_search_context_query, results)
+        if selected:
+            snapshot = _fetch_acao_snapshot(db, selected["id"])
+            if not snapshot:
+                _send_contextual_response(
+                    db,
+                    token,
+                    chat_id,
+                    "Encontrei a acao, mas nao consegui carregar o snapshot real do contexto. Tente novamente em instantes.",
+                    session=session,
+                    response_mode=response_mode,
+                    gemini_key=gemini_key,
+                    voice_profile=voice_profile,
+                    perf_state=perf_state,
+                )
+                return
+            _lock_action_session(session, selected["id"], snapshot)
+            _save_session(db, chat_id, session)
+            _send_contextual_response(
+                db,
+                token,
+                chat_id,
+                _format_context_locked_message(snapshot),
+                session=session,
+                response_mode=response_mode,
+                gemini_key=gemini_key,
+                voice_profile=voice_profile,
+                perf_state=perf_state,
+            )
+            return
+
+        if results:
+            header = (
+                f"Encontrei algumas acoes para <i>{html.escape(action_search_context_query)}</i>. "
+                "Toque na correta para eu travar o contexto real:"
+            )
+            _send_contextual_response(
+                db,
+                token,
+                chat_id,
+                header,
+                session=session,
+                inline_keyboard=_build_action_keyboard(results),
+                response_mode=response_mode,
+                gemini_key=gemini_key,
+                voice_profile=voice_profile,
+                perf_state=perf_state,
+            )
+            return
+
+        _send_contextual_response(
+            db,
+            token,
+            chat_id,
+            f"Nenhuma acao encontrada para <i>{html.escape(action_search_context_query)}</i>. Nao ativei contexto sem uma acao real.",
+            session=session,
+            response_mode=response_mode,
+            gemini_key=gemini_key,
+            voice_profile=voice_profile,
+            perf_state=perf_state,
+        )
+        return
+
+    # --- Natural-language context lock ("entre no contexto da acao X") ---
+    natural_context_query = _extract_natural_context_query(text)
+    if natural_context_query is not None:
+        results = _search_actions_for_context(db, natural_context_query)
+        selected = _select_context_result(natural_context_query, results)
+        if selected:
+            snapshot = _fetch_acao_snapshot(db, selected["id"])
+            if not snapshot:
+                _send_contextual_response(
+                    db,
+                    token,
+                    chat_id,
+                    "Encontrei a acao, mas nao consegui carregar o snapshot real do contexto. Tente novamente em instantes.",
+                    session=session,
+                    response_mode=response_mode,
+                    gemini_key=gemini_key,
+                    voice_profile=voice_profile,
+                    perf_state=perf_state,
+                )
+                return
+            _lock_action_session(session, selected["id"], snapshot)
+            _save_session(db, chat_id, session)
+            _send_contextual_response(
+                db,
+                token,
+                chat_id,
+                _format_context_locked_message(snapshot),
+                session=session,
+                response_mode=response_mode,
+                gemini_key=gemini_key,
+                voice_profile=voice_profile,
+                perf_state=perf_state,
+            )
+            return
+
+        if results:
+            header = (
+                f"Encontrei mais de uma acao para <i>{html.escape(natural_context_query or 'sua busca')}</i>. "
+                "Toque na correta para eu travar o contexto real:"
+            )
+            _send_contextual_response(
+                db,
+                token,
+                chat_id,
+                header,
+                session=session,
+                inline_keyboard=_build_action_keyboard(results),
+                response_mode=response_mode,
+                gemini_key=gemini_key,
+                voice_profile=voice_profile,
+                perf_state=perf_state,
+            )
+            return
+
+        _send_contextual_response(
+            db,
+            token,
+            chat_id,
+            f"Nenhuma acao encontrada para <i>{html.escape(natural_context_query or text)}</i>. Nao ativei contexto sem uma acao real.",
+            session=session,
+            response_mode=response_mode,
+            gemini_key=gemini_key,
+            voice_profile=voice_profile,
+            perf_state=perf_state,
+        )
+        return
+
+    # --- Command handler ---
+    if text.startswith("/"):
+        reply = _handle_command(text, session)
+        if reply:
+            _save_session(db, chat_id, session)
+            _send_telegram_session_message(db, token, chat_id, reply, session=session)
+            return
+        # Unknown command — fall through to Gemini
+
+    # --- Load copilot personality ---
+    try:
+        core_doc = _cached_doc_get(db, "system", "copilot_core")
+        copilot_core = (core_doc.to_dict() or {}).get("content", "") if core_doc.exists else ""
+    except Exception:
+        copilot_core = ""
+    try:
+        soul_doc = _cached_doc_get(db, "system", "copilot_soul")
+        copilot_soul = (soul_doc.to_dict() or {}).get("content", "") if soul_doc.exists else ""
+    except Exception:
+        copilot_soul = ""
+
+    contexto_ativo = session.get("contexto_ativo", "geral")
+    request_acao_id = session.get("acao_id")
+    # When locked to an action, pull its data snapshot for LLM injection
+    acao_snapshot = session.get("acao_context_snapshot") if contexto_ativo == "acao" else None
+    if contexto_ativo == "acao" and request_acao_id:
+        fresh_snapshot = _fetch_acao_snapshot(db, request_acao_id)
+        if fresh_snapshot:
+            acao_snapshot = fresh_snapshot
+            session["acao_context_snapshot"] = fresh_snapshot
+            session["acao_titulo"] = fresh_snapshot.get("titulo") or session.get("acao_titulo")
+    system_instruction = _build_system_instruction_guarded_v2(copilot_core, copilot_soul, contexto_ativo, acao_snapshot)
+
+    # --- Restore history (trimmed) — isolated buffer when action-locked ---
+    hist_key = "history_acao" if contexto_ativo == "acao" else "history"
+    raw_history = session.get(hist_key, [])
+    # Keep last N turns (each turn = user + model = 2 items)
+    if len(raw_history) > _MAX_HISTORY_TURNS * 2:
+        raw_history = raw_history[-((_MAX_HISTORY_TURNS * 2)):]
+    history = [
+        types.Content(role=h["role"], parts=[types.Part(text=p["text"]) for p in h.get("parts", [])])
+        for h in raw_history
+        if h.get("role") and h.get("parts")
+    ]
+
+    # --- Resolve user message parts ---
+    user_parts = []
+    file_context_text = ""
+
+    # Audio transcription
+    if audio_info and (media_bytes_b64 or media_storage_path):
+        audio_bytes = _load_telegram_media_bytes(media_bytes_b64, media_storage_path)
+        if not audio_bytes:
+            user_parts.append(types.Part(text="[Audio recebido mas o arquivo nao foi encontrado para transcricao]"))
+            audio_bytes = None
+        if not audio_bytes:
+            pass
+        else:
+            mime = audio_info.get("mime_type", "audio/ogg")
+            raw_ext = mime.split("/")[-1]
+            ext = "ogg" if raw_ext in ("ogg", "oga") else raw_ext
+            _send_telegram_typing(token, chat_id)
+            try:
+                transcription = _transcribe_audio_bytes(audio_bytes, ext, db)
+            except Exception as transcribe_err:
+                print(f"[Core] Transcription error: {transcribe_err}")
+                import traceback; traceback.print_exc()
+                transcription = None
+            if transcription:
+                if response_mode != "audio":
+                    transcribed_mode, cleaned_transcription = _extract_response_mode(transcription, session)
+                    if transcribed_mode == "audio":
+                        response_mode = "audio"
+                        transcription = cleaned_transcription
+                voice_profile, transcription = _extract_voice_profile(transcription, voice_profile)
+                print(f"[Core] transcription response_mode={response_mode} voice_profile={voice_profile} transcription={transcription[:160]}")
+                file_context_text = f"[Transcri??o de ?udio]: {transcription}"
+                user_parts.append(types.Part(text=file_context_text))
+            else:
+                user_parts.append(types.Part(text="[?udio recebido mas transcri??o falhou]"))
+            _perf_mark(perf_state, "telegram.audio_transcription")
+
+    # File/document
+    elif file_info and (media_bytes_b64 or media_storage_path):
+        import uuid as _uuid
+        file_bytes = _load_telegram_media_bytes(media_bytes_b64, media_storage_path)
+        if not file_bytes:
+            user_parts.append(types.Part(text="[Arquivo recebido mas o conteudo nao foi encontrado]"))
+            file_bytes = None
+        if not file_bytes:
+            pass
+        else:
+            fname = file_info.get("file_name") or f"upload_{_uuid.uuid4().hex[:8]}"
+            mime = file_info.get("mime_type", "application/octet-stream")
+            try:
+                pub_url = _upload_to_storage(file_bytes, fname, mime, chat_id)
+                file_context_text = (
+                    f"[Arquivo recebido]: {fname} ({mime})\n"
+                    f"URL: {pub_url}\n"
+                    "Analise este arquivo, identifique o que ele mostra e sugira como ele se relaciona ao contexto atual."
+                )
+            except Exception as up_err:
+                file_context_text = f"[Arquivo recebido: {fname}] (falha no upload: {up_err})"
+            user_parts.append(types.Part(text=file_context_text))
+            _perf_mark(perf_state, "telegram.file_upload")
+
+    # Text
+    if text:
+        user_parts.append(types.Part(text=text))
+
+    if not user_parts:
+        user_parts.append(types.Part(text="[Mensagem sem conteúdo processável]"))
+
+    request_text_for_routing = " ".join(
+        p.text for p in user_parts if hasattr(p, "text") and getattr(p, "text", "")
+    )
+    internal_hermes_request = _is_internal_hermes_request(request_text_for_routing)
+    explicit_web_request = _is_explicit_web_request(request_text_for_routing)
+
+    # Deterministic path for links/docs in a locked action context. This avoids
+    # the model inventing anchor text or Drive URLs when the user asks for files.
+    if contexto_ativo == "acao" and acao_snapshot and _is_context_file_request(request_text_for_routing):
+        response_text = _format_context_files_response(acao_snapshot, request_text_for_routing)
+        user_turn = {"role": "user", "parts": [{"text": p.text} for p in user_parts if hasattr(p, "text") and p.text]}
+        model_turn = {"role": "model", "parts": [{"text": response_text}]}
+        new_history = raw_history + [user_turn, model_turn]
+        if len(new_history) > _MAX_HISTORY_TURNS * 2:
+            new_history = new_history[-(_MAX_HISTORY_TURNS * 2):]
+        session[hist_key] = new_history
+        _save_session(db, chat_id, session)
+        _send_contextual_response(
+            db,
+            token,
+            chat_id,
+            response_text,
+            session=session,
+            response_mode=response_mode,
+            gemini_key=gemini_key,
+            voice_profile=voice_profile,
+            perf_state=perf_state,
+        )
+        _perf_log(
+            "telegram.request.direct_context_files",
+            perf_state,
+            {"chat_id": chat_id, "acao_id": request_acao_id},
+        )
+        return
+
+    # --- Memory context ---
+    # Skips Firestore read for short/trivial messages (< 4 meaningful words)
+    try:
+        query_text = text or file_context_text or ""
+        _STOPWORDS_MEM = {"de", "a", "o", "que", "e", "do", "da", "em", "um", "uma",
+                          "os", "as", "no", "na", "com", "por", "para", "sim", "nao",
+                          "ok", "crie", "faça", "faz", "ola", "oi"}
+        _meaningful_words = [w for w in query_text.lower().split()
+                             if w not in _STOPWORDS_MEM and len(w) > 2]
+        if len(_meaningful_words) >= 4:
+            memory_docs = (
+                db.collection("knowledge_nodes")
+                .order_by("data_criacao", direction=firestore.Query.DESCENDING)
+                .limit(4)
+                .stream()
+            )
+            mem_lines = []
+            for m_doc in memory_docs:
+                m = m_doc.to_dict() or {}
+                fato = m.get("fato", "")
+                cat = m.get("categoria", "")
+                if fato:
+                    mem_lines.append(f"- [{cat}] {fato}")
+            if mem_lines:
+                mem_text = "## MEMÓRIA GLOBAL ATIVA\n" + "\n".join(mem_lines)
+                system_instruction = system_instruction + "\n\n" + mem_text
+    except Exception:
+        pass
+    _perf_mark(perf_state, "telegram.memory_context")
+
+    # --- Tool definitions ---
+    def consultar_historico_acoes(
+        query: str,
+        area_tematica: str = None,
+        data_limite_inicio: str = None,
+        data_limite_fim: str = None,
+        status: str = None,
+    ):
+        """Busca ações e tarefas no Hermes. Use status para filtrar por estado (ex: 'em andamento', 'concluída', 'cancelada'). Use data_limite_inicio/fim (YYYY-MM-DD) para filtrar por prazo."""
+        from tools.busca_grafo import buscar_tarefas
+
+        _STOPWORDS_TG = {"de", "a", "o", "que", "e", "do", "da", "em", "um", "uma",
+                         "os", "as", "no", "na", "com", "por", "para", "dos", "das",
+                         "nos", "nas", "ao", "se", "ou", "acao", "acoes", "tarefa",
+                         "tarefas", "pesquisa", "pesquisar", "pesquise", "busca",
+                         "buscar", "busque", "procura", "procurar", "procure",
+                         "localiza", "localizar", "localize", "ative", "ativar",
+                         "ativa", "contexto"}
+        _tg_terms = [w for w in re.findall(r"[\w./-]+", _normalize_for_matching(query), flags=re.UNICODE) if w not in _STOPWORDS_TG and len(w) > 2]
+        _tg_mode = "all" if len(_tg_terms) >= 2 else "any"
+        res = buscar_tarefas(query, area_tematica=area_tematica, match_mode=_tg_mode,
+                             data_limite_inicio=data_limite_inicio, data_limite_fim=data_limite_fim,
+                             status=status)
+        if _tg_mode == "all" and not res.get("resultados"):
+            res = buscar_tarefas(query, area_tematica=area_tematica, match_mode="any",
+                                 data_limite_inicio=data_limite_inicio, data_limite_fim=data_limite_fim,
+                                 status=status)
+        if res.get("erro"):
+            return f"⚠️ [ERRO] {res['erro']}"
+        resultados = res.get("resultados", [])
+        if not resultados:
+            filtros_desc = []
+            if query and query.strip():
+                filtros_desc.append(f"query='{query.strip()}'")
+            if status:
+                filtros_desc.append(f"status='{status}'")
+            if area_tematica:
+                filtros_desc.append(f"area='{area_tematica}'")
+            if data_limite_inicio or data_limite_fim:
+                filtros_desc.append(f"prazo=[{data_limite_inicio or '*'} a {data_limite_fim or '*'}]")
+            filtros_str = ", ".join(filtros_desc) if filtros_desc else "(sem filtros)"
+            return (
+                f"NENHUMA TAREFA ENCONTRADA com os filtros: {filtros_str}.\n"
+                "INSTRUCAO OBRIGATORIA: Informe ao usuario que nao encontrou. "
+                "NAO invente titulos, status ou dados. NAO use RAG para compensar."
+            )
+        lines = [
+            "=== TAREFAS REAIS ENCONTRADAS NO BANCO DE DADOS ===",
+            "REGRA: Use EXCLUSIVAMENTE os campos abaixo. Nao invente, nao complete, nao use RAG.",
+            "",
+        ]
+        if res.get("aviso"):
+            lines.append(f"AVISO TECNICO: {res['aviso']}")
+        for r in resultados:
+            lines.append(f"ID: {r['id']}")
+            lines.append(f"Titulo: {r['titulo']}")
+            lines.append(f"Status: {r['status']} | Tipo: {r.get('tipo_acao') or 'nao informado'}")
+            lines.append(f"Prazo: {r.get('data_limite', 'N/A')} | Area: {r['area']}")
+            if r.get('processo_sei'):
+                lines.append(f"Processo SEI: {r['processo_sei']}")
+            lines.append(f"Responsavel: {r['responsavel'] or 'nao informado'}")
+            if r.get('tags'):
+                lines.append(f"Tags: {', '.join(r['tags'])}")
+            if r.get('sintese_demanda'):
+                lines.append(f"Sintese da Demanda: {r['sintese_demanda']}")
+            if r.get('descricao'):
+                lines.append(f"Descricao: {r['descricao']}")
+            if r.get('notas'):
+                lines.append(f"Notas: {r['notas']}")
+            plano = r.get('plano_acao', [])
+            if plano:
+                lines.append("Plano de Acao:")
+                for passo in plano:
+                    lines.append(f"  {passo}")
+            acomp = r.get('acompanhamento_recente', [])
+            if acomp:
+                lines.append("Diario de Bordo (ultimas entradas):")
+                for entrada in acomp:
+                    lines.append(f"  {entrada}")
+            lines.append("---")
+        return "\n".join(lines)
+
+    def buscar_arquivos_acervo(query: str):
+        """Busca documentos, manuais e arquivos no Acervo Global do Hermes."""
+        from tools.busca_acervo import buscar_acervo
+        res = buscar_acervo(query)
+        if res.get("erro"):
+            return f"⚠️ [ERRO] {res['erro']}"
+        resultados = res.get("resultados", [])
+        if not resultados:
+            return "Nenhum documento encontrado."
+        return "\n\n".join(
+            f"DOC: {r['titulo']} | FONTE: {r['fonte']}\nTRECHO: {r['trecho']}"
+            for r in resultados
+        )
+
+    def pesquisar_internet(query: str):
+        """Busca informações recentes na internet via Tavily."""
+        try:
+            if internal_hermes_request and not explicit_web_request:
+                return (
+                    '{"error": "Bloqueado: o pedido atual e interno do Hermes. '
+                    'Nao use internet como substituto para consultas do sistema."}'
+                )
+            tavily_key = _get_api_keys(db).get("tavily_api_key")
+            if not tavily_key:
+                return '{"error": "Tavily não configurado."}'
+            resp = _requests.post(
+                "https://api.tavily.com/search",
+                json={"api_key": tavily_key, "query": query, "search_depth": "advanced",
+                      "include_answer": True, "include_raw_content": False, "max_results": 5},
+                timeout=20,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            parts = []
+            if data.get("answer"):
+                parts.append(f"RESPOSTA: {data['answer']}\n")
+            for r in data.get("results", []):
+                parts.append(f"FONTE: {r.get('title','')} ({r.get('url','')})\n{r.get('content','')}")
+            return "\n\n".join(parts) or "Sem resultados."
+        except Exception as e:
+            return f'{{"error": "{e}"}}'
+
+    def ler_pagina_web(url: str):
+        """Lê o conteúdo de uma URL via Jina Reader."""
+        try:
+            resp = _requests.get(f"https://r.jina.ai/{url}",
+                                 headers={"Accept": "text/markdown"}, timeout=25)
+            if resp.status_code in (401, 403, 429):
+                return '{"error": "Acesso bloqueado pela página de destino."}'
+            resp.raise_for_status()
+            content = resp.text.strip()
+            return content[:12000] + "\n[truncado]" if len(content) > 12000 else content
+        except Exception as e:
+            return f'{{"error": "{e}"}}'
+
+    def consultar_agenda(data_inicio: str, data_fim: str):
+        """Retorna eventos ocupados no período para verificação de disponibilidade (YYYY-MM-DD)."""
+        try:
+            from main import get_calendar_service, get_target_calendar_id
+            import hermes_calendar_tools as hc_tools
+            c_service = get_calendar_service()
+            # Na main.py talvez get_db e db global não funcionem direto dentro da tool, mas 'db' é capturado!
+            c_id = get_target_calendar_id(db)
+            if not c_service or not c_id:
+                return "Google Calendar não configurado."
+            events = hc_tools.consultar_eventos(c_service, c_id, data_inicio, data_fim)
+            return hc_tools.formatar_eventos_para_llm(events)
+        except Exception as e:
+            return f"Erro ao consultar agenda: {e}"
+
+    def encontrar_slot_livre(a_partir_de: str, duracao_min: int = 30):
+        """Encontra o próximo horário livre na agenda. a_partir_de = YYYY-MM-DD. Retorna JSON com data, horario_inicio, horario_fim."""
+        try:
+            from main import get_calendar_service, get_target_calendar_id
+            import hermes_calendar_tools as hc_tools
+            c_service = get_calendar_service()
+            c_id = get_target_calendar_id(db)
+            if not c_service or not c_id:
+                return "Erro: Google Calendar não configurado."
+            slot = hc_tools.encontrar_proximo_slot(c_service, c_id, a_partir_de, duracao_min)
+            if slot:
+                import json as _js
+                return _js.dumps(slot, ensure_ascii=False)
+            return "Nenhum slot livre encontrado."
+        except Exception as e:
+            return f"Erro ao buscar slot livre: {e}"
+
+    def criar_acao_no_sistema(
+        titulo: str,
+        descricao: str = "",
+        area_tematica: str = "GERAL",
+        data_limite: str = None,
+        tipo_acao: str = "fast",
+        tags: list[str] = None,
+        notas: str = "",
+        plano_acao: list[str] = None,
+        horario_inicio: str = None,
+        horario_fim: str = None,
+    ):
+        """
+        Cria uma nova ação no Hermes. Apresente draft ao usuário antes de chamar.
+        Retorna 'OK|{ID}' em caso de sucesso ou 'ERRO|{detalhe}'.
+        """
+        import uuid as _uuid
+        now_iso = datetime.now(timezone.utc).isoformat()
+        today = (datetime.now(timezone.utc)).strftime("%Y-%m-%d")
+        if not data_limite:
+            data_limite = today
+        task_id = str(_uuid.uuid4())[:20]
+        plano_convertido = [
+            {"id": str(_uuid.uuid4())[:8], "text": str(p), "completed": False}
+            for p in (plano_acao or []) if str(p).strip()
+        ]
+        try:
+            from main import get_calendar_service, get_target_calendar_id
+            import hermes_calendar_tools as hc_tools
+            c_service = get_calendar_service()
+            c_id = get_target_calendar_id(db)
+            if c_service and c_id and horario_inicio and horario_fim:
+                hc_tools.reagendar_acoes_hermes(db, c_service, c_id, data_limite, horario_inicio, horario_fim)
+        except Exception as e:
+            print(f"[Core] Erro ao reagendar iterativo: {e}")
+
+        doc = {
+            "id": task_id,
+            "titulo": titulo.strip(),
+            "descricao": descricao or "",
+            "area_tematica": area_tematica or "GERAL",
+            "data_limite": data_limite,
+            "horario_inicio": horario_inicio,
+            "horario_fim": horario_fim,
+            "tipo_acao": tipo_acao or "fast",
+            "tags": tags or [],
+            "notas": notas or "",
+            "plano_acao": plano_convertido,
+            "status": "em andamento",
+            "criado_em": now_iso,
+            "data_criacao": now_iso,
+            "data_atualizacao": now_iso,
+            "origem_ingestao": "telegram",
+            "acompanhamento": [],
+            "sync_status": "new",
+        }
+        try:
+            db.collection("tarefas").document(task_id).set(doc)
+            return f"OK|{task_id}"
+        except Exception as e:
+            return f"ERRO|{e}"
+
+    def salvar_memoria_global(fato: str, categoria: str):
+        """Persiste fato durável na memória global do Hermes. Apenas para regras estáveis e preferências permanentes."""
+        try:
+            import uuid as _uuid
+            node_id = str(_uuid.uuid4())[:16]
+            db.collection("knowledge_nodes").document(node_id).set({
+                "id": node_id,
+                "fato": fato,
+                "categoria": categoria,
+                "data_criacao": datetime.now(timezone.utc).isoformat(),
+                "origem": "telegram",
+            })
+            return json.dumps({"status": "saved", "id": node_id}, ensure_ascii=False)
+        except Exception as e:
+            return json.dumps({"status": "error", "reason": str(e)}, ensure_ascii=False)
+
+    def registrar_correcao_procedimento(
+        area_tematica: str,
+        titulo_procedimento: str,
+        correcao_descrita: str,
+        novo_conteudo_proposto: str,
+        justificativa: str,
+    ):
+        """[FERRAMENTA OCULTA] Registra correção de procedimento silenciosamente."""
+        try:
+            import uuid as _uuid
+            cid = str(_uuid.uuid4())[:12]
+            db.collection("correcoes_pendentes").document(cid).set({
+                "id": cid,
+                "area_tematica": area_tematica,
+                "titulo_procedimento": titulo_procedimento,
+                "correcao_descrita": correcao_descrita,
+                "novo_conteudo_proposto": novo_conteudo_proposto,
+                "justificativa_usuario": justificativa,
+                "status": "pendente",
+                "data_criacao": firestore.SERVER_TIMESTAMP,
+                "origem": "telegram",
+            })
+            return f"Correção registrada (ID: {cid})."
+        except Exception as e:
+            return f"Erro: {e}"
+
+    def buscar_e_analisar_email(query: str, max_results: int = 5):
+        """Busca e analisa e-mails no Gmail. Use query padrão do Gmail (ex: 'from:x@y.com newer_than:2d')."""
+        try:
+            from tools.buscar_e_analisar_email import buscar_e_analisar_email as _fn
+            return _fn(query=query, max_results=min(int(max_results), 5))
+        except Exception as e:
+            return f"Erro: {e}"
+
+    tools_list = [
+        consultar_historico_acoes,
+        buscar_arquivos_acervo,
+        pesquisar_internet,
+        ler_pagina_web,
+        consultar_agenda,
+        encontrar_slot_livre,
+        criar_acao_no_sistema,
+        salvar_memoria_global,
+        registrar_correcao_procedimento,
+        buscar_e_analisar_email,
+    ]
+
+    function_map = {fn.__name__: fn for fn in tools_list}
+
+    # --- Gemini call ---
+    _send_telegram_typing(token, chat_id)
+    processing_msg_id = _send_telegram_session_message(
+        db,
+        token,
+        chat_id,
+        "⏳ <i>Estou processando seu pedido, aguarde um minuto...</i>",
+        session=session,
+    )
+
+    try:
+        response_text = _run_gemini_turn(
+            db=db,
+            gemini_key=gemini_key,
+            system_instruction=system_instruction,
+            history=history,
+            user_message_parts=user_parts,
+            tools_list=tools_list,
+            function_map=function_map,
+            perf_state=perf_state,
+        )
+    except Exception as gemini_err:
+        if processing_msg_id:
+            _delete_telegram_message(token, chat_id, processing_msg_id)
+        print(f"[Core] Gemini error: {gemini_err}")
+        _perf_log("telegram.request.error", perf_state, {"chat_id": chat_id, "error": str(gemini_err)})
+        latest_session = _get_session(db, chat_id)
+        _send_telegram_session_message(
+            db,
+            token,
+            chat_id,
+            f"⚠️ Erro ao processar: {gemini_err}",
+            session=latest_session,
+        )
+        return
+
+    if processing_msg_id:
+        _delete_telegram_message(token, chat_id, processing_msg_id)
+
+    # --- Persist history — write to isolated buffer when action-locked ---
+    user_turn = {"role": "user", "parts": [{"text": p.text} for p in user_parts if hasattr(p, "text") and p.text]}
+    model_turn = {"role": "model", "parts": [{"text": response_text}]}
+    new_history = raw_history + [user_turn, model_turn]
+    if len(new_history) > _MAX_HISTORY_TURNS * 2:
+        new_history = new_history[-(_MAX_HISTORY_TURNS * 2):]
+    latest_session = _get_session(db, chat_id)
+    if not _session_matches_processing_state(latest_session, contexto_ativo, request_acao_id):
+        print(
+            f"[Session] Discarding stale response for chat_id={chat_id} "
+            f"contexto={contexto_ativo} acao_id={request_acao_id!r}"
+        )
+        _perf_log(
+            "telegram.request.discarded_stale_session",
+            perf_state,
+            {"chat_id": chat_id, "contexto_ativo": contexto_ativo, "acao_id": request_acao_id},
+        )
+        return
+    latest_session[hist_key] = new_history
+
+    # --- Send response ---
+    # Text goes out first; session is persisted after so it doesn't block the user.
+    _send_telegram_session_message(db, token, chat_id, response_text, session=latest_session)
+    _perf_mark(perf_state, "telegram.text_response")
+
+    _save_session(db, chat_id, latest_session)
+    _perf_mark(perf_state, "telegram.history_persist")
+
     if response_mode == "audio":
         try:
             with _telegram_action_heartbeat(token, chat_id, "record_voice"):
+                print(f"[Core] sending audio with voice_profile={voice_profile}")
                 tts_script = _run_gemini_text(
                     gemini_key=gemini_key,
                     system_instruction=_build_tts_director_instruction(voice_profile),
@@ -418,569 +2351,25 @@ def _deliver_response(token: str, chat_id: str | int, response_text: str, respon
                 tg_audio_bytes, tg_audio_mime, tg_audio_name = _transcode_audio_for_telegram_voice(audio_bytes, audio_mime)
                 if tg_audio_bytes:
                     if not _send_telegram_voice(token, chat_id, tg_audio_bytes, tg_audio_name, tg_audio_mime):
-                        raise RuntimeError("Falha ao enviar voice note.")
+                        raise RuntimeError("Falha ao enviar voice note pelo Telegram.")
                 else:
                     wav_bytes, wav_mime, wav_name = _wrap_pcm_audio_as_wav(audio_bytes, audio_mime)
-                    if not _send_telegram_document(token, chat_id, wav_bytes, wav_name, wav_mime, caption="Resposta em áudio"):
-                        raise RuntimeError("Falha ao enviar arquivo de áudio.")
+                    if not _send_telegram_document(token, chat_id, wav_bytes, wav_name, wav_mime, caption="Resposta em audio"):
+                        raise RuntimeError("Falha ao enviar arquivo de audio pelo Telegram.")
+            _perf_mark(perf_state, "telegram.audio_response")
         except Exception as tts_err:
             print(f"[Core] TTS error: {tts_err}")
-            _send_tts_failure_notice(token, chat_id)
-    else:
-        if message_id_to_edit:
-            if not _edit_telegram_message(token, chat_id, message_id_to_edit, response_text):
-                _send_telegram_message(token, chat_id, response_text)
-        else:
-            _send_telegram_message(token, chat_id, response_text)
-
-
-def _dispatch_tool_execution(
-    *,
-    token: str,
-    chat_id: str,
-    trace_id: str,
-    tool_name: str,
-    slots: dict,
-    response_mode: str,
-    voice_profile: str,
-    provisional_text: str = "⏳ Processando...",
-) -> None:
-    from core.pubsub_queue import publish_telegram_tool
-    from core import tracing
-
-    provisional_msg_id = _send_telegram_message(token, chat_id, provisional_text)
-    payload = {
-        "trace_id": trace_id,
-        "tool_name": tool_name,
-        "json_data": slots,
-        "chat_id": chat_id,
-        "message_id": provisional_msg_id,
-        "response_mode": response_mode,
-        "voice_profile": voice_profile,
-        "dispatched_at": time.time(),
-    }
-    publish_telegram_tool(payload)
-    tracing.log("INFO", "tool_dispatched", tool=tool_name, chat_id=chat_id, message_id=provisional_msg_id)
-
-
-# ---------------------------------------------------------------------------
-# Command handler
-# ---------------------------------------------------------------------------
-
-def _handle_command(text: str, session: dict, db, chat_id: str, token: str) -> bool:
-    """
-    Trata comandos /start /contexto /sair /status.
-    Retorna True se o comando foi tratado (não deve seguir para o pipeline).
-    """
-    text = (text or "").strip()
-    m = re.match(r"^/contexto\s+(.+)$", text, re.IGNORECASE)
-    if m:
-        ctx = m.group(1).strip()
-        from core.session import clear_session
-        clear_session(db, chat_id)
-        _send_telegram_message(token, chat_id, f"Contexto ativo: <b>{ctx}</b>. Histórico reiniciado.")
-        return True
-
-    if re.match(r"^/sair$", text, re.IGNORECASE):
-        from core.session import clear_session
-        clear_session(db, chat_id)
-        _send_telegram_message(token, chat_id, "Sessão encerrada. Voltando ao modo geral.")
-        return True
-
-    if re.match(r"^/start$", text, re.IGNORECASE):
-        _send_telegram_message(token, chat_id, (
-            "👋 Olá! Sou o <b>Hermes Copiloto</b>.\n\n"
-            "Comandos:\n"
-            "• <code>/contexto [nome]</code> — foca em uma área\n"
-            "• <code>/sair</code> — encerra a sessão atual\n"
-            "• <code>/status</code> — exibe estado da sessão\n\n"
-            "Envie texto, áudio ou arquivos (máx. 20 MB)."
-        ))
-        return True
-
-    if re.match(r"^/status$", text, re.IGNORECASE):
-        mode = session.get("mode", "geral") if session else "geral"
-        tool = session.get("tool_name", "") if session else ""
-        slots = session.get("slots", {}) if session else {}
-        msg = f"<b>Modo:</b> {mode}"
-        if tool:
-            msg += f"\n<b>Ferramenta ativa:</b> {tool}"
-            msg += f"\n<b>Parâmetros coletados:</b> {', '.join(slots.keys()) or 'nenhum'}"
-        _send_telegram_message(token, chat_id, msg)
-        return True
-
-    return False
-
-
-# ---------------------------------------------------------------------------
-# Tool executors
-# ---------------------------------------------------------------------------
-
-def _execute_tool(tool_name: str, slots: dict, db) -> str:
-    """Executa a ferramenta identificada com os slots preenchidos."""
-    try:
-        if tool_name == "consultar_historico_acoes":
-            from tools.busca_grafo import buscar_tarefas
-            res = buscar_tarefas(
-                slots.get("query", ""),
-                area_tematica=slots.get("area_tematica"),
-                match_mode="all",
-                data_limite_inicio=slots.get("data_limite_inicio"),
-                data_limite_fim=slots.get("data_limite_fim"),
-                status=slots.get("status"),
-            )
-            if not res.get("resultados"):
-                res = buscar_tarefas(slots.get("query", ""), area_tematica=slots.get("area_tematica"), match_mode="any",
-                                     data_limite_inicio=slots.get("data_limite_inicio"),
-                                     data_limite_fim=slots.get("data_limite_fim"), status=slots.get("status"))
-            if res.get("erro"):
-                return f"⚠️ {res['erro']}"
-            resultados = res.get("resultados", [])
-            if not resultados:
-                return f"Nenhuma ação encontrada para <b>{slots.get('query')}</b>."
-            lines = [f"<b>Ações encontradas ({len(resultados)}):</b>"]
-            for r in resultados:
-                lines.append(f"• <code>{r['id']}</code> | {r['titulo']} | {r['status']} | Prazo: {r.get('data_limite', 'N/A')}")
-            return "\n".join(lines)
-
-        elif tool_name == "buscar_arquivos_acervo":
-            from tools.busca_acervo import buscar_acervo
-            res = buscar_acervo(slots.get("query", ""))
-            if res.get("erro"):
-                return f"⚠️ {res['erro']}"
-            resultados = res.get("resultados", [])
-            if not resultados:
-                return "Nenhum documento encontrado."
-            return "\n\n".join(
-                f"<b>{r['titulo']}</b> | {r['fonte']}\n{r['trecho']}" for r in resultados
-            )
-
-        elif tool_name == "pesquisar_internet":
-            tavily_key = _get_api_keys(db).get("tavily_api_key")
-            if not tavily_key:
-                return "⚠️ Tavily não configurado."
-            resp = _requests.post(
-                "https://api.tavily.com/search",
-                json={"api_key": tavily_key, "query": slots.get("query", ""),
-                      "search_depth": "advanced", "include_answer": True,
-                      "include_raw_content": False, "max_results": 5},
-                timeout=20,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            parts = []
-            if data.get("answer"):
-                parts.append(f"<b>Resposta:</b> {data['answer']}\n")
-            for r in data.get("results", []):
-                parts.append(f"<b>{r.get('title', '')}</b>\n{r.get('content', '')}")
-            return "\n\n".join(parts) or "Sem resultados."
-
-        elif tool_name == "ler_pagina_web":
-            url = slots.get("url", "")
-            resp = _requests.get(f"https://r.jina.ai/{url}", headers={"Accept": "text/markdown"}, timeout=25)
-            if resp.status_code in (401, 403, 429):
-                return "⚠️ Acesso bloqueado pela página de destino."
-            resp.raise_for_status()
-            content = resp.text.strip()
-            return content[:12000] + "\n[truncado]" if len(content) > 12000 else content
-
-        elif tool_name == "consultar_agenda":
-            from main import get_calendar_service, get_target_calendar_id
-            import hermes_calendar_tools as hc_tools
-            c_service = get_calendar_service()
-            c_id = get_target_calendar_id(db)
-            if not c_service or not c_id:
-                return "Google Calendar não configurado."
-            events = hc_tools.consultar_eventos(c_service, c_id, slots.get("data_inicio", ""), slots.get("data_fim", ""))
-            return hc_tools.formatar_eventos_para_llm(events)
-
-        elif tool_name == "encontrar_slot_livre":
-            from main import get_calendar_service, get_target_calendar_id
-            import hermes_calendar_tools as hc_tools
-            c_service = get_calendar_service()
-            c_id = get_target_calendar_id(db)
-            if not c_service or not c_id:
-                return "Google Calendar não configurado."
-            slot = hc_tools.encontrar_proximo_slot(c_service, c_id, slots.get("a_partir_de", ""), int(slots.get("duracao_min", 30)))
-            if slot:
-                return json.dumps(slot, ensure_ascii=False)
-            return "Nenhum slot livre encontrado no período."
-
-        elif tool_name == "criar_acao_no_sistema":
-            import uuid as _uuid
-            now_iso = datetime.now(timezone.utc).isoformat()
-            task_id = str(_uuid.uuid4())[:20]
-            data_limite = slots.get("data_limite") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            plano_convertido = [
-                {"id": str(_uuid.uuid4())[:8], "text": str(p), "completed": False}
-                for p in (slots.get("plano_acao") or []) if str(p).strip()
-            ]
-            horario_inicio = slots.get("horario_inicio")
-            horario_fim = slots.get("horario_fim")
-            try:
-                from main import get_calendar_service, get_target_calendar_id
-                import hermes_calendar_tools as hc_tools
-                c_service = get_calendar_service()
-                c_id = get_target_calendar_id(db)
-                if c_service and c_id and horario_inicio and horario_fim:
-                    hc_tools.reagendar_acoes_hermes(db, c_service, c_id, data_limite, horario_inicio, horario_fim)
-            except Exception as e:
-                print(f"[Core] Erro ao reagendar: {e}")
-
-            doc = {
-                "id": task_id,
-                "titulo": slots.get("titulo", "").strip(),
-                "descricao": slots.get("descricao", ""),
-                "area_tematica": slots.get("area_tematica", "GERAL"),
-                "data_limite": data_limite,
-                "horario_inicio": horario_inicio,
-                "horario_fim": horario_fim,
-                "tipo_acao": slots.get("tipo_acao", "fast"),
-                "tags": slots.get("tags", []),
-                "notas": slots.get("notas", ""),
-                "plano_acao": plano_convertido,
-                "status": "em andamento",
-                "criado_em": now_iso,
-                "data_criacao": now_iso,
-                "data_atualizacao": now_iso,
-                "origem_ingestao": "telegram",
-                "acompanhamento": [],
-                "sync_status": "new",
-            }
-            db.collection("tarefas").document(task_id).set(doc)
-            return f"✅ Ação criada com sucesso!\n<b>ID:</b> <code>{task_id}</code>\n<b>Título:</b> {doc['titulo']}"
-
-        elif tool_name == "salvar_memoria_global":
-            import uuid as _uuid
-            node_id = str(_uuid.uuid4())[:16]
-            db.collection("knowledge_nodes").document(node_id).set({
-                "id": node_id,
-                "fato": slots.get("fato", ""),
-                "categoria": slots.get("categoria", ""),
-                "data_criacao": datetime.now(timezone.utc).isoformat(),
-                "origem": "telegram",
-            })
-            return f"✅ Memorizado: <i>{slots.get('fato', '')}</i>"
-
-        elif tool_name == "registrar_correcao_procedimento":
-            import uuid as _uuid
-            cid = str(_uuid.uuid4())[:12]
-            db.collection("correcoes_pendentes").document(cid).set({
-                "id": cid,
-                "area_tematica": slots.get("area_tematica", ""),
-                "titulo_procedimento": slots.get("titulo_procedimento", ""),
-                "correcao_descrita": slots.get("correcao_descrita", ""),
-                "novo_conteudo_proposto": slots.get("novo_conteudo_proposto", ""),
-                "justificativa_usuario": slots.get("justificativa", ""),
-                "status": "pendente",
-                "data_criacao": firestore.SERVER_TIMESTAMP,
-                "origem": "telegram",
-            })
-            return f"✅ Correção registrada (ID: <code>{cid}</code>)."
-
-        elif tool_name == "buscar_e_analisar_email":
-            from tools.buscar_e_analisar_email import buscar_e_analisar_email as _fn
-            return _fn(query=slots.get("query", ""), max_results=min(int(slots.get("max_results", 5)), 5))
-
-        from tools.telegram_extended import execute as execute_extended
-        return execute_extended(tool_name, slots, db)
-
-    except Exception as e:
-        print(f"[Core] execute_tool error ({tool_name}): {e}")
-        return f"⚠️ Erro ao executar <b>{tool_name}</b>: {e}"
-
-
-def _build_confirmation_draft(tool_name: str, slots: dict) -> str:
-    """Gera mensagem de confirmação para ferramentas que precisam de aprovação."""
-    if tool_name == "criar_acao_no_sistema":
-        lines = ["<b>📋 Draft da Ação — confirme para criar:</b>\n"]
-        lines.append(f"<b>Título:</b> {slots.get('titulo', '(não informado)')}")
-        lines.append(f"<b>Área:</b> {slots.get('area_tematica', '(não informado)')}")
-        lines.append(f"<b>Prazo:</b> {slots.get('data_limite', '(não informado)')}")
-        if slots.get("descricao"):
-            lines.append(f"<b>Descrição:</b> {slots['descricao']}")
-        if slots.get("tipo_acao"):
-            lines.append(f"<b>Tipo:</b> {slots['tipo_acao']}")
-        if slots.get("horario_inicio"):
-            lines.append(f"<b>Horário:</b> {slots['horario_inicio']} → {slots.get('horario_fim', '?')}")
-        if slots.get("plano_acao"):
-            lines.append("<b>Plano:</b>")
-            for step in slots["plano_acao"]:
-                lines.append(f"  • {step}")
-        lines.append("\nResponda <b>sim</b> para confirmar ou <b>não</b> para cancelar.")
-        return "\n".join(lines)
-    return "Confirme a operação respondendo <b>sim</b> ou <b>não</b>."
-
-
-# ---------------------------------------------------------------------------
-# General LLM response (conversational, no tool)
-# ---------------------------------------------------------------------------
-
-def _build_general_system_instruction(db) -> str:
-    from datetime import datetime as _dt
-    today = _dt.now(timezone.utc).strftime("%Y-%m-%d")
-    try:
-        core_doc = db.collection("system").document("copilot_core").get()
-        copilot_core = (core_doc.to_dict() or {}).get("content", "") if core_doc.exists else ""
-    except Exception:
-        copilot_core = ""
-    try:
-        soul_doc = db.collection("system").document("copilot_soul").get()
-        copilot_soul = (soul_doc.to_dict() or {}).get("content", "") if soul_doc.exists else ""
-    except Exception:
-        copilot_soul = ""
-
-    mem_text = ""
-    try:
-        memory_docs = (
-            db.collection("knowledge_nodes")
-            .order_by("data_criacao", direction=firestore.Query.DESCENDING)
-            .limit(4)
-            .stream()
-        )
-        mem_lines = []
-        for m_doc in memory_docs:
-            m = m_doc.to_dict() or {}
-            fato = m.get("fato", "")
-            cat = m.get("categoria", "")
-            if fato:
-                mem_lines.append(f"- [{cat}] {fato}")
-        if mem_lines:
-            mem_text = "\n\n## MEMÓRIA GLOBAL ATIVA\n" + "\n".join(mem_lines)
-    except Exception:
-        pass
-
-    return (
-        f"Você é o Copiloto Hermes, estrategista sênior de processos. Hoje é {today}.\n\n"
-        f"## CORE\n{copilot_core}\n\n## PERSONALIDADE\n{copilot_soul}\n\n"
-        "## CANAL: TELEGRAM\n"
-        "Use APENAS tags HTML do Telegram: <b>, <i>, <code>, <pre>. "
-        "PROIBIDO Markdown (asteriscos, #, backticks). "
-        "Listas: use • ou - como prefixo. Respostas concisas (máx 4096 chars).\n\n"
-        "## REGRAS\n"
-        "1. JAMAIS expanda siglas arbitrariamente.\n"
-        "2. Se qualquer ferramenta retornar campo 'erro', reproduza o erro literal.\n"
-        "3. Links de tarefas: use o formato task:{ID}.\n"
-        f"{mem_text}"
+            _perf_log("telegram.request.tts_error", perf_state, {"chat_id": chat_id, "error": str(tts_err)})
+            _send_tts_failure_notice_contextual(db, token, chat_id, session=latest_session)
+    _perf_log(
+        "telegram.request.complete",
+        perf_state,
+        {
+            "chat_id": chat_id,
+            "response_mode": response_mode,
+            "history_turns": len(raw_history) // 2,
+        },
     )
-
-
-def _run_general_response(db, gemini_key: str, message: str, history: list) -> str:
-    """Resposta conversacional sem tool — usa histórico mínimo (últimas 5 trocas)."""
-    from google import genai
-    from google.genai import types
-
-    system_instruction = _build_general_system_instruction(db)
-    client = genai.Client(api_key=gemini_key)
-
-    # Reconstrói histórico no formato Gemini
-    gemini_history = []
-    for h in history:
-        role = h.get("role")
-        text = h.get("text", "")
-        if role and text:
-            gemini_history.append(types.Content(role=role, parts=[types.Part(text=text)]))
-
-    chat = client.chats.create(
-        model=_GENERAL_RESPONSE_MODEL,
-        config=types.GenerateContentConfig(system_instruction=system_instruction),
-        history=gemini_history,
-    )
-    response = chat.send_message(message)
-    text_parts = []
-    if response.candidates:
-        for part in (response.candidates[0].content.parts or []):
-            if hasattr(part, "text") and part.text:
-                text_parts.append(part.text)
-    return "\n".join(text_parts).strip() or "Não consegui gerar uma resposta. Tente novamente."
-
-
-# ---------------------------------------------------------------------------
-# Main processing pipeline
-# ---------------------------------------------------------------------------
-
-def _process_telegram_message(db, data: dict):
-    """Pipeline principal de processamento de uma mensagem Telegram."""
-    from core import tracing, router as core_router
-    from core.session import (
-        get_session, save_slot_session, save_general_session,
-        clear_session, trim_history,
-    )
-    from tools import registry
-
-    chat_id = str(data.get("chat_id", ""))
-    raw_text = (data.get("text") or "").strip()
-    file_info = data.get("file_info")
-    audio_info = data.get("audio_info")
-    media_bytes_b64 = data.get("media_bytes_b64")
-    media_storage_path = data.get("media_storage_path")
-    trace_id = data.get("trace_id", tracing.generate_trace_id())
-    tracing.set_trace_id(trace_id)
-
-    if not chat_id:
-        return
-
-    keys = _get_api_keys(db)
-    gemini_key = keys.get("gemini_api_key")
-    token = keys.get("telegram_bot_token") or os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    if not gemini_key or not token:
-        _send_telegram_message(token or "", chat_id, "⚠️ Configuração incompleta. Contate o administrador.")
-        return
-
-    session = get_session(db, chat_id) or {}
-    response_mode, text = _extract_response_mode(raw_text, session)
-    voice_profile, text = _extract_voice_profile(text, "masculina")
-
-    tracing.log("INFO", "message_received", chat_id=chat_id, mode=response_mode, has_audio=bool(audio_info))
-
-    # --- Resolve conteúdo de áudio/arquivo ---
-    file_context_text = ""
-    if audio_info and (media_bytes_b64 or media_storage_path):
-        audio_bytes = _load_telegram_media_bytes(media_bytes_b64, media_storage_path)
-        if audio_bytes:
-            mime = audio_info.get("mime_type", "audio/ogg")
-            raw_ext = mime.split("/")[-1]
-            ext = "ogg" if raw_ext in ("ogg", "oga") else raw_ext
-            _send_telegram_typing(token, chat_id)
-            try:
-                transcription = _transcribe_audio_bytes(audio_bytes, ext, db)
-                if transcription:
-                    transcribed_mode, cleaned = _extract_response_mode(transcription, session)
-                    if transcribed_mode == "audio":
-                        response_mode = "audio"
-                        transcription = cleaned
-                    voice_profile, transcription = _extract_voice_profile(transcription, voice_profile)
-                    file_context_text = transcription
-                    if not text:
-                        text = transcription
-                    tracing.log("INFO", "audio_transcribed", chars=len(transcription))
-            except Exception as te:
-                tracing.log("ERROR", "transcription_failed", error=str(te))
-
-    elif file_info and (media_bytes_b64 or media_storage_path):
-        import uuid as _uuid
-        file_bytes = _load_telegram_media_bytes(media_bytes_b64, media_storage_path)
-        if file_bytes:
-            fname = file_info.get("file_name") or f"upload_{_uuid.uuid4().hex[:8]}"
-            mime = file_info.get("mime_type", "application/octet-stream")
-            try:
-                pub_url = _upload_to_storage(file_bytes, fname, mime, chat_id)
-                file_context_text = (
-                    f"[Arquivo recebido]: {fname} ({mime})\nURL: {pub_url}\n"
-                    "Analise este arquivo e relacione ao contexto atual."
-                )
-            except Exception as ue:
-                file_context_text = f"[Arquivo recebido: {fname}] (falha no upload: {ue})"
-            if not text:
-                text = file_context_text
-
-    if not text:
-        return
-
-    # --- Comandos ---
-    if text.startswith("/"):
-        if _handle_command(text, session, db, chat_id, token):
-            return
-
-    # --- Sessão de slot-filling ativa? ---
-    active_tool = session.get("tool_name") if session.get("mode") == "slot_filling" else None
-
-    if active_tool and session.get("awaiting_confirmation"):
-        # Usuário está respondendo ao draft de confirmação
-        if core_router.is_confirmation(text):
-            clear_session(db, chat_id)
-            _dispatch_tool_execution(
-                token=token,
-                chat_id=chat_id,
-                trace_id=trace_id,
-                tool_name=active_tool,
-                slots=session.get("slots", {}),
-                response_mode=response_mode,
-                voice_profile=voice_profile,
-                provisional_text="⏳ Executando...",
-            )
-        elif core_router.is_cancellation(text):
-            clear_session(db, chat_id)
-            _send_telegram_message(token, chat_id, "Operação cancelada.")
-        else:
-            _send_telegram_message(token, chat_id, "Responda <b>sim</b> para confirmar ou <b>não</b> para cancelar.")
-        return
-
-    if active_tool:
-        # Slot-filling em andamento: extrai mais parâmetros
-        current_slots = session.get("slots", {})
-        required_params = session.get("required_params", [])
-        _send_telegram_typing(token, chat_id)
-        updated_slots = core_router.extract_slots(gemini_key, active_tool, text, current_slots, registry.get_schema(active_tool))
-        missing = core_router.get_missing_params(required_params, updated_slots)
-
-        if missing:
-            save_slot_session(db, chat_id, active_tool, updated_slots, required_params, trace_id,
-                              history=session.get("history", []))
-            _send_telegram_message(token, chat_id, core_router.get_missing_param_prompt(missing))
-            return
-
-        # Todos os slots preenchidos
-        if registry.needs_confirmation(active_tool):
-            save_slot_session(db, chat_id, active_tool, updated_slots, required_params, trace_id,
-                              history=session.get("history", []), awaiting_confirmation=True)
-            _send_telegram_message(token, chat_id, _build_confirmation_draft(active_tool, updated_slots))
-            return
-
-        clear_session(db, chat_id)
-        _dispatch_tool_execution(
-            token=token,
-            chat_id=chat_id,
-            trace_id=trace_id,
-            tool_name=active_tool,
-            slots=updated_slots,
-            response_mode=response_mode,
-            voice_profile=voice_profile,
-            provisional_text="⏳ Executando...",
-        )
-        return
-
-    # --- Sem sessão ativa: Stage 1 — classificação ---
-    _send_telegram_typing(token, chat_id)
-    tool_name = core_router.classify_tool(gemini_key, text, registry.get_short_catalog())
-
-    if tool_name:
-        # Stage 2 — extração de slots
-        schema = registry.get_schema(tool_name)
-        required_params = registry.get_required_params(tool_name)
-        slots = core_router.extract_slots(gemini_key, tool_name, text, {}, schema)
-        missing = core_router.get_missing_params(required_params, slots)
-
-        if missing:
-            save_slot_session(db, chat_id, tool_name, slots, required_params, trace_id)
-            _send_telegram_message(token, chat_id, core_router.get_missing_param_prompt(missing))
-            tracing.log("INFO", "slot_filling_started", tool=tool_name, missing=missing)
-            return
-
-        # Slots completos desde a primeira mensagem
-        if registry.needs_confirmation(tool_name):
-            save_slot_session(db, chat_id, tool_name, slots, required_params, trace_id, awaiting_confirmation=True)
-            _send_telegram_message(token, chat_id, _build_confirmation_draft(tool_name, slots))
-            return
-
-        _dispatch_tool_execution(
-            token=token,
-            chat_id=chat_id,
-            trace_id=trace_id,
-            tool_name=tool_name,
-            slots=slots,
-            response_mode=response_mode,
-            voice_profile=voice_profile,
-            provisional_text="⏳ Processando...",
-        )
-        return
-
-    # --- Sem tool identificada: resposta conversacional ---
-    history = trim_history(session.get("history", []))
-    response_text = _run_general_response(db, gemini_key, text, history)
-    new_history = trim_history(history + [{"role": "user", "text": text}, {"role": "model", "text": response_text}])
-    save_general_session(db, chat_id, new_history, trace_id)
-    _deliver_response(token, chat_id, response_text, response_mode, voice_profile, gemini_key)
 
 
 # ---------------------------------------------------------------------------
@@ -994,8 +2383,8 @@ def _process_telegram_message(db, data: dict):
 )
 def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
     """
-    Porteiro: recebe POST do Telegram, valida auth + idempotência,
-    enfileira no Firestore e retorna 200 imediatamente.
+    Porteiro: recebe POST do Telegram, valida, enfileira no Firestore e retorna 200.
+    Nunca bloqueia aguardando processamento Gemini.
     """
     if req.method != "POST":
         return https_fn.Response("OK", status=200)
@@ -1005,55 +2394,62 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
     except Exception:
         return https_fn.Response("OK", status=200)
 
+    db = _get_db()
+    try:
+        token = _get_telegram_token(db)
+    except Exception:
+        return https_fn.Response("OK", status=200)
+
+    # --- Handle callback_query (botões inline — travamento/destravamento de contexto) ---
+    callback_query = update.get("callback_query")
+    if callback_query:
+        return _handle_telegram_callback(db, token, callback_query)
+
+    # --- Extrair mensagem ---
     message = update.get("message") or update.get("edited_message") or {}
     if not message:
         return https_fn.Response("OK", status=200)
 
     chat = message.get("chat", {})
     chat_id = str(chat.get("id", ""))
-    update_id = update.get("update_id")
-
     if not chat_id:
         return https_fn.Response("OK", status=200)
 
-    # --- Autorização ---
-    from core import auth as core_auth
-    db = _get_db()
-    allowed_env = _get_allowed_chat_id()
-    if not core_auth.is_authorized(db, chat_id, env_fallback=allowed_env):
-        return https_fn.Response("OK", status=200)
-
-    # --- Idempotência ---
-    from core import idempotency as core_idem
-    if not core_idem.check_and_register(db, update_id):
-        return https_fn.Response("OK", status=200)
+    # --- Validação single-owner ---
+    allowed = _get_allowed_chat_id()
+    if allowed and chat_id != allowed:
+        return https_fn.Response("OK", status=200)  # silent ignore
 
     text = message.get("text") or message.get("caption") or ""
     from_user = message.get("from", {})
     message_id = str(message.get("message_id", ""))
 
+    # --- Detectar mídia ---
     audio_info = None
     file_info = None
     media_bytes_b64 = None
     media_storage_path = None
 
-    try:
-        token = _get_telegram_token(db)
-    except Exception:
-        return https_fn.Response("OK", status=200)
-
-    # --- Mídia: áudio / voz ---
+    # Audio / Voice
     audio = message.get("audio") or message.get("voice")
     if audio:
         file_size = audio.get("file_size", 0)
         if file_size > _MAX_FILE_BYTES:
-            _send_telegram_message(token, chat_id, "⚠️ Áudio muito grande (máx. 20 MB).")
+            _send_telegram_session_message(
+                db,
+                token,
+                chat_id,
+                "⚠️ Áudio muito grande (máximo 20 MB). Use o portal Web para arquivos maiores.",
+            )
             return https_fn.Response("OK", status=200)
         try:
             file_meta = _get_telegram_file(token, audio["file_id"])
             file_bytes = _download_telegram_file(token, file_meta["file_path"])
             media_bytes_b64, media_storage_path = _store_telegram_media(
-                file_bytes, f"audio_{message_id}.ogg", audio.get("mime_type", "audio/ogg"), chat_id,
+                file_bytes,
+                f"audio_{message_id}.ogg",
+                audio.get("mime_type", "audio/ogg"),
+                chat_id,
             )
             audio_info = {
                 "file_id": audio["file_id"],
@@ -1063,10 +2459,15 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
             }
         except Exception as e:
             print(f"[Webhook] Audio download error: {e}")
-            _send_telegram_message(token, chat_id, f"⚠️ Não consegui baixar o áudio: {e}")
+            _send_telegram_session_message(
+                db,
+                token,
+                chat_id,
+                f"⚠️ Não consegui baixar o áudio: {e}\nTente novamente ou envie o texto diretamente.",
+            )
             return https_fn.Response("OK", status=200)
 
-    # --- Mídia: documento / foto ---
+    # Document / Photo
     doc = message.get("document")
     photos = message.get("photo")
     if not audio_info:
@@ -1074,7 +2475,12 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
         if media_obj:
             file_size = media_obj.get("file_size", 0)
             if file_size > _MAX_FILE_BYTES:
-                _send_telegram_message(token, chat_id, "⚠️ Arquivo muito grande (máx. 20 MB).")
+                _send_telegram_session_message(
+                    db,
+                    token,
+                    chat_id,
+                    "⚠️ Arquivo muito grande (máximo 20 MB). Use o portal Web para arquivos maiores.",
+                )
                 return https_fn.Response("OK", status=200)
             try:
                 file_meta = _get_telegram_file(token, media_obj["file_id"])
@@ -1086,7 +2492,10 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
                     "mime_type": (doc.get("mime_type") if doc else "image/jpeg") or "application/octet-stream",
                 }
                 media_bytes_b64, media_storage_path = _store_telegram_media(
-                    file_bytes, file_info["file_name"], file_info["mime_type"], chat_id,
+                    file_bytes,
+                    file_info["file_name"],
+                    file_info["mime_type"],
+                    chat_id,
                 )
             except Exception as e:
                 print(f"[Webhook] File download error: {e}")
@@ -1094,13 +2503,9 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
     if not text and not audio_info and not file_info:
         return https_fn.Response("OK", status=200)
 
-    # --- Gera trace_id e enfileira ---
-    from core.tracing import generate_trace_id
-    trace_id = generate_trace_id()
-
+    # --- Enfileira no Firestore ---
     payload = {
         "chat_id": chat_id,
-        "update_id": update_id,
         "message_id": message_id,
         "text": text,
         "from_user": from_user,
@@ -1108,11 +2513,11 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
         "file_info": file_info,
         "media_bytes_b64": media_bytes_b64,
         "media_storage_path": media_storage_path,
-        "trace_id": trace_id,
         "received_at": firestore.SERVER_TIMESTAMP,
         "processed": False,
     }
     db.collection("telegram_inbound").document(f"{chat_id}_{message_id}").set(payload)
+
     return https_fn.Response("OK", status=200)
 
 
@@ -1122,7 +2527,9 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
     memory=options.MemoryOption.GB_2,
 )
 def on_telegram_inbound(event: Event[DocumentSnapshot]) -> None:
-    """Trigger assíncrono: processa mensagem enfileirada e envia resposta ao Telegram."""
+    """
+    Trigger assíncrono: processa a mensagem enfileirada e envia resposta ao Telegram.
+    """
     snap = event.data
     if not snap or not snap.exists:
         return
@@ -1131,6 +2538,7 @@ def on_telegram_inbound(event: Event[DocumentSnapshot]) -> None:
     if data.get("processed"):
         return
 
+    # Marca como em processamento para evitar double-trigger
     snap.reference.update({"processed": True, "processing_started_at": firestore.SERVER_TIMESTAMP})
 
     try:
@@ -1143,62 +2551,14 @@ def on_telegram_inbound(event: Event[DocumentSnapshot]) -> None:
         snap.reference.update({"error": str(e)})
         try:
             chat_id = data.get("chat_id")
-            trace_id = data.get("trace_id", "?")
-            token = _get_telegram_token(_get_db())
+            db = _get_db()
+            token = _get_telegram_token(db)
             if chat_id and token:
-                _send_telegram_message(
-                    token, chat_id,
-                    f"⚠️ Erro interno ao processar mensagem. Código: <code>{trace_id[:8]}</code>"
+                _send_telegram_session_message(
+                    db,
+                    token,
+                    chat_id,
+                    f"⚠️ Erro interno ao processar mensagem: {e}",
                 )
         except Exception:
             pass
-
-
-@pubsub_fn.on_message_published(
-    topic="hermes-telegram-tool-dispatch",
-    timeout_sec=_TELEGRAM_TOOL_TIMEOUT_SEC,
-    memory=options.MemoryOption.GB_2,
-)
-def on_telegram_tool_dispatch(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedData]) -> None:
-    import base64
-
-    from core import tracing
-
-    raw_data = event.data.message.data
-    payload_bytes = base64.b64decode(raw_data or b"")
-    payload = json.loads(payload_bytes.decode("utf-8") or "{}")
-
-    trace_id = payload.get("trace_id", tracing.generate_trace_id())
-    tracing.set_trace_id(trace_id)
-
-    db = _get_db()
-    keys = _get_api_keys(db)
-    gemini_key = keys.get("gemini_api_key")
-    token = keys.get("telegram_bot_token") or os.environ.get("TELEGRAM_BOT_TOKEN", "")
-
-    chat_id = str(payload.get("chat_id", ""))
-    message_id = payload.get("message_id")
-    tool_name = payload.get("tool_name", "")
-    slots = payload.get("json_data") or {}
-    response_mode = payload.get("response_mode", "texto")
-    voice_profile = payload.get("voice_profile", "masculina")
-
-    try:
-        tracing.log("INFO", "tool_execution_started", tool=tool_name, chat_id=chat_id)
-        result = _execute_tool(tool_name, slots, db)
-        tracing.log("INFO", "tool_execution_finished", tool=tool_name, chat_id=chat_id)
-        _deliver_response(
-            token,
-            chat_id,
-            result,
-            response_mode,
-            voice_profile,
-            gemini_key,
-            message_id_to_edit=message_id,
-        )
-    except Exception as exc:
-        tracing.log("ERROR", "tool_execution_failed", tool=tool_name, error=str(exc))
-        if chat_id and token:
-            fallback = f"⚠️ Erro ao executar <b>{tool_name}</b>. Código: <code>{trace_id[:8]}</code>"
-            if message_id and not _edit_telegram_message(token, chat_id, message_id, fallback):
-                _send_telegram_message(token, chat_id, fallback)

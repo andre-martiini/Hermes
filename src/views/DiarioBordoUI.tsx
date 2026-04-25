@@ -20,6 +20,7 @@ interface DiarioBordoUIProps {
   setShowAttachMenu: (val: boolean) => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
   handleFileUploadInput: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  handleDroppedFiles: (files: File[]) => void;
   setModalConfig: (config: any) => void;
   applyFormatting: (symbol: string) => void;
   isTimerRunning: boolean;
@@ -35,11 +36,64 @@ interface DiarioBordoUIProps {
 export const DiarioBordoUI = ({
   task, currentTaskData, newFollowUp, setNewFollowUp, handleAddFollowUp, handleCopyMessage, handleCopyAllHistory,
   isRecording, startRecording, stopRecording, isProcessingTranscription, showAttachMenu, setShowAttachMenu,
-  fileInputRef, handleFileUploadInput, setModalConfig, applyFormatting, isTimerRunning,
+  fileInputRef, handleFileUploadInput, handleDroppedFiles, setModalConfig, applyFormatting, isTimerRunning,
   diaryEndRef, handleDiaryScroll, handleEditDiaryEntry, handleDeleteDiaryEntry, isUploading,
   notifications = [], handleProcessAudio
 }: DiarioBordoUIProps) => {
   const [showEmojiPicker, setShowEmojiPicker] = React.useState(false);
+  const [isDragActive, setIsDragActive] = React.useState(false);
+  const dragCounterRef = React.useRef(0);
+
+  const processDroppedFiles = React.useCallback((files: File[]) => {
+    if (files.length === 0) return;
+    const oggFile = files.find(f => f.type === 'audio/ogg' || f.name.endsWith('.ogg'));
+
+    if (oggFile && handleProcessAudio) {
+      handleProcessAudio(oggFile);
+      const remainingFiles = files.filter(f => f !== oggFile);
+      if (remainingFiles.length > 0) {
+        handleDroppedFiles(remainingFiles);
+      }
+      return;
+    }
+
+    handleDroppedFiles(files);
+  }, [handleDroppedFiles, handleProcessAudio]);
+
+  const handleDragEnter = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
+    setIsDragActive(true);
+  }, []);
+
+  const handleDragOver = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+    setIsDragActive(true);
+  }, []);
+
+  const handleDragLeave = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) {
+      setIsDragActive(false);
+    }
+  }, []);
+
+  const handleDrop = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = 0;
+    setIsDragActive(false);
+    processDroppedFiles(Array.from(e.dataTransfer.files || []));
+  }, [processDroppedFiles]);
 
 
   React.useEffect(() => {
@@ -130,7 +184,27 @@ export const DiarioBordoUI = ({
   };
 
   return (
-<div className={`flex flex-col h-full relative rounded-none md:rounded-b-2xl ${isTimerRunning ? 'bg-[#111827]' : 'bg-slate-50'}`}>
+<div
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className={`flex flex-col h-full relative rounded-none md:rounded-b-2xl ${isTimerRunning ? 'bg-[#111827]' : 'bg-slate-50'}`}
+    >
+      {isDragActive && (
+        <div className={`pointer-events-none absolute inset-3 z-30 rounded-2xl border-2 border-dashed flex items-center justify-center backdrop-blur-sm ${
+          isTimerRunning
+            ? 'border-blue-400 bg-blue-500/10'
+            : 'border-blue-400 bg-blue-50/90'
+        }`}>
+          <div className={`px-4 py-3 rounded-2xl text-center shadow-lg ${
+            isTimerRunning ? 'bg-slate-950/80 text-blue-200' : 'bg-white text-blue-700'
+          }`}>
+            <p className="text-sm font-black uppercase tracking-widest">Solte para anexar</p>
+            <p className="text-[11px] mt-1 opacity-80">O diário vai usar o mesmo fluxo do botão de upload.</p>
+          </div>
+        </div>
+      )}
       {/* ── Área de histórico com scroll suave e scrollbar fina ── */}
       <div
         onScroll={handleDiaryScroll}
@@ -261,33 +335,11 @@ export const DiarioBordoUI = ({
                 
                 if (e.clipboardData.files && e.clipboardData.files.length > 0) {
                   e.preventDefault();
-                  try {
-                      const filesArray = Array.from(e.clipboardData.files);
-                      const oggFile = filesArray.find(f => f.type === 'audio/ogg' || f.name.endsWith('.ogg'));
-                      if (oggFile && handleProcessAudio) {
-                          handleProcessAudio(oggFile);
-                          const remainingFiles = filesArray.filter(f => f !== oggFile);
-                          if (remainingFiles.length > 0) {
-                              const dataTransfer = new DataTransfer();
-                              remainingFiles.forEach(file => dataTransfer.items.add(file));
-                              const pseudoEvent = {
-                                  target: { files: dataTransfer.files, value: '' },
-                                  preventDefault: () => {}
-                              } as unknown as React.ChangeEvent<HTMLInputElement>;
-                              handleFileUploadInput(pseudoEvent);
-                          }
-                      } else {
-                          const dataTransfer = new DataTransfer();
-                          filesArray.forEach(file => dataTransfer.items.add(file));
-                          const pseudoEvent = {
-                              target: { files: dataTransfer.files, value: '' },
-                              preventDefault: () => {}
-                          } as unknown as React.ChangeEvent<HTMLInputElement>;
-                          handleFileUploadInput(pseudoEvent);
+                      try {
+                          processDroppedFiles(Array.from(e.clipboardData.files));
+                      } catch (err) {
+                          console.error('Erro ao processar ficheiros:', err);
                       }
-                  } catch (err) {
-                      console.error('Erro ao processar ficheiros:', err);
-                  }
                 }
               }}
               placeholder="Descreva o que foi feito agora..."

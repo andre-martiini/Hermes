@@ -8,6 +8,7 @@ import base64
 from datetime import datetime, timedelta, timezone
 import math
 import time
+import threading
 import re
 import io
 import uuid
@@ -49,7 +50,6 @@ from knowledge_graph import (  # noqa: F401 — registra as Cloud Functions
 from hermes_core_logic import (  # noqa: F401 — registra as Cloud Functions
     telegramWebhook,
     on_telegram_inbound,
-    on_telegram_tool_dispatch,
 )
 
 
@@ -64,6 +64,30 @@ SYNC_LOCK_DOC_ID = 'sync_lock'
 SYNC_LOCK_STALE_SECONDS = 15 * 60
 MAX_SYNC_PASSES = 3
 
+# ---------------------------------------------------------------------------
+# In-process Firestore document cache (TTL = 60 s per Cloud Function instance)
+# Evita leituras repetidas de system/api_keys, system/copilot_core, etc.
+# ---------------------------------------------------------------------------
+_DOC_CACHE: dict = {}
+_DOC_CACHE_TTL = 60  # seconds
+
+# Cache da coleção pops_diretrizes (muda raramente — TTL 5 min)
+_POPS_DATA_CACHE: tuple | None = None  # (monotonic_ts, list[dict])
+_POPS_DATA_TTL = 300
+
+# Cache de _bootstrap_user_ai_profile por UID (TTL 60 s)
+_PROFILE_CACHE: dict = {}  # uid -> (monotonic_ts, dict)
+
+def _cached_doc_get(db, collection: str, document: str):
+    key = f"{collection}/{document}"
+    now = time.monotonic()
+    cached = _DOC_CACHE.get(key)
+    if cached and (now - cached[0]) < _DOC_CACHE_TTL:
+        return cached[1]
+    doc = db.collection(collection).document(document).get()
+    _DOC_CACHE[key] = (now, doc)
+    return doc
+
 
 def get_genai_module():
     from google import genai
@@ -72,7 +96,7 @@ def get_genai_module():
 
 def get_gemini_api_key() -> str | None:
     db = get_db()
-    keys_doc = db.collection('system').document('api_keys').get()
+    keys_doc = _cached_doc_get(db, 'system', 'api_keys')
     return keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
 
 
@@ -111,6 +135,36 @@ def get_db():
     """Retorna a instância do Firestore de forma lazy"""
 
     return firestore.client()
+
+def _perf_now_ms() -> int:
+    return int(time.perf_counter() * 1000)
+
+
+def _perf_mark(perf_state: dict, name: str):
+    started_at = perf_state.get("_last_ms", perf_state["start_ms"])
+    now_ms = _perf_now_ms()
+    perf_state.setdefault("steps", []).append({
+        "name": name,
+        "duration_ms": max(0, now_ms - started_at),
+    })
+    perf_state["_last_ms"] = now_ms
+
+
+def _perf_log(prefix: str, perf_state: dict, extra: dict | None = None):
+    payload = {
+        "prefix": prefix,
+        "total_ms": max(0, _perf_now_ms() - perf_state["start_ms"]),
+        "steps": perf_state.get("steps", []),
+    }
+    if perf_state.get("tool_calls"):
+        payload["tool_calls"] = perf_state["tool_calls"]
+    if extra:
+        payload.update(extra)
+    try:
+        print(f"[Perf] {json.dumps(payload, ensure_ascii=False)}")
+    except Exception:
+        print(f"[Perf] {prefix} total_ms={payload['total_ms']}")
+
 
 GOOGLE_BASE_SCOPES = [
     'https://www.googleapis.com/auth/tasks',
@@ -1389,7 +1443,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
             return
 
         # Configurar Gemini
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
         if not api_key:
             log_to_firestore(sync_ref, logs, "ERRO: Gemini API Key não encontrada (em system/api_keys).")
@@ -1736,6 +1790,63 @@ def scheduled_sync(event: scheduler_fn.ScheduledEvent) -> None:
 
     run_full_sync('scheduled')
 
+
+def _normalize_notification_title(title: str | None) -> str:
+    normalized = unicodedata.normalize("NFKD", str(title or ""))
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return normalized.strip().lower()
+
+
+def _should_mirror_notification_to_telegram(notif: dict) -> bool:
+    """Mantem o Telegram restrito as categorias importantes e acionaveis."""
+    title = _normalize_notification_title(notif.get('title'))
+
+    exact_titles = {
+        "erro de sincronizacao",
+        "novo pix recebido",
+        "novos boletos",
+        "acoes vencidas",
+        "alerta de orcamento",
+        "auditoria pgd",
+        "apresentacao concluida",
+        "pesquisa concluida",
+        "pesquisa profunda concluida",
+        "pesquisa profunda falhou",
+    }
+    if title in exact_titles:
+        return True
+
+    if title in {"hermes: proxima tarefa", "hermes: encerramento de tarefa"}:
+        return True
+
+    # Lembretes especificos de acao ja sao enviados ao Telegram pelo scheduler
+    # com mensagem mais detalhada; nao duplicamos via espelhamento generico.
+    if title.startswith("lembrete:"):
+        return False
+
+    return False
+
+
+def _build_telegram_notification_message(notif: dict) -> str:
+    title = str(notif.get('title') or 'Hermes').strip()
+    message = str(notif.get('message') or '').strip()
+    n_type = str(notif.get('type') or 'info').strip()
+    link = str(notif.get('link') or '').strip()
+
+    icons = {
+        'success': '✅',
+        'warning': '⚠️',
+        'error': '🚨',
+        'info': '🔔',
+    }
+    lines = [f"{icons.get(n_type, '🔔')} Hermes - {title}"]
+    if message:
+        lines.extend(["", message])
+    if link:
+        label = "Link" if link.startswith(("http://", "https://")) else "Destino no Hermes"
+        lines.extend(["", f"{label}: {link}"])
+    return "\n".join(lines)
+
 @firestore_fn.on_document_created(document="notificacoes/{notification_id}")
 
 def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]):
@@ -1746,7 +1857,7 @@ def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapsh
 
     notif = event.data.to_dict()
 
-    if not notif or notif.get('sent_to_push'): return
+    if not notif: return
 
     title = notif.get('title', 'Hermes')
 
@@ -1754,11 +1865,45 @@ def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapsh
 
     db = get_db()
 
+    updates = {}
+
+    if not notif.get('sent_to_telegram') and _should_mirror_notification_to_telegram(notif):
+
+        telegram_chat_id = _resolve_default_telegram_chat_id(db)
+
+        if telegram_chat_id:
+
+            sent = _send_telegram_message_raw(db, telegram_chat_id, _build_telegram_notification_message(notif))
+
+            updates['sent_to_telegram'] = bool(sent)
+
+            if not sent:
+
+                updates['telegram_error'] = 'send_failed'
+
+        else:
+
+            updates['sent_to_telegram'] = False
+
+            updates['telegram_error'] = 'chat_id_not_configured'
+
+    if notif.get('sent_to_push'):
+
+        if updates:
+
+            event.data.reference.update(updates)
+
+        return
+
     tokens_docs = db.collection('fcm_tokens').stream()
     tokens = list({doc.id for doc in tokens_docs if doc.id})
     if not tokens:
 
         print("Nenhum token FCM encontrado para enviar push.")
+
+        if updates:
+
+            event.data.reference.update(updates)
 
         return
 
@@ -1790,11 +1935,17 @@ def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapsh
 
                         db.collection('fcm_tokens').document(bad_token).delete()
 
-        event.data.reference.update({'sent_to_push': True})
+        updates['sent_to_push'] = True
+
+        event.data.reference.update(updates)
 
     except Exception as e:
 
         print(f"Erro ao enviar push notification: {str(e)}")
+
+        if updates:
+
+            event.data.reference.update(updates)
 
 
 
@@ -2002,10 +2153,9 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
         t = task_doc.to_dict()
 
         title = t.get('titulo', 'Ação Pendente')
-
-        task_id = task_doc.id
-
-        
+        task_reminders = _normalize_task_reminders(t)
+        due_reminder = next((reminder for reminder in task_reminders if not reminder.get('reminder_sent')), None)
+        reminder_iso = due_reminder.get('reminder_at') if due_reminder else t.get('reminder_at')
 
         emit_notification_backend(
 
@@ -2021,9 +2171,28 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
 
         
 
+        owner_uid = t.get('created_by_uid')
+        telegram_chat_id = _resolve_telegram_chat_id_for_uid(db, owner_uid) or _resolve_default_telegram_chat_id(db)
+        telegram_message = _build_task_reminder_telegram_message(t, reminder_iso)
+        if telegram_chat_id:
+            _send_telegram_message_raw(db, telegram_chat_id, telegram_message)
+        else:
+            print(f"[Telegram] Nenhum chat_id encontrado para lembrete da tarefa {task_doc.id}")
+
         # Marca como enviado para não repetir
 
-        task_doc.reference.update({'reminder_sent': True})
+        if due_reminder:
+            updated_reminders = []
+            matched = False
+            for reminder in task_reminders:
+                if not matched and reminder.get('id') == due_reminder.get('id'):
+                    updated_reminders.append({**reminder, 'reminder_sent': True})
+                    matched = True
+                else:
+                    updated_reminders.append(reminder)
+            task_doc.reference.update(_build_task_reminder_state_payload(updated_reminders))
+        else:
+            task_doc.reference.update({'reminder_sent': True})
 
 
 
@@ -2270,7 +2439,7 @@ def process_vectorization(task_id):
 
     # Buscar chave do Gemini
 
-    keys_doc = db.collection('system').document('api_keys').get()
+    keys_doc = _cached_doc_get(db, 'system', 'api_keys')
 
     GEMINI_API_KEY = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
 
@@ -2380,7 +2549,7 @@ def vectorizeKnowledgeItemCallable(req: https_fn.CallableRequest):
         return {'success': False, 'message': 'Nenhum texto bruto para vetorizar.'}
 
     try:
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         GEMINI_API_KEY = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
         if not GEMINI_API_KEY:
             raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION, message="Chave Gemini não configurada.")
@@ -2495,7 +2664,7 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
     today = datetime.now().date().isoformat()
 
     db = firestore.client()
-    keys_doc = db.collection('system').document('api_keys').get()
+    keys_doc = _cached_doc_get(db, 'system', 'api_keys')
     api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
 
     if not api_key:
@@ -2922,7 +3091,7 @@ def sync_github_repo(req: https_fn.CallableRequest):
     db = get_db()
 
     # Busca chaves da API
-    keys_doc = db.collection('system').document('api_keys').get()
+    keys_doc = _cached_doc_get(db, 'system', 'api_keys')
     keys = keys_doc.to_dict() if keys_doc.exists else {}
     gemini_key = keys.get('gemini_api_key')
     github_token = keys.get('github_token')  # opcional, para repos privados
@@ -3130,7 +3299,7 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
         db = get_db()
 
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
 
         if not keys_doc.exists:
 
@@ -3655,7 +3824,7 @@ def findSimilarKnowledge(req: https_fn.CallableRequest):
 
 
 
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
 
 
 
@@ -4087,7 +4256,7 @@ def on_knowledge_item_updated(event: firestore_fn.Event[firestore_fn.Change[fire
 
 
 
-            keys_doc = db.collection('system').document('api_keys').get()
+            keys_doc = _cached_doc_get(db, 'system', 'api_keys')
 
 
 
@@ -4228,6 +4397,7 @@ def _normalize_pop_text(text: str | None) -> str:
 
 
 def _match_pop_directives(db, prompt: str) -> list[dict]:
+    global _POPS_DATA_CACHE
     prompt_norm = _normalize_pop_text(prompt)
     if not prompt_norm:
         return []
@@ -4236,12 +4406,20 @@ def _match_pop_directives(db, prompt: str) -> list[dict]:
     matched: list[dict] = []
 
     try:
-        docs = db.collection("pops_diretrizes").stream()
-        for pop_doc in docs:
-            pop = pop_doc.to_dict() or {}
+        now = time.monotonic()
+        if _POPS_DATA_CACHE and (now - _POPS_DATA_CACHE[0]) < _POPS_DATA_TTL:
+            all_pops = _POPS_DATA_CACHE[1]
+        else:
+            all_pops = [
+                {"id": d.id, **( d.to_dict() or {})}
+                for d in db.collection("pops_diretrizes").stream()
+            ]
+            _POPS_DATA_CACHE = (now, all_pops)
+
+        for pop in all_pops:
             gatilhos = pop.get("gatilhos", []) or []
             instrucao = (pop.get("instrucao_sistema") or "").strip()
-            titulo = (pop.get("titulo") or pop_doc.id or "POP").strip()
+            titulo = (pop.get("titulo") or pop.get("id") or "POP").strip()
 
             if not instrucao or not isinstance(gatilhos, list):
                 continue
@@ -4263,7 +4441,7 @@ def _match_pop_directives(db, prompt: str) -> list[dict]:
 
             if matched_triggers:
                 matched.append({
-                    "id": pop_doc.id,
+                    "id": pop.get("id", ""),
                     "titulo": titulo,
                     "instrucao_sistema": instrucao,
                     "matched_triggers": matched_triggers,
@@ -4278,7 +4456,7 @@ def _match_pop_directives(db, prompt: str) -> list[dict]:
 
 
 def _get_copilot_core(db):
-    doc = db.collection("system").document("copilot_core").get()
+    doc = _cached_doc_get(db, "system", "copilot_core")
     if doc.exists:
         data = doc.to_dict() or {}
         if data.get("content"):
@@ -4294,8 +4472,7 @@ def _get_copilot_core(db):
 
 
 def _get_copilot_soul(db):
-    ref = db.collection("system").document("copilot_soul")
-    doc = ref.get()
+    doc = _cached_doc_get(db, "system", "copilot_soul")
     if doc.exists:
         data = doc.to_dict() or {}
         if any(data.get(key) for key in ("tone", "detail_level", "interaction_style", "content")):
@@ -4312,6 +4489,7 @@ def _get_copilot_soul(db):
         "created_by": "system_bootstrap",
     }
     try:
+        ref = db.collection("system").document("copilot_soul")
         ref.set(payload, merge=True)
     except Exception:
         pass
@@ -4321,6 +4499,11 @@ def _get_copilot_soul(db):
 def _bootstrap_user_ai_profile(db, uid: str | None):
     if not uid:
         return {}
+
+    now = time.monotonic()
+    cached = _PROFILE_CACHE.get(uid)
+    if cached and (now - cached[0]) < _DOC_CACHE_TTL:
+        return cached[1]
 
     user_ref = db.collection("usuarios").document(uid)
     snap = user_ref.get()
@@ -4354,6 +4537,7 @@ def _bootstrap_user_ai_profile(db, uid: str | None):
         ai_profile["updated_at"] = firestore.SERVER_TIMESTAMP
         user_ref.set({"ai_profile": ai_profile}, merge=True)
 
+    _PROFILE_CACHE[uid] = (now, ai_profile)
     return ai_profile
 
 
@@ -4390,7 +4574,7 @@ def _find_similar_memory_nodes(db, fato: str, api_key: str, limit: int = 5):
         return []
 
     candidates = []
-    for snap in db.collection("knowledge_nodes").stream():
+    for snap in db.collection("knowledge_nodes").limit(200).stream():
         data = snap.to_dict() or {}
         if data.get("tipo") not in MEMORY_NODE_TYPES:
             continue
@@ -4709,7 +4893,7 @@ def _format_pending_memory_conflict(conflict_data: dict | None) -> str:
 def consolidar_memorias_copiloto(event: scheduler_fn.ScheduledEvent):
     db = get_db()
     try:
-        keys_doc = db.collection("system").document("api_keys").get()
+        keys_doc = _cached_doc_get(db, "system", "api_keys")
         gemini_key = keys_doc.to_dict().get("gemini_api_key") if keys_doc.exists else None
         if not gemini_key:
             print("[Memoria] gemini_api_key indisponível; consolidação ignorada.")
@@ -4826,6 +5010,165 @@ def _resolve_telegram_chat_id_for_uid(db, uid: str | None):
         print(f"[DeepResearch] Falha ao resolver telegram_chat_id para uid={uid}: {exc}")
     return None
 
+
+def _resolve_default_telegram_chat_id(db):
+    # 1. Tenta encontrar chat_id na coleção de usuários
+    try:
+        candidates = (
+            db.collection("usuarios")
+            .where("telegram_chat_id", "!=", None)
+            .limit(1)
+            .stream()
+        )
+        for doc in candidates:
+            data = doc.to_dict() or {}
+            value = data.get("telegram_chat_id")
+            if isinstance(value, (str, int)) and str(value).strip():
+                return str(value).strip()
+    except Exception as exc:
+        print(f"[Telegram] Falha ao resolver chat_id via usuarios: {exc}")
+
+    # 2. Fallback Firestore: system/api_keys (mesmo doc do bot token)
+    for key in ("telegram_chat_id", "telegram_allowed_chat_id", "allowed_telegram_chat_id"):
+        try:
+            keys_doc = _cached_doc_get(db, "system", "api_keys")
+            if keys_doc.exists:
+                value = (keys_doc.to_dict() or {}).get(key)
+                if isinstance(value, (str, int)) and str(value).strip():
+                    return str(value).strip()
+        except Exception:
+            pass
+
+    # 3. Fallback Firestore: configuracoes/geral
+    for key in ("telegram_chat_id", "telegram_allowed_chat_id"):
+        try:
+            cfg_doc = _cached_doc_get(db, "configuracoes", "geral")
+            if cfg_doc.exists:
+                value = (cfg_doc.to_dict() or {}).get(key)
+                if isinstance(value, (str, int)) and str(value).strip():
+                    return str(value).strip()
+        except Exception:
+            pass
+
+    # 4. Fallback variável de ambiente
+    env_chat_id = os.environ.get("ALLOWED_TELEGRAM_CHAT_ID")
+    if env_chat_id and str(env_chat_id).strip():
+        return str(env_chat_id).strip()
+
+    return None
+
+
+def _send_telegram_message_raw(db, chat_id: str | int | None, text: str):
+    if not chat_id or not text:
+        return False
+    try:
+        import requests
+
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
+        bot_token = keys_doc.to_dict().get('telegram_bot_token') if keys_doc.exists else None
+        bot_token = bot_token or os.environ.get('TELEGRAM_BOT_TOKEN')
+        if not bot_token:
+            print("[Telegram] TELEGRAM_BOT_TOKEN nao configurado.")
+            return False
+
+        resp = requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={"chat_id": str(chat_id), "text": text},
+            timeout=10
+        )
+        if not resp.ok:
+            print(f"[Telegram] Falha ao enviar lembrete: {resp.status_code} {resp.text[:300]}")
+            return False
+        return True
+    except Exception as exc:
+        print(f"[Telegram] Erro ao enviar lembrete: {exc}")
+        return False
+
+
+def _build_task_reminder_telegram_message(task: dict, reminder_iso: str | None):
+    title = (task.get('titulo') or 'Ação pendente').strip()
+    status = (task.get('status') or 'não informado').strip()
+    descricao = (task.get('descricao') or '').strip()
+    reminder_label = ''
+    if reminder_iso:
+        try:
+            reminder_dt = datetime.fromisoformat(str(reminder_iso))
+            reminder_label = reminder_dt.strftime('%d/%m/%Y às %H:%M')
+        except Exception:
+            reminder_label = str(reminder_iso)
+
+    plan_items = task.get('plano_acao') or []
+    pending_steps = []
+    for item in plan_items:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get('text') or '').strip()
+        if text and not item.get('completed'):
+            pending_steps.append(text)
+        if len(pending_steps) >= 3:
+            break
+
+    lines = [
+        "Lembrete de ação",
+        f"Título: {title}",
+    ]
+
+    if reminder_label:
+        lines.append(f"Agendado para: {reminder_label}")
+    lines.append(f"Status atual: {status}")
+
+    if descricao:
+        resumo = descricao if len(descricao) <= 220 else f"{descricao[:217]}..."
+        lines.append(f"Contexto: {resumo}")
+
+    if pending_steps:
+        lines.append("Próximas etapas:")
+        for idx, step in enumerate(pending_steps, start=1):
+            lines.append(f"{idx}. {step}")
+    else:
+        lines.append("Próximas etapas: revise a ação e defina o próximo passo operacional.")
+
+    return "\n".join(lines)
+
+
+def _normalize_task_reminders(task: dict):
+    reminders = task.get('reminders') or []
+    normalized = []
+    if isinstance(reminders, list):
+        for idx, reminder in enumerate(reminders):
+            if not isinstance(reminder, dict):
+                continue
+            reminder_at = reminder.get('reminder_at')
+            if not reminder_at:
+                continue
+            normalized.append({
+                'id': str(reminder.get('id') or f"legacy-{idx}"),
+                'reminder_at': str(reminder_at),
+                'reminder_sent': bool(reminder.get('reminder_sent')),
+                'created_at': str(reminder.get('created_at') or reminder_at),
+            })
+
+    if not normalized and task.get('reminder_at'):
+        normalized.append({
+            'id': 'legacy-reminder',
+            'reminder_at': str(task.get('reminder_at')),
+            'reminder_sent': bool(task.get('reminder_sent')),
+            'created_at': str(task.get('data_atualizacao') or task.get('data_criacao') or task.get('reminder_at')),
+        })
+
+    normalized.sort(key=lambda item: item.get('reminder_at') or '')
+    return normalized
+
+
+def _build_task_reminder_state_payload(reminders: list[dict]):
+    ordered = sorted(reminders, key=lambda item: item.get('reminder_at') or '')
+    next_pending = next((item for item in ordered if not item.get('reminder_sent')), None)
+    return {
+        'reminders': ordered,
+        'reminder_at': next_pending.get('reminder_at') if next_pending else None,
+        'reminder_sent': bool(next_pending.get('reminder_sent')) if next_pending else True,
+    }
+
 @https_fn.on_call(
 
     cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
@@ -4906,7 +5249,7 @@ def gerarSlidesIA(req: https_fn.CallableRequest):
 
         db = get_db()
 
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
 
         if not keys_doc.exists:
 
@@ -5284,7 +5627,7 @@ def diagnosticar_codigo(req: https_fn.CallableRequest):
         db = get_db()
 
         # ── Credenciais comuns ─────────────────────────────────────────────────
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         keys = keys_doc.to_dict() if keys_doc.exists else {}
         gemini_api_key = keys.get('gemini_api_key')
 
@@ -5777,7 +6120,7 @@ def corrigir_sintaxe_mermaid(req: https_fn.CallableRequest):
 
     try:
         db = get_db()
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
 
         if not gemini_key:
@@ -5864,7 +6207,7 @@ def processInvoiceOCR(req: https_fn.CallableRequest):
 
         db = get_db()
 
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
 
         GEMINI_API_KEY = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
 
@@ -6011,7 +6354,7 @@ def transcrever_audio(req: https_fn.CallableRequest):
         # vamos usar o padrão seguro: importar firestore.
         from firebase_admin import firestore
         db = firestore.client()
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         
         if not keys_doc.exists:
              raise https_fn.HttpsError(
@@ -6129,7 +6472,7 @@ def askTaskAssistant(req: https_fn.CallableRequest):
     try:
         db = get_db()
 
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
 
         if not gemini_key:
@@ -6278,7 +6621,7 @@ def askChatbot(req: https_fn.CallableRequest):
 
     try:
         db = get_db()
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
         if not gemini_key:
             raise https_fn.HttpsError(
@@ -6315,7 +6658,7 @@ def askChatbot(req: https_fn.CallableRequest):
 @https_fn.on_call(
     cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
     memory=options.MemoryOption.GB_1,
-    timeout_sec=540
+    timeout_sec=300
 )
 def askCopilotoHermes(req: https_fn.CallableRequest):
     """
@@ -6326,6 +6669,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
     from google.genai import types
 
     data = req.data or {}
+    perf_state = {"start_ms": _perf_now_ms(), "_last_ms": _perf_now_ms(), "steps": [], "tool_calls": []}
     prompt = (data.get('prompt') or "").strip()
     task_id = data.get('taskId')
     system_id = data.get('systemId')
@@ -6350,7 +6694,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
     try:
         db = get_db()
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
 
         if not gemini_key:
@@ -6363,9 +6707,15 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         copilot_core = _get_copilot_core(db)
         copilot_soul = _get_copilot_soul(db)
         ai_profile = _bootstrap_user_ai_profile(db, user_uid)
-        _save_user_profile_signal(db, user_uid, prompt, task_id, system_id)
-        memory_context = _build_memory_context(db, gemini_key, prompt, limit=4)
+        threading.Thread(
+            target=_save_user_profile_signal,
+            args=(db, user_uid, prompt, task_id, system_id),
+            daemon=True,
+        ).start()
+        _prompt_words = [w for w in prompt.lower().split() if len(w) > 2]
+        memory_context = _build_memory_context(db, gemini_key, prompt, limit=4) if len(_prompt_words) >= 4 else ""
         matched_pop_directives = _match_pop_directives(db, prompt)
+        _perf_mark(perf_state, "web.bootstrap")
 
         tools_routing_context = ""
         if routing_index:
@@ -6392,62 +6742,101 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 print(f"[Memoria] Falha ao ler conflito pendente da sessão {session_id}: {session_err}")
 
         # --- DEFINIÇÃO DE FERRAMENTAS ---
-        def consultar_historico_acoes(query: str, area_tematica: str = None, data_limite_inicio: str = None, data_limite_fim: str = None):
+        _perf_mark(perf_state, "web.session_context")
+        def consultar_historico_acoes(query: str, area_tematica: str = None, data_limite_inicio: str = None, data_limite_fim: str = None, ultimas_n_acoes: int = 20, status: str = None):
             """
-            Busca no Grafo de Conhecimento. Retorna procedimentos cristalizados (semântica) 
-            e histórico de execução real (regex flexível).
-            
-            Use data_limite_inicio e data_limite_fim (formato YYYY-MM-DD) para filtrar por prazo/vencimento.
+            Busca tarefas reais no banco de dados do Hermes por texto, area, prazo e/ou status.
+            Retorna somente dados oficiais — nao mistura com RAG ou procedimentos.
+            Use status para filtrar (ex: 'em andamento', 'concluido', 'cancelado').
+            Use data_limite_inicio e data_limite_fim (YYYY-MM-DD) para filtrar por prazo.
+            Use ultimas_n_acoes (default 20) para buscar em lote.
             """
-            # 1. Busca Semântica (Nós Conceituais)
-            # Passamos a área temática para filtrar se o LLM fornecer
-            res_semantic = buscar_procedimento_internal(query, area_tematica)
-            
-            # 2. Busca em Tarefas Reais (Regex)
             from tools.busca_grafo import buscar_tarefas
-            # Tenta primeiro match estrito (AND)
-            res_exact = buscar_tarefas(query, 
-                                       area_tematica=area_tematica, 
-                                       match_mode="all", 
-                                       data_limite_inicio=data_limite_inicio, 
-                                       data_limite_fim=data_limite_fim)
-            
-            # Se vier vazio, tenta match flexível (OR / ANY)
-            if not res_exact.get("resultados"):
-                res_exact = buscar_tarefas(query, 
-                                           area_tematica=area_tematica, 
-                                           match_mode="any", 
-                                           data_limite_inicio=data_limite_inicio, 
-                                           data_limite_fim=data_limite_fim)
+            _STOPWORDS_Q = {"de", "a", "o", "que", "e", "do", "da", "em", "um", "uma",
+                            "os", "as", "no", "na", "com", "por", "para", "dos", "das",
+                            "nos", "nas", "ao", "os", "se", "ou"}
+            _q_terms = [w for w in query.lower().split() if w not in _STOPWORDS_Q and len(w) > 2]
+            _initial_mode = "all" if len(_q_terms) >= 2 else "any"
+            res_exact = buscar_tarefas(query,
+                                       area_tematica=area_tematica,
+                                       match_mode=_initial_mode,
+                                       data_limite_inicio=data_limite_inicio,
+                                       data_limite_fim=data_limite_fim,
+                                       status=status,
+                                       limite=ultimas_n_acoes)
+            # Tenta com match_mode=any se all nao encontrou
+            if _initial_mode == "all" and not res_exact.get("resultados"):
+                res_exact = buscar_tarefas(query,
+                                           area_tematica=area_tematica,
+                                           match_mode="any",
+                                           data_limite_inicio=data_limite_inicio,
+                                           data_limite_fim=data_limite_fim,
+                                           status=status,
+                                           limite=ultimas_n_acoes)
 
             if res_exact.get("erro"):
                 return f"⚠️ [ERRO TÉCNICO BuscaGrafo] {res_exact['erro']}"
 
-            # Construção do Relatório Híbrido
-            context_parts = []
-            
-            # Adiciona contexto semântico se houver resultados reais nele
-            semantic_text = res_semantic.get("context", "")
-            if "Nenhum registro encontrado" not in semantic_text:
-                context_parts.append(f"--- PROCEDIMENTOS E CONCEITOS ENCONTRADOS ---\n{semantic_text}")
-
-            # Adiciona tarefas reais
             resultados = res_exact.get("resultados", [])
+
+            # CAMINHO A: Tarefas reais encontradas — retorna SOMENTE elas.
+            # Nao inclui contexto semantico para evitar mistura de fontes (alucinacao de titulo/dados).
             if resultados:
-                lines = ["--- ÚLTIMAS TAREFAS EXECUTADAS (HISTÓRICO REAL) ---"]
+                lines = [
+                    "=== TAREFAS REAIS ENCONTRADAS NO BANCO DE DADOS ===",
+                    "REGRA: Use EXCLUSIVAMENTE os campos abaixo. Nao invente, nao complete, nao use RAG.",
+                    "",
+                ]
                 for r in resultados:
-                    lines.append(
-                        f"ID: {r['id']} | TÍTULO: {r['titulo']} | STATUS: {r['status']}\n"
-                        f"MÁXIMO: {r.get('data_limite', 'N/A')} | ÁREA: {r['area']} | DATA: {r['criado_em']}\n"
-                        f"DESCRIÇÃO: {r['descricao']}\n"
-                        f"[Abrir Ação](task:{r['id']})\n"
-                    )
-                context_parts.append("\n".join(lines))
+                    lines.append(f"ID: {r['id']}")
+                    lines.append(f"Titulo: {r['titulo']}")
+                    lines.append(f"Status: {r['status']} | Tipo: {r.get('tipo_acao') or 'nao informado'}")
+                    lines.append(f"Prazo: {r.get('data_limite', 'N/A')} | Area: {r['area']} | Criado em: {r['criado_em']}")
+                    if r.get('processo_sei'):
+                        lines.append(f"Processo SEI: {r['processo_sei']}")
+                    lines.append(f"Responsavel: {r.get('responsavel') or 'nao informado'}")
+                    if r.get('tags'):
+                        tags_val = r['tags']
+                        tags_str = ', '.join(tags_val) if isinstance(tags_val, list) else str(tags_val)
+                        lines.append(f"Tags: {tags_str}")
+                    if r.get('sintese_demanda'):
+                        lines.append(f"Sintese da Demanda: {r['sintese_demanda']}")
+                    if r.get('descricao'):
+                        lines.append(f"Descricao: {r['descricao']}")
+                    if r.get('notas'):
+                        lines.append(f"Notas: {r['notas']}")
+                    plano = r.get('plano_acao', [])
+                    if plano:
+                        lines.append("Plano de Acao:")
+                        for passo in plano:
+                            lines.append(f"  {passo}")
+                    acomp = r.get('acompanhamento_recente', [])
+                    if acomp:
+                        lines.append("Diario de Bordo (ultimas entradas):")
+                        for entrada in acomp:
+                            lines.append(f"  {entrada}")
+                    lines.append(f"[Abrir Acao](task:{r['id']})")
+                    lines.append("---")
+                return "\n".join(lines)
 
-            if not context_parts:
-                return f"Nenhum registro encontrado para '{query}' com os filtros aplicados."
-
-            return "\n\n".join(context_parts)
+            # CAMINHO B: Nenhuma tarefa real encontrada.
+            # Retorna mensagem direta sem fallback semantico.
+            # O modelo NAO deve inventar dados nem usar RAG para compensar.
+            filtros_desc = []
+            if query and query.strip():
+                filtros_desc.append(f"query='{query.strip()}'")
+            if status:
+                filtros_desc.append(f"status='{status}'")
+            if area_tematica:
+                filtros_desc.append(f"area='{area_tematica}'")
+            if data_limite_inicio or data_limite_fim:
+                filtros_desc.append(f"prazo=[{data_limite_inicio or '*'} a {data_limite_fim or '*'}]")
+            filtros_str = ", ".join(filtros_desc) if filtros_desc else "(sem filtros)"
+            return (
+                f"NENHUMA TAREFA ENCONTRADA no banco de dados com os filtros: {filtros_str}.\n"
+                "INSTRUCAO OBRIGATORIA: Informe ao usuario que nao encontrou. NAO invente titulos, "
+                "status, prazos ou qualquer dado de tarefa. NAO use RAG, acervo ou memoria para fabricar uma resposta."
+            )
 
         def buscar_arquivos_acervo(query: str):
             """Busca documentação, manuais e arquivos de referência no Acervo Global (FindNearest)."""
@@ -6551,9 +6940,17 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             ou qualquer informação que possa estar desatualizada no seu conhecimento.
             Parâmetro: query — a frase de busca otimizada em português ou inglês.
             """
+            _prompt_lower = (prompt or "").lower()
+            _web_triggers = (
+                "http://", "https://", "www.", "internet", "na web", "busca online",
+                "pesquise", "pesquisar", "notícia", "noticias", "cotação", "cotacao",
+                "atualiz", "link", "site", "acesse",
+            )
+            if not any(t in _prompt_lower for t in _web_triggers):
+                return '{"blocked": true, "reason": "O prompt não menciona internet, URL ou busca atual. Use esta ferramenta apenas quando o usuário pedir explicitamente informações da web."}'
             import requests as _req
             try:
-                keys_doc_web = db.collection('system').document('api_keys').get()
+                keys_doc_web = _cached_doc_get(db, 'system', 'api_keys')
                 tavily_key = keys_doc_web.to_dict().get('tavily_api_key') if keys_doc_web.exists else None
                 if not tavily_key:
                     return '{"error": "Tavily API key não configurada. Informe ao usuário que a busca na internet está indisponível no momento."}'
@@ -6780,16 +7177,98 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 _real_name = _file_meta.get('name', 'documento')
                 _mime = _file_meta.get('mimeType', 'application/octet-stream')
 
-                # 2. Baixa o binário
+                from googleapiclient.http import MediaIoBaseDownload
+
+                # 2a. Google Workspace files must be exported, not downloaded
+                _GAPPS_EXPORT_MAP = {
+                    'application/vnd.google-apps.document': 'text/plain',
+                    'application/vnd.google-apps.spreadsheet': 'text/csv',
+                    'application/vnd.google-apps.presentation': 'text/plain',
+                }
+                if _mime in _GAPPS_EXPORT_MAP:
+                    _export_mime = _GAPPS_EXPORT_MAP[_mime]
+                    _req_dl = _drive_service.files().export_media(
+                        fileId=drive_file_id, mimeType=_export_mime
+                    )
+                    _fh = _io.BytesIO()
+                    _dl = MediaIoBaseDownload(_fh, _req_dl)
+                    _done = False
+                    while not _done:
+                        _, _done = _dl.next_chunk()
+                    _exported_text = _fh.getvalue().decode('utf-8', errors='replace').strip()
+                    _response = client.models.generate_content(
+                        model=model_id,
+                        contents=[(
+                            f"Você recebeu o conteúdo exportado do arquivo '{_real_name}'. "
+                            f"Responda exclusivamente à pergunta abaixo com base nesse conteúdo.\n\n"
+                            f"PERGUNTA: {query_especifica}\n\n"
+                            "REGRAS:\n"
+                            "- Se a informação existir, responda de forma precisa e cite o trecho de origem.\n"
+                            "- Se a informação não existir, declare: 'A informação solicitada não foi encontrada neste documento.'\n"
+                            "- Não invente dados externos.\n\n"
+                            f"CONTEÚDO DO DOCUMENTO:\n{_exported_text[:120000]}"
+                        )]
+                    )
+                    _answer = (_response.text or "").strip()
+                    return f"[Leitura de '{_real_name}']\n{_answer}" if _answer else "Não foi possível extrair a resposta do documento."
+
+                # 2b. Download binary for all other file types
                 _req_dl = _drive_service.files().get_media(fileId=drive_file_id)
                 _fh = _io.BytesIO()
-                from googleapiclient.http import MediaIoBaseDownload
                 _dl = MediaIoBaseDownload(_fh, _req_dl)
                 _done = False
                 while not _done:
                     _, _done = _dl.next_chunk()
                 _fh.seek(0)
                 _file_bytes = _fh.read()
+
+                # 2c. Office formats: extract text locally — Gemini File API does not support them
+                _OFFICE_DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                _OFFICE_PPTX = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+                _OFFICE_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                if _mime == _OFFICE_DOCX or _real_name.lower().endswith('.docx'):
+                    import mammoth as _mammoth
+                    _docx_result = _mammoth.extract_raw_text(_io.BytesIO(_file_bytes))
+                    _office_text = (_docx_result.value or '').strip()
+                    _response = client.models.generate_content(
+                        model=model_id,
+                        contents=[(
+                            f"Você recebeu o conteúdo extraído do arquivo Word '{_real_name}'. "
+                            f"Responda exclusivamente à pergunta abaixo com base nesse conteúdo.\n\n"
+                            f"PERGUNTA: {query_especifica}\n\n"
+                            "REGRAS:\n"
+                            "- Se a informação existir, responda de forma precisa e cite o trecho de origem.\n"
+                            "- Se a informação não existir, declare: 'A informação solicitada não foi encontrada neste documento.'\n"
+                            "- Não invente dados externos.\n\n"
+                            f"CONTEÚDO DO DOCUMENTO:\n{_office_text[:120000]}"
+                        )]
+                    )
+                    _answer = (_response.text or "").strip()
+                    return f"[Leitura de '{_real_name}']\n{_answer}" if _answer else "Não foi possível extrair a resposta do documento."
+                if _mime == _OFFICE_PPTX or _real_name.lower().endswith('.pptx'):
+                    from pptx import Presentation as _Presentation
+                    _prs = _Presentation(_io.BytesIO(_file_bytes))
+                    _slides_text = []
+                    for _slide in _prs.slides:
+                        for _shape in _slide.shapes:
+                            if hasattr(_shape, 'text') and _shape.text.strip():
+                                _slides_text.append(_shape.text.strip())
+                    _office_text = '\n'.join(_slides_text).strip()
+                    _response = client.models.generate_content(
+                        model=model_id,
+                        contents=[(
+                            f"Você recebeu o conteúdo extraído da apresentação PowerPoint '{_real_name}'. "
+                            f"Responda exclusivamente à pergunta abaixo com base nesse conteúdo.\n\n"
+                            f"PERGUNTA: {query_especifica}\n\n"
+                            "REGRAS:\n"
+                            "- Se a informação existir, responda de forma precisa e cite o trecho de origem.\n"
+                            "- Se a informação não existir, declare: 'A informação solicitada não foi encontrada neste documento.'\n"
+                            "- Não invente dados externos.\n\n"
+                            f"CONTEÚDO DO DOCUMENTO:\n{_office_text[:120000]}"
+                        )]
+                    )
+                    _answer = (_response.text or "").strip()
+                    return f"[Leitura de '{_real_name}']\n{_answer}" if _answer else "Não foi possível extrair a resposta do documento."
 
                 if is_pdf_mime_type(_real_name, _mime):
                     _pdf_result = extract_pdf_text_with_fallback(
@@ -7269,7 +7748,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     from knowledge_graph import _get_embedding
                     try:
                         kg_id = str(_uuid.uuid4())[:20]
-                        keys_doc = db.collection('system').document('api_keys').get()
+                        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
                         gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
                         if not gemini_key:
                             raise ValueError("Gemini API Key não encontrada (system/api_keys).")
@@ -7953,6 +8432,11 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "Não explique o diagrama antes de gerá-lo, a menos que seja explicitamente solicitado.\n"
             "Escolha o tipo de diagrama mais adequado: flowchart, sequenceDiagram, classDiagram, "
             "stateDiagram-v2, erDiagram, gantt, mindmap, timeline, pie, quadrantChart, xychart-beta, etc.\n\n"
+            "## GOVERNANCA DE FONTES — REGRA CRITICA\n"
+            "Quando descrever uma tarefa encontrada por consultar_historico_acoes, "
+            "use SOMENTE os campos retornados por essa ferramenta (Titulo, Status, Prazo, Area, Descricao, Tags, Sintese, Plano de Acao, Diario de Bordo, Notas). "
+            "E PROIBIDO completar, interpretar ou inferir informacoes da tarefa usando dados do RAG, acervo ou memoria global. "
+            "Se um campo nao constar no retorno da ferramenta, responda 'nao informado' em vez de inventar.\n"
         )
 
         # --- RECUPERAÇÃO DE HISTÓRICO DA SESSÃO ---
@@ -8143,6 +8627,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             ),
             history=history
         )
+        _perf_mark(perf_state, "web.chat_create")
 
         # ─── INGESTÃO DOCUMENTAL ─────────────────────────────────────────────────
         # Se um driveFileId foi enviado, baixa o binário, extrai metadados via
@@ -8447,6 +8932,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         # ─────────────────────────────────────────────────────────────────────────
 
         # Injeta contexto inicial se houver task_id
+        _perf_mark(perf_state, "web.file_ingestion")
         initial_context = ""
         if task_id:
             initial_context = f"DICA DE CONTEXTO: O usuário está visualizando a tarefa {task_id}. " \
@@ -8481,6 +8967,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             pop_lines.append("[/DIRETRIZES OPERACIONAIS (POPs) CORRESPONDENTES - OBRIGATORIAS]")
             context_parts.append("\n".join(pop_lines))
         final_prompt = "\n\n".join(context_parts)
+        _perf_mark(perf_state, "web.prompt_build")
         # Loop manual de tool calling — intercepta cada chamada para rastrear ferramentas usadas
         tools_used: list[str] = []
         pending_edit_data = None
@@ -8488,101 +8975,104 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         report_data = None
         tool_invocation_data = None
         response = chat.send_message(final_prompt)
+        _perf_mark(perf_state, "web.first_model_response")
         _max_iter = 10
-        for _ in range(_max_iter):
+        for _round in range(_max_iter):
             fcs = response.function_calls
             if not fcs:
                 break
+            
             function_response_parts = []
+            # Constraint: Se mais de 3 roundtrips, forçar consolidação ou emitir aviso parcial
+            if _round >= 3:
+                # Injeta aviso diretamente no contexto do próximo turno para forçar consolidação
+                function_response_parts.append(types.Part(text="\nAVISO DE PERFORMANCE: Você já realizou 3 rodadas de consultas sequenciais. Para evitar latência excessiva, consolide TODAS as buscas restantes em um único lote (batch) nesta rodada ou emita uma resposta parcial informando que está compilando os dados."))
             break_loop = False
-            for fc in fcs:
+            # Paralelismo de Execução de Ferramentas: processa múltiplas ferramentas simultaneamente em uma única rodada
+            from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
+            _fn_results = [None] * len(fcs)
+            
+            def _execute_tool(idx, fc):
                 fn = _function_map.get(fc.name)
+                tool_start_ms = _perf_now_ms()
+                tool_invocation_data_local = None
+                
                 if fn is None:
-                    result = f"Ferramenta '{fc.name}' não encontrada."
+                    res = f"Ferramenta '{fc.name}' não encontrada."
                 else:
                     try:
-                        result = fn(**(fc.args or {}))
-                        if isinstance(result, dict) and result.get("intent") == "tool_invocation":
-                            tool_invocation_data = result
-                            break_loop = True
+                        res = fn(**(fc.args or {}))
+                        if isinstance(res, dict) and res.get("intent") == "tool_invocation":
+                            tool_invocation_data_local = res
                     except Exception as _fe:
-                        result = f"Erro ao executar {fc.name}: {_fe}"
+                        res = f"Erro ao executar {fc.name}: {_fe}"
+                
+                perf_state.setdefault("tool_calls", []).append({
+                    "name": fc.name,
+                    "duration_ms": max(0, _perf_now_ms() - tool_start_ms),
+                })
+                return (res, tool_invocation_data_local)
 
-                if break_loop:
-                    break
-
-                # Captura payload de edição pendente gerado por preparar_edicao_acao
-                if fc.name == 'preparar_edicao_acao' and isinstance(result, str) and result.startswith('{'):
-                    try:
-                        pending_edit_data = json.loads(result)
-                    except Exception:
-                        pass
-                # Captura metadados do relatório gerado por gerar_relatorio
-                if fc.name == 'gerar_relatorio' and isinstance(result, str) and result.startswith('{'):
-                    try:
-                        parsed_rep = json.loads(result)
-                        if parsed_rep.get('report_id'):
-                            report_data = parsed_rep
-                    except Exception:
-                        pass
-                if fc.name == 'salvar_memoria_global' and isinstance(result, str) and result.startswith('{'):
-                    try:
-                        parsed_mem = json.loads(result)
-                        if parsed_mem.get('status') == 'conflict':
-                            parsed_mem.setdefault('status_ui', 'pending')
-                            pending_memory_conflict = parsed_mem
-                        if session_ref:
+            with _ThreadPoolExecutor(max_workers=min(len(fcs), 8)) as _executor:
+                _futures = [_executor.submit(_execute_tool, i, fc) for i, fc in enumerate(fcs)]
+                for _i, _future in enumerate(_futures):
+                    result, tool_invocation_data_local = _future.result()
+                    _fc = fcs[_i]
+                    
+                    if tool_invocation_data_local:
+                        tool_invocation_data = tool_invocation_data_local
+                        break_loop = True
+                    
+                    # Processamento síncrono de efeitos colaterais
+                    if _fc.name == 'preparar_edicao_acao' and isinstance(result, str) and result.startswith('{'):
+                        try: pending_edit_data = json.loads(result)
+                        except: pass
+                    if _fc.name == 'gerar_relatorio' and isinstance(result, str) and result.startswith('{'):
+                        try:
+                            parsed_rep = json.loads(result)
+                            if parsed_rep.get('report_id'): report_data = parsed_rep
+                        except: pass
+                    if _fc.name == 'salvar_memoria_global' and isinstance(result, str) and result.startswith('{'):
+                        try:
+                            parsed_mem = json.loads(result)
                             if parsed_mem.get('status') == 'conflict':
-                                session_ref.set({
-                                    "pendingMemoryConflict": parsed_mem,
-                                    "lastMemoryConflictAt": firestore.SERVER_TIMESTAMP,
-                                }, merge=True)
-                            else:
-                                session_ref.update({
-                                    "pendingMemoryConflict": firestore.DELETE_FIELD,
-                                    "lastMemoryConflictAt": firestore.DELETE_FIELD
-                                })
-                    except Exception:
-                        pass
+                                parsed_mem.setdefault('status_ui', 'pending')
+                                pending_memory_conflict = parsed_mem
+                            if session_ref:
+                                if parsed_mem.get('status') == 'conflict':
+                                    session_ref.set({"pendingMemoryConflict": parsed_mem, "lastMemoryConflictAt": firestore.SERVER_TIMESTAMP}, merge=True)
+                                else:
+                                    session_ref.update({"pendingMemoryConflict": firestore.DELETE_FIELD, "lastMemoryConflictAt": firestore.DELETE_FIELD})
+                        except: pass
+                    if _fc.name == 'resolver_conflito_memoria' and isinstance(result, str) and result.startswith('{'):
+                        try:
+                            parsed_resolution = json.loads(result)
+                            if session_ref and parsed_resolution.get('status') in {'resolved', 'updated'}:
+                                session_ref.set({"pendingMemoryConflict": firestore.DELETE_FIELD, "lastMemoryConflictResolutionAt": firestore.SERVER_TIMESTAMP}, merge=True)
+                                try: session_ref.update({"lastMemoryConflictAt": firestore.DELETE_FIELD})
+                                except: pass
+                        except: pass
 
+                    if _fc.name not in _HIDDEN_TOOLS and _fc.name not in tools_used:
+                        tools_used.append(_fc.name)
 
-                if fc.name == 'resolver_conflito_memoria' and isinstance(result, str) and result.startswith('{'):
-                    try:
-                        parsed_resolution = json.loads(result)
-                        if session_ref and parsed_resolution.get('status') in {'resolved', 'updated'}:
-                            session_ref.set({
-                                "pendingMemoryConflict": firestore.DELETE_FIELD,
-                                "lastMemoryConflictResolutionAt": firestore.SERVER_TIMESTAMP,
-                            }, merge=True)
-
-                            # Also safely try to clear lastMemoryConflictAt if needed
-                            try:
-                                session_ref.update({
-                                    "lastMemoryConflictAt": firestore.DELETE_FIELD
-                                })
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-
-                if fc.name not in _HIDDEN_TOOLS and fc.name not in tools_used:
-                    tools_used.append(fc.name)
-
-                _result_str = str(result)
-                if len(_result_str) > 12000:
-                    _result_str = _result_str[:12000] + "\n[...resultado truncado por tamanho...]"
-                function_response_parts.append(
-                    types.Part.from_function_response(
-                        name=fc.name,
-                        response={"result": _result_str}
+                    _result_str = str(result)
+                    if len(_result_str) > 12000:
+                        _result_str = _result_str[:12000] + "\n[...resultado truncado por tamanho...]"
+                    
+                    function_response_parts.append(
+                        types.Part.from_function_response(
+                            name=_fc.name,
+                            response={"result": _result_str}
+                        )
                     )
-                )
 
             if break_loop:
                 break
 
             try:
                 response = chat.send_message(function_response_parts)
+                _perf_mark(perf_state, "web.tool_roundtrip")
             except Exception as _send_err:
                 from google.genai.errors import ServerError as _GeminiServerError
                 if isinstance(_send_err, _GeminiServerError) and '500' in str(_send_err):
@@ -8602,6 +9092,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         except Exception:
                             _reduced_parts.append(_p)
                     response = chat.send_message(_reduced_parts)
+                    _perf_mark(perf_state, "web.tool_roundtrip_retry")
                 else:
                     raise
 
@@ -8624,6 +9115,17 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 except Exception as e:
                     print(f"Erro ao salvar invocação de ferramenta no Firestore: {e}")
 
+            _perf_mark(perf_state, "web.tool_invocation_persist")
+            _perf_log(
+                "web.askCopiloto.complete",
+                perf_state,
+                {
+                    "session_id": session_id,
+                    "task_id": task_id,
+                    "mode": "tool_invocation",
+                    "tools_used": tools_used,
+                },
+            )
             return {
                 "result": clean_text,
                 "kg_nodes": kg_nodes_payload,
@@ -8710,10 +9212,21 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 print(f"Erro ao salvar resposta no Firestore: {e}")
 
         # Tenta extrair título sugerido se for início de sessão
+        _perf_mark(perf_state, "web.response_persist")
         suggested_title = None
         if prompt and len(prompt) < 100:
             suggested_title = prompt[:50]
 
+        _perf_log(
+            "web.askCopiloto.complete",
+            perf_state,
+            {
+                "session_id": session_id,
+                "task_id": task_id,
+                "mode": "assistant_text",
+                "tools_used": tools_used,
+            },
+        )
         return {
             "result": clean_text,
             "proposedPlan": proposal_data.get("items") if proposal_data else None,
@@ -8727,6 +9240,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
     except Exception as e:
         print(f"Erro em askCopilotoHermes: {e}")
+        _perf_log("web.askCopiloto.error", perf_state, {"session_id": session_id, "task_id": task_id, "error": str(e)})
         import traceback
         print(traceback.format_exc())
         raise https_fn.HttpsError(
@@ -8869,7 +9383,7 @@ def confirmarConflitoMemoria(req: https_fn.CallableRequest):
 
     try:
         db = get_db()
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
         if not gemini_key:
             raise https_fn.HttpsError(
@@ -8926,37 +9440,52 @@ def buscar_procedimento_internal(query_text: str, area_tematica: str = None):
     # Wrapper interno para chamar a lógica de buscar_procedimento sem o overhead do Callable HTTPS
     try:
         db = get_db()
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
-        
+
         from knowledge_graph import _get_embedding, _cosine_similarity
-        
+
         # Sanitização de input
         q_text = (query_text or "").strip()
         if not q_text:
             q_text = "procedimentos operacionais"
 
+        # Short-query fast-path: skip embedding + scan for 1-word queries
+        _SW = {"de", "a", "o", "que", "e", "do", "da", "em", "um", "uma", "os", "as",
+               "no", "na", "com", "por", "para", "dos", "das"}
+        _q_meaningful = [w for w in q_text.lower().split() if w not in _SW and len(w) > 2]
+        if len(_q_meaningful) < 2:
+            return {"context": f"Nenhum registro encontrado para '{q_text}'.", "resultados": []}
+
+        from google.cloud.firestore_v1.vector import Vector
+        from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
+        from google.cloud.firestore_v1.base_query import FieldFilter
+
         query_embedding = _get_embedding(q_text, api_key)
-        # Protocolo de Segurança: Converte para floats
         query_vector = list(map(float, query_embedding))
 
-        collection_query = db.collection("knowledge_nodes")
+        # Otimização: Uso de Vector Search Nativo do Firestore (find_nearest)
+        # Substitui a varredura manual de 200 documentos por filtragem no banco.
+        collection_ref = db.collection("knowledge_nodes")
+        vector_query = collection_ref
         if area_tematica:
-            collection_query = collection_query.where("area_tematica", "==", area_tematica)
+            vector_query = vector_query.where(filter=FieldFilter("area_tematica", "==", area_tematica))
+        
+        vector_query = vector_query.find_nearest(
+            vector_field="embedding",
+            query_vector=Vector(query_vector),
+            distance_measure=DistanceMeasure.COSINE,
+            limit=5
+        )
 
         nodes_raw = []
-        for ndoc in collection_query.stream():
+        for ndoc in vector_query.stream():
             nd = ndoc.to_dict() or {}
-            node_emb = nd.get("embedding")
-            if not node_emb: continue
-            sim = _cosine_similarity(query_vector, node_emb)
-            # Limiar mais flexível
-            if sim < 0.35: continue
             nodes_raw.append({
                 "titulo": nd.get("titulo"),
                 "resumo": nd.get("resumo"),
                 "area_tematica": nd.get("area_tematica"),
-                "score": sim
+                "score": nd.get("__vector_distance__", 0.0) # find_nearest retorna distância
             })
         
         nodes_raw.sort(key=lambda x: x["score"], reverse=True)
@@ -9162,7 +9691,7 @@ def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
         if not contexto_tarefas:
             return {"success": False, "message": f"Não há tarefas concluídas suficientes em '{area_tematica}' para analisar padrões."}
 
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
         
         if not gemini_key:
@@ -9250,7 +9779,7 @@ def processar_correcoes_pendentes(event: scheduler_fn.ScheduledEvent) -> None:
     # Recupera chave Tavily para consenso web
     _tavily_key = ''
     try:
-        _keys_doc = _db.collection('system').document('api_keys').get()
+        _keys_doc = __cached_doc_get(db, 'system', 'api_keys')
         _tavily_key = (_keys_doc.to_dict() or {}).get('tavily_api_key', '')
     except Exception as _key_err:
         print(f"[EvoEngine] Aviso: não foi possível recuperar chave Tavily: {_key_err}")
@@ -9780,7 +10309,7 @@ def deep_research_worker(event: firestore_fn.Event[firestore_fn.DocumentSnapshot
         if not telegram_chat_id:
              print("[DeepResearch] No telegram_chat_id provided, skipping notification.")
              return
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         bot_token = keys_doc.to_dict().get('telegram_bot_token') if keys_doc.exists else None
         bot_token = bot_token or os.environ.get('TELEGRAM_BOT_TOKEN')
         if not bot_token:
@@ -9804,7 +10333,7 @@ def deep_research_worker(event: firestore_fn.Event[firestore_fn.DocumentSnapshot
             'started_at': firestore.SERVER_TIMESTAMP
         })
 
-        keys_doc = db.collection('system').document('api_keys').get()
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
         api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
         if not api_key:
             api_key = os.environ.get("GEMINI_API_KEY")

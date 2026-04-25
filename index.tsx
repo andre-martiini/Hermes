@@ -1965,6 +1965,8 @@ const App: React.FC = () => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [exams, setExams] = useState<HealthExam[]>([]);
   const [lastBackPress, setLastBackPress] = useState(0);
+  const [pendingSharedAudioFile, setPendingSharedAudioFile] = useState<File | null>(null);
+  const [pendingSharedVideoFile, setPendingSharedVideoFile] = useState<File | null>(null);
 
   // Escuta o redirecionamento do Share Target (Android Share Intent PWA)
   useEffect(() => {
@@ -1987,12 +1989,12 @@ const App: React.FC = () => {
                 setActiveModule('acoes');
                 setViewMode('ferramentas');
                 setActiveFerramenta('transcription');
-                setTimeout(() => window.dispatchEvent(new CustomEvent('hermes-shared-audio', { detail: item.file })), 800);
+                setPendingSharedAudioFile(item.file);
               } else if (item.fileType === 'video') {
                 setActiveModule('acoes');
                 setViewMode('ferramentas');
                 setActiveFerramenta('choir_rehearsals');
-                setTimeout(() => window.dispatchEvent(new CustomEvent('hermes-shared-video', { detail: item.file })), 800);
+                setPendingSharedVideoFile(item.file);
               }
               store.delete(item.id);
             }
@@ -6013,6 +6015,10 @@ const App: React.FC = () => {
                     onUploadFile={handleUploadKnowledgeFile}
                     initialDraftId={initialDraftId}
                     initialDiagnosisId={initialDiagnosisId}
+                    pendingSharedAudioFile={pendingSharedAudioFile}
+                    onPendingSharedAudioFileConsumed={() => setPendingSharedAudioFile(null)}
+                    pendingSharedVideoFile={pendingSharedVideoFile}
+                    onPendingSharedVideoFileConsumed={() => setPendingSharedVideoFile(null)}
                   />
                 ) : viewMode === 'services' ? (
                   <ServicesView
