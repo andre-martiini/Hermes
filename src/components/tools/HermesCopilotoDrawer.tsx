@@ -163,6 +163,11 @@ const TOOL_LABELS: Record<string, string> = {
     editar_plano_acao: 'Ajustando Plano...',
     preparar_edicao_acao: 'Preparando Edição',
     gerar_relatorio: 'Gerando Relatório',
+    registrar_no_diario: 'Registrado no Diário',
+    buscar_e_analisar_email: 'Email Analisado',
+    gerar_rascunho_formulario: 'Rascunho de Formulário',
+    consultar_agenda: 'Agenda Consultada',
+    encontrar_slot_livre: 'Slot Livre Encontrado',
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -184,6 +189,7 @@ const WRITE_TOOLS = new Set([
     'salvar_memoria_global',
     'salvar_pop_global',
     'atualizar_personalidade',
+    'registrar_no_diario',
 ]);
 
 const sanitizeDiagnosisFilePart = (value?: string) =>
@@ -2222,9 +2228,10 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             </svg>
                                         </button>
                                         {showToolMenu && (
-                                            <div className={`absolute bottom-full right-0 mb-2 z-[80] min-w-[260px] max-w-[min(20rem,calc(100vw-2rem))] max-h-[min(24rem,calc(100vh-14rem))] overflow-y-auto overflow-x-hidden rounded-2xl border shadow-2xl ${isDark ? 'border-white/10 bg-[#101827]' : 'border-slate-200 bg-white'}`}>
+                                            <div className={`absolute bottom-full right-0 mb-2 z-[80] min-w-[280px] max-w-[min(22rem,calc(100vw-2rem))] max-h-[min(28rem,calc(100vh-14rem))] overflow-y-auto overflow-x-hidden rounded-2xl border shadow-2xl ${isDark ? 'border-white/10 bg-[#101827]' : 'border-slate-200 bg-white'}`}>
+                                                {/* Ferramentas interativas (UI) */}
                                                 <div className={`sticky top-0 z-10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'border-b border-white/10 bg-[#101827] text-white/40' : 'border-b border-slate-100 bg-white text-slate-400'}`}>
-                                                    Inserir Atalho
+                                                    Ferramentas Interativas
                                                 </div>
                                                 <div className="p-2">
                                                     {toolsRegistry.map(tool => (
@@ -2239,6 +2246,34 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                             </div>
                                                             <p className={`mt-1 text-[10px] leading-relaxed ${isDark ? 'text-white/50' : 'text-slate-500'}`}>{tool.ui_metadata.description}</p>
                                                         </button>
+                                                    ))}
+                                                </div>
+                                                {/* Capacidades de IA (backend automático) */}
+                                                <div className={`sticky top-0 z-10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'border-t border-white/10 bg-[#101827] text-white/40' : 'border-t border-slate-100 bg-white text-slate-400'}`}>
+                                                    Capacidades de IA
+                                                </div>
+                                                <div className="p-2 pb-3">
+                                                    {([
+                                                        { key: 'pesquisar_internet', label: 'Pesquisar na Internet', desc: 'Busca informações em tempo real na web.' },
+                                                        { key: 'ler_pagina_web', label: 'Ler Página Web', desc: 'Extrai e resume o conteúdo de um URL.' },
+                                                        { key: 'buscar_arquivos_acervo', label: 'Buscar no Acervo', desc: 'Localiza documentos e arquivos do sistema.' },
+                                                        { key: 'consultar_historico_acoes', label: 'Consultar Histórico', desc: 'Recupera o grafo de execução de ações.' },
+                                                        { key: 'criar_acao_no_sistema', label: 'Criar Ação', desc: 'Cria uma nova ação diretamente no sistema.' },
+                                                        { key: 'registrar_no_diario', label: 'Registrar no Diário', desc: 'Adiciona uma entrada no diário de bordo.' },
+                                                        { key: 'gerar_relatorio', label: 'Gerar Relatório', desc: 'Compila um relatório estruturado.' },
+                                                        { key: 'consultar_agenda', label: 'Consultar Agenda', desc: 'Verifica compromissos e eventos do calendário.' },
+                                                        { key: 'encontrar_slot_livre', label: 'Encontrar Slot Livre', desc: 'Sugere horários disponíveis na agenda.' },
+                                                        { key: 'buscar_e_analisar_email', label: 'Analisar E-mail', desc: 'Busca e analisa e-mails relevantes.' },
+                                                        { key: 'salvar_memoria_global', label: 'Salvar Memória', desc: 'Persiste informações na memória global.' },
+                                                        { key: 'gerar_rascunho_formulario', label: 'Gerar Formulário', desc: 'Cria rascunho de formulário estruturado.' },
+                                                    ] as { key: string; label: string; desc: string }[]).map(cap => (
+                                                        <div
+                                                            key={cap.key}
+                                                            className={`rounded-xl px-3 py-2 ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}
+                                                        >
+                                                            <span className={`text-[11px] font-black ${isDark ? 'text-white/80' : 'text-slate-700'}`}>{cap.label}</span>
+                                                            <p className={`mt-0.5 text-[10px] leading-relaxed ${isDark ? 'text-white/40' : 'text-slate-400'}`}>{cap.desc}</p>
+                                                        </div>
                                                     ))}
                                                 </div>
                                             </div>

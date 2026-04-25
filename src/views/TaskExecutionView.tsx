@@ -56,7 +56,7 @@ interface TaskExecutionViewProps {
   onCreateAction: () => void;
 }
 
-type MobileTab = 'mapa' | 'diario';
+type MobileTab = 'mapa' | 'diario' | 'copiloto';
 type DesktopPanel = 'plan' | 'copilot';
 
 const OPS_LAYOUT_KEY = 'hermes-ops-layout-v1';
@@ -947,6 +947,15 @@ export const TaskExecutionView = ({
   // ─── Columns visibility (mobile tabs) ────────────────────────
   const showMapa = mobileTab === 'mapa';
   const showDiario = mobileTab === 'diario';
+  const showCopiloto = mobileTab === 'copiloto';
+
+  // ─── Derived knowledge base from area_tematica ───────────────
+  const derivedKnowledgeBase = (() => {
+    const area = (currentTaskData.area_tematica || '').toUpperCase();
+    if (!area || area === 'GERAL' || area === 'NÃO CLASSIFICADA') return null;
+    const unit = unidades.find(u => u.nome.toUpperCase() === area);
+    return unit ? (knowledgeBases.find(b => b.sistema_id === unit.id) ?? null) : null;
+  })();
   const isPlanPanelCollapsed = isDesktopViewport && isPlanCollapsed;
   const isCopilotPanelCollapsed = isDesktopViewport && isCopilotCollapsed;
   const mapPanelDesktopWidth = isPlanPanelCollapsed ? PANEL_COLLAPSED_WIDTH : planPanelWidth;
@@ -1070,11 +1079,12 @@ export const TaskExecutionView = ({
           MOBILE TAB BAR
       ══════════════════════════════════════════════════════════ */}
       <nav className={`lg:hidden shrink-0 flex border-b ${isDark ? 'border-white/10 bg-black/20' : 'border-slate-200 bg-white/60'}`}>
-        {(['mapa', 'diario'] as MobileTab[]).map(tab => {
-          const labels: Record<MobileTab, string> = { mapa: 'Mapa', diario: 'Diário' };
+        {(['mapa', 'diario', 'copiloto'] as MobileTab[]).map(tab => {
+          const labels: Record<MobileTab, string> = { mapa: 'Mapa', diario: 'Diário', copiloto: 'Copiloto' };
           const icons: Record<MobileTab, React.ReactNode> = {
             mapa: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>,
             diario: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>,
+            copiloto: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>,
           };
           const active = mobileTab === tab;
           return (
@@ -1136,7 +1146,12 @@ export const TaskExecutionView = ({
             <p className={`${labelCls} mb-2`}>Área Temática</p>
             <select
               value={currentTaskData.area_tematica || 'NÃO CLASSIFICADA'}
-              onChange={e => onSave(task.id, { area_tematica: e.target.value as any })}
+              onChange={e => {
+                const newArea = e.target.value as any;
+                const unit = unidades.find(u => u.nome.toUpperCase() === (newArea || '').toUpperCase());
+                const baseId = unit ? (knowledgeBases.find(b => b.sistema_id === unit.id)?.id ?? undefined) : undefined;
+                onSave(task.id, { area_tematica: newArea, base_conhecimento: baseId });
+              }}
               style={{ colorScheme: isDark ? 'dark' : 'light' }}
               className={`w-full border-none p-0 text-xs font-black uppercase tracking-widest focus:ring-0 cursor-pointer ${isDark ? 'bg-slate-900 text-white' : 'bg-transparent text-slate-900'}`}
             >
@@ -1401,25 +1416,17 @@ export const TaskExecutionView = ({
             {showKnowledgePanel && (
               <div className="px-4 pb-4 space-y-4">
 
-                {/* Base RAG */}
+                {/* Base RAG — derivada automaticamente da Área Temática */}
                 <div>
                   <p className={`${labelCls} mb-1.5`}>Base de Conhecimento (RAG)</p>
-                  <select
-                    value={currentTaskData.base_conhecimento || ''}
-                    onChange={e => {
-                      onSave(task.id, { base_conhecimento: e.target.value || undefined });
-                      showToast('Base atualizada!', 'success');
-                    }}
-                    className={`w-full px-3 py-2 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 border transition-all appearance-none cursor-pointer ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-slate-100 text-slate-900'}`}
-                  >
-                    <option value="">Nenhuma base vinculada</option>
-                    {knowledgeBases.map(b => (
-                      <option key={b.id} value={b.id}>{b.emoji || '📚'} {b.nome}</option>
-                    ))}
-                  </select>
-                  {currentTaskData.base_conhecimento && (
-                    <p className={`text-[9px] mt-1 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
-                      ✓ Copiloto usa RAG desta base
+                  {derivedKnowledgeBase ? (
+                    <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold ${isDark ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+                      <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                      <span className="truncate">{derivedKnowledgeBase.emoji || '📚'} {derivedKnowledgeBase.nome}</span>
+                    </div>
+                  ) : (
+                    <p className={`text-[10px] px-1 ${isDark ? 'text-white/30' : 'text-slate-400'}`}>
+                      Sem base vinculada — defina a Área Temática acima.
                     </p>
                   )}
                 </div>
@@ -1531,8 +1538,8 @@ export const TaskExecutionView = ({
           renderCollapsedPanelRail('copilot', 'Copiloto', 'Hermes', () => setIsCopilotCollapsed(false))
         ) : (
           <div
-            className="hidden lg:flex min-h-0 shrink-0 flex-col"
-            style={{ width: copilotoDesktopWidth }}
+            className={`${showCopiloto ? 'flex' : 'hidden'} lg:flex min-h-0 shrink-0 flex-col`}
+            style={{ width: isDesktopViewport ? copilotoDesktopWidth : undefined }}
           >
             <HermesCopilotoDrawer
               isOpen

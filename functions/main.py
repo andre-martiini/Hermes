@@ -7432,6 +7432,41 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 print(f"[Copiloto] Erro ao editar plano: {_ee}")
                 return f"ERRO|{str(_ee)}"
 
+        def registrar_no_diario(
+            nota: str,
+            task_id_alvo: str = None,
+        ):
+            """
+            Registra uma entrada livre no diário de bordo de uma tarefa.
+            Use sempre que o usuário pedir para anotar, registrar ou logar algo no diário.
+            Parâmetros:
+            - nota: texto da entrada a registrar.
+            - task_id_alvo: ID da tarefa alvo (opcional). Se omitido, usa a tarefa da sessão ativa.
+              Quando não houver tarefa no contexto, informe o usuário e peça qual ação usar
+              ANTES de chamar esta função.
+            Retorna JSON com status e título da tarefa, ou 'ERRO|{detalhe}'.
+            """
+            try:
+                from datetime import datetime as _dt, timezone as _tz
+                alvo = (task_id_alvo or task_id or "").strip()
+                if not alvo:
+                    return "ERRO|Sem tarefa ativa. Informe o ID da tarefa onde registrar."
+                if not (nota or "").strip():
+                    return "ERRO|Nota vazia."
+                task_ref = db.collection('tarefas').document(alvo)
+                task_doc = task_ref.get()
+                if not task_doc.exists:
+                    return f"ERRO|Tarefa '{alvo}' não encontrada."
+                now_iso = _dt.now(_tz.utc).isoformat()
+                entry = {'data': now_iso, 'nota': nota.strip()}
+                task_ref.update({'acompanhamento': firestore.ArrayUnion([entry])})
+                titulo_tarefa = (task_doc.to_dict() or {}).get('titulo', alvo)
+                print(f"[Copiloto] Diário registrado na tarefa {alvo}.")
+                return json.dumps({"status": "ok", "task_id": alvo, "titulo": titulo_tarefa}, ensure_ascii=False)
+            except Exception as _err:
+                print(f"[Copiloto] Erro ao registrar no diário: {_err}")
+                return f"ERRO|{str(_err)}"
+
         def gerar_relatorio(
             titulo: str,
             tipo: str,
@@ -7993,6 +8028,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'criar_acao_no_sistema': criar_acao_no_sistema,
             'editar_plano_acao': editar_plano_acao,
             'preparar_edicao_acao': preparar_edicao_acao,
+            'registrar_no_diario': registrar_no_diario,
             'gerar_relatorio': gerar_relatorio,
             'gerar_rascunho_formulario': gerar_rascunho_formulario,
             'consultar_agenda': consultar_agenda,
@@ -8067,6 +8103,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'criar_acao_no_sistema': criar_acao_no_sistema,
             'editar_plano_acao': editar_plano_acao,
             'preparar_edicao_acao': preparar_edicao_acao,
+            'registrar_no_diario': registrar_no_diario,
             'gerar_relatorio': gerar_relatorio,
             'gerar_rascunho_formulario': gerar_rascunho_formulario,
             'consultar_agenda': consultar_agenda,
@@ -8096,6 +8133,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     criar_acao_no_sistema,
                     editar_plano_acao,
                     preparar_edicao_acao,
+                    registrar_no_diario,
                     gerar_relatorio,
                     gerar_rascunho_formulario,
                     consultar_agenda,

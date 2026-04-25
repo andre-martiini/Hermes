@@ -472,7 +472,6 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
               window.setTimeout(() => {
                 setFile(null);
                 setTranscription(null);
-                onClose();
               }, 450);
             }
           } catch (clipboardError) {
