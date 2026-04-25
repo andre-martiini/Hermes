@@ -6,7 +6,6 @@ except ImportError:
 
 from firebase_admin import firestore
 from firebase_functions import scheduler_fn, options
-from main import get_db, _send_telegram_message_raw
 
 # Usar um agendador às 3 da manhã para limpar as tarefas
 @scheduler_fn.on_schedule(
@@ -16,6 +15,7 @@ from main import get_db, _send_telegram_message_raw
     timeout_sec=120,
 )
 def daily_wip_reset_and_degradation(event: scheduler_fn.ScheduledEvent):
+    from main import get_db, _send_telegram_message_raw
     db = get_db()
     sp_tz = zoneinfo.ZoneInfo("America/Sao_Paulo")
     now_sp = datetime.datetime.now(sp_tz)
