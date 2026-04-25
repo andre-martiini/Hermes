@@ -8106,7 +8106,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             Retorna JSON string com payload de confirmação ou string de erro.
             """
             try:
-                _ALLOWED_FIELDS = {'titulo', 'descricao', 'data_limite', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas'}
+                _ALLOWED_FIELDS = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas'}
 
                 task_ref = db.collection('tarefas').document(task_id)
                 task_doc = task_ref.get()
@@ -8152,6 +8152,112 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             except Exception as _pe:
                 print(f"[Copiloto] Erro ao preparar edição: {_pe}")
                 return f"ERRO|{str(_pe)}"
+
+        def preparar_reagendamento_em_lote(
+            nova_data_inicio: str,
+            max_por_semana: int = 5,
+            estrategia: str = "data_criacao",
+            filtro_data: str = None,
+            task_ids: list = None,
+            justificativa: str = "",
+        ):
+            """
+            Prepara reagendamento em lote de ações para confirmação interativa do usuário.
+            NÃO realiza nenhuma mutação — retorna payload para card de confirmação visual.
+
+            Parâmetros:
+            - nova_data_inicio: YYYY-MM-DD — primeiro dia útil a partir do qual redistribuir as ações
+            - max_por_semana: máximo de ações alocadas por semana (padrão 5)
+            - estrategia: critério de ordenação das ações — "data_criacao" (padrão, mais antigas primeiro),
+              "tipo_acao" (fast antes de deep), "alfa" (ordem alfabética pelo título)
+            - filtro_data: YYYY-MM-DD — seleciona ações com data_limite igual a esta data (ex: hoje)
+            - task_ids: lista explícita de IDs (alternativa ao filtro_data)
+            - justificativa: frase curta explicando o motivo (gravada silenciosamente no diário de cada ação)
+
+            Retorna JSON string com payload de confirmação ou string de erro.
+            """
+            try:
+                from datetime import timedelta as _td
+
+                if not filtro_data and not task_ids:
+                    return "ERRO|Forneça filtro_data (YYYY-MM-DD) ou task_ids (lista de IDs)."
+
+                tasks = []
+                if task_ids:
+                    for tid in (task_ids or []):
+                        tdoc = db.collection('tarefas').document(str(tid)).get()
+                        if tdoc.exists:
+                            t = tdoc.to_dict()
+                            if t.get('status') not in ('concluído', 'cancelado'):
+                                tasks.append({'_doc_id': str(tid), **t})
+                else:
+                    q = db.collection('tarefas')\
+                        .where('data_limite', '==', filtro_data)\
+                        .where('status', 'in', ['em andamento', 'stand-by'])\
+                        .get()
+                    for qdoc in q:
+                        tasks.append({'_doc_id': qdoc.id, **qdoc.to_dict()})
+
+                if not tasks:
+                    return "ERRO|Nenhuma ação encontrada com os critérios informados."
+
+                if estrategia == 'tipo_acao':
+                    tasks.sort(key=lambda x: (0 if x.get('tipo_acao') == 'fast' else 1, x.get('data_criacao', '')))
+                elif estrategia == 'alfa':
+                    tasks.sort(key=lambda x: x.get('titulo', '').lower())
+                else:
+                    tasks.sort(key=lambda x: x.get('data_criacao', ''))
+
+                try:
+                    from datetime import date as _date
+                    start_date = datetime.strptime(nova_data_inicio, "%Y-%m-%d").date()
+                except ValueError:
+                    return f"ERRO|Formato de data inválido: '{nova_data_inicio}'. Use YYYY-MM-DD."
+
+                def _next_weekday(d):
+                    while d.weekday() >= 5:
+                        d += _td(days=1)
+                    return d
+
+                day_cursor = _next_weekday(start_date)
+                count_this_week = 0
+                items = []
+
+                for task in tasks:
+                    if count_this_week >= max_por_semana:
+                        days_to_monday = 7 - day_cursor.weekday()
+                        day_cursor += _td(days=days_to_monday)
+                        day_cursor = _next_weekday(day_cursor)
+                        count_this_week = 0
+
+                    items.append({
+                        'task_id': task['_doc_id'],
+                        'titulo': task.get('titulo', ''),
+                        'data_limite_original': task.get('data_limite', ''),
+                        'horario_inicio_original': task.get('horario_inicio'),
+                        'horario_fim_original': task.get('horario_fim'),
+                        'nova_data_limite': day_cursor.strftime("%Y-%m-%d"),
+                        'novo_horario_inicio': None,
+                        'novo_horario_fim': None,
+                    })
+
+                    count_this_week += 1
+                    day_cursor += _td(days=1)
+                    day_cursor = _next_weekday(day_cursor)
+
+                payload = {
+                    'items': items,
+                    'justificativa': justificativa or f"Reagendamento em lote para semana de {nova_data_inicio}.",
+                    'status': 'pending',
+                    'created_at': datetime.now(timezone.utc).isoformat(),
+                }
+
+                print(f"[Copiloto] Reagendamento em lote preparado: {len(items)} ações.")
+                return json.dumps(payload, ensure_ascii=False)
+
+            except Exception as _re:
+                print(f"[Copiloto] Erro em preparar_reagendamento_em_lote: {_re}")
+                return f"ERRO|{str(_re)}"
 
         # Configuração do Chat com ferramentas
         model_id = "gemini-3.1-pro-preview"
@@ -8324,8 +8430,31 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "A confirmação ocorre pelo clique no botão do card — não pelo chat de texto.\n"
             "Se o usuário disser 'confirmo' ou 'pode fazer' no chat, explique:\n"
             "  'A confirmação de segurança deve ser feita clicando no botão ✅ do card acima.'\n\n"
-            "CAMPOS SUPORTADOS: titulo, descricao, data_limite, status, tags, area_tematica, tipo_acao, notas.\n"
+            "CAMPOS SUPORTADOS: titulo, descricao, data_limite, data_inicio, horario_inicio, horario_fim, status, tags, area_tematica, tipo_acao, notas.\n"
             "Para alteração do plano de ação (passos), use o fluxo de EDIÇÃO DE PLANO DE AÇÃO acima.\n\n"
+            "## REAGENDAMENTO EM LOTE — REDISTRIBUIÇÃO DE AÇÕES (CRÍTICO)\n\n"
+            "Quando o usuário pedir para mover, reagendar ou redistribuir múltiplas ações de uma vez "
+            "(ex: 'mova as ações de hoje para a próxima semana', 'redistribua 5 por semana'), "
+            "siga OBRIGATORIAMENTE este protocolo:\n\n"
+            "ETAPA 0 — ENTENDIMENTO DOS CRITÉRIOS:\n"
+            "Identifique:\n"
+            "  a) Filtro de origem: data_limite = qual data? Ex: hoje → use a data atual no formato YYYY-MM-DD.\n"
+            "  b) Data de início do reagendamento: qual o primeiro dia útil alvo? Ex: 'próxima semana' → segunda-feira da próxima semana.\n"
+            "  c) Máximo por semana: quanto o usuário quer alocar por semana? Padrão: 5.\n"
+            "  d) Estratégia de ordenação: se não especificada, use 'data_criacao' (mais antigas primeiro).\n"
+            "Se qualquer parâmetro for ambíguo, esclareça com uma pergunta direta ANTES de chamar a ferramenta.\n\n"
+            "ETAPA 1 — PREPARAÇÃO:\n"
+            "Chame preparar_reagendamento_em_lote(nova_data_inicio, max_por_semana, estrategia, filtro_data, task_ids, justificativa).\n"
+            "Esta ferramenta NÃO muta o banco — apenas prepara o plano de redistribuição.\n\n"
+            "ETAPA 2 — AGUARDAR O CARD:\n"
+            "Após chamar preparar_reagendamento_em_lote com sucesso, sua resposta de texto DEVE ser APENAS:\n"
+            "  📅 Preparei o plano de reagendamento. Verifique o card abaixo e confirme ou cancele.\n"
+            "NÃO liste os reagendamentos no texto — eles já estão no card visual.\n"
+            "NÃO chame nenhuma outra ferramenta de escrita nesta mensagem.\n\n"
+            "ETAPA 3 — APÓS CONFIRMAÇÃO:\n"
+            "A confirmação ocorre pelo clique no botão do card — não pelo chat de texto.\n\n"
+            "PARÂMETRO justificativa: gere automaticamente uma frase concisa descrevendo o reagendamento "
+            "(ex: 'Reagendamento em lote das ações de 2026-04-25 para a semana de 2026-04-28.').\n\n"
             "## GERAÇÃO DE RELATÓRIOS — PROTOCOLO COLLECT-THEN-REPORT\n\n"
             "Quando o usuário solicitar um relatório, análise formal, resumo executivo ou documento consolidado:\n\n"
             "ETAPA 1 — COLETA DE CONTEXTO:\n"
@@ -8517,6 +8646,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'gerar_rascunho_formulario': gerar_rascunho_formulario,
             'consultar_agenda': consultar_agenda,
             'encontrar_slot_livre': encontrar_slot_livre,
+            'preparar_reagendamento_em_lote': preparar_reagendamento_em_lote,
         }
 
         # Cria função genérica de acionamento que o loop manual do Python irá ignorar
@@ -8592,6 +8722,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'gerar_rascunho_formulario': gerar_rascunho_formulario,
             'consultar_agenda': consultar_agenda,
             'encontrar_slot_livre': encontrar_slot_livre,
+            'preparar_reagendamento_em_lote': preparar_reagendamento_em_lote,
         }
         # Ferramentas internas que não devem aparecer para o usuário
         _HIDDEN_TOOLS = {'registrar_correcao_procedimento', 'resolver_conflito_memoria'}
@@ -8622,6 +8753,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     gerar_rascunho_formulario,
                     consultar_agenda,
                     encontrar_slot_livre,
+                    preparar_reagendamento_em_lote,
                 ] + dynamic_tools,
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
             ),
@@ -8971,6 +9103,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         # Loop manual de tool calling — intercepta cada chamada para rastrear ferramentas usadas
         tools_used: list[str] = []
         pending_edit_data = None
+        pending_batch_reschedule_data = None
         pending_memory_conflict = None
         report_data = None
         tool_invocation_data = None
@@ -9026,6 +9159,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     # Processamento síncrono de efeitos colaterais
                     if _fc.name == 'preparar_edicao_acao' and isinstance(result, str) and result.startswith('{'):
                         try: pending_edit_data = json.loads(result)
+                        except: pass
+                    if _fc.name == 'preparar_reagendamento_em_lote' and isinstance(result, str) and result.startswith('{'):
+                        try: pending_batch_reschedule_data = json.loads(result)
                         except: pass
                     if _fc.name == 'gerar_relatorio' and isinstance(result, str) and result.startswith('{'):
                         try:
@@ -9200,6 +9336,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "proposedForm": form_data if form_data else None,
                     "toolsUsed": tools_used if tools_used else None,
                     "pendingEdit": pending_edit_data,
+                    "pendingBatchReschedule": pending_batch_reschedule_data,
                     "pendingMemoryConflict": pending_memory_conflict,
                     "reportId": report_data.get('report_id') if report_data else None,
                     "timestamp": firestore.SERVER_TIMESTAMP
@@ -9314,7 +9451,7 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
             return {'status': 'invalidated', 'message': msg}
 
         # Aplica mudanças — somente campos whitelistados
-        _ALLOWED = {'titulo', 'descricao', 'data_limite', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas'}
+        _ALLOWED = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas'}
         updates = {}
         for campo, novo_valor in alteracoes.items():
             if campo not in _ALLOWED:
@@ -9353,6 +9490,92 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
         print(f"Erro em confirmarEdicaoAcao: {e}")
         try:
             _set_card_status(get_db(), 'error', str(e))
+        except Exception:
+            pass
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=str(e)
+        )
+
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=30
+)
+def confirmarReagendamentoEmLote(req: https_fn.CallableRequest):
+    """
+    Confirma e executa o reagendamento em lote de ações preparado pelo Copiloto Hermes.
+    Aplica as novas datas atomicamente via WriteBatch e registra no diário de cada ação.
+    """
+    data = req.data or {}
+    session_id = data.get('sessionId')
+    message_id = data.get('messageId')
+    items = data.get('items', [])
+    justificativa = data.get('justificativa', 'Reagendamento em lote via Copiloto Hermes.')
+
+    if not items:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="items é obrigatório e não pode ser vazio."
+        )
+
+    def _set_batch_card_status(db_ref, status, error_msg=None):
+        if not session_id or not message_id:
+            return
+        try:
+            update_payload = {'pendingBatchReschedule.status': status}
+            if error_msg:
+                update_payload['pendingBatchReschedule.errorMessage'] = error_msg
+            db_ref.collection('sessoes_copiloto').document(session_id)\
+                .collection('mensagens').document(message_id)\
+                .update(update_payload)
+        except Exception as _ue:
+            print(f"[confirmarReagendamentoEmLote] Falha ao atualizar card: {_ue}")
+
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+
+        db_ref = get_db()
+        batch = db_ref.batch()
+        now_iso = _dt.now(_tz.utc).isoformat()
+        diary_entry = {
+            'data': now_iso,
+            'nota': f"[Copiloto Hermes] {justificativa}"
+        }
+
+        count = 0
+        for item in items:
+            task_id = item.get('task_id')
+            if not task_id:
+                continue
+
+            updates = {'data_atualizacao': now_iso}
+            if item.get('nova_data_limite'):
+                updates['data_limite'] = item['nova_data_limite']
+            if item.get('novo_horario_inicio') is not None:
+                updates['horario_inicio'] = item['novo_horario_inicio']
+            if item.get('novo_horario_fim') is not None:
+                updates['horario_fim'] = item['novo_horario_fim']
+
+            task_ref = db_ref.collection('tarefas').document(task_id)
+            batch.update(task_ref, {
+                **updates,
+                'acompanhamento': firestore.ArrayUnion([diary_entry])
+            })
+            count += 1
+
+        batch.commit()
+        _set_batch_card_status(db_ref, 'completed')
+        print(f"[confirmarReagendamentoEmLote] {count} ações reagendadas.")
+        return {'status': 'completed', 'count': count}
+
+    except https_fn.HttpsError:
+        raise
+    except Exception as e:
+        print(f"Erro em confirmarReagendamentoEmLote: {e}")
+        try:
+            _set_batch_card_status(get_db(), 'error', str(e))
         except Exception:
             pass
         raise https_fn.HttpsError(

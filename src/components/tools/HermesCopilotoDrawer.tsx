@@ -99,6 +99,25 @@ interface PendingEdit {
     errorMessage?: string;
 }
 
+interface BatchRescheduleItem {
+    task_id: string;
+    titulo: string;
+    data_limite_original: string;
+    horario_inicio_original: string | null;
+    horario_fim_original: string | null;
+    nova_data_limite: string;
+    novo_horario_inicio: string | null;
+    novo_horario_fim: string | null;
+}
+
+interface PendingBatchReschedule {
+    items: BatchRescheduleItem[];
+    justificativa: string;
+    status: 'pending' | 'completed' | 'cancelled' | 'error';
+    errorMessage?: string;
+    created_at: string;
+}
+
 interface PendingMemoryConflict {
     memory_id: string;
     categoria_existente?: string;
@@ -144,6 +163,7 @@ interface Message {
     type?: 'text' | 'plan_proposal';
     toolsUsed?: string[];
     pendingEdit?: PendingEdit;
+    pendingBatchReschedule?: PendingBatchReschedule;
     pendingMemoryConflict?: PendingMemoryConflict;
     reportId?: string;
 }
@@ -162,6 +182,7 @@ const TOOL_LABELS: Record<string, string> = {
     criar_acao_no_sistema: 'Criando Ação',
     editar_plano_acao: 'Ajustando Plano...',
     preparar_edicao_acao: 'Preparando Edição',
+    preparar_reagendamento_em_lote: 'Planejando Reagendamento',
     gerar_relatorio: 'Gerando Relatório',
     registrar_no_diario: 'Registrado no Diário',
     buscar_e_analisar_email: 'Email Analisado',
@@ -174,6 +195,9 @@ const FIELD_LABELS: Record<string, string> = {
     titulo: 'Título',
     descricao: 'Descrição',
     data_limite: 'Prazo',
+    data_inicio: 'Data Início',
+    horario_inicio: 'Horário Início',
+    horario_fim: 'Horário Fim',
     status: 'Status',
     tags: 'Tags',
     area_tematica: 'Área Temática',
@@ -916,6 +940,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
     // Estado para rastrear qual card de edição está em processamento
     const [loadingEditId, setLoadingEditId] = useState<string | null>(null);
+    const [loadingBatchRescheduleId, setLoadingBatchRescheduleId] = useState<string | null>(null);
     const [loadingMemoryConflictId, setLoadingMemoryConflictId] = useState<string | null>(null);
 
     const handleConfirmEdit = async (messageId: string, pendingEdit: PendingEdit) => {
@@ -958,6 +983,37 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             console.error('[EditCard] Erro ao cancelar edição:', err);
         } finally {
             setLoadingEditId(null);
+        }
+    };
+
+    const handleConfirmBatchReschedule = async (messageId: string, batchReschedule: PendingBatchReschedule) => {
+        if (!currentSessionId || loadingBatchRescheduleId) return;
+        setLoadingBatchRescheduleId(messageId);
+        try {
+            const fn = httpsCallable(functions, 'confirmarReagendamentoEmLote');
+            await fn({
+                sessionId: currentSessionId,
+                messageId,
+                items: batchReschedule.items,
+                justificativa: batchReschedule.justificativa,
+            });
+        } catch (err: any) {
+            console.error('[BatchReschedule] Erro ao confirmar reagendamento:', err);
+        } finally {
+            setLoadingBatchRescheduleId(null);
+        }
+    };
+
+    const handleCancelBatchReschedule = async (messageId: string) => {
+        if (!currentSessionId || loadingBatchRescheduleId) return;
+        setLoadingBatchRescheduleId(messageId);
+        try {
+            const msgRef = doc(db, 'sessoes_copiloto', currentSessionId, 'mensagens', messageId);
+            await updateDoc(msgRef, { 'pendingBatchReschedule.status': 'cancelled' });
+        } catch (err) {
+            console.error('[BatchReschedule] Erro ao cancelar reagendamento:', err);
+        } finally {
+            setLoadingBatchRescheduleId(null);
         }
     };
 
@@ -1859,6 +1915,101 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                     </button>
                                                     <button
                                                         onClick={() => handleCancelEdit(mid)}
+                                                        disabled={isProcessing}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-slate-400 border border-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                    >
+                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                        Cancelar
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {/* Card de confirmação de reagendamento em lote */}
+                                    {msg.pendingBatchReschedule && msg.id && (() => {
+                                        const br = msg.pendingBatchReschedule!;
+                                        const mid = msg.id!;
+                                        const isProcessing = loadingBatchRescheduleId === mid;
+
+                                        if (br.status === 'completed') {
+                                            return (
+                                                <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700 flex items-center gap-1.5 mb-2">
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                        {br.items.length} ações reagendadas
+                                                    </p>
+                                                    <div className="space-y-1 mt-1">
+                                                        {br.items.map(item => (
+                                                            <div key={item.task_id} className="text-[9px] text-emerald-600 flex gap-1 flex-wrap">
+                                                                <span className="font-semibold truncate max-w-[140px]">{item.titulo}</span>
+                                                                <span className="opacity-60 line-through">{item.data_limite_original || '—'}</span>
+                                                                <span>→</span>
+                                                                <span className="font-black">{item.nova_data_limite}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            );
+                                        }
+
+                                        if (br.status === 'error') {
+                                            return (
+                                                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl">
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-red-600 flex items-center gap-1.5 mb-1">
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                                                        Erro no reagendamento
+                                                    </p>
+                                                    <p className="text-[10px] text-red-600">{br.errorMessage ?? 'Operação indisponível.'}</p>
+                                                </div>
+                                            );
+                                        }
+
+                                        if (br.status === 'cancelled') {
+                                            return (
+                                                <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                        Reagendamento cancelado
+                                                    </p>
+                                                </div>
+                                            );
+                                        }
+
+                                        // status === 'pending'
+                                        return (
+                                            <div className="mt-3 p-3 bg-white border border-blue-200 rounded-xl shadow-sm">
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-blue-700 flex items-center gap-1.5 mb-1">
+                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                                    Reagendamento em lote — {br.items.length} ações
+                                                </p>
+                                                <p className="text-[9px] text-slate-500 mb-2 italic">{br.justificativa}</p>
+                                                <div className="space-y-1 mb-3 max-h-48 overflow-y-auto pr-1">
+                                                    {br.items.map((item, idx) => (
+                                                        <div key={item.task_id} className="grid grid-cols-[16px_1fr_72px_8px_72px] gap-1 items-center text-[9px]">
+                                                            <span className="text-slate-300 font-mono">{idx + 1}.</span>
+                                                            <span className="text-slate-600 font-semibold truncate">{item.titulo}</span>
+                                                            <span className="text-slate-400 line-through text-right">{item.data_limite_original || '—'}</span>
+                                                            <span className="text-slate-300">→</span>
+                                                            <span className="text-blue-700 font-black">{item.nova_data_limite}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <div className="flex gap-2 pt-2 border-t border-blue-100">
+                                                    <button
+                                                        onClick={() => handleConfirmBatchReschedule(mid, br)}
+                                                        disabled={isProcessing}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                    >
+                                                        {isProcessing ? (
+                                                            <span className="w-2.5 h-2.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                                        ) : (
+                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                        )}
+                                                        Confirmar tudo
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleCancelBatchReschedule(mid)}
                                                         disabled={isProcessing}
                                                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-slate-400 border border-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
                                                     >

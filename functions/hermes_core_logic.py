@@ -2202,6 +2202,108 @@ def _process_telegram_message(db, data: dict):
         except Exception as e:
             return f"ERRO|{e}"
 
+    def reagendar_acoes_em_lote(
+        nova_data_inicio: str,
+        max_por_semana: int = 5,
+        estrategia: str = "data_criacao",
+        filtro_data: str = None,
+        task_ids: list = None,
+        justificativa: str = "",
+    ):
+        """
+        Reagenda múltiplas ações de uma vez, redistribuindo-as a partir de uma data de início.
+        Executa imediatamente após confirmação do usuário.
+
+        Parâmetros:
+        - nova_data_inicio: YYYY-MM-DD — primeiro dia útil a partir do qual distribuir as ações
+        - max_por_semana: máximo de ações por semana (padrão 5)
+        - estrategia: "data_criacao" (padrão) | "tipo_acao" (fast primeiro) | "alfa" (alfabética)
+        - filtro_data: YYYY-MM-DD — seleciona ações com data_limite igual a essa data
+        - task_ids: lista explícita de IDs de tarefas (alternativa ao filtro_data)
+        - justificativa: motivo gravado no diário de cada ação reagendada
+
+        Retorna resumo textual com as ações reagendadas ou mensagem de erro.
+        """
+        try:
+            from datetime import timedelta as _td
+
+            if not filtro_data and not task_ids:
+                return "ERRO|Forneça filtro_data (YYYY-MM-DD) ou task_ids."
+
+            tasks = []
+            if task_ids:
+                for tid in (task_ids or []):
+                    tdoc = db.collection('tarefas').document(str(tid)).get()
+                    if tdoc.exists:
+                        t = tdoc.to_dict()
+                        if t.get('status') not in ('concluído', 'cancelado'):
+                            tasks.append({'_id': str(tid), **t})
+            else:
+                q = db.collection('tarefas')\
+                    .where('data_limite', '==', filtro_data)\
+                    .where('status', 'in', ['em andamento', 'stand-by'])\
+                    .get()
+                for qdoc in q:
+                    tasks.append({'_id': qdoc.id, **qdoc.to_dict()})
+
+            if not tasks:
+                return "Nenhuma ação encontrada com os critérios informados."
+
+            if estrategia == 'tipo_acao':
+                tasks.sort(key=lambda x: (0 if x.get('tipo_acao') == 'fast' else 1, x.get('data_criacao', '')))
+            elif estrategia == 'alfa':
+                tasks.sort(key=lambda x: x.get('titulo', '').lower())
+            else:
+                tasks.sort(key=lambda x: x.get('data_criacao', ''))
+
+            try:
+                start_date = datetime.strptime(nova_data_inicio, "%Y-%m-%d").date()
+            except ValueError:
+                return f"ERRO|Formato de data inválido: '{nova_data_inicio}'. Use YYYY-MM-DD."
+
+            def _next_weekday(d):
+                while d.weekday() >= 5:
+                    d += _td(days=1)
+                return d
+
+            day_cursor = _next_weekday(start_date)
+
+            batch = db.batch()
+            now_iso = datetime.now(timezone.utc).isoformat()
+            diary_entry = {
+                'data': now_iso,
+                'nota': f"[Copiloto Hermes] {justificativa or 'Reagendamento em lote.'}"
+            }
+
+            count_this_week = 0
+            updated_lines = []
+
+            for task in tasks:
+                if count_this_week >= max_por_semana:
+                    days_to_monday = 7 - day_cursor.weekday()
+                    day_cursor += _td(days=days_to_monday)
+                    day_cursor = _next_weekday(day_cursor)
+                    count_this_week = 0
+
+                nova_data_str = day_cursor.strftime("%Y-%m-%d")
+                task_ref = db.collection('tarefas').document(task['_id'])
+                batch.update(task_ref, {
+                    'data_limite': nova_data_str,
+                    'data_atualizacao': now_iso,
+                    'acompanhamento': firestore.ArrayUnion([diary_entry]),
+                })
+                updated_lines.append(f"• [{task.get('titulo', task['_id'])}](task:{task['_id']}) → {nova_data_str}")
+
+                count_this_week += 1
+                day_cursor += _td(days=1)
+                day_cursor = _next_weekday(day_cursor)
+
+            batch.commit()
+            return f"✅ {len(updated_lines)} ações reagendadas:\n" + "\n".join(updated_lines)
+
+        except Exception as _e:
+            return f"ERRO|{_e}"
+
     def salvar_memoria_global(fato: str, categoria: str):
         """Persiste fato durável na memória global do Hermes. Apenas para regras estáveis e preferências permanentes."""
         try:
@@ -2260,6 +2362,7 @@ def _process_telegram_message(db, data: dict):
         consultar_agenda,
         encontrar_slot_livre,
         criar_acao_no_sistema,
+        reagendar_acoes_em_lote,
         salvar_memoria_global,
         registrar_correcao_procedimento,
         buscar_e_analisar_email,
