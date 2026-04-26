@@ -830,19 +830,24 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         window.setTimeout(() => setDiagnosisCopyDone(false), 2000);
     };
 
-    const handleCopyChatMessage = async (messageKey: string, content: string) => {
-        try {
-            await navigator.clipboard.writeText(content);
-        } catch {
-            const el = document.createElement('textarea');
-            el.value = content;
-            document.body.appendChild(el);
-            el.select();
-            document.execCommand('copy');
-            document.body.removeChild(el);
-        }
+    const handleCopyChatMessage = (messageKey: string, content: string) => {
+        navigator.clipboard.writeText(content);
         setCopiedMessageKey(messageKey);
-        window.setTimeout(() => setCopiedMessageKey((current) => current === messageKey ? null : current), 1600);
+        setTimeout(() => setCopiedMessageKey(null), 2000);
+    };
+
+    const handleDeleteMessage = async (messageId?: string) => {
+        if (!currentSessionId || !messageId) return;
+
+        // Confirmação simples via browser (opcional, mas seguro)
+        if (!window.confirm("Deseja apagar esta mensagem do histórico?")) return;
+
+        try {
+            await deleteDoc(doc(db, 'sessoes_copiloto', currentSessionId, 'mensagens', messageId));
+        } catch (err) {
+            console.error('[Copiloto] Erro ao excluir mensagem:', err);
+            setFooterError('Erro ao excluir mensagem do histórico.');
+        }
     };
 
     const formatMessageTimestamp = (timestamp: any) => {
@@ -1628,19 +1633,28 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             ? 'bg-slate-800 text-slate-100 border border-slate-700 rounded-bl-none'
                                             : 'bg-slate-100 text-slate-700 rounded-bl-none'
                                         }`}>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleCopyChatMessage(messageKey, msg.content || '')}
-                                            className={`absolute right-2 top-2 rounded-md p-1 opacity-0 transition-all group-hover:opacity-100 hover:scale-105 ${isDark ? 'bg-black/20 text-white/60 hover:text-white hover:bg-black/30' : 'bg-white/70 text-slate-400 hover:text-slate-700 hover:bg-white'}`}
-                                            title={copiedMessageKey === messageKey ? 'Copiado!' : 'Copiar mensagem'}
-                                            aria-label={copiedMessageKey === messageKey ? 'Mensagem copiada' : 'Copiar mensagem'}
-                                        >
-                                            {copiedMessageKey === messageKey ? (
-                                                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
-                                            ) : (
-                                                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V5a2 2 0 012-2h7a2 2 0 012 2v7a2 2 0 01-2 2h-2m-1 4H7a2 2 0 01-2-2V9a2 2 0 012-2h7a2 2 0 012 2v7a2 2 0 01-2 2z" /></svg>
-                                            )}
-                                        </button>
+                                        <div className={`absolute right-2 top-2 flex gap-1 opacity-0 transition-all group-hover:opacity-100`}>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleCopyChatMessage(messageKey, msg.content || '')}
+                                                className={`rounded-md p-1 transition-all ${isDark ? 'bg-black/20 text-white/60 hover:text-white hover:bg-black/30' : 'bg-white/70 text-slate-400 hover:text-slate-700 hover:bg-white'}`}
+                                                title={copiedMessageKey === messageKey ? 'Copiado!' : 'Copiar mensagem'}
+                                            >
+                                                {copiedMessageKey === messageKey ? (
+                                                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                                                ) : (
+                                                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V5a2 2 0 012-2h7a2 2 0 012 2v7a2 2 0 01-2 2h-2m-1 4H7a2 2 0 01-2-2V9a2 2 0 012-2h7a2 2 0 012 2v7a2 2 0 01-2 2z" /></svg>
+                                                )}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleDeleteMessage(msg.id)}
+                                                className={`rounded-md p-1 transition-all ${isDark ? 'bg-black/20 text-red-400/60 hover:text-red-400 hover:bg-black/30' : 'bg-white/70 text-red-400 hover:text-red-600 hover:bg-white'}`}
+                                                title="Excluir mensagem"
+                                            >
+                                                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16" /></svg>
+                                            </button>
+                                        </div>
                                         {msg.toolsUsed && msg.toolsUsed.length > 0 && (
                                             <div className="mb-2.5">
                                                 <div className={`mb-1 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
@@ -2351,6 +2365,17 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             </span>
                                         )}
                                     </div>
+                                    <button
+                                        onClick={() => {
+                                            setIsLoading(false);
+                                            setUploadPhase('idle');
+                                            setProgressWidth(0);
+                                        }}
+                                        className="mt-1 self-start px-2.5 py-1 rounded-lg bg-white/50 hover:bg-white text-[9px] font-black uppercase tracking-widest text-slate-400 hover:text-red-500 transition-all flex items-center gap-1 shadow-sm"
+                                    >
+                                        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                        Cancelar
+                                    </button>
                                     {/* Barra de progresso — visível apenas nas fases de upload/processamento */}
                                     {uploadPhase !== 'idle' && (
                                         <div className="w-48 h-1 bg-slate-200 rounded-full overflow-hidden">

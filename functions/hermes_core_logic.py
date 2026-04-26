@@ -222,6 +222,22 @@ def _send_telegram_session_message(
             final_text = f"<b>[Contexto: {acao_titulo}]</b>\n\n{final_text}"
         final_keyboard = _merge_inline_keyboards(final_keyboard, _EXIT_KEYBOARD)
 
+    # --- Medidor de Contexto ---
+    ctx = session.get("contexto_ativo", "geral")
+    hist_key = "history_acao" if ctx == "acao" else "history"
+    raw_history = session.get(hist_key, [])
+    # _MAX_HISTORY_TURNS * 2 é o limite de itens (user+model)
+    turns = len(raw_history) // 2
+    
+    if turns >= (_MAX_HISTORY_TURNS * 0.75):  # Começa a avisar a partir de 75% (15 turnos)
+        meter_icon = "🔴" if turns >= _MAX_HISTORY_TURNS else "🟡"
+        warning = f"\n\n{meter_icon} <b>Contexto: {turns}/{_MAX_HISTORY_TURNS} turnos</b>"
+        if turns >= _MAX_HISTORY_TURNS:
+            warning += " (Limite atingido, mensagens antigas serão esquecidas. Use /limpar se necessário)."
+        # Evita duplicar se já houver o aviso (importante para redifusões ou mensagens de sistema)
+        if warning.strip() not in final_text:
+            final_text += warning
+
     if final_keyboard:
         return _send_telegram_message_with_keyboard(token, chat_id, final_text, final_keyboard, parse_mode=parse_mode)
     return _send_telegram_message(token, chat_id, final_text, parse_mode=parse_mode)
