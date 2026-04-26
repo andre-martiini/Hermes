@@ -11,10 +11,56 @@ import { NotificationCenter } from '../components/ui/UIComponents';
 import { db, functions } from '../../firebase';
 import { httpsCallable } from 'firebase/functions';
 import { getAuth } from 'firebase/auth';
-import { setDoc, doc, onSnapshot } from 'firebase/firestore';
+import { setDoc, doc, onSnapshot, addDoc, collection, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { DiarioBordoUI } from './DiarioBordoUI';
 import { SpeedDialMenu } from '../components/ui/SpeedDialMenu';
 import { HermesCopilotoDrawer } from '../components/tools/HermesCopilotoDrawer';
+
+const DocumentViewer = ({ file, onClose, isDark }: {
+  file: { url: string; nome: string; tipo: 'link' | 'file' | 'image' };
+  onClose: () => void;
+  isDark: boolean;
+}) => {
+  const isGoogleDrive = file.url.includes('drive.google.com');
+
+  let finalUrl = file.url;
+  if (isGoogleDrive) {
+    const match = file.url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if (match && match[1]) {
+      finalUrl = `https://drive.google.com/file/d/${match[1]}/preview`;
+    }
+  }
+
+  return (
+    <div className={`flex flex-col flex-1 h-full overflow-hidden rounded-2xl border ${isDark ? 'bg-[#0f1724] border-white/10' : 'bg-white border-slate-200'}`}>
+      <div className={`shrink-0 px-6 py-4 flex items-center justify-between border-b ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+        <div className="flex items-center gap-3">
+          <button onClick={onClose} className={`p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10 text-white/50' : 'hover:bg-slate-100 text-slate-400'}`}>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
+          </button>
+          <div>
+            <h3 className={`text-sm font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>{file.nome}</h3>
+            <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? 'text-white/40' : 'text-slate-400'}`}>Modo de Foco</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <a href={file.url} target="_blank" rel="noreferrer" className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-white/5 text-white/70 hover:bg-white/10' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+            Abrir Original
+          </a>
+        </div>
+      </div>
+      <div className="flex-1 bg-black/5 relative">
+        {file.tipo === 'image' ? (
+          <div className="w-full h-full flex items-center justify-center p-8">
+            <img src={file.url} alt={file.nome} className="max-w-full max-h-full object-contain rounded-lg shadow-2xl transition-all hover:scale-[1.01]" />
+          </div>
+        ) : (
+          <iframe src={finalUrl} className="w-full h-full border-none" title={file.nome} />
+        )}
+      </div>
+    </div>
+  );
+};
 
 const getPendingFileKey = (file: File) => `${file.name}-${file.size}-${file.lastModified}`;
 
@@ -124,15 +170,42 @@ export const TaskExecutionView = ({
   // ─── States ───────────────────────────────────────────────────
   const [mobileTab, setMobileTab] = useState<MobileTab>('diario');
   const [desktopViewportWidth, setDesktopViewportWidth] = useState(() => window.innerWidth);
+  const isDesktopViewport = desktopViewportWidth >= 1024;
   const [planPanelWidth, setPlanPanelWidth] = useState(PLAN_PANEL_DEFAULT_WIDTH);
   const [copilotPanelWidth, setCopilotPanelWidth] = useState(COPILOT_PANEL_DEFAULT_WIDTH);
   const [isPlanCollapsed, setIsPlanCollapsed] = useState(false);
   const [isCopilotCollapsed, setIsCopilotCollapsed] = useState(false);
+  const [focusedFile, setFocusedFile] = useState<{ url: string; nome: string; tipo: 'link' | 'file' | 'image'; driveFileId?: string } | null>(null);
+  const [tempSessionId, setTempSessionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (focusedFile && isDesktopViewport && !tempSessionId) {
+      setIsCopilotCollapsed(false);
+
+      const createTempSession = async () => {
+        try {
+          const sessRef = await addDoc(collection(db, 'sessoes_copiloto'), {
+            title: `[ANÁLISE] ${focusedFile.nome}`,
+            userId: copilotoUserId,
+            taskId: task.id,
+            systemId: currentTaskData.sistema || null,
+            isTemporary: true,
+            createdAt: serverTimestamp(),
+            lastMessageAt: serverTimestamp()
+          });
+          setTempSessionId(sessRef.id);
+        } catch (err) {
+          console.error("Erro ao criar sessão temporária:", err);
+        }
+      };
+      createTempSession();
+    }
+  }, [focusedFile, isDesktopViewport, tempSessionId, copilotoUserId, task.id, currentTaskData.sistema]);
   const [newFollowUp, setNewFollowUp] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [showPool, setShowPool] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null!);
 
   // Chat & Artifacts
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(currentTaskData.chat_history || []);
@@ -146,7 +219,7 @@ export const TaskExecutionView = ({
   const [showArtifacts, setShowArtifacts] = useState(false);
   const [copiedArtifactId, setCopiedArtifactId] = useState<string | null>(null);
   const [isChatFocused, setIsChatFocused] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null!);
 
   useEffect(() => {
     if (!pendingDeepResearchId) return;
@@ -162,23 +235,23 @@ export const TaskExecutionView = ({
       if (docSnap.exists()) {
         const data = docSnap.data();
         if (data.status === 'COMPLETED' || data.status === 'FAILED' || data.status === 'CANCELLED') {
-           setIsDeepResearching(false);
-           if (data.status === 'COMPLETED') {
-             showToast('Pesquisa Profunda concluída! Verifique o acervo global.', 'success');
-           } else if (data.status === 'CANCELLED') {
-             showToast('Pesquisa Profunda cancelada.', 'info');
-           } else {
-             showToast('Pesquisa Profunda falhou.', 'error');
-           }
-           setPendingDeepResearchId(null);
-           clearTimeout(fallbackTimer);
+          setIsDeepResearching(false);
+          if (data.status === 'COMPLETED') {
+            showToast('Pesquisa Profunda concluída! Verifique o acervo global.', 'success');
+          } else if (data.status === 'CANCELLED') {
+            showToast('Pesquisa Profunda cancelada.', 'info');
+          } else {
+            showToast('Pesquisa Profunda falhou.', 'error');
+          }
+          setPendingDeepResearchId(null);
+          clearTimeout(fallbackTimer);
         }
       }
     });
 
     return () => {
-       unsub();
-       clearTimeout(fallbackTimer);
+      unsub();
+      clearTimeout(fallbackTimer);
     };
   }, [pendingDeepResearchId, showToast]);
 
@@ -235,7 +308,7 @@ export const TaskExecutionView = ({
     }, 8000);
 
     return () => { if (insightDebounceRef.current) clearTimeout(insightDebounceRef.current); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [insightDiarioSignature, insightPlanoSignature, newFollowUp]);
 
   // Inline editing
@@ -306,7 +379,6 @@ export const TaskExecutionView = ({
   const workspaceRef = useRef<HTMLDivElement>(null);
 
   const isBreakActive = false;
-  const isDesktopViewport = desktopViewportWidth >= DESKTOP_BREAKPOINT;
 
   const progressPercent = useMemo(() => {
     const items = currentTaskData.plano_acao || [];
@@ -853,16 +925,16 @@ export const TaskExecutionView = ({
       const parts = msg.split(' ');
       const idToCancel = parts.length > 1 ? parts[1] : pendingDeepResearchId;
       if (!idToCancel) {
-         showToast('Nenhuma pesquisa em andamento ou ID inválido.', 'warning');
-         return;
+        showToast('Nenhuma pesquisa em andamento ou ID inválido.', 'warning');
+        return;
       }
       try {
-         const fn = httpsCallable(functions, 'cancelDeepResearch');
-         await fn({ taskId: idToCancel });
-         showToast('Solicitação de cancelamento enviada.', 'success');
+        const fn = httpsCallable(functions, 'cancelDeepResearch');
+        await fn({ taskId: idToCancel });
+        showToast('Solicitação de cancelamento enviada.', 'success');
       } catch (e) {
-         console.error('Erro ao cancelar:', e);
-         showToast('Erro ao cancelar pesquisa.', 'error');
+        console.error('Erro ao cancelar:', e);
+        showToast('Erro ao cancelar pesquisa.', 'error');
       }
       return;
     }
@@ -1171,53 +1243,53 @@ export const TaskExecutionView = ({
           {/* Back */}
           <div className="flex items-start justify-between gap-4">
 
-          {/* Label + Title */}
-          <div className="order-3 sm:order-2 flex-1 min-w-0 w-full sm:w-auto">
-            <p className={`text-[8px] font-black uppercase tracking-[0.3em] ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>Sala de Operações</p>
-            <h1 className={`text-base md:text-xl font-black tracking-tight leading-tight break-words whitespace-normal ${isDark ? 'text-white' : 'text-slate-900'}`}>
-              {currentTaskData.titulo}
-            </h1>
-          </div>
+            {/* Label + Title */}
+            <div className="order-3 sm:order-2 flex-1 min-w-0 w-full sm:w-auto">
+              <p className={`text-[8px] font-black uppercase tracking-[0.3em] ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>Sala de Operações</p>
+              <h1 className={`text-base md:text-xl font-black tracking-tight leading-tight break-words whitespace-normal ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                {currentTaskData.titulo}
+              </h1>
+            </div>
 
-          <div className="order-2 sm:order-3 shrink-0 flex items-center gap-2">
-            <SpeedDialMenu
-              notifications={notifications}
-              isSyncing={isSyncing}
-              isNotificationCenterOpen={isNotificationCenterOpen}
-              onOpenNotes={onOpenNotes}
-              onOpenLog={onOpenLog}
-              onOpenCopiloto={() => {
-                if (isDesktopViewport) {
-                  setIsCopilotCollapsed(false);
-                  return;
-                }
-                onOpenCopiloto();
-              }}
-              onOpenShopping={onOpenShopping}
-              onOpenTranscription={onOpenTranscription}
-              onOpenMeetingTranscription={onOpenMeetingTranscription}
-              onToggleNotifications={onToggleNotifications}
-              onSync={onSync}
-              onOpenSettings={onOpenSettings}
-              onCloseNotifications={onCloseNotifications}
-              onMarkAsRead={onMarkAsRead}
-              onDismiss={onDismiss}
-              onCreateAction={onCreateAction}
-              direction="down"
-            />
-            {/* Status inline selector */}
-            <select
-              value={currentTaskData.status}
-              onChange={e => handleStatusChange(e.target.value)}
-              className={`shrink-0 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl border appearance-none cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 transition-all ${statusColor(currentTaskData.status)} ${isDark ? 'bg-transparent' : 'bg-white'}`}
-            >
-              <option value="em andamento">Em Andamento</option>
-              <option value="stand-by">Stand-by</option>
-              <option value="conclu?do">Conclu?do</option>
-            </select>
-          </div>
+            <div className="order-2 sm:order-3 shrink-0 flex items-center gap-2">
+              <SpeedDialMenu
+                notifications={notifications}
+                isSyncing={isSyncing}
+                isNotificationCenterOpen={isNotificationCenterOpen}
+                onOpenNotes={onOpenNotes}
+                onOpenLog={onOpenLog}
+                onOpenCopiloto={() => {
+                  if (isDesktopViewport) {
+                    setIsCopilotCollapsed(false);
+                    return;
+                  }
+                  onOpenCopiloto();
+                }}
+                onOpenShopping={onOpenShopping}
+                onOpenTranscription={onOpenTranscription}
+                onOpenMeetingTranscription={onOpenMeetingTranscription}
+                onToggleNotifications={onToggleNotifications}
+                onSync={onSync}
+                onOpenSettings={onOpenSettings}
+                onCloseNotifications={onCloseNotifications}
+                onMarkAsRead={onMarkAsRead}
+                onDismiss={onDismiss}
+                onCreateAction={onCreateAction}
+                direction="down"
+              />
+              {/* Status inline selector */}
+              <select
+                value={currentTaskData.status}
+                onChange={e => handleStatusChange(e.target.value)}
+                className={`shrink-0 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl border appearance-none cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 transition-all ${statusColor(currentTaskData.status)} ${isDark ? 'bg-transparent' : 'bg-white'}`}
+              >
+                <option value="em andamento">Em Andamento</option>
+                <option value="stand-by">Stand-by</option>
+                <option value="conclu?do">Conclu?do</option>
+              </select>
+            </div>
 
-        </div>
+          </div>
         </div>
 
         <div className="sm:hidden flex flex-col gap-2 py-0.5">
@@ -1387,520 +1459,543 @@ export const TaskExecutionView = ({
       {/* ══════════════════════════════════════════════════════════
           MAIN CONTENT — 3-column desktop / single tab mobile
       ══════════════════════════════════════════════════════════ */}
-      <div ref={workspaceRef} className="flex-1 min-h-0 flex flex-col gap-0 overflow-hidden lg:flex-row lg:gap-0 lg:p-4">
+      <div ref={workspaceRef} className={`flex-1 min-h-0 flex flex-col gap-0 overflow-hidden lg:flex-row lg:gap-0 ${focusedFile && isDesktopViewport ? 'p-0' : 'lg:p-4'}`}>
 
-        {/* LEFT COLUMN — Mapa Operacional */}
-        {isPlanPanelCollapsed ? (
-          renderCollapsedPanelRail('plan', 'Plano', 'Sala de Operações', () => setIsPlanCollapsed(false))
+        {focusedFile && isDesktopViewport ? (
+          <DocumentViewer
+            file={focusedFile}
+            onClose={async () => {
+              if (tempSessionId) {
+                await deleteDoc(doc(db, 'sessoes_copiloto', tempSessionId));
+                setTempSessionId(null);
+              }
+              setFocusedFile(null);
+            }}
+            isDark={isDark}
+          />
         ) : (
-        <>
-        <div className={`flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4 lg:flex-none lg:p-0 ${!showMapa ? 'hidden lg:flex' : 'flex'} shrink-0`}
-          style={{ scrollbarWidth: 'thin', scrollbarColor: '#CBD5E0 transparent', width: isDesktopViewport ? mapPanelDesktopWidth : undefined }}>
-          <div className="hidden lg:flex items-center justify-between px-1 pb-1">
-            <div>
-              <p className={labelCls}>Plano de Ação</p>
-              <p className={`text-[11px] font-bold ${isDark ? 'text-white/70' : 'text-slate-700'}`}>Mapa operacional da ação</p>
-            </div>
-            <button
-              onClick={() => setIsPlanCollapsed(true)}
-              className={`flex h-8 w-8 items-center justify-center rounded-xl border transition-all ${isDark ? 'border-white/10 text-white/50 hover:bg-white/10 hover:text-white' : 'border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-slate-900'}`}
-              title="Retrair plano de ação"
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-          </div>
+          <>
 
-          {/* Síntese / Descrição */}
-          {currentTaskData.descricao && (
-            <div className={`rounded-2xl border p-4 ${cardBg}`}>
-              <p className={`${labelCls} mb-2`}>Síntese da Demanda</p>
-              <p className={`text-xs leading-relaxed ${isDark ? 'text-white/70' : 'text-slate-600'}`}>
-                {currentTaskData.descricao}
-              </p>
-            </div>
-          )}
-
-          {/* Área Temática */}
-          <div className={`rounded-2xl border p-4 ${cardBg}`}>
-            <p className={`${labelCls} mb-2`}>Área Temática</p>
-            <select
-              value={currentTaskData.area_tematica || 'NÃO CLASSIFICADA'}
-              onChange={e => {
-                const newArea = e.target.value as any;
-                const unit = unidades.find(u => u.nome.toUpperCase() === (newArea || '').toUpperCase());
-                const baseId = unit ? (knowledgeBases.find(b => b.sistema_id === unit.id)?.id ?? undefined) : undefined;
-                onSave(task.id, { area_tematica: newArea, base_conhecimento: baseId });
-              }}
-              style={{ colorScheme: isDark ? 'dark' : 'light' }}
-              className={`w-full border-none p-0 text-xs font-black uppercase tracking-widest focus:ring-0 cursor-pointer ${isDark ? 'bg-slate-900 text-white' : 'bg-transparent text-slate-900'}`}
-            >
-              <option className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'} value="GERAL">Geral</option>
-              <option className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'} value="NÃO CLASSIFICADA">Não Classificada</option>
-              {unidades.map(u => (
-                <option className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'} key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Tags Dinâmicas */}
-          <div className={`rounded-2xl border p-4 ${cardBg}`}>
-            <div className="flex items-center justify-between mb-3">
-              <p className={labelCls}>Tags Dinâmicas</p>
-              <button
-                onClick={handleAutoClassifyTags}
-                disabled={isGeneratingTags}
-                className="flex items-center gap-1.5 px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors text-[9px] font-black uppercase tracking-widest border border-indigo-100 disabled:opacity-50"
-              >
-                {isGeneratingTags ? '...' : '✨ Auto'}
-              </button>
-            </div>
-            <div className="flex flex-wrap gap-2 mb-3">
-              {(currentTaskData.tags || []).map(tag => (
-                <span key={tag} className="flex items-center gap-1 bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg text-[10px] font-bold border border-indigo-100">
-                  #{tag}
-                  <button onClick={(e) => {
-                    e.preventDefault();
-                    const newTags = (currentTaskData.tags || []).filter(t => t !== tag);
-                    onSave(task.id, { tags: newTags });
-                  }} className="text-indigo-400 hover:text-rose-500 scale-125 ml-1 transition-colors">&times;</button>
-                </span>
-              ))}
-              {(currentTaskData.tags || []).length === 0 && (
-                <span className="text-[10px] text-slate-400 font-medium italic">Nenhuma tag...</span>
-              )}
-            </div>
-            <div>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={tagInput}
-                  onChange={e => setTagInput(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      if (tagInput.trim() && !(currentTaskData.tags || []).includes(tagInput.trim())) {
-                        onSave(task.id, { tags: [...(currentTaskData.tags || []), tagInput.trim()] });
-                        setTagInput('');
-                      }
-                    }
-                  }}
-                  className={`flex-1 border rounded-lg px-3 py-1.5 text-[11px] font-medium focus:ring-1 focus:ring-indigo-500 outline-none ${isDark ? 'bg-black/50 border-white/10 text-white' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
-                  placeholder="Adicionar nova tag (Enter)..."
-                />
-                <button
-                  onClick={(e) => {
-                    e.preventDefault();
-                    if (tagInput.trim() && !(currentTaskData.tags || []).includes(tagInput.trim())) {
-                      onSave(task.id, { tags: [...(currentTaskData.tags || []), tagInput.trim()] });
-                      setTagInput('');
-                    }
-                  }}
-                  className={`px-3 py-1.5 rounded-lg transition-all text-[10px] font-bold border ${isDark ? 'bg-white/10 text-white/70 border-white/20 hover:bg-white/20' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}
-                >
-                  Add
-                </button>
-              </div>
-              {tagInput.trim() && existingTags.filter(t => t.toLowerCase().includes(tagInput.trim().toLowerCase()) && !(currentTaskData.tags || []).includes(t)).length > 0 && (
-                <div className="flex flex-wrap items-center gap-1.5 mt-2 pl-1">
-                  <span className={`text-[9px] font-bold uppercase tracking-widest ${mutedText}`}>Sugestões:</span>
-                  {existingTags
-                    .filter(t => t.toLowerCase().includes(tagInput.trim().toLowerCase()) && !(currentTaskData.tags || []).includes(t))
-                    .slice(0, 5)
-                    .map(sug => (
-                      <button
-                        key={sug}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          onSave(task.id, { tags: [...(currentTaskData.tags || []), sug] });
-                          setTagInput('');
-                        }}
-                        className="text-[9px] bg-indigo-50 hover:bg-indigo-100 text-indigo-500 font-bold px-1.5 py-0.5 rounded cursor-pointer transition-colors"
-                      >
-                        {sug}
-                      </button>
-                    ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Plano de Ação */}
-          <div className={`rounded-2xl border ${cardBg}`}>
-            <div className="px-4 pt-4 pb-2 flex items-center justify-between">
-              <p className={labelCls}>Plano de Ação</p>
-              <div className="flex items-center gap-2">
-                <span className={`text-[9px] font-black ${progressPercent === 100 ? 'text-emerald-500' : mutedText}`}>
-                  {(currentTaskData.plano_acao || []).filter(i => i.completed).length}/{(currentTaskData.plano_acao || []).length}
-                </span>
-                <button
-                  onClick={openPlanModal}
-                  title="Editar plano de ação"
-                  className={`p-1 rounded-lg transition-all ${isDark ? 'text-white/30 hover:text-white/70 hover:bg-white/10' : 'text-slate-300 hover:text-slate-600 hover:bg-slate-100'}`}
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                </button>
-              </div>
-            </div>
-            <div className="px-3 pb-3 space-y-1.5">
-              {(currentTaskData.plano_acao || []).length === 0 ? (
-                <p className={`text-xs text-center py-4 ${mutedText}`}>Nenhum passo no plano.</p>
-              ) : (
-                (currentTaskData.plano_acao || []).map(item => (
-                  <button
-                    key={item.id}
-                    onClick={() => handleToggleChecklistItem(item.id)}
-                    className={`w-full flex items-start gap-3 p-2.5 rounded-xl text-left transition-all group ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}
-                  >
-                    <div className={`w-4 h-4 mt-0.5 rounded border-2 flex items-center justify-center shrink-0 transition-all ${item.completed
-                      ? 'bg-emerald-500 border-emerald-500'
-                      : isDark ? 'border-white/30 group-hover:border-emerald-400' : 'border-slate-300 group-hover:border-emerald-500'
-                      }`}>
-                      {item.completed && (
-                        <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" />
-                        </svg>
-                      )}
+            {/* LEFT COLUMN — Mapa Operacional */}
+            {isPlanPanelCollapsed ? (
+              renderCollapsedPanelRail('plan', 'Plano', 'Sala de Operações', () => setIsPlanCollapsed(false))
+            ) : (
+              <>
+                <div className={`flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4 lg:flex-none lg:p-0 ${!showMapa ? 'hidden lg:flex' : 'flex'} shrink-0`}
+                  style={{ scrollbarWidth: 'thin', scrollbarColor: '#CBD5E0 transparent', width: isDesktopViewport ? mapPanelDesktopWidth : undefined }}>
+                  <div className="hidden lg:flex items-center justify-between px-1 pb-1">
+                    <div>
+                      <p className={labelCls}>Plano de Ação</p>
+                      <p className={`text-[11px] font-bold ${isDark ? 'text-white/70' : 'text-slate-700'}`}>Mapa operacional da ação</p>
                     </div>
-                    <span className={`text-xs font-medium leading-snug transition-all ${item.completed
-                      ? isDark ? 'text-white/30 line-through' : 'text-slate-300 line-through'
-                      : isDark ? 'text-white/80' : 'text-slate-700'
-                      }`}>
-                      {item.text}
-                    </span>
-                  </button>
-                ))
-              )}
-            </div>
-
-            {/* Feature 3: sugestão de revisão após concluir etapa */}
-            {showPlanSuggestion && (
-              <div className={`mx-3 mb-3 flex items-center gap-2 p-2 rounded-xl border ${isDark ? 'bg-blue-500/10 border-blue-500/20' : 'bg-blue-50 border-blue-200'}`}>
-                <svg className="w-3 h-3 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-                <span className={`flex-1 text-[9px] ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>Revisar plano com base no progresso?</span>
-                <button onClick={handleSuggestPlanAdjustment} className="text-[9px] font-black text-blue-400 hover:text-blue-300 uppercase tracking-widest px-2">Sim</button>
-                <button onClick={() => setShowPlanSuggestion(false)} className={`text-[9px] ${isDark ? 'text-white/30 hover:text-white/50' : 'text-slate-400 hover:text-slate-600'}`}>Ignorar</button>
-              </div>
-            )}
-
-            {/* Feature 5: histórico de versões do plano */}
-            {(currentTaskData.plano_acao_historico || []).length > 0 && (
-              <div className="px-3 mb-3">
-                <button
-                  onClick={() => setShowPlanHistory(!showPlanHistory)}
-                  className={`text-[9px] font-bold flex items-center gap-1 ${isDark ? 'text-white/30 hover:text-white/50' : 'text-slate-400 hover:text-slate-600'}`}
-                >
-                  <svg className={`w-3 h-3 transition-transform ${showPlanHistory ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
-                  Histórico de versões ({(currentTaskData.plano_acao_historico || []).length})
-                </button>
-                {showPlanHistory && (
-                  <div className="mt-2 space-y-2">
-                    {[...(currentTaskData.plano_acao_historico || [])].reverse().map((version, vIdx) => (
-                      <div key={vIdx} className={`p-2 rounded-xl border ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <p className={`text-[8px] font-black uppercase tracking-widest ${mutedText}`}>
-                            Versão {(currentTaskData.plano_acao_historico || []).length - vIdx}
-                            {version.data && ` — ${formatDate(version.data)}`}
-                          </p>
-                        </div>
-                        <div className="space-y-1">
-                          {version.items.map((item, iIdx) => (
-                            <p key={iIdx} className={`text-[9px] flex gap-1.5 ${isDark ? 'text-white/40' : 'text-slate-500'}`}>
-                              <span className="shrink-0">{iIdx + 1}.</span>{item.text}
-                            </p>
-                          ))}
-                        </div>
-                        <button
-                          onClick={() => {
-                            onSave(task.id, { plano_acao: version.items });
-                            setShowPlanHistory(false);
-                            showToast('Plano restaurado!', 'success');
-                          }}
-                          className={`mt-1.5 text-[8px] font-bold ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-800'}`}
-                        >
-                          Restaurar esta versão
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Pool de Dados */}
-          <div className={`rounded-2xl border ${cardBg} shrink-0`}>
-            <button onClick={() => setShowPool(!showPool)} className="w-full flex items-center gap-2 px-4 py-3">
-              <svg className={`w-3.5 h-3.5 ${mutedText}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
-              <span className={`${labelCls} flex-1 text-left`}>Pool de Dados</span>
-              <span className={`text-[9px] font-bold ${mutedText}`}>{(currentTaskData.pool_dados || []).length}</span>
-              <svg className={`w-3 h-3 transition-transform ${mutedText} ${showPool ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeWidth="2.5" /></svg>
-            </button>
-            {showPool && (
-              <div className="px-3 pb-3 flex flex-wrap gap-2 max-h-36 overflow-y-auto">
-                {(currentTaskData.pool_dados || []).length === 0 ? (
-                  <p className={`text-xs ${mutedText} w-full text-center py-2`}>Nenhum item no pool.</p>
-                ) : (
-                  (currentTaskData.pool_dados || []).map(item => (
-                    <button key={item.id} onClick={() => window.open(item.valor, '_blank')}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${isDark ? 'bg-white/10 border-white/10 text-white/70 hover:bg-white/20' : 'bg-slate-50 border-slate-100 text-slate-700 hover:bg-blue-50 hover:border-blue-200'}`}>
-                      <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                      <span className="truncate max-w-[120px]">{item.nome || item.valor}</span>
+                    <button
+                      onClick={() => setIsPlanCollapsed(true)}
+                      className={`flex h-8 w-8 items-center justify-center rounded-xl border transition-all ${isDark ? 'border-white/10 text-white/50 hover:bg-white/10 hover:text-white' : 'border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-slate-900'}`}
+                      title="Retrair plano de ação"
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" />
+                      </svg>
                     </button>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
+                  </div>
 
-          {/* Planejamento compacto */}
-          <div className={`rounded-2xl border p-4 ${cardBg}`}>
-            <p className={`${labelCls} mb-3`}>Planejamento</p>
-            <div className="space-y-3">
-              <div>
-                <p className={`${labelCls} mb-1`}>Prazo Final</p>
-                <input type="date" value={currentTaskData.data_limite || ''} onChange={e => onSave(task.id, { data_limite: e.target.value })}
-                  className={`w-full px-3 py-2 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 border transition-all ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-slate-100 text-slate-900'}`} />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <p className={`${labelCls} mb-1`}>Início</p>
-                  <input type="time" value={currentTaskData.horario_inicio || ''} onChange={e => onSave(task.id, { horario_inicio: e.target.value })}
-                    className={`w-full px-3 py-2 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 border transition-all ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-slate-100 text-slate-900'}`} />
-                </div>
-                <div>
-                  <p className={`${labelCls} mb-1`}>Fim</p>
-                  <input type="time" value={currentTaskData.horario_fim || ''} onChange={e => onSave(task.id, { horario_fim: e.target.value })}
-                    className={`w-full px-3 py-2 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 border transition-all ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-slate-100 text-slate-900'}`} />
-                </div>
-              </div>
-              {taskReminders.length > 0 && (
-                <div className={`rounded-xl border px-3 py-2 ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-slate-50'}`}>
-                  <button
-                    onClick={() => setShowReminderHistory(prev => !prev)}
-                    className="w-full flex items-center gap-2 text-left"
-                  >
-                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${pendingReminderCount > 0
-                      ? isDark ? 'bg-amber-500/15 text-amber-300' : 'bg-amber-100 text-amber-700'
-                      : isDark ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
-                      }`}>
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className={`text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-white/75' : 'text-slate-700'}`}>Lembretes</p>
-                      <p className={`text-[10px] truncate ${mutedText}`}>
-                        {nextPendingReminder
-                          ? `Próximo: ${new Date(nextPendingReminder.reminder_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}`
-                          : 'Todos os lembretes já foram enviados'}
+                  {/* Síntese / Descrição */}
+                  {currentTaskData.descricao && (
+                    <div className={`rounded-2xl border p-4 ${cardBg}`}>
+                      <p className={`${labelCls} mb-2`}>Síntese da Demanda</p>
+                      <p className={`text-xs leading-relaxed ${isDark ? 'text-white/70' : 'text-slate-600'}`}>
+                        {currentTaskData.descricao}
                       </p>
                     </div>
-                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-black ${pendingReminderCount > 0
-                      ? isDark ? 'bg-amber-500/15 text-amber-300' : 'bg-amber-100 text-amber-700'
-                      : isDark ? 'bg-white/10 text-white/45' : 'bg-slate-200 text-slate-500'
-                      }`}>
-                      {taskReminders.length}
-                    </span>
-                    <svg className={`w-3 h-3 transition-transform ${mutedText} ${showReminderHistory ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeWidth="2.5" /></svg>
-                  </button>
-                  {showReminderHistory && (
-                    <div className="mt-3 space-y-2">
-                      {taskReminders.map(reminder => (
-                        <div
-                          key={reminder.id}
-                          className={`flex items-center gap-2 rounded-xl border px-2.5 py-2 ${reminder.reminder_sent
-                            ? isDark ? 'border-white/10 bg-white/5 text-white/45' : 'border-slate-200 bg-white text-slate-400'
-                            : isDark ? 'border-amber-500/20 bg-amber-500/10 text-white' : 'border-amber-200 bg-amber-50 text-slate-700'
-                            }`}
+                  )}
+
+                  {/* Área Temática */}
+                  <div className={`rounded-2xl border p-4 ${cardBg}`}>
+                    <p className={`${labelCls} mb-2`}>Área Temática</p>
+                    <select
+                      value={currentTaskData.area_tematica || 'NÃO CLASSIFICADA'}
+                      onChange={e => {
+                        const newArea = e.target.value as any;
+                        const unit = unidades.find(u => u.nome.toUpperCase() === (newArea || '').toUpperCase());
+                        const baseId = unit ? (knowledgeBases.find(b => b.sistema_id === unit.id)?.id ?? undefined) : undefined;
+                        onSave(task.id, { area_tematica: newArea, base_conhecimento: baseId });
+                      }}
+                      style={{ colorScheme: isDark ? 'dark' : 'light' }}
+                      className={`w-full border-none p-0 text-xs font-black uppercase tracking-widest focus:ring-0 cursor-pointer ${isDark ? 'bg-slate-900 text-white' : 'bg-transparent text-slate-900'}`}
+                    >
+                      <option className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'} value="GERAL">Geral</option>
+                      <option className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'} value="NÃO CLASSIFICADA">Não Classificada</option>
+                      {unidades.map(u => (
+                        <option className={isDark ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'} key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Tags Dinâmicas */}
+                  <div className={`rounded-2xl border p-4 ${cardBg}`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <p className={labelCls}>Tags Dinâmicas</p>
+                      <button
+                        onClick={handleAutoClassifyTags}
+                        disabled={isGeneratingTags}
+                        className="flex items-center gap-1.5 px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors text-[9px] font-black uppercase tracking-widest border border-indigo-100 disabled:opacity-50"
+                      >
+                        {isGeneratingTags ? '...' : '✨ Auto'}
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {(currentTaskData.tags || []).map(tag => (
+                        <span key={tag} className="flex items-center gap-1 bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg text-[10px] font-bold border border-indigo-100">
+                          #{tag}
+                          <button onClick={(e) => {
+                            e.preventDefault();
+                            const newTags = (currentTaskData.tags || []).filter(t => t !== tag);
+                            onSave(task.id, { tags: newTags });
+                          }} className="text-indigo-400 hover:text-rose-500 scale-125 ml-1 transition-colors">&times;</button>
+                        </span>
+                      ))}
+                      {(currentTaskData.tags || []).length === 0 && (
+                        <span className="text-[10px] text-slate-400 font-medium italic">Nenhuma tag...</span>
+                      )}
+                    </div>
+                    <div>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={tagInput}
+                          onChange={e => setTagInput(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              if (tagInput.trim() && !(currentTaskData.tags || []).includes(tagInput.trim())) {
+                                onSave(task.id, { tags: [...(currentTaskData.tags || []), tagInput.trim()] });
+                                setTagInput('');
+                              }
+                            }
+                          }}
+                          className={`flex-1 border rounded-lg px-3 py-1.5 text-[11px] font-medium focus:ring-1 focus:ring-indigo-500 outline-none ${isDark ? 'bg-black/50 border-white/10 text-white' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                          placeholder="Adicionar nova tag (Enter)..."
+                        />
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            if (tagInput.trim() && !(currentTaskData.tags || []).includes(tagInput.trim())) {
+                              onSave(task.id, { tags: [...(currentTaskData.tags || []), tagInput.trim()] });
+                              setTagInput('');
+                            }
+                          }}
+                          className={`px-3 py-1.5 rounded-lg transition-all text-[10px] font-bold border ${isDark ? 'bg-white/10 text-white/70 border-white/20 hover:bg-white/20' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}
                         >
-                          <div className={`w-2 h-2 rounded-full shrink-0 ${reminder.reminder_sent ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-[11px] font-bold">
-                              {new Date(reminder.reminder_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
-                            </p>
-                            <p className={`text-[9px] ${reminder.reminder_sent ? mutedText : isDark ? 'text-amber-200' : 'text-amber-700'}`}>
-                              {reminder.reminder_sent ? 'Enviado' : 'Agendado'}
-                            </p>
-                          </div>
+                          Add
+                        </button>
+                      </div>
+                      {tagInput.trim() && existingTags.filter(t => t.toLowerCase().includes(tagInput.trim().toLowerCase()) && !(currentTaskData.tags || []).includes(t)).length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5 mt-2 pl-1">
+                          <span className={`text-[9px] font-bold uppercase tracking-widest ${mutedText}`}>Sugestões:</span>
+                          {existingTags
+                            .filter(t => t.toLowerCase().includes(tagInput.trim().toLowerCase()) && !(currentTaskData.tags || []).includes(t))
+                            .slice(0, 5)
+                            .map(sug => (
+                              <button
+                                key={sug}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  onSave(task.id, { tags: [...(currentTaskData.tags || []), sug] });
+                                  setTagInput('');
+                                }}
+                                className="text-[9px] bg-indigo-50 hover:bg-indigo-100 text-indigo-500 font-bold px-1.5 py-0.5 rounded cursor-pointer transition-colors"
+                              >
+                                {sug}
+                              </button>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Plano de Ação */}
+                  <div className={`rounded-2xl border ${cardBg}`}>
+                    <div className="px-4 pt-4 pb-2 flex items-center justify-between">
+                      <p className={labelCls}>Plano de Ação</p>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[9px] font-black ${progressPercent === 100 ? 'text-emerald-500' : mutedText}`}>
+                          {(currentTaskData.plano_acao || []).filter(i => i.completed).length}/{(currentTaskData.plano_acao || []).length}
+                        </span>
+                        <button
+                          onClick={openPlanModal}
+                          title="Editar plano de ação"
+                          className={`p-1 rounded-lg transition-all ${isDark ? 'text-white/30 hover:text-white/70 hover:bg-white/10' : 'text-slate-300 hover:text-slate-600 hover:bg-slate-100'}`}
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="px-3 pb-3 space-y-1.5">
+                      {(currentTaskData.plano_acao || []).length === 0 ? (
+                        <p className={`text-xs text-center py-4 ${mutedText}`}>Nenhum passo no plano.</p>
+                      ) : (
+                        (currentTaskData.plano_acao || []).map(item => (
                           <button
-                            onClick={() => handleDeleteReminder(reminder.id)}
-                            className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${isDark ? 'hover:bg-white/10 text-white/40 hover:text-rose-300' : 'hover:bg-white text-slate-400 hover:text-rose-600'}`}
-                            aria-label="Excluir lembrete"
+                            key={item.id}
+                            onClick={() => handleToggleChecklistItem(item.id)}
+                            className={`w-full flex items-start gap-3 p-2.5 rounded-xl text-left transition-all group ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}
                           >
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M6 18L18 6M6 6l12 12" /></svg>
+                            <div className={`w-4 h-4 mt-0.5 rounded border-2 flex items-center justify-center shrink-0 transition-all ${item.completed
+                              ? 'bg-emerald-500 border-emerald-500'
+                              : isDark ? 'border-white/30 group-hover:border-emerald-400' : 'border-slate-300 group-hover:border-emerald-500'
+                              }`}>
+                              {item.completed && (
+                                <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" />
+                                </svg>
+                              )}
+                            </div>
+                            <span className={`text-xs font-medium leading-snug transition-all ${item.completed
+                              ? isDark ? 'text-white/30 line-through' : 'text-slate-300 line-through'
+                              : isDark ? 'text-white/80' : 'text-slate-700'
+                              }`}>
+                              {item.text}
+                            </span>
                           </button>
+                        ))
+                      )}
+                    </div>
+
+                    {/* Feature 3: sugestão de revisão após concluir etapa */}
+                    {showPlanSuggestion && (
+                      <div className={`mx-3 mb-3 flex items-center gap-2 p-2 rounded-xl border ${isDark ? 'bg-blue-500/10 border-blue-500/20' : 'bg-blue-50 border-blue-200'}`}>
+                        <svg className="w-3 h-3 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                        <span className={`flex-1 text-[9px] ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>Revisar plano com base no progresso?</span>
+                        <button onClick={handleSuggestPlanAdjustment} className="text-[9px] font-black text-blue-400 hover:text-blue-300 uppercase tracking-widest px-2">Sim</button>
+                        <button onClick={() => setShowPlanSuggestion(false)} className={`text-[9px] ${isDark ? 'text-white/30 hover:text-white/50' : 'text-slate-400 hover:text-slate-600'}`}>Ignorar</button>
+                      </div>
+                    )}
+
+                    {/* Feature 5: histórico de versões do plano */}
+                    {(currentTaskData.plano_acao_historico || []).length > 0 && (
+                      <div className="px-3 mb-3">
+                        <button
+                          onClick={() => setShowPlanHistory(!showPlanHistory)}
+                          className={`text-[9px] font-bold flex items-center gap-1 ${isDark ? 'text-white/30 hover:text-white/50' : 'text-slate-400 hover:text-slate-600'}`}
+                        >
+                          <svg className={`w-3 h-3 transition-transform ${showPlanHistory ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
+                          Histórico de versões ({(currentTaskData.plano_acao_historico || []).length})
+                        </button>
+                        {showPlanHistory && (
+                          <div className="mt-2 space-y-2">
+                            {[...(currentTaskData.plano_acao_historico || [])].reverse().map((version, vIdx) => (
+                              <div key={vIdx} className={`p-2 rounded-xl border ${isDark ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                <div className="flex items-center justify-between mb-1.5">
+                                  <p className={`text-[8px] font-black uppercase tracking-widest ${mutedText}`}>
+                                    Versão {(currentTaskData.plano_acao_historico || []).length - vIdx}
+                                    {version.data && ` — ${formatDate(version.data)}`}
+                                  </p>
+                                </div>
+                                <div className="space-y-1">
+                                  {version.items.map((item, iIdx) => (
+                                    <p key={iIdx} className={`text-[9px] flex gap-1.5 ${isDark ? 'text-white/40' : 'text-slate-500'}`}>
+                                      <span className="shrink-0">{iIdx + 1}.</span>{item.text}
+                                    </p>
+                                  ))}
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    onSave(task.id, { plano_acao: version.items });
+                                    setShowPlanHistory(false);
+                                    showToast('Plano restaurado!', 'success');
+                                  }}
+                                  className={`mt-1.5 text-[8px] font-bold ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-800'}`}
+                                >
+                                  Restaurar esta versão
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Pool de Dados */}
+                  <div className={`rounded-2xl border ${cardBg} shrink-0`}>
+                    <button onClick={() => setShowPool(!showPool)} className="w-full flex items-center gap-2 px-4 py-3">
+                      <svg className={`w-3.5 h-3.5 ${mutedText}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                      <span className={`${labelCls} flex-1 text-left`}>Pool de Dados</span>
+                      <span className={`text-[9px] font-bold ${mutedText}`}>{(currentTaskData.pool_dados || []).length}</span>
+                      <svg className={`w-3 h-3 transition-transform ${mutedText} ${showPool ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeWidth="2.5" /></svg>
+                    </button>
+                    {showPool && (
+                      <div className="px-3 pb-3 flex flex-wrap gap-2 max-h-36 overflow-y-auto">
+                        {(currentTaskData.pool_dados || []).length === 0 ? (
+                          <p className={`text-xs ${mutedText} w-full text-center py-2`}>Nenhum item no pool.</p>
+                        ) : (
+                          (currentTaskData.pool_dados || []).map(item => (
+                            <button key={item.id} onClick={() => {
+                              if (isDesktopViewport) {
+                                setFocusedFile({ url: item.valor, nome: item.nome || item.valor, tipo: item.tipo === 'arquivo' ? 'file' : 'link', driveFileId: item.drive_file_id });
+                              } else {
+                                window.open(item.valor, '_blank');
+                              }
+                            }}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${isDark ? 'bg-white/10 border-white/10 text-white/70 hover:bg-white/20' : 'bg-slate-50 border-slate-100 text-slate-700 hover:bg-blue-50 hover:border-blue-200'}`}>
+                              <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                              <span className="truncate max-w-[120px]">{item.nome || item.valor}</span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Planejamento compacto */}
+                  <div className={`rounded-2xl border p-4 ${cardBg}`}>
+                    <p className={`${labelCls} mb-3`}>Planejamento</p>
+                    <div className="space-y-3">
+                      <div>
+                        <p className={`${labelCls} mb-1`}>Prazo Final</p>
+                        <input type="date" value={currentTaskData.data_limite || ''} onChange={e => onSave(task.id, { data_limite: e.target.value })}
+                          className={`w-full px-3 py-2 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 border transition-all ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-slate-100 text-slate-900'}`} />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <p className={`${labelCls} mb-1`}>Início</p>
+                          <input type="time" value={currentTaskData.horario_inicio || ''} onChange={e => onSave(task.id, { horario_inicio: e.target.value })}
+                            className={`w-full px-3 py-2 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 border transition-all ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-slate-100 text-slate-900'}`} />
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-              <button
-                onClick={() => openReminderModal()}
-                className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${pendingReminderCount > 0
-                  ? isDark ? 'border-amber-500/20 text-amber-300 hover:bg-amber-500/10' : 'border-amber-200 text-amber-700 hover:bg-amber-50'
-                  : isDark ? 'border-white/10 text-white/40 hover:bg-white/5 hover:text-white/70' : 'border-slate-200 text-slate-400 hover:bg-slate-50 hover:text-slate-700'
-                  }`}>
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-                {taskReminders.length > 0 ? 'Novo Lembrete' : 'Agendar Lembrete'}
-              </button>
-            </div>
-          </div>
-
-          {/* Fontes de Conhecimento */}
-          <div className={`rounded-2xl border ${cardBg} shrink-0`}>
-            <button onClick={() => setShowKnowledgePanel(!showKnowledgePanel)} className="w-full flex items-center gap-2 px-4 py-3">
-              <svg className={`w-3.5 h-3.5 ${mutedText}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
-              <span className={`${labelCls} flex-1 text-left`}>Fontes de Conhecimento</span>
-              {(currentTaskData.base_conhecimento || currentTaskData.extra_context_id) && (
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-              )}
-              <svg className={`w-3 h-3 transition-transform ${mutedText} ${showKnowledgePanel ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeWidth="2.5" /></svg>
-            </button>
-            {showKnowledgePanel && (
-              <div className="px-4 pb-4 space-y-4">
-
-                {/* Base RAG — derivada automaticamente da Área Temática */}
-                <div>
-                  <p className={`${labelCls} mb-1.5`}>Base de Conhecimento (RAG)</p>
-                  {derivedKnowledgeBase ? (
-                    <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold ${isDark ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
-                      <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
-                      <span className="truncate">{derivedKnowledgeBase.emoji || '📚'} {derivedKnowledgeBase.nome}</span>
-                    </div>
-                  ) : (
-                    <p className={`text-[10px] px-1 ${isDark ? 'text-white/30' : 'text-slate-400'}`}>
-                      Sem base vinculada — defina a Área Temática acima.
-                    </p>
-                  )}
-                </div>
-
-                {/* Contexto Complementar */}
-                <div>
-                  <p className={`${labelCls} mb-1.5`}>Contexto Complementar</p>
-
-                  {sessionExtraFiles.length > 0 && (
-                    <div className="space-y-1 mb-2">
-                      {sessionExtraFiles.map(f => (
-                        <div key={f.id} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[10px] font-medium border ${f.status === 'ready'
-                          ? isDark ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                          : f.status === 'uploading'
-                            ? isDark ? 'bg-blue-500/10 border-blue-500/20 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-600'
-                            : isDark ? 'bg-rose-500/10 border-rose-500/20 text-rose-300' : 'bg-rose-50 border-rose-200 text-rose-600'
+                        <div>
+                          <p className={`${labelCls} mb-1`}>Fim</p>
+                          <input type="time" value={currentTaskData.horario_fim || ''} onChange={e => onSave(task.id, { horario_fim: e.target.value })}
+                            className={`w-full px-3 py-2 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 border transition-all ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-slate-100 text-slate-900'}`} />
+                        </div>
+                      </div>
+                      {taskReminders.length > 0 && (
+                        <div className={`rounded-xl border px-3 py-2 ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-slate-50'}`}>
+                          <button
+                            onClick={() => setShowReminderHistory(prev => !prev)}
+                            className="w-full flex items-center gap-2 text-left"
+                          >
+                            <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${pendingReminderCount > 0
+                              ? isDark ? 'bg-amber-500/15 text-amber-300' : 'bg-amber-100 text-amber-700'
+                              : isDark ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
+                              }`}>
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className={`text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-white/75' : 'text-slate-700'}`}>Lembretes</p>
+                              <p className={`text-[10px] truncate ${mutedText}`}>
+                                {nextPendingReminder
+                                  ? `Próximo: ${new Date(nextPendingReminder.reminder_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}`
+                                  : 'Todos os lembretes já foram enviados'}
+                              </p>
+                            </div>
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-black ${pendingReminderCount > 0
+                              ? isDark ? 'bg-amber-500/15 text-amber-300' : 'bg-amber-100 text-amber-700'
+                              : isDark ? 'bg-white/10 text-white/45' : 'bg-slate-200 text-slate-500'
+                              }`}>
+                              {taskReminders.length}
+                            </span>
+                            <svg className={`w-3 h-3 transition-transform ${mutedText} ${showReminderHistory ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeWidth="2.5" /></svg>
+                          </button>
+                          {showReminderHistory && (
+                            <div className="mt-3 space-y-2">
+                              {taskReminders.map(reminder => (
+                                <div
+                                  key={reminder.id}
+                                  className={`flex items-center gap-2 rounded-xl border px-2.5 py-2 ${reminder.reminder_sent
+                                    ? isDark ? 'border-white/10 bg-white/5 text-white/45' : 'border-slate-200 bg-white text-slate-400'
+                                    : isDark ? 'border-amber-500/20 bg-amber-500/10 text-white' : 'border-amber-200 bg-amber-50 text-slate-700'
+                                    }`}
+                                >
+                                  <div className={`w-2 h-2 rounded-full shrink-0 ${reminder.reminder_sent ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-[11px] font-bold">
+                                      {new Date(reminder.reminder_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                                    </p>
+                                    <p className={`text-[9px] ${reminder.reminder_sent ? mutedText : isDark ? 'text-amber-200' : 'text-amber-700'}`}>
+                                      {reminder.reminder_sent ? 'Enviado' : 'Agendado'}
+                                    </p>
+                                  </div>
+                                  <button
+                                    onClick={() => handleDeleteReminder(reminder.id)}
+                                    className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${isDark ? 'hover:bg-white/10 text-white/40 hover:text-rose-300' : 'hover:bg-white text-slate-400 hover:text-rose-600'}`}
+                                    aria-label="Excluir lembrete"
+                                  >
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M6 18L18 6M6 6l12 12" /></svg>
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      <button
+                        onClick={() => openReminderModal()}
+                        className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${pendingReminderCount > 0
+                          ? isDark ? 'border-amber-500/20 text-amber-300 hover:bg-amber-500/10' : 'border-amber-200 text-amber-700 hover:bg-amber-50'
+                          : isDark ? 'border-white/10 text-white/40 hover:bg-white/5 hover:text-white/70' : 'border-slate-200 text-slate-400 hover:bg-slate-50 hover:text-slate-700'
                           }`}>
-                          {f.status === 'ready' && <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>}
-                          {f.status === 'uploading' && <svg className="w-3 h-3 shrink-0 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>}
-                          {f.status === 'error' && <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>}
-                          <span className="truncate">{f.name}</span>
-                        </div>
-                      ))}
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+                        {taskReminders.length > 0 ? 'Novo Lembrete' : 'Agendar Lembrete'}
+                      </button>
                     </div>
-                  )}
+                  </div>
 
-                  {currentTaskData.extra_context_id && sessionExtraFiles.length === 0 && (
-                    <p className={`text-[9px] mb-2 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
-                      ✓ Contexto complementar vinculado
-                    </p>
-                  )}
+                  {/* Fontes de Conhecimento */}
+                  <div className={`rounded-2xl border ${cardBg} shrink-0`}>
+                    <button onClick={() => setShowKnowledgePanel(!showKnowledgePanel)} className="w-full flex items-center gap-2 px-4 py-3">
+                      <svg className={`w-3.5 h-3.5 ${mutedText}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+                      <span className={`${labelCls} flex-1 text-left`}>Fontes de Conhecimento</span>
+                      {(currentTaskData.base_conhecimento || currentTaskData.extra_context_id) && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                      )}
+                      <svg className={`w-3 h-3 transition-transform ${mutedText} ${showKnowledgePanel ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeWidth="2.5" /></svg>
+                    </button>
+                    {showKnowledgePanel && (
+                      <div className="px-4 pb-4 space-y-4">
 
-                  <button
-                    onClick={() => extraFileInputRef.current?.click()}
-                    disabled={isUploadingExtra}
-                    className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl border border-dashed text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-40 ${isDark ? 'border-white/20 text-white/40 hover:border-blue-400/40 hover:text-blue-300 hover:bg-blue-500/5' : 'border-slate-300 text-slate-400 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50'}`}
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
-                    {isUploadingExtra ? 'Processando…' : 'Adicionar arquivo'}
-                  </button>
-                  <p className={`text-[8px] text-center mt-1 ${mutedText}`}>PDF · TXT · MD — isolado da Base RAG</p>
-                  <input ref={extraFileInputRef} type="file" accept=".pdf,.txt,.md" className="hidden" onChange={handleUploadExtraContextFile} />
+                        {/* Base RAG — derivada automaticamente da Área Temática */}
+                        <div>
+                          <p className={`${labelCls} mb-1.5`}>Base de Conhecimento (RAG)</p>
+                          {derivedKnowledgeBase ? (
+                            <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold ${isDark ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+                              <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                              <span className="truncate">{derivedKnowledgeBase.emoji || '📚'} {derivedKnowledgeBase.nome}</span>
+                            </div>
+                          ) : (
+                            <p className={`text-[10px] px-1 ${isDark ? 'text-white/30' : 'text-slate-400'}`}>
+                              Sem base vinculada — defina a Área Temática acima.
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Contexto Complementar */}
+                        <div>
+                          <p className={`${labelCls} mb-1.5`}>Contexto Complementar</p>
+
+                          {sessionExtraFiles.length > 0 && (
+                            <div className="space-y-1 mb-2">
+                              {sessionExtraFiles.map(f => (
+                                <div key={f.id} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[10px] font-medium border ${f.status === 'ready'
+                                  ? isDark ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                                  : f.status === 'uploading'
+                                    ? isDark ? 'bg-blue-500/10 border-blue-500/20 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-600'
+                                    : isDark ? 'bg-rose-500/10 border-rose-500/20 text-rose-300' : 'bg-rose-50 border-rose-200 text-rose-600'
+                                  }`}>
+                                  {f.status === 'ready' && <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>}
+                                  {f.status === 'uploading' && <svg className="w-3 h-3 shrink-0 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>}
+                                  {f.status === 'error' && <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>}
+                                  <span className="truncate">{f.name}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {currentTaskData.extra_context_id && sessionExtraFiles.length === 0 && (
+                            <p className={`text-[9px] mb-2 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                              ✓ Contexto complementar vinculado
+                            </p>
+                          )}
+
+                          <button
+                            onClick={() => extraFileInputRef.current?.click()}
+                            disabled={isUploadingExtra}
+                            className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl border border-dashed text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-40 ${isDark ? 'border-white/20 text-white/40 hover:border-blue-400/40 hover:text-blue-300 hover:bg-blue-500/5' : 'border-slate-300 text-slate-400 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50'}`}
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
+                            {isUploadingExtra ? 'Processando…' : 'Adicionar arquivo'}
+                          </button>
+                          <p className={`text-[8px] text-center mt-1 ${mutedText}`}>PDF · TXT · MD — isolado da Base RAG</p>
+                          <input ref={extraFileInputRef} type="file" accept=".pdf,.txt,.md" className="hidden" onChange={handleUploadExtraContextFile} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
+
+                {/* CENTER COLUMN — Diário de Missão */}
+              </>
             )}
-          </div>
-        </div>
 
-        {/* CENTER COLUMN — Diário de Missão */}
-        </>
-        )}
+            {!isPlanPanelCollapsed && renderResizeHandle('plan')}
 
-        {!isPlanPanelCollapsed && renderResizeHandle('plan')}
-
-        <div className={`flex min-w-0 flex-1 flex-col overflow-hidden ${!showDiario ? 'hidden lg:flex' : 'flex'} min-h-0`}>
-          <div className={`flex-1 flex flex-col rounded-none lg:rounded-2xl border overflow-hidden ${isDark ? 'bg-[#0f1724] border-white/10' : 'bg-white border-slate-200'}`}>
-            {/* Diary header */}
-            <div className={`shrink-0 px-4 py-3 flex items-center justify-between border-b ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
-              <div className="flex items-center gap-2">
-                <svg className={`w-4 h-4 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                </svg>
-                <span className={labelCls}>Diário de Missão</span>
-              </div>
-              <div className="flex items-center gap-2">
-                {/* Proactive insight indicator */}
-                {(isAnalyzingInsight || insightState) && (
-                  <button
-                    onClick={() => insightState && setShowInsightModal(true)}
-                    title={
-                      isAnalyzingInsight ? 'Analisando contexto...' :
-                      insightState?.nivel === 1 ? 'Insight Crítico — clique para ver' :
-                      'Sugestão de otimização — clique para ver'
-                    }
-                    disabled={isAnalyzingInsight}
-                    className={`flex items-center justify-center w-8 h-8 rounded-xl transition-all disabled:cursor-default ${
-                      isAnalyzingInsight
-                        ? `opacity-40 ${isDark ? 'bg-white/5 text-white/30' : 'bg-slate-100 text-slate-400'}`
-                        : insightState?.nivel === 1
-                          ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 animate-pulse'
-                          : `${isDark ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20' : 'bg-blue-50 text-blue-500 hover:bg-blue-100'}`
-                    }`}
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            <div className={`flex min-w-0 flex-1 flex-col overflow-hidden ${!showDiario ? 'hidden lg:flex' : 'flex'} min-h-0`}>
+              <div className={`flex-1 flex flex-col rounded-none lg:rounded-2xl border overflow-hidden ${isDark ? 'bg-[#0f1724] border-white/10' : 'bg-white border-slate-200'}`}>
+                {/* Diary header */}
+                <div className={`shrink-0 px-4 py-3 flex items-center justify-between border-b ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+                  <div className="flex items-center gap-2">
+                    <svg className={`w-4 h-4 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                     </svg>
-                  </button>
-                )}
-                <button onClick={handleSummarizeWithAI}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200'}`}>
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-                  Resumir com IA
-                </button>
+                    <span className={labelCls}>Diário de Missão</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {/* Proactive insight indicator */}
+                    {(isAnalyzingInsight || insightState) && (
+                      <button
+                        onClick={() => insightState && setShowInsightModal(true)}
+                        title={
+                          isAnalyzingInsight ? 'Analisando contexto...' :
+                            insightState?.nivel === 1 ? 'Insight Crítico — clique para ver' :
+                              'Sugestão de otimização — clique para ver'
+                        }
+                        disabled={isAnalyzingInsight}
+                        className={`flex items-center justify-center w-8 h-8 rounded-xl transition-all disabled:cursor-default ${isAnalyzingInsight
+                          ? `opacity-40 ${isDark ? 'bg-white/5 text-white/30' : 'bg-slate-100 text-slate-400'}`
+                          : insightState?.nivel === 1
+                            ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 animate-pulse'
+                            : `${isDark ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20' : 'bg-blue-50 text-blue-500 hover:bg-blue-100'}`
+                          }`}
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                        </svg>
+                      </button>
+                    )}
+                    <button onClick={handleSummarizeWithAI}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200'}`}>
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                      Resumir com IA
+                    </button>
+                  </div>
+                </div>
+
+                {/* Diary body — uses DiarioBordoUI unchanged */}
+                <DiarioBordoUI
+                  task={task}
+                  currentTaskData={currentTaskData}
+                  newFollowUp={newFollowUp}
+                  setNewFollowUp={setNewFollowUp}
+                  handleAddFollowUp={handleAddFollowUp}
+                  handleCopyMessage={(txt) => { navigator.clipboard.writeText(txt); showToast('Copiado!', 'success'); }}
+                  handleCopyAllHistory={handleCopyAllHistory}
+                  isRecording={isRecording}
+                  startRecording={startRecording}
+                  stopRecording={stopRecording}
+                  isProcessingTranscription={isProcessingTranscription}
+                  showAttachMenu={showAttachMenu}
+                  setShowAttachMenu={setShowAttachMenu}
+                  fileInputRef={fileInputRef}
+                  handleFileUploadInput={handleFileUploadInput}
+                  handleDroppedFiles={handleDiaryFilesSelected}
+                  setModalConfig={setModalConfig}
+                  applyFormatting={() => { }}
+                  isTimerRunning={isDark}
+                  diaryEndRef={diaryEndRef}
+                  handleDiaryScroll={() => { }}
+                  handleEditDiaryEntry={(index) => {
+                    setModalInputValue(currentTaskData.acompanhamento![index].nota);
+                    setModalConfig({ type: 'edit_diary', data: { index }, isOpen: true });
+                  }}
+                  handleDeleteDiaryEntry={(index) => setModalConfig({ type: 'confirm_delete', data: { index }, isOpen: true })}
+                  isUploading={isUploading}
+                  notifications={notifications}
+                  handleProcessAudio={handleProcessAudio}
+                  onFocusFile={isDesktopViewport ? setFocusedFile : undefined}
+                />
               </div>
             </div>
-
-            {/* Diary body — uses DiarioBordoUI unchanged */}
-            <DiarioBordoUI
-              task={task}
-              currentTaskData={currentTaskData}
-              newFollowUp={newFollowUp}
-              setNewFollowUp={setNewFollowUp}
-              handleAddFollowUp={handleAddFollowUp}
-              handleCopyMessage={(txt) => { navigator.clipboard.writeText(txt); showToast('Copiado!', 'success'); }}
-              handleCopyAllHistory={handleCopyAllHistory}
-              isRecording={isRecording}
-              startRecording={startRecording}
-              stopRecording={stopRecording}
-              isProcessingTranscription={isProcessingTranscription}
-              showAttachMenu={showAttachMenu}
-              setShowAttachMenu={setShowAttachMenu}
-              fileInputRef={fileInputRef}
-              handleFileUploadInput={handleFileUploadInput}
-              handleDroppedFiles={handleDiaryFilesSelected}
-              setModalConfig={setModalConfig}
-              applyFormatting={() => { }}
-              isTimerRunning={isDark}
-              diaryEndRef={diaryEndRef}
-              handleDiaryScroll={() => { }}
-              handleEditDiaryEntry={(index) => {
-                setModalInputValue(currentTaskData.acompanhamento![index].nota);
-                setModalConfig({ type: 'edit_diary', data: { index }, isOpen: true });
-              }}
-              handleDeleteDiaryEntry={(index) => setModalConfig({ type: 'confirm_delete', data: { index }, isOpen: true })}
-              isUploading={isUploading}
-              notifications={notifications}
-              handleProcessAudio={handleProcessAudio}
-            />
-          </div>
-        </div>
+          </>
+        )}
 
         {!isCopilotPanelCollapsed && renderResizeHandle('copilot')}
 
@@ -1917,8 +2012,11 @@ export const TaskExecutionView = ({
               isDark={isDark}
               variant="embedded"
               taskId={task.id}
-              systemId={currentTaskData.sistema_id}
+              systemId={currentTaskData.sistema}
               userId={copilotoUserId}
+              activeDocument={focusedFile}
+              isTemporary={!!tempSessionId}
+              sessionId={tempSessionId}
               onOpenTask={onOpenCopilotoTask}
               onOpenTool={onOpenCopilotoTool}
             />
@@ -2086,11 +2184,10 @@ export const TaskExecutionView = ({
 
             {/* Header */}
             <div className="flex items-center gap-3 mb-5">
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                insightState.nivel === 1
-                  ? 'bg-amber-500/20 text-amber-400'
-                  : isDark ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600'
-              }`}>
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${insightState.nivel === 1
+                ? 'bg-amber-500/20 text-amber-400'
+                : isDark ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600'
+                }`}>
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                 </svg>

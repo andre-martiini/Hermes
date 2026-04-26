@@ -322,6 +322,7 @@ interface Session {
     lastMessageAt: any;
     taskId?: string;
     systemId?: string;
+    isTemporary?: boolean;
 }
 
 interface HermesCopilotoDrawerProps {
@@ -334,13 +335,16 @@ interface HermesCopilotoDrawerProps {
     userId: string;
     onOpenTask?: (taskId: string) => void;
     onOpenTool?: (tool: string, id: string) => void;
+    activeDocument?: { url: string; nome: string; tipo: 'link' | 'file' | 'image'; driveFileId?: string } | null;
+    isTemporary?: boolean;
+    sessionId?: string | null;
 }
 
 type UploadPhase = 'idle' | 'uploading' | 'processing';
 const MOBILE_BREAKPOINT = 768;
 
 export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
-    isOpen, onClose, taskId, systemId, isDark = false, variant = 'drawer', userId, onOpenTask, onOpenTool
+    isOpen, onClose, taskId, systemId, isDark = false, variant = 'drawer', userId, onOpenTask, onOpenTool, activeDocument, isTemporary, sessionId
 }) => {
     const [sessions, setSessions] = useState<Session[]>([]);
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -351,6 +355,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const [showHistory, setShowHistory] = useState(false);
     const [sessionPendingDeleteId, setSessionPendingDeleteId] = useState<string | null>(null);
     const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+    const [confirmDeleteMessageId, setConfirmDeleteMessageId] = useState<string | null>(null);
     const chatEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -600,15 +605,20 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
     // Auto-select session for the current task when drawer opens
     useEffect(() => {
+        if (sessionId) {
+            setCurrentSessionId(sessionId);
+            return;
+        }
+
         if (isOpen && taskId && sessions.length > 0) {
             // Only auto-select if no session is selected or if the current one doesn't match the taskId
             // and we haven't manually switched to another one in this "open" session.
-            const latestTaskSession = sessions.find(s => s.taskId === taskId);
+            const latestTaskSession = sessions.find(s => s.taskId === taskId && !s.isTemporary);
             if (latestTaskSession && !currentSessionId) {
                 setCurrentSessionId(latestTaskSession.id);
             }
         }
-    }, [isOpen, taskId, sessions, currentSessionId]);
+    }, [isOpen, taskId, sessions, currentSessionId, sessionId]);
 
     // Load Messages for current session
     useEffect(() => {
@@ -839,11 +849,19 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const handleDeleteMessage = async (messageId?: string) => {
         if (!currentSessionId || !messageId) return;
 
-        // Confirmação simples via browser (opcional, mas seguro)
-        if (!window.confirm("Deseja apagar esta mensagem do histórico?")) return;
+        // Se ainda não clicou uma vez, entra no estado de confirmação
+        if (confirmDeleteMessageId !== messageId) {
+            setConfirmDeleteMessageId(messageId);
+            // Reset automático após 3 segundos se não confirmar
+            setTimeout(() => {
+                setConfirmDeleteMessageId(current => current === messageId ? null : current);
+            }, 3000);
+            return;
+        }
 
         try {
             await deleteDoc(doc(db, 'sessoes_copiloto', currentSessionId, 'mensagens', messageId));
+            setConfirmDeleteMessageId(null);
         } catch (err) {
             console.error('[Copiloto] Erro ao excluir mensagem:', err);
             setFooterError('Erro ao excluir mensagem do histórico.');
@@ -1265,9 +1283,14 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
             // 2. Chama a Cloud Function
             const askCopiloto = httpsCallable(functions, 'askCopilotoHermes', { timeout: 300000 });
+
+            const contextPrefix = activeDocument
+                ? `[CONTEXTO: Visualizando ${activeDocument.tipo} "${activeDocument.nome}" em Tela Cheia]\nLocal: ${activeDocument.url}${activeDocument.driveFileId ? `\nID para leitura profunda: ${activeDocument.driveFileId}\nPara ler o arquivo, use a ferramenta 'ler_arquivo_drive' com este ID.` : ''}\n\n`
+                : '';
+
             const response = await askCopiloto({
                 sessionId: sId,
-                prompt: text.trim() || (hasFile ? '' : text),
+                prompt: contextPrefix + (text.trim() || (hasFile ? '' : text)),
                 taskId: taskId || null,
                 systemId: systemId || null,
                 driveFileId: driveFileId || null,
@@ -1491,24 +1514,38 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                     <div className="hidden sm:block">
                         <h3 className="text-base font-black tracking-tight">Copiloto Hermes</h3>
                         {taskId && (
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
-                                <span className="text-[9px] font-black text-emerald-500 uppercase tracking-tight">Contexto da Ação Ativo</span>
+                            <div className="flex flex-col gap-0.5 mt-0.5">
+                                <div className="flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
+                                    <span className="text-[9px] font-black text-emerald-500 uppercase tracking-tight">Contexto da Ação Ativo</span>
+                                </div>
+                                {activeDocument && (
+                                    <div className="flex items-center gap-1.5">
+                                        <span className={`w-1.5 h-1.5 rounded-full ${isTemporary ? 'bg-amber-500' : 'bg-blue-500'} animate-pulse`} />
+                                        <span className={`text-[9px] font-black ${isTemporary ? 'text-amber-500' : 'text-blue-500'} uppercase tracking-tight truncate max-w-[150px]`}>
+                                            {isTemporary ? `Análise Volátil: ${activeDocument.nome}` : `Foco: ${activeDocument.nome}`}
+                                        </span>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
                 </div>
                 <div className="flex items-center gap-1 sm:gap-2">
-                    <button
-                        onClick={() => handleCreateSession()}
-                        className={`p-1.5 sm:p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}
-                        title="Nova Conversa"
-                    >
-                        <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-                    </button>
-                    <button onClick={() => setShowHistory(!showHistory)} className={`p-1.5 sm:p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}>
-                        <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    </button>
+                    {!isTemporary && (
+                        <button
+                            onClick={() => handleCreateSession()}
+                            className={`p-1.5 sm:p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}
+                            title="Nova Conversa"
+                        >
+                            <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+                        </button>
+                    )}
+                    {!isTemporary && (
+                        <button onClick={() => setShowHistory(!showHistory)} className={`p-1.5 sm:p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}>
+                            <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        </button>
+                    )}
                     <button onClick={onClose} className={`p-1.5 sm:p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}>
                         {isEmbedded ? (
                             <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
@@ -1649,8 +1686,13 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             <button
                                                 type="button"
                                                 onClick={() => handleDeleteMessage(msg.id)}
-                                                className={`rounded-md p-1 transition-all ${isDark ? 'bg-black/20 text-red-400/60 hover:text-red-400 hover:bg-black/30' : 'bg-white/70 text-red-400 hover:text-red-600 hover:bg-white'}`}
-                                                title="Excluir mensagem"
+                                                className={`rounded-md p-1 transition-all ${confirmDeleteMessageId === msg.id
+                                                    ? 'bg-red-600 text-white scale-110 shadow-lg'
+                                                    : isDark
+                                                        ? 'bg-black/20 text-red-400/60 hover:text-red-400 hover:bg-black/30'
+                                                        : 'bg-white/70 text-red-400 hover:text-red-600 hover:bg-white'
+                                                    }`}
+                                                title={confirmDeleteMessageId === msg.id ? "Clique novamente para confirmar" : "Excluir mensagem"}
                                             >
                                                 <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16" /></svg>
                                             </button>

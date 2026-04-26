@@ -31,6 +31,7 @@ interface DiarioBordoUIProps {
   isUploading: boolean;
   notifications?: any[];
   handleProcessAudio?: (audioBlob: Blob) => void;
+  onFocusFile?: (file: { url: string; nome: string; tipo: 'link' | 'file' | 'image'; driveFileId?: string }) => void;
 }
 
 export const DiarioBordoUI = ({
@@ -38,7 +39,7 @@ export const DiarioBordoUI = ({
   isRecording, startRecording, stopRecording, isProcessingTranscription, showAttachMenu, setShowAttachMenu,
   fileInputRef, handleFileUploadInput, handleDroppedFiles, setModalConfig, applyFormatting, isTimerRunning,
   diaryEndRef, handleDiaryScroll, handleEditDiaryEntry, handleDeleteDiaryEntry, isUploading,
-  notifications = [], handleProcessAudio
+  notifications = [], handleProcessAudio, onFocusFile
 }: DiarioBordoUIProps) => {
   const [showEmojiPicker, setShowEmojiPicker] = React.useState(false);
   const [isDragActive, setIsDragActive] = React.useState(false);
@@ -109,7 +110,15 @@ export const DiarioBordoUI = ({
       const url = ensureHttpUrl(richEntry.value);
       const nome = richEntry.name || richEntry.value;
       return (
-        <a href={url} target="_blank" rel="noreferrer" className={`group flex items-center gap-2 p-2 rounded-xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-blue-50/50 border-blue-100 hover:bg-blue-50'}`}>
+        <a href={url} target="_blank" rel="noreferrer"
+          onClick={(e) => {
+            if (onFocusFile) {
+              e.preventDefault();
+              const dMatch = url.match(/\/d\/([a-zA-Z0-9_-]{10,})/);
+              onFocusFile({ url, nome, tipo: 'link', driveFileId: dMatch ? dMatch[1] : undefined });
+            }
+          }}
+          className={`group flex items-center gap-2 p-2 rounded-xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-blue-50/50 border-blue-100 hover:bg-blue-50'}`}>
           <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-blue-200 text-blue-600'}`}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
           </div>
@@ -154,18 +163,26 @@ export const DiarioBordoUI = ({
       // Conversão do link do Web View do Drive para Embed URL
       let embedUrl = url;
       if (isImage && url.includes('drive.google.com')) {
-          const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-          if (match && match[1]) {
-              embedUrl = `https://drive.google.com/thumbnail?id=${match[1]}&sz=w800`;
-          }
+        const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+        if (match && match[1]) {
+          embedUrl = `https://drive.google.com/thumbnail?id=${match[1]}&sz=w800`;
+        }
       }
 
       return (
-        <a href={url} target="_blank" rel="noreferrer" className={`group flex flex-col p-2 rounded-xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-amber-50/50 border-amber-100 hover:bg-amber-50'} overflow-hidden max-w-sm`}>
+        <a href={url} target="_blank" rel="noreferrer"
+          onClick={(e) => {
+            if (onFocusFile) {
+              e.preventDefault();
+              const dMatch = url.match(/\/d\/([a-zA-Z0-9_-]{10,})/);
+              onFocusFile({ url, nome, tipo: isImage ? 'image' : 'file', driveFileId: dMatch ? dMatch[1] : undefined });
+            }
+          }}
+          className={`group flex flex-col p-2 rounded-xl border transition-all ${isTimerRunning ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-amber-50/50 border-amber-100 hover:bg-amber-50'} overflow-hidden max-w-sm`}>
           {isImage && (
-             <div className="w-full h-32 md:h-48 mb-2 bg-slate-900 rounded-lg overflow-hidden flex items-center justify-center">
-                <img src={embedUrl} alt={nome} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
-             </div>
+            <div className="w-full h-32 md:h-48 mb-2 bg-slate-900 rounded-lg overflow-hidden flex items-center justify-center">
+              <img src={embedUrl} alt={nome} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
+            </div>
           )}
           <div className="flex items-center gap-2">
             <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isTimerRunning ? 'bg-white/10 text-white' : 'bg-amber-200 text-amber-600'}`}>
@@ -184,7 +201,7 @@ export const DiarioBordoUI = ({
   };
 
   return (
-<div
+    <div
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -192,14 +209,12 @@ export const DiarioBordoUI = ({
       className={`flex flex-col h-full relative rounded-none md:rounded-b-2xl ${isTimerRunning ? 'bg-[#111827]' : 'bg-slate-50'}`}
     >
       {isDragActive && (
-        <div className={`pointer-events-none absolute inset-3 z-30 rounded-2xl border-2 border-dashed flex items-center justify-center backdrop-blur-sm ${
-          isTimerRunning
-            ? 'border-blue-400 bg-blue-500/10'
-            : 'border-blue-400 bg-blue-50/90'
-        }`}>
-          <div className={`px-4 py-3 rounded-2xl text-center shadow-lg ${
-            isTimerRunning ? 'bg-slate-950/80 text-blue-200' : 'bg-white text-blue-700'
+        <div className={`pointer-events-none absolute inset-3 z-30 rounded-2xl border-2 border-dashed flex items-center justify-center backdrop-blur-sm ${isTimerRunning
+          ? 'border-blue-400 bg-blue-500/10'
+          : 'border-blue-400 bg-blue-50/90'
           }`}>
+          <div className={`px-4 py-3 rounded-2xl text-center shadow-lg ${isTimerRunning ? 'bg-slate-950/80 text-blue-200' : 'bg-white text-blue-700'
+            }`}>
             <p className="text-sm font-black uppercase tracking-widest">Solte para anexar</p>
             <p className="text-[11px] mt-1 opacity-80">O diário vai usar o mesmo fluxo do botão de upload.</p>
           </div>
@@ -260,7 +275,7 @@ export const DiarioBordoUI = ({
                       </div>
                     )}
                     <div className="flex flex-col gap-1 items-start animate-in fade-in slide-in-from-bottom-2 duration-300 w-full mb-3">
-                    <div className={`p-4 rounded-none md:rounded-2xl md:rounded-tl-none border max-w-full md:max-w-[90%] shadow-lg relative group ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-100 shadow-slate-200'}`}>
+                      <div className={`p-4 rounded-none md:rounded-2xl md:rounded-tl-none border max-w-full md:max-w-[90%] shadow-lg relative group ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-100 shadow-slate-200'}`}>
                         {renderDiaryContent(entry.nota)}
                         <div className="flex items-center justify-between mt-2 gap-4">
                           <span className={`text-[9px] font-black uppercase tracking-wider ${isTimerRunning ? 'text-white/30' : 'text-slate-300'}`}>
@@ -332,21 +347,21 @@ export const DiarioBordoUI = ({
                   setNewFollowUp(newFollowUp ? newFollowUp + '\n' + cleaned : cleaned);
                   return;
                 }
-                
+
                 if (e.clipboardData.files && e.clipboardData.files.length > 0) {
                   e.preventDefault();
-                      try {
-                          processDroppedFiles(Array.from(e.clipboardData.files));
-                      } catch (err) {
-                          console.error('Erro ao processar ficheiros:', err);
-                      }
+                  try {
+                    processDroppedFiles(Array.from(e.clipboardData.files));
+                  } catch (err) {
+                    console.error('Erro ao processar ficheiros:', err);
+                  }
                 }
               }}
               placeholder="Descreva o que foi feito agora..."
               className={`w-full outline-none text-sm leading-relaxed transition-all min-h-[40px] max-h-[120px] overflow-y-auto resize-none ${isTimerRunning
                 ? 'bg-transparent text-white placeholder:text-white/20'
                 : 'bg-transparent text-slate-800 placeholder:text-slate-400'
-              }`}
+                }`}
             />
           </div>
 
@@ -401,7 +416,7 @@ export const DiarioBordoUI = ({
                 </button>
                 {showEmojiPicker && (
                   <div className="absolute bottom-8 left-0 z-[100] shadow-2xl rounded-xl">
-                    <EmojiPicker 
+                    <EmojiPicker
                       onEmojiClick={(emojiData) => {
                         setNewFollowUp(newFollowUp + emojiData.emoji);
                         setShowEmojiPicker(false);
@@ -422,18 +437,17 @@ export const DiarioBordoUI = ({
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6" /></svg>
               </button>
-              
+
               {/* Botão de Gravação de Áudio */}
               <button
                 onClick={isRecording ? stopRecording : startRecording}
                 disabled={isProcessingTranscription}
-                className={`w-8 h-8 flex items-center justify-center rounded-full transition-all active:scale-90 shadow-sm ${
-                  isRecording
-                    ? 'bg-rose-500 text-white animate-pulse shadow-rose-500/30'
-                    : isTimerRunning
-                      ? 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white'
-                      : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
-                }`}
+                className={`w-8 h-8 flex items-center justify-center rounded-full transition-all active:scale-90 shadow-sm ${isRecording
+                  ? 'bg-rose-500 text-white animate-pulse shadow-rose-500/30'
+                  : isTimerRunning
+                    ? 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white'
+                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
+                  }`}
                 title={isRecording ? 'Parar Gravação' : 'Gravar Áudio'}
               >
                 {isProcessingTranscription ? (
@@ -450,7 +464,7 @@ export const DiarioBordoUI = ({
                 className={`w-8 h-8 flex items-center justify-center rounded-full transition-all active:scale-90 shadow-md ${newFollowUp.trim()
                   ? 'bg-blue-600 text-white hover:bg-blue-500 shadow-blue-600/30'
                   : isTimerRunning ? 'bg-white/10 text-white/20 cursor-not-allowed' : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                }`}
+                  }`}
                 title="Enviar (Enter)"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
