@@ -1165,7 +1165,7 @@ export const TaskExecutionView = ({
       {/* ══════════════════════════════════════════════════════════
           HEADER BAR
       ══════════════════════════════════════════════════════════ */}
-      <header className={`shrink-0 px-4 md:px-6 py-3 border-b flex flex-col gap-2 ${isDark ? 'border-white/10 bg-black/30' : 'border-slate-200 bg-white/80 backdrop-blur-sm'}`}>
+      <header className={`shrink-0 px-4 md:px-6 py-2 sm:py-3 border-b flex flex-col gap-2 ${isDark ? 'border-white/10 bg-black/30' : 'border-slate-200 bg-white/80 backdrop-blur-sm'}`}>
         {/* Row 1: nav + title + controls */}
         <div className="hidden">
           {/* Back */}
@@ -1220,16 +1220,16 @@ export const TaskExecutionView = ({
         </div>
         </div>
 
-        <div className="sm:hidden flex flex-col gap-4 py-1">
-          <div className="flex items-start justify-between gap-4">
+        <div className="sm:hidden flex flex-col gap-2 py-0.5">
+          {/* Linha 1: label + t\u00edtulo + SpeedDial */}
+          <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <p className={`text-[10px] font-black uppercase tracking-[0.22em] ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>{'Sala de Opera\u00e7\u00f5es'}</p>
-              <h1 className={`mt-2 text-[1rem] font-black leading-[1.12] tracking-tight break-words ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              <p className={`text-[9px] font-black uppercase tracking-[0.22em] ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>Sala de Operações</p>
+              <h1 className={`mt-1 text-[1rem] font-black leading-[1.12] tracking-tight break-words ${isDark ? 'text-white' : 'text-slate-900'}`}>
                 {currentTaskData.titulo}
               </h1>
             </div>
-
-            <div className="shrink-0 pt-1">
+            <div className="shrink-0 pt-0.5">
               <SpeedDialMenu
                 notifications={notifications}
                 isSyncing={isSyncing}
@@ -1254,26 +1254,38 @@ export const TaskExecutionView = ({
                 onDismiss={onDismiss}
                 onCreateAction={onCreateAction}
                 direction="down"
-                triggerClassName="flex h-12 w-12 items-center justify-center rounded-[1.2rem] bg-white text-slate-700 border border-slate-200 shadow-[0_8px_18px_rgba(15,23,42,0.18)]"
-                triggerIconClassName="h-5 w-5"
+                triggerClassName="flex h-10 w-10 items-center justify-center rounded-[1rem] bg-white text-slate-700 border border-slate-200 shadow-[0_4px_12px_rgba(15,23,42,0.15)]"
+                triggerIconClassName="h-4 w-4"
               />
             </div>
           </div>
-
-          <div className="relative flex min-h-[44px] items-center justify-center">
-            <button onClick={onClose} className={`absolute left-0 top-1/2 shrink-0 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-2xl transition-all ${isDark ? 'text-white/30 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}>
+          {/* Linha 2: seta + badge + barra de progresso inline */}
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className={`shrink-0 flex h-8 w-8 items-center justify-center rounded-xl transition-all ${isDark ? 'text-white/30 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
             </button>
-
             <select
               value={currentTaskData.status}
               onChange={e => handleStatusChange(e.target.value)}
-              className={`mx-auto min-w-[92px] max-w-full text-center text-[8px] font-black uppercase tracking-[0.16em] px-3 py-1.5 rounded-full border appearance-none cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 transition-all ${statusColor(currentTaskData.status)} ${isDark ? 'bg-transparent' : 'bg-white'}`}
+              className={`shrink-0 text-center text-[8px] font-black uppercase tracking-[0.16em] px-2.5 py-1 rounded-full border appearance-none cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 transition-all ${statusColor(currentTaskData.status)} ${isDark ? 'bg-transparent' : 'bg-white'}`}
             >
               <option value="em andamento">Em Andamento</option>
               <option value="stand-by">Stand-by</option>
               <option value="conclu?do">Conclu?do</option>
             </select>
+            {(currentTaskData.plano_acao || []).length > 0 && (
+              <>
+                <div className={`flex-1 h-1 rounded-full overflow-hidden ${isDark ? 'bg-white/10' : 'bg-slate-200'}`}>
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${progressPercent === 100 ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+                <span className={`text-[9px] font-black shrink-0 ${progressPercent === 100 ? (isDark ? 'text-emerald-400' : 'text-emerald-600') : mutedText}`}>
+                  {progressPercent}%
+                </span>
+              </>
+            )}
           </div>
         </div>
 
@@ -1328,9 +1340,9 @@ export const TaskExecutionView = ({
           </div>
         </div>
 
-        {/* Row 2: Progress bar */}
+        {/* Row 2: Progress bar — desktop only (mobile é inline na linha 2 acima) */}
         {(currentTaskData.plano_acao || []).length > 0 && (
-          <div className="flex items-center gap-3">
+          <div className="hidden sm:flex items-center gap-3">
             <div className={`flex-1 h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-white/10' : 'bg-slate-200'}`}>
               <div
                 className={`h-full rounded-full transition-all duration-500 ${progressPercent === 100 ? 'bg-emerald-500' : 'bg-blue-500'}`}
@@ -1360,13 +1372,13 @@ export const TaskExecutionView = ({
             <button
               key={tab}
               onClick={() => setMobileTab(tab)}
-              className={`flex-1 flex flex-col items-center gap-1 py-2.5 text-[9px] font-black uppercase tracking-widest transition-all border-b-2 ${active
+              title={labels[tab]}
+              className={`flex-1 flex items-center justify-center py-2 transition-all border-b-2 ${active
                 ? isDark ? 'border-blue-400 text-blue-400' : 'border-blue-600 text-blue-600'
                 : `border-transparent ${mutedText}`
                 }`}
             >
               {icons[tab]}
-              {labels[tab]}
             </button>
           );
         })}
@@ -1896,7 +1908,7 @@ export const TaskExecutionView = ({
           renderCollapsedPanelRail('copilot', 'Copiloto', 'Hermes', () => setIsCopilotCollapsed(false))
         ) : (
           <div
-            className={`${showCopiloto ? 'flex' : 'hidden'} lg:flex min-h-0 shrink-0 flex-col`}
+            className={`${showCopiloto ? 'flex' : 'hidden'} lg:flex min-h-0 flex-1 lg:flex-none flex-col overflow-hidden`}
             style={{ width: isDesktopViewport ? copilotoDesktopWidth : undefined }}
           >
             <HermesCopilotoDrawer

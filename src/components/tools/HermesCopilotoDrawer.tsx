@@ -36,6 +36,7 @@ const COPILOTO_SUPPORTED_FILE_EXTENSIONS = [
 ] as const;
 const COPILOTO_FILE_ACCEPT = COPILOTO_SUPPORTED_FILE_EXTENSIONS.join(',');
 const COPILOTO_SUPPORTED_FORMATS_LABEL = 'PDF, DOC/DOCX, XLS/XLSX, CSV, TXT, JSON, XML, EML, Markdown, HTML, PPTX e imagens';
+const LARGE_PASTE_THRESHOLD = 1500;
 
 const isCopilotoFileSupported = (file: File) => {
     const fileName = file.name.toLowerCase();
@@ -1077,7 +1078,17 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
         const files = Array.from(e.clipboardData.files);
         const audioFile = files.find(f => f.type.startsWith('audio/'));
-        if (!audioFile) return; // sem áudio: deixa o comportamento padrão acontecer
+
+        if (!audioFile) {
+            const pastedText = e.clipboardData.getData('text');
+            if (pastedText.length > LARGE_PASTE_THRESHOLD) {
+                e.preventDefault();
+                const dateStr = new Date().toISOString().slice(0, 10);
+                const file = new File([pastedText], `contexto-${dateStr}.txt`, { type: 'text/plain' });
+                attachFileToCopiloto(file);
+            }
+            return;
+        }
 
         e.preventDefault();
         setIsTranscribing(true);
@@ -1458,47 +1469,52 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             )}
 
             {/* Header */}
-            <div className={`shrink-0 p-6 flex items-center justify-between border-b ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
-                <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-lg">
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className={`shrink-0 px-3 py-2 sm:p-5 flex items-center justify-between border-b ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+                <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+                    {/* Ícone — oculto no mobile */}
+                    <div className="hidden sm:flex w-9 h-9 shrink-0 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 items-center justify-center text-white shadow-lg">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                         </svg>
                     </div>
-                    <div>
-                        <h3 className="text-lg font-black tracking-tight">Copiloto Hermes</h3>
-                        <div className="flex items-center gap-3">
-                            {taskId && (
-                                <div className="flex items-center gap-1.5">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]"></span>
-                                    <span className="text-[9px] font-black text-emerald-500 uppercase tracking-tight">Contexto da Ação Ativo</span>
-                                </div>
-                            )}
-                        </div>
+                    {/* Mobile: dot + título inline */}
+                    <div className="flex sm:hidden items-center gap-1.5 min-w-0">
+                        {taskId && <span className="w-1.5 h-1.5 shrink-0 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]" />}
+                        <span className={`text-xs font-black tracking-tight truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>Copiloto Hermes</span>
+                    </div>
+                    {/* Desktop: título + badge empilhados */}
+                    <div className="hidden sm:block">
+                        <h3 className="text-base font-black tracking-tight">Copiloto Hermes</h3>
+                        {taskId && (
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
+                                <span className="text-[9px] font-black text-emerald-500 uppercase tracking-tight">Contexto da Ação Ativo</span>
+                            </div>
+                        )}
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 sm:gap-2">
                     <button
                         onClick={() => handleCreateSession()}
-                        className={`p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}
+                        className={`p-1.5 sm:p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}
                         title="Nova Conversa"
                     >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+                        <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
                     </button>
-                    <button onClick={() => setShowHistory(!showHistory)} className={`p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}>
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    <button onClick={() => setShowHistory(!showHistory)} className={`p-1.5 sm:p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}>
+                        <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                     </button>
-                    <button onClick={onClose} className={`p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}>
+                    <button onClick={onClose} className={`p-1.5 sm:p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}>
                         {isEmbedded ? (
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
+                            <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
                         ) : (
-                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                            <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
                         )}
                     </button>
                 </div>
             </div>
 
-            <div className="flex-1 overflow-x-hidden overflow-y-visible flex relative">
+            <div className="flex-1 min-h-0 overflow-hidden flex relative">
                 {/* History Sidebar */}
                 {showHistory && (
                     <div className={`absolute inset-0 z-10 flex flex-col ${isDark ? 'border-r border-white/10 bg-[#0b1220]' : 'border-r border-slate-200 bg-white'}`}>
@@ -1571,8 +1587,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 )}
 
                 {/* Chat Area */}
-                <div className="flex-1 flex flex-col min-w-0 overflow-visible">
-                    <div className="flex-1 overflow-y-auto p-6 space-y-6" style={{ scrollbarWidth: 'thin' }}>
+                <div className="flex-1 min-h-0 flex flex-col min-w-0 overflow-hidden">
+                    <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-6" style={{ scrollbarWidth: 'thin' }}>
                         {messages.length === 0 && !isLoading && (
                             <div className="h-full flex flex-col items-center justify-center text-center gap-5">
                                 <div className={`w-20 h-20 rounded-[2.5rem] flex items-center justify-center border ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-400'}`}>
