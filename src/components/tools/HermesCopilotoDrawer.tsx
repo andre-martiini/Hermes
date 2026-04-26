@@ -189,6 +189,8 @@ const TOOL_LABELS: Record<string, string> = {
     gerar_rascunho_formulario: 'Rascunho de Formulário',
     consultar_agenda: 'Agenda Consultada',
     encontrar_slot_livre: 'Slot Livre Encontrado',
+    consultar_financas_v2: 'Dados Financeiros Consultados',
+    registrar_item_financeiro_v2: 'Movimentação Financeira Registrada',
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -885,7 +887,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const handleConfirmDiagnosis = async (diagnosis: DiagnosisRequest, messageId?: string) => {
         if (!currentSessionId || diagnosingId) return;
         if (messageId) setDiagnosingId(messageId);
-        
+
         try {
             const sanitize = (v?: string | null) => {
                 const s = v?.trim() || '';
@@ -1510,8 +1512,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         disabled={Boolean(deletingSessionId && deletingSessionId !== s.id)}
                                         title={sessionPendingDeleteId === s.id ? 'Clique novamente para excluir' : 'Excluir sessão'}
                                         className={`shrink-0 rounded-xl border px-2.5 py-2 text-[9px] font-black uppercase tracking-widest transition-all ${sessionPendingDeleteId === s.id
-                                                ? (isDark ? 'border-red-400/40 bg-red-500/10 text-red-300 hover:bg-red-500/15' : 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100')
-                                                : (isDark ? 'border-white/10 bg-white/5 text-white/45 hover:border-white/20 hover:text-red-300' : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300 hover:text-red-600')
+                                            ? (isDark ? 'border-red-400/40 bg-red-500/10 text-red-300 hover:bg-red-500/15' : 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100')
+                                            : (isDark ? 'border-white/10 bg-white/5 text-white/45 hover:border-white/20 hover:text-red-300' : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300 hover:text-red-600')
                                             } disabled:cursor-not-allowed disabled:opacity-40`}
                                     >
                                         {deletingSessionId === s.id ? (
@@ -1566,722 +1568,723 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                             const messageKey = msg.id || `${msg.role}-${i}`;
                             const messageTimestamp = formatMessageTimestamp(msg.timestamp);
                             return (
-                            <div key={messageKey} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                                <div className={`group relative max-w-[90%] min-w-0 px-4 py-3 rounded-2xl text-xs font-medium leading-relaxed shadow-sm break-words [overflow-wrap:anywhere] [&_*]:max-w-full ${msg.role === 'user'
-                                    ? isDark
-                                        ? 'bg-blue-600 text-white rounded-br-none'
-                                        : 'bg-blue-600 text-white rounded-br-none'
-                                    : isDark
-                                        ? 'bg-slate-800 text-slate-100 border border-slate-700 rounded-bl-none'
-                                        : 'bg-slate-100 text-slate-700 rounded-bl-none'
-                                    }`}>
-                                    <button
-                                        type="button"
-                                        onClick={() => handleCopyChatMessage(messageKey, msg.content || '')}
-                                        className={`absolute right-2 top-2 rounded-md p-1 opacity-0 transition-all group-hover:opacity-100 hover:scale-105 ${isDark ? 'bg-black/20 text-white/60 hover:text-white hover:bg-black/30' : 'bg-white/70 text-slate-400 hover:text-slate-700 hover:bg-white'}`}
-                                        title={copiedMessageKey === messageKey ? 'Copiado!' : 'Copiar mensagem'}
-                                        aria-label={copiedMessageKey === messageKey ? 'Mensagem copiada' : 'Copiar mensagem'}
-                                    >
-                                        {copiedMessageKey === messageKey ? (
-                                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
-                                        ) : (
-                                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V5a2 2 0 012-2h7a2 2 0 012 2v7a2 2 0 01-2 2h-2m-1 4H7a2 2 0 01-2-2V9a2 2 0 012-2h7a2 2 0 012 2v7a2 2 0 01-2 2z" /></svg>
+                                <div key={messageKey} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                                    <div className={`group relative max-w-[90%] min-w-0 px-4 py-3 rounded-2xl text-xs font-medium leading-relaxed shadow-sm break-words [overflow-wrap:anywhere] [&_*]:max-w-full ${msg.role === 'user'
+                                        ? isDark
+                                            ? 'bg-blue-600 text-white rounded-br-none'
+                                            : 'bg-blue-600 text-white rounded-br-none'
+                                        : isDark
+                                            ? 'bg-slate-800 text-slate-100 border border-slate-700 rounded-bl-none'
+                                            : 'bg-slate-100 text-slate-700 rounded-bl-none'
+                                        }`}>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleCopyChatMessage(messageKey, msg.content || '')}
+                                            className={`absolute right-2 top-2 rounded-md p-1 opacity-0 transition-all group-hover:opacity-100 hover:scale-105 ${isDark ? 'bg-black/20 text-white/60 hover:text-white hover:bg-black/30' : 'bg-white/70 text-slate-400 hover:text-slate-700 hover:bg-white'}`}
+                                            title={copiedMessageKey === messageKey ? 'Copiado!' : 'Copiar mensagem'}
+                                            aria-label={copiedMessageKey === messageKey ? 'Mensagem copiada' : 'Copiar mensagem'}
+                                        >
+                                            {copiedMessageKey === messageKey ? (
+                                                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                                            ) : (
+                                                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V5a2 2 0 012-2h7a2 2 0 012 2v7a2 2 0 01-2 2h-2m-1 4H7a2 2 0 01-2-2V9a2 2 0 012-2h7a2 2 0 012 2v7a2 2 0 01-2 2z" /></svg>
+                                            )}
+                                        </button>
+                                        {msg.toolsUsed && msg.toolsUsed.length > 0 && (
+                                            <div className="mb-2.5">
+                                                <div className={`mb-1 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.75 3a.75.75 0 01.75.75V5a.75.75 0 01-1.5 0V3.75A.75.75 0 019.75 3zm4.5 0a.75.75 0 01.75.75V5a.75.75 0 01-1.5 0V3.75a.75.75 0 01.75-.75zM12 8.25A3.75 3.75 0 108.25 12 3.75 3.75 0 0012 8.25zm7.5 3a.75.75 0 010 1.5H18.25a.75.75 0 010-1.5zM5.75 12a.75.75 0 01-.75.75H3.75a.75.75 0 010-1.5H5a.75.75 0 01.75.75zm10.364 5.614a.75.75 0 011.06 0l.884.884a.75.75 0 11-1.06 1.06l-.884-.883a.75.75 0 010-1.061zm-9.288 0a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.883-.884a.75.75 0 011.061 0zm11.172-11.228a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.883-.884a.75.75 0 011.061 0zm-11.172 0l.884.884a.75.75 0 11-1.06 1.06l-.884-.883a.75.75 0 011.06-1.061zM9.75 19a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-1.25a.75.75 0 01.75-.75zm4.5 0a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-1.25a.75.75 0 01.75-.75z" /></svg>
+                                                    Ferramentas usadas
+                                                </div>
+                                                <div className="flex flex-wrap gap-1">
+                                                    {[...new Set(msg.toolsUsed)].map(tool => {
+                                                        if (!TOOL_LABELS[tool]) return null;
+                                                        const isWrite = WRITE_TOOLS.has(tool);
+                                                        return (
+                                                            <span
+                                                                key={tool}
+                                                                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.08em] border ${isWrite
+                                                                    ? isDark
+                                                                        ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20'
+                                                                        : 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                                                                    : isDark
+                                                                        ? 'text-slate-300 bg-slate-900 border-slate-700'
+                                                                        : 'text-slate-500 bg-white/90 border-slate-200'
+                                                                    }`}
+                                                            >
+                                                                {isWrite ? (
+                                                                    <svg className="w-2.5 h-2.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+                                                                    </svg>
+                                                                ) : (
+                                                                    <svg className="w-2.5 h-2.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                                    </svg>
+                                                                )}
+                                                                {TOOL_LABELS[tool]}
+                                                            </span>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
                                         )}
-                                    </button>
-                                    {msg.toolsUsed && msg.toolsUsed.length > 0 && (
-                                        <div className="mb-2.5">
-                                            <div className={`mb-1 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.75 3a.75.75 0 01.75.75V5a.75.75 0 01-1.5 0V3.75A.75.75 0 019.75 3zm4.5 0a.75.75 0 01.75.75V5a.75.75 0 01-1.5 0V3.75a.75.75 0 01.75-.75zM12 8.25A3.75 3.75 0 108.25 12 3.75 3.75 0 0012 8.25zm7.5 3a.75.75 0 010 1.5H18.25a.75.75 0 010-1.5zM5.75 12a.75.75 0 01-.75.75H3.75a.75.75 0 010-1.5H5a.75.75 0 01.75.75zm10.364 5.614a.75.75 0 011.06 0l.884.884a.75.75 0 11-1.06 1.06l-.884-.883a.75.75 0 010-1.061zm-9.288 0a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.883-.884a.75.75 0 011.061 0zm11.172-11.228a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.883-.884a.75.75 0 011.061 0zm-11.172 0l.884.884a.75.75 0 11-1.06 1.06l-.884-.883a.75.75 0 011.06-1.061zM9.75 19a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-1.25a.75.75 0 01.75-.75zm4.5 0a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-1.25a.75.75 0 01.75-.75z" /></svg>
-                                                Ferramentas usadas
-                                            </div>
-                                            <div className="flex flex-wrap gap-1">
-                                            {[...new Set(msg.toolsUsed)].map(tool => {
-                                                if (!TOOL_LABELS[tool]) return null;
-                                                const isWrite = WRITE_TOOLS.has(tool);
-                                                return (
-                                            <span
-                                                        key={tool}
-                                                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.08em] border ${isWrite
-                                                                ? isDark
-                                                                    ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20'
-                                                                    : 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                                                                : isDark
-                                                                    ? 'text-slate-300 bg-slate-900 border-slate-700'
-                                                                    : 'text-slate-500 bg-white/90 border-slate-200'
-                                                            }`}
-                                                    >
-                                                        {isWrite ? (
-                                                            <svg className="w-2.5 h-2.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-                                                            </svg>
-                                                        ) : (
-                                                            <svg className="w-2.5 h-2.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                            </svg>
-                                                        )}
-                                                        {TOOL_LABELS[tool]}
-                                                    </span>
-                                                );
-                                            })}
-                                            </div>
-                                        </div>
-                                    )}
-                                    <ReactMarkdown
-                                        remarkPlugins={[remarkGfm]}
-                                        urlTransform={(url) => url}
-                                        components={{
-                                            p: ({ node, ...props }) => <p className="mb-2 last:mb-0 break-words [overflow-wrap:anywhere]" {...props} />,
-                                            ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-2 break-words [overflow-wrap:anywhere]" {...props} />,
-                                            li: ({ node, ...props }) => <li className="mb-0.5 break-words [overflow-wrap:anywhere]" {...props} />,
-                                            strong: ({ node, ...props }) => <strong className={`font-bold ${isDark ? 'text-blue-300' : 'text-blue-600'}`} {...props} />,
-                                            pre: ({ node, children, ...props }) => {
-                                                const arr = React.Children.toArray(children);
-                                                const first = arr[0] as React.ReactElement | undefined;
-                                                if (first?.props?.className === 'language-mermaid') {
-                                                    return <>{children}</>;
-                                                }
-                                                return (
-                                                    <pre
-                                                        className="max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] overflow-x-hidden rounded-xl"
-                                                        {...props}
-                                                    >
-                                                        {children}
-                                                    </pre>
-                                                );
-                                            },
-                                            code: ({ node, className, children, ...props }) => {
-                                                if (className === 'language-mermaid') {
-                                                    return <MermaidBlock code={String(children).trim()} isDark={isDark} />;
-                                                }
-                                                return (
-                                                    <code
-                                                        className={`${className ?? ''} whitespace-pre-wrap break-words [overflow-wrap:anywhere]`}
-                                                        {...props}
-                                                    >
-                                                        {children}
-                                                    </code>
-                                                );
-                                            },
-                                            a: ({ node, ...props }) => {
-                                                const href = props.href || '';
+                                        <ReactMarkdown
+                                            remarkPlugins={[remarkGfm]}
+                                            urlTransform={(url) => url}
+                                            components={{
+                                                p: ({ node, ...props }) => <p className="mb-2 last:mb-0 break-words [overflow-wrap:anywhere]" {...props} />,
+                                                ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-2 break-words [overflow-wrap:anywhere]" {...props} />,
+                                                li: ({ node, ...props }) => <li className="mb-0.5 break-words [overflow-wrap:anywhere]" {...props} />,
+                                                strong: ({ node, ...props }) => <strong className={`font-bold ${isDark ? 'text-blue-300' : 'text-blue-600'}`} {...props} />,
+                                                pre: ({ node, children, ...props }) => {
+                                                    const arr = React.Children.toArray(children);
+                                                    const first = arr[0] as React.ReactElement | undefined;
+                                                    if (first?.props?.className === 'language-mermaid') {
+                                                        return <>{children}</>;
+                                                    }
+                                                    return (
+                                                        <pre
+                                                            className="max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] overflow-x-hidden rounded-xl"
+                                                            {...props}
+                                                        >
+                                                            {children}
+                                                        </pre>
+                                                    );
+                                                },
+                                                code: ({ node, className, children, ...props }) => {
+                                                    if (className === 'language-mermaid') {
+                                                        return <MermaidBlock code={String(children).trim()} isDark={isDark} />;
+                                                    }
+                                                    return (
+                                                        <code
+                                                            className={`${className ?? ''} whitespace-pre-wrap break-words [overflow-wrap:anywhere]`}
+                                                            {...props}
+                                                        >
+                                                            {children}
+                                                        </code>
+                                                    );
+                                                },
+                                                a: ({ node, ...props }) => {
+                                                    const href = props.href || '';
 
-                                                if (isInternalAppHref(href)) {
+                                                    if (isInternalAppHref(href)) {
+                                                        return (
+                                                            <a
+                                                                className={`underline break-all ${isDark ? 'text-blue-300 hover:text-blue-200' : 'text-blue-600 hover:text-blue-800'}`}
+                                                                href={href}
+                                                                onClick={(event) => {
+                                                                    event.preventDefault();
+                                                                    console.log("[HermesCopiloto] Link clicked:", href);
+                                                                    navigateWithinApp(href);
+                                                                    if (shouldAutoCloseOnNavigate) onClose?.();
+                                                                }}
+                                                            >
+                                                                {props.children}
+                                                            </a>
+                                                        );
+                                                    }
+
+                                                    if (href.includes('task:')) {
+                                                        const id = href.split('task:')[1];
+                                                        return (
+                                                            <button
+                                                                onClick={() => {
+                                                                    console.log("[HermesCopiloto] Link clicked:", href);
+                                                                    onOpenTask?.(id);
+                                                                    if (shouldAutoCloseOnNavigate) onClose?.();
+                                                                }}
+                                                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm group/btn ${isDark ? 'bg-blue-500/10 hover:bg-blue-600 hover:text-white text-blue-300 border-blue-400/30' : 'bg-white/10 hover:bg-blue-600 hover:text-white text-blue-400 border-blue-500/30'}`}
+                                                            >
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                                                <span className="group-hover/btn:underline">{props.children}</span>
+                                                                <svg className="w-3 h-3 opacity-0 group-hover/btn:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
+                                                            </button>
+                                                        );
+                                                    }
+                                                    if (href.includes('tool:slides:')) {
+                                                        const draftId = href.split('tool:slides:')[1];
+                                                        return (
+                                                            <button
+                                                                onClick={() => {
+                                                                    console.log("[HermesCopiloto] Link clicked:", href);
+                                                                    onOpenTool?.('slides', draftId);
+                                                                }}
+                                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm"
+                                                            >
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" /></svg>
+                                                                {props.children}
+                                                            </button>
+                                                        );
+                                                    }
+                                                    if (href.includes('tool:diagnosis:')) {
+                                                        const diagId = href.split('tool:diagnosis:')[1];
+                                                        return (
+                                                            <button
+                                                                onClick={() => {
+                                                                    console.log("[HermesCopiloto] Link clicked:", href);
+                                                                    handleOpenDiagnosis(diagId);
+                                                                }}
+                                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm"
+                                                            >
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+                                                                {props.children}
+                                                            </button>
+                                                        );
+                                                    }
                                                     return (
                                                         <a
                                                             className={`underline break-all ${isDark ? 'text-blue-300 hover:text-blue-200' : 'text-blue-600 hover:text-blue-800'}`}
-                                                            href={href}
-                                                            onClick={(event) => {
-                                                                event.preventDefault();
-                                                                console.log("[HermesCopiloto] Link clicked:", href);
-                                                                navigateWithinApp(href);
-                                                                if (shouldAutoCloseOnNavigate) onClose?.();
-                                                            }}
-                                                        >
-                                                            {props.children}
-                                                        </a>
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            onClick={() => console.log("[HermesCopiloto] Link clicked:", href)}
+                                                            {...props}
+                                                        />
                                                     );
-                                                }
+                                                },
+                                            }}
+                                        >
+                                            {msg.content}
+                                        </ReactMarkdown>
 
-                                                if (href.includes('task:')) {
-                                                    const id = href.split('task:')[1];
-                                                    return (
-                                                        <button
-                                                            onClick={() => {
-                                                                console.log("[HermesCopiloto] Link clicked:", href);
-                                                                onOpenTask?.(id);
-                                                                if (shouldAutoCloseOnNavigate) onClose?.();
-                                                            }}
-                                                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm group/btn ${isDark ? 'bg-blue-500/10 hover:bg-blue-600 hover:text-white text-blue-300 border-blue-400/30' : 'bg-white/10 hover:bg-blue-600 hover:text-white text-blue-400 border-blue-500/30'}`}
-                                                        >
-                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                                                            <span className="group-hover/btn:underline">{props.children}</span>
-                                                            <svg className="w-3 h-3 opacity-0 group-hover/btn:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
-                                                        </button>
-                                                    );
-                                                }
-                                                if (href.includes('tool:slides:')) {
-                                                    const draftId = href.split('tool:slides:')[1];
-                                                    return (
-                                                        <button
-                                                            onClick={() => {
-                                                                console.log("[HermesCopiloto] Link clicked:", href);
-                                                                onOpenTool?.('slides', draftId);
-                                                            }}
-                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm"
-                                                        >
-                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" /></svg>
-                                                            {props.children}
-                                                        </button>
-                                                    );
-                                                }
-                                                if (href.includes('tool:diagnosis:')) {
-                                                    const diagId = href.split('tool:diagnosis:')[1];
-                                                    return (
-                                                        <button
-                                                            onClick={() => {
-                                                                console.log("[HermesCopiloto] Link clicked:", href);
-                                                                handleOpenDiagnosis(diagId);
-                                                            }}
-                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm"
-                                                        >
-                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
-                                                            {props.children}
-                                                        </button>
-                                                    );
-                                                }
-                                                return (
-                                                    <a
-                                                        className={`underline break-all ${isDark ? 'text-blue-300 hover:text-blue-200' : 'text-blue-600 hover:text-blue-800'}`}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        onClick={() => console.log("[HermesCopiloto] Link clicked:", href)}
-                                                        {...props}
-                                                    />
-                                                );
-                                            },
-                                        }}
-                                    >
-                                        {msg.content}
-                                    </ReactMarkdown>
-
-                                {msg.toolInvocation && (
-                                    <div className={`mt-4 p-4 rounded-xl overflow-hidden ${isDark ? 'bg-slate-900 border border-slate-700' : 'bg-white/5 border border-white/10'}`}>
-                                        {(() => {
-                                            const tool = toolsRegistry.find(t => t.id === msg.toolInvocation!.tool_id);
-                                            if (!tool) return <div className="text-red-400 text-sm">Erro: Ferramenta {msg.toolInvocation!.tool_id} não encontrada no catálogo.</div>;
-                                            const ToolComponent = tool.component;
-                                            return <ToolComponent {...msg.toolInvocation!.parametros} onBack={() => {}} showToast={() => {}} isEmbedded={true} />;
-                                        })()}
-                                    </div>
-                                )}
-
-
-                                    {/* Botões de confirmação de draft */}
-                                    {msg.role === 'assistant' && (() => {
-                                        const draftType = getDraftType(msg.content, i);
-                                        if (!draftType) return null;
-                                        return (
-                                            <div className={`mt-3 pt-3 border-t flex flex-wrap gap-2 ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                                                <button
-                                                    onClick={() => handleQuickReply('Confirmo!')}
-                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-sm"
-                                                >
-                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                    Confirmar
-                                                </button>
-                                                <button
-                                                    onClick={() => {
-                                                        setInput('Prefiro ajustar: ');
-                                                        setTimeout(() => textareaRef.current?.focus(), 50);
-                                                    }}
-                                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all shadow-sm ${isDark ? 'bg-slate-800 text-amber-300 border-amber-500/30 hover:bg-slate-700' : 'bg-white text-amber-700 border-amber-300 hover:bg-amber-50'}`}
-                                                >
-                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                                                    Ajustar
-                                                </button>
-                                                <button
-                                                    onClick={() => handleQuickReply('Cancelar, não quero prosseguir.')}
-                                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all shadow-sm ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-slate-100' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-100 hover:text-slate-600'}`}
-                                                >
-                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-                                                    Cancelar
-                                                </button>
+                                        {msg.toolInvocation && (
+                                            <div className={`mt-4 p-4 rounded-xl overflow-hidden ${isDark ? 'bg-slate-900 border border-slate-700' : 'bg-white/5 border border-white/10'}`}>
+                                                {(() => {
+                                                    const tool = toolsRegistry.find(t => t.id === msg.toolInvocation!.tool_id);
+                                                    if (!tool) return <div className="text-red-400 text-sm">Erro: Ferramenta {msg.toolInvocation!.tool_id} não encontrada no catálogo.</div>;
+                                                    const ToolComponent = tool.component;
+                                                    return <ToolComponent {...msg.toolInvocation!.parametros} onBack={() => { }} showToast={() => { }} isEmbedded={true} />;
+                                                })()}
                                             </div>
-                                        );
-                                    })()}
+                                        )}
 
-                                    {/* Botão Abrir Relatório */}
-                                    {msg.role === 'assistant' && msg.reportId && (
-                                        <div className={`mt-3 pt-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                                            <button
-                                                onClick={() => handleOpenReport(msg.reportId!)}
-                                                disabled={isLoadingReport}
-                                                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
-                                            >
-                                                {isLoadingReport ? (
-                                                    <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                                                ) : (
-                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                                    </svg>
-                                                )}
-                                                Abrir Relatório
-                                            </button>
-                                        </div>
-                                    )}
 
-                                    {msg.proposedPlan && (
-                                        <div className={`mt-4 p-4 rounded-xl border shadow-sm ${isDark ? 'bg-slate-900 border-blue-500/20' : 'bg-white border-blue-200'}`}>
-                                            <p className="text-[10px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-2 mb-3">
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
-                                                Proposta de Ajuste de Plano
-                                            </p>
-                                            <div className="space-y-2 mb-4">
-                                                {msg.proposedPlan.map((item, idx) => (
-                                                    <div key={idx} className={`flex gap-2 text-[11px] ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                                                        <span className="font-black text-blue-400">{idx + 1}.</span>
-                                                        <span>{item.text}</span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                            <div className="flex gap-2">
-                                                <button className="flex-1 bg-emerald-600 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all">Aceitar</button>
-                                                <button className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>Recusar</button>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Card de confirmação de edição de ação */}
-                                    {msg.pendingEdit && msg.id && (() => {
-                                        const pe = msg.pendingEdit!;
-                                        const mid = msg.id!;
-                                        const isProcessing = loadingEditId === mid;
-
-                                        if (pe.status === 'completed') {
+                                        {/* Botões de confirmação de draft */}
+                                        {msg.role === 'assistant' && (() => {
+                                            const draftType = getDraftType(msg.content, i);
+                                            if (!draftType) return null;
                                             return (
-                                                <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
-                                                    <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700 flex items-center gap-1.5 mb-2">
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                        Edição confirmada
-                                                    </p>
-                                                    <p className="text-[10px] text-emerald-700 font-semibold truncate">{pe.titulo}</p>
-                                                    <div className="mt-1.5 space-y-1">
-                                                        {Object.entries(pe.alteracoes).map(([campo, change]) => (
-                                                            <div key={campo} className="text-[9px] text-emerald-600 flex gap-1 flex-wrap">
-                                                                <span className="font-black">{FIELD_LABELS[campo] ?? campo}:</span>
-                                                                <span className="line-through opacity-60">{change.original || '—'}</span>
-                                                                <span>→</span>
-                                                                <span className="font-semibold">{change.novo || '—'}</span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            );
-                                        }
-
-                                        if (pe.status === 'invalidated' || pe.status === 'error') {
-                                            return (
-                                                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl">
-                                                    <p className="text-[10px] font-black uppercase tracking-widest text-red-600 flex items-center gap-1.5 mb-1">
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
-                                                        {pe.status === 'error' ? 'Erro na edição' : 'Edição bloqueada'}
-                                                    </p>
-                                                    <p className="text-[10px] text-red-600">{pe.errorMessage ?? 'Operação indisponível.'}</p>
-                                                </div>
-                                            );
-                                        }
-
-                                        if (pe.status === 'cancelled') {
-                                            return (
-                                                <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-                                                        Edição cancelada
-                                                    </p>
-                                                </div>
-                                            );
-                                        }
-
-                                        // status === 'pending'
-                                        return (
-                                            <div className="mt-3 p-3 bg-white border border-amber-200 rounded-xl shadow-sm">
-                                                <p className="text-[10px] font-black uppercase tracking-widest text-amber-700 flex items-center gap-1.5 mb-2">
-                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                                                    Edição pendente
-                                                </p>
-                                                <p className="text-[10px] font-semibold text-slate-700 truncate mb-2">{pe.titulo}</p>
-                                                <div className="space-y-1.5 mb-3">
-                                                    {Object.entries(pe.alteracoes).map(([campo, change]) => (
-                                                        <div key={campo} className="grid grid-cols-[80px_1fr_1fr] gap-1 text-[9px]">
-                                                            <span className="font-black text-slate-500 uppercase">{FIELD_LABELS[campo] ?? campo}</span>
-                                                            <span className="text-slate-400 truncate line-through">{change.original || '—'}</span>
-                                                            <span className="text-emerald-700 font-semibold truncate">{change.novo || '—'}</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                                <div className="flex gap-2 pt-2 border-t border-amber-100">
+                                                <div className={`mt-3 pt-3 border-t flex flex-wrap gap-2 ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
                                                     <button
-                                                        onClick={() => handleConfirmEdit(mid, pe)}
-                                                        disabled={isProcessing}
-                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                        onClick={() => handleQuickReply('Confirmo!')}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-sm"
                                                     >
-                                                        {isProcessing ? (
-                                                            <span className="w-2.5 h-2.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                                                        ) : (
-                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                        )}
+                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                                                         Confirmar
                                                     </button>
                                                     <button
-                                                        onClick={() => handleCancelEdit(mid)}
-                                                        disabled={isProcessing}
-                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-slate-400 border border-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                        onClick={() => {
+                                                            setInput('Prefiro ajustar: ');
+                                                            setTimeout(() => textareaRef.current?.focus(), 50);
+                                                        }}
+                                                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all shadow-sm ${isDark ? 'bg-slate-800 text-amber-300 border-amber-500/30 hover:bg-slate-700' : 'bg-white text-amber-700 border-amber-300 hover:bg-amber-50'}`}
+                                                    >
+                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                        Ajustar
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleQuickReply('Cancelar, não quero prosseguir.')}
+                                                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all shadow-sm ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-slate-100' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-100 hover:text-slate-600'}`}
                                                     >
                                                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
                                                         Cancelar
                                                     </button>
                                                 </div>
+                                            );
+                                        })()}
+
+                                        {/* Botão Abrir Relatório */}
+                                        {msg.role === 'assistant' && msg.reportId && (
+                                            <div className={`mt-3 pt-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                                                <button
+                                                    onClick={() => handleOpenReport(msg.reportId!)}
+                                                    disabled={isLoadingReport}
+                                                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                >
+                                                    {isLoadingReport ? (
+                                                        <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                                    ) : (
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                        </svg>
+                                                    )}
+                                                    Abrir Relatório
+                                                </button>
                                             </div>
-                                        );
-                                    })()}
+                                        )}
 
-                                    {/* Card de confirmação de reagendamento em lote */}
-                                    {msg.pendingBatchReschedule && msg.id && (() => {
-                                        const br = msg.pendingBatchReschedule!;
-                                        const mid = msg.id!;
-                                        const isProcessing = loadingBatchRescheduleId === mid;
-
-                                        if (br.status === 'completed') {
-                                            return (
-                                                <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
-                                                    <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700 flex items-center gap-1.5 mb-2">
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                        {br.items.length} ações reagendadas
-                                                    </p>
-                                                    <div className="space-y-1 mt-1">
-                                                        {br.items.map(item => (
-                                                            <div key={item.task_id} className="text-[9px] text-emerald-600 flex gap-1 flex-wrap">
-                                                                <span className="font-semibold truncate max-w-[140px]">{item.titulo}</span>
-                                                                <span className="opacity-60 line-through">{item.data_limite_original || '—'}</span>
-                                                                <span>→</span>
-                                                                <span className="font-black">{item.nova_data_limite}</span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            );
-                                        }
-
-                                        if (br.status === 'error') {
-                                            return (
-                                                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl">
-                                                    <p className="text-[10px] font-black uppercase tracking-widest text-red-600 flex items-center gap-1.5 mb-1">
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
-                                                        Erro no reagendamento
-                                                    </p>
-                                                    <p className="text-[10px] text-red-600">{br.errorMessage ?? 'Operação indisponível.'}</p>
-                                                </div>
-                                            );
-                                        }
-
-                                        if (br.status === 'cancelled') {
-                                            return (
-                                                <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-                                                        Reagendamento cancelado
-                                                    </p>
-                                                </div>
-                                            );
-                                        }
-
-                                        // status === 'pending'
-                                        return (
-                                            <div className="mt-3 p-3 bg-white border border-blue-200 rounded-xl shadow-sm">
-                                                <p className="text-[10px] font-black uppercase tracking-widest text-blue-700 flex items-center gap-1.5 mb-1">
-                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                                                    Reagendamento em lote — {br.items.length} ações
+                                        {msg.proposedPlan && (
+                                            <div className={`mt-4 p-4 rounded-xl border shadow-sm ${isDark ? 'bg-slate-900 border-blue-500/20' : 'bg-white border-blue-200'}`}>
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-2 mb-3">
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                                                    Proposta de Ajuste de Plano
                                                 </p>
-                                                <p className="text-[9px] text-slate-500 mb-2 italic">{br.justificativa}</p>
-                                                <div className="space-y-1 mb-3 max-h-48 overflow-y-auto pr-1">
-                                                    {br.items.map((item, idx) => (
-                                                        <div key={item.task_id} className="grid grid-cols-[16px_1fr_72px_8px_72px] gap-1 items-center text-[9px]">
-                                                            <span className="text-slate-300 font-mono">{idx + 1}.</span>
-                                                            <span className="text-slate-600 font-semibold truncate">{item.titulo}</span>
-                                                            <span className="text-slate-400 line-through text-right">{item.data_limite_original || '—'}</span>
-                                                            <span className="text-slate-300">→</span>
-                                                            <span className="text-blue-700 font-black">{item.nova_data_limite}</span>
+                                                <div className="space-y-2 mb-4">
+                                                    {msg.proposedPlan.map((item, idx) => (
+                                                        <div key={idx} className={`flex gap-2 text-[11px] ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                                                            <span className="font-black text-blue-400">{idx + 1}.</span>
+                                                            <span>{item.text}</span>
                                                         </div>
                                                     ))}
                                                 </div>
-                                                <div className="flex gap-2 pt-2 border-t border-blue-100">
-                                                    <button
-                                                        onClick={() => handleConfirmBatchReschedule(mid, br)}
-                                                        disabled={isProcessing}
-                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
-                                                    >
-                                                        {isProcessing ? (
-                                                            <span className="w-2.5 h-2.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                                                        ) : (
-                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                        )}
-                                                        Confirmar tudo
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleCancelBatchReschedule(mid)}
-                                                        disabled={isProcessing}
-                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-slate-400 border border-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
-                                                    >
-                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-                                                        Cancelar
-                                                    </button>
+                                                <div className="flex gap-2">
+                                                    <button className="flex-1 bg-emerald-600 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all">Aceitar</button>
+                                                    <button className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>Recusar</button>
                                                 </div>
                                             </div>
-                                        );
-                                    })()}
+                                        )}
 
-                                    {msg.pendingMemoryConflict && msg.id && (() => {
-                                        const conflict = msg.pendingMemoryConflict!;
-                                        const mid = msg.id!;
-                                        const isProcessing = loadingMemoryConflictId === mid;
+                                        {/* Card de confirmação de edição de ação */}
+                                        {msg.pendingEdit && msg.id && (() => {
+                                            const pe = msg.pendingEdit!;
+                                            const mid = msg.id!;
+                                            const isProcessing = loadingEditId === mid;
 
-                                        if (conflict.status_ui === 'resolved') {
-                                            return (
-                                                <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
-                                                    <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700 flex items-center gap-1.5 mb-2">
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                        Conflito resolvido
-                                                    </p>
-                                                    <p className="text-[10px] text-emerald-700 font-semibold">
-                                                        A nova memória substituiu a versão anterior.
-                                                    </p>
-                                                </div>
-                                            );
-                                        }
-
-                                        if (conflict.status_ui === 'kept') {
-                                            return (
-                                                <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                                                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-1.5 mb-2">
-                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                        Conflito encerrado
-                                                    </p>
-                                                    <p className="text-[10px] text-slate-600 font-semibold">
-                                                        A memória antiga foi mantida como fonte de verdade.
-                                                    </p>
-                                                </div>
-                                            );
-                                        }
-
-                                        return (
-                                            <div className="mt-3 p-3 bg-white border border-violet-200 rounded-xl shadow-sm">
-                                                <p className="text-[10px] font-black uppercase tracking-widest text-violet-700 flex items-center gap-1.5 mb-2">
-                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
-                                                    Conflito de Memória
-                                                </p>
-                                                <p className="text-[10px] text-slate-600 mb-3">
-                                                    O Hermes encontrou duas versões muito parecidas e precisa de uma decisão explícita.
-                                                </p>
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-                                                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                                                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">Versão Antiga</p>
-                                                        <p className="text-[11px] text-slate-700 leading-relaxed whitespace-pre-wrap">{conflict.existing_text}</p>
-                                                    </div>
-                                                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                                                        <p className="text-[9px] font-black uppercase tracking-widest text-emerald-700 mb-2">Versão Nova</p>
-                                                        <p className="text-[11px] text-emerald-900 leading-relaxed whitespace-pre-wrap">{conflict.proposed_text}</p>
-                                                    </div>
-                                                </div>
-                                                <div className="flex flex-wrap gap-2 pt-2 border-t border-violet-100">
-                                                    <button
-                                                        onClick={() => handleResolveMemoryConflict(mid, conflict, 'manter_existente')}
-                                                        disabled={isProcessing}
-                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-slate-700 border border-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
-                                                    >
-                                                        {isProcessing ? <span className="w-2.5 h-2.5 border-2 border-slate-300 border-t-slate-700 rounded-full animate-spin" /> : null}
-                                                        Manter Antiga
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleResolveMemoryConflict(mid, conflict, 'substituir_pelo_novo')}
-                                                        disabled={isProcessing}
-                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
-                                                    >
-                                                        {isProcessing ? <span className="w-2.5 h-2.5 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : null}
-                                                        Manter Nova
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        );
-                                    })()}
-
-                                    {/* Proposta de Diagnóstico de Código */}
-                                    {msg.proposedDiagnosis && (
-                                        <div className="mt-4 p-4 bg-white rounded-xl border border-blue-200 shadow-sm">
-                                            <p className="text-[10px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-2 mb-2">
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
-                                                Diagnóstico de Código
-                                                <span className={`ml-auto text-[8px] font-black uppercase px-1.5 py-0.5 rounded ${msg.proposedDiagnosis.mode === 'snippet' ? 'bg-amber-100 text-amber-600' : 'bg-blue-50 text-blue-500'}`}>
-                                                    {msg.proposedDiagnosis.mode === 'snippet' ? 'Snippet' : 'Repositório'}
-                                                </span>
-                                            </p>
-                                            <div className="space-y-1.5 mb-4">
-                                                {msg.proposedDiagnosis.mode === 'repo' && msg.proposedDiagnosis.sistemaId && (
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="text-[9px] font-black text-blue-500 uppercase bg-blue-50 px-1.5 py-0.5 rounded">Sistema</span>
-                                                        <span className="text-[11px] font-bold text-slate-700">{msg.proposedDiagnosis.sistemaId}</span>
-                                                    </div>
-                                                )}
-                                                {msg.proposedDiagnosis.mode === 'snippet' && msg.proposedDiagnosis.fileName && (
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="text-[9px] font-black text-amber-600 uppercase bg-amber-50 px-1.5 py-0.5 rounded">Arquivo</span>
-                                                        <span className="text-[11px] font-mono text-slate-600">{msg.proposedDiagnosis.fileName}</span>
-                                                    </div>
-                                                )}
-                                                <p className="text-[11px] text-slate-600 leading-relaxed">{msg.proposedDiagnosis.descricaoProblema}</p>
-                                                {msg.proposedDiagnosis.mode === 'snippet' && msg.proposedDiagnosis.codeSnippet && (
-                                                    <pre className="text-[9px] font-mono text-slate-500 bg-slate-50 border border-slate-200 rounded p-2 max-h-24 overflow-hidden relative">
-                                                        {msg.proposedDiagnosis.codeSnippet.slice(0, 300)}
-                                                        {msg.proposedDiagnosis.codeSnippet.length > 300 && (
-                                                            <span className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-slate-50 to-transparent block" />
-                                                        )}
-                                                    </pre>
-                                                )}
-                                            </div>
-                                            <div className="flex gap-2">
-                                                <button
-                                                    onClick={() => handleConfirmDiagnosis(msg.proposedDiagnosis!, msg.id)}
-                                                    disabled={diagnosingId === msg.id}
-                                                    className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-1.5"
-                                                >
-                                                    {diagnosingId === msg.id ? (
-                                                        <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                                                    ) : (
-                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                    )}
-                                                    {diagnosingId === msg.id ? 'Analisando...' : (msg.proposedDiagnosis.mode === 'snippet' ? 'Analisar Snippet' : 'Analisar Repositório')}
-                                                </button>
-                                                <button
-                                                    onClick={() => { setInput(`Ajustar diagnóstico: `); setTimeout(() => textareaRef.current?.focus(), 50); }}
-                                                    className="flex-1 bg-slate-100 text-slate-500 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all flex items-center justify-center gap-1.5"
-                                                >
-                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                                                    Ajustar
-                                                </button>
-                                            </div>
-                                        </div>
-                                    )}
-
-
-                                    {/* Proposta de Rascunho de Formulário */}
-                                    {msg.proposedForm && (() => {
-                                        // "State Lock": only enable if this is the LAST form draft in the entire session.
-                                        // That means we find the last message index that has a proposedForm.
-                                        const lastFormIndex = messages.reduce((acc, m, idx) => m.proposedForm ? idx : acc, -1);
-                                        const isLatestForm = i === lastFormIndex;
-                                        const isProcessing = creatingFormId === msg.id;
-
-                                        return (
-                                        <div className="mt-4 p-4 bg-white rounded-xl border border-emerald-200 shadow-sm">
-                                            <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 flex items-center gap-2 mb-1">
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
-                                                Rascunho de Formulário
-                                            </p>
-                                            <p className="text-[11px] font-bold text-slate-700 mb-1 truncate">{msg.proposedForm.titulo}</p>
-                                            {msg.proposedForm.descricao && <p className="text-[10px] text-slate-500 mb-3">{msg.proposedForm.descricao}</p>}
-                                            <div className="space-y-2 mb-4 max-h-52 overflow-y-auto pr-1">
-                                                {msg.proposedForm.perguntas.map((q, idx) => (
-                                                    <div key={idx} className="p-2 rounded-lg bg-emerald-50 border border-emerald-100">
-                                                        <div className="flex items-center gap-1.5 mb-1">
-                                                            <span className="text-[9px] font-black text-emerald-500 uppercase">{q.tipo.replace('_', ' ')}</span>
-                                                            {q.obrigatoria && <span className="text-[9px] text-red-500 font-bold">*</span>}
+                                            if (pe.status === 'completed') {
+                                                return (
+                                                    <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                                                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700 flex items-center gap-1.5 mb-2">
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                            Edição confirmada
+                                                        </p>
+                                                        <p className="text-[10px] text-emerald-700 font-semibold truncate">{pe.titulo}</p>
+                                                        <div className="mt-1.5 space-y-1">
+                                                            {Object.entries(pe.alteracoes).map(([campo, change]) => (
+                                                                <div key={campo} className="text-[9px] text-emerald-600 flex gap-1 flex-wrap">
+                                                                    <span className="font-black">{FIELD_LABELS[campo] ?? campo}:</span>
+                                                                    <span className="line-through opacity-60">{change.original || '—'}</span>
+                                                                    <span>→</span>
+                                                                    <span className="font-semibold">{change.novo || '—'}</span>
+                                                                </div>
+                                                            ))}
                                                         </div>
-                                                        <p className="text-[10px] font-bold text-slate-700 leading-tight">{q.texto}</p>
-                                                        {q.opcoes && q.opcoes.length > 0 && (
-                                                            <ul className="mt-1 space-y-0.5">
-                                                                {q.opcoes.map((opt, optIdx) => (
-                                                                    <li key={optIdx} className="text-[9px] text-slate-500 flex gap-1">
-                                                                        <span className="text-emerald-400">•</span>{opt}
-                                                                    </li>
-                                                                ))}
-                                                            </ul>
-                                                        )}
-                                                        {q.tipo === 'escala_linear' && (
-                                                            <p className="text-[9px] text-slate-500 mt-1">Escala de {q.escala_min || 1} a {q.escala_max || 5}</p>
-                                                        )}
                                                     </div>
-                                                ))}
-                                            </div>
-                                            {isLatestForm ? (
+                                                );
+                                            }
+
+                                            if (pe.status === 'invalidated' || pe.status === 'error') {
+                                                return (
+                                                    <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl">
+                                                        <p className="text-[10px] font-black uppercase tracking-widest text-red-600 flex items-center gap-1.5 mb-1">
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                                                            {pe.status === 'error' ? 'Erro na edição' : 'Edição bloqueada'}
+                                                        </p>
+                                                        <p className="text-[10px] text-red-600">{pe.errorMessage ?? 'Operação indisponível.'}</p>
+                                                    </div>
+                                                );
+                                            }
+
+                                            if (pe.status === 'cancelled') {
+                                                return (
+                                                    <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                                                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                            Edição cancelada
+                                                        </p>
+                                                    </div>
+                                                );
+                                            }
+
+                                            // status === 'pending'
+                                            return (
+                                                <div className="mt-3 p-3 bg-white border border-amber-200 rounded-xl shadow-sm">
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-amber-700 flex items-center gap-1.5 mb-2">
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                        Edição pendente
+                                                    </p>
+                                                    <p className="text-[10px] font-semibold text-slate-700 truncate mb-2">{pe.titulo}</p>
+                                                    <div className="space-y-1.5 mb-3">
+                                                        {Object.entries(pe.alteracoes).map(([campo, change]) => (
+                                                            <div key={campo} className="grid grid-cols-[80px_1fr_1fr] gap-1 text-[9px]">
+                                                                <span className="font-black text-slate-500 uppercase">{FIELD_LABELS[campo] ?? campo}</span>
+                                                                <span className="text-slate-400 truncate line-through">{change.original || '—'}</span>
+                                                                <span className="text-emerald-700 font-semibold truncate">{change.novo || '—'}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                    <div className="flex gap-2 pt-2 border-t border-amber-100">
+                                                        <button
+                                                            onClick={() => handleConfirmEdit(mid, pe)}
+                                                            disabled={isProcessing}
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                        >
+                                                            {isProcessing ? (
+                                                                <span className="w-2.5 h-2.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                                            ) : (
+                                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                            )}
+                                                            Confirmar
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleCancelEdit(mid)}
+                                                            disabled={isProcessing}
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-slate-400 border border-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                        >
+                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                            Cancelar
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
+
+                                        {/* Card de confirmação de reagendamento em lote */}
+                                        {msg.pendingBatchReschedule && msg.id && (() => {
+                                            const br = msg.pendingBatchReschedule!;
+                                            const mid = msg.id!;
+                                            const isProcessing = loadingBatchRescheduleId === mid;
+
+                                            if (br.status === 'completed') {
+                                                return (
+                                                    <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                                                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700 flex items-center gap-1.5 mb-2">
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                            {br.items.length} ações reagendadas
+                                                        </p>
+                                                        <div className="space-y-1 mt-1">
+                                                            {br.items.map(item => (
+                                                                <div key={item.task_id} className="text-[9px] text-emerald-600 flex gap-1 flex-wrap">
+                                                                    <span className="font-semibold truncate max-w-[140px]">{item.titulo}</span>
+                                                                    <span className="opacity-60 line-through">{item.data_limite_original || '—'}</span>
+                                                                    <span>→</span>
+                                                                    <span className="font-black">{item.nova_data_limite}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }
+
+                                            if (br.status === 'error') {
+                                                return (
+                                                    <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl">
+                                                        <p className="text-[10px] font-black uppercase tracking-widest text-red-600 flex items-center gap-1.5 mb-1">
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                                                            Erro no reagendamento
+                                                        </p>
+                                                        <p className="text-[10px] text-red-600">{br.errorMessage ?? 'Operação indisponível.'}</p>
+                                                    </div>
+                                                );
+                                            }
+
+                                            if (br.status === 'cancelled') {
+                                                return (
+                                                    <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                                                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                            Reagendamento cancelado
+                                                        </p>
+                                                    </div>
+                                                );
+                                            }
+
+                                            // status === 'pending'
+                                            return (
+                                                <div className="mt-3 p-3 bg-white border border-blue-200 rounded-xl shadow-sm">
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-blue-700 flex items-center gap-1.5 mb-1">
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                                        Reagendamento em lote — {br.items.length} ações
+                                                    </p>
+                                                    <p className="text-[9px] text-slate-500 mb-2 italic">{br.justificativa}</p>
+                                                    <div className="space-y-1 mb-3 max-h-48 overflow-y-auto pr-1">
+                                                        {br.items.map((item, idx) => (
+                                                            <div key={item.task_id} className="grid grid-cols-[16px_1fr_72px_8px_72px] gap-1 items-center text-[9px]">
+                                                                <span className="text-slate-300 font-mono">{idx + 1}.</span>
+                                                                <span className="text-slate-600 font-semibold truncate">{item.titulo}</span>
+                                                                <span className="text-slate-400 line-through text-right">{item.data_limite_original || '—'}</span>
+                                                                <span className="text-slate-300">→</span>
+                                                                <span className="text-blue-700 font-black">{item.nova_data_limite}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                    <div className="flex gap-2 pt-2 border-t border-blue-100">
+                                                        <button
+                                                            onClick={() => handleConfirmBatchReschedule(mid, br)}
+                                                            disabled={isProcessing}
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                        >
+                                                            {isProcessing ? (
+                                                                <span className="w-2.5 h-2.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                                            ) : (
+                                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                            )}
+                                                            Confirmar tudo
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleCancelBatchReschedule(mid)}
+                                                            disabled={isProcessing}
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-slate-400 border border-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                        >
+                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                            Cancelar
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
+
+                                        {msg.pendingMemoryConflict && msg.id && (() => {
+                                            const conflict = msg.pendingMemoryConflict!;
+                                            const mid = msg.id!;
+                                            const isProcessing = loadingMemoryConflictId === mid;
+
+                                            if (conflict.status_ui === 'resolved') {
+                                                return (
+                                                    <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                                                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700 flex items-center gap-1.5 mb-2">
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                            Conflito resolvido
+                                                        </p>
+                                                        <p className="text-[10px] text-emerald-700 font-semibold">
+                                                            A nova memória substituiu a versão anterior.
+                                                        </p>
+                                                    </div>
+                                                );
+                                            }
+
+                                            if (conflict.status_ui === 'kept') {
+                                                return (
+                                                    <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                                                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-1.5 mb-2">
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                            Conflito encerrado
+                                                        </p>
+                                                        <p className="text-[10px] text-slate-600 font-semibold">
+                                                            A memória antiga foi mantida como fonte de verdade.
+                                                        </p>
+                                                    </div>
+                                                );
+                                            }
+
+                                            return (
+                                                <div className="mt-3 p-3 bg-white border border-violet-200 rounded-xl shadow-sm">
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-violet-700 flex items-center gap-1.5 mb-2">
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                                                        Conflito de Memória
+                                                    </p>
+                                                    <p className="text-[10px] text-slate-600 mb-3">
+                                                        O Hermes encontrou duas versões muito parecidas e precisa de uma decisão explícita.
+                                                    </p>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                                                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                                            <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">Versão Antiga</p>
+                                                            <p className="text-[11px] text-slate-700 leading-relaxed whitespace-pre-wrap">{conflict.existing_text}</p>
+                                                        </div>
+                                                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                                                            <p className="text-[9px] font-black uppercase tracking-widest text-emerald-700 mb-2">Versão Nova</p>
+                                                            <p className="text-[11px] text-emerald-900 leading-relaxed whitespace-pre-wrap">{conflict.proposed_text}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-2 pt-2 border-t border-violet-100">
+                                                        <button
+                                                            onClick={() => handleResolveMemoryConflict(mid, conflict, 'manter_existente')}
+                                                            disabled={isProcessing}
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-slate-700 border border-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                        >
+                                                            {isProcessing ? <span className="w-2.5 h-2.5 border-2 border-slate-300 border-t-slate-700 rounded-full animate-spin" /> : null}
+                                                            Manter Antiga
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleResolveMemoryConflict(mid, conflict, 'substituir_pelo_novo')}
+                                                            disabled={isProcessing}
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                        >
+                                                            {isProcessing ? <span className="w-2.5 h-2.5 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : null}
+                                                            Manter Nova
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
+
+                                        {/* Proposta de Diagnóstico de Código */}
+                                        {msg.proposedDiagnosis && (
+                                            <div className="mt-4 p-4 bg-white rounded-xl border border-blue-200 shadow-sm">
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-2 mb-2">
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+                                                    Diagnóstico de Código
+                                                    <span className={`ml-auto text-[8px] font-black uppercase px-1.5 py-0.5 rounded ${msg.proposedDiagnosis.mode === 'snippet' ? 'bg-amber-100 text-amber-600' : 'bg-blue-50 text-blue-500'}`}>
+                                                        {msg.proposedDiagnosis.mode === 'snippet' ? 'Snippet' : 'Repositório'}
+                                                    </span>
+                                                </p>
+                                                <div className="space-y-1.5 mb-4">
+                                                    {msg.proposedDiagnosis.mode === 'repo' && msg.proposedDiagnosis.sistemaId && (
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-[9px] font-black text-blue-500 uppercase bg-blue-50 px-1.5 py-0.5 rounded">Sistema</span>
+                                                            <span className="text-[11px] font-bold text-slate-700">{msg.proposedDiagnosis.sistemaId}</span>
+                                                        </div>
+                                                    )}
+                                                    {msg.proposedDiagnosis.mode === 'snippet' && msg.proposedDiagnosis.fileName && (
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-[9px] font-black text-amber-600 uppercase bg-amber-50 px-1.5 py-0.5 rounded">Arquivo</span>
+                                                            <span className="text-[11px] font-mono text-slate-600">{msg.proposedDiagnosis.fileName}</span>
+                                                        </div>
+                                                    )}
+                                                    <p className="text-[11px] text-slate-600 leading-relaxed">{msg.proposedDiagnosis.descricaoProblema}</p>
+                                                    {msg.proposedDiagnosis.mode === 'snippet' && msg.proposedDiagnosis.codeSnippet && (
+                                                        <pre className="text-[9px] font-mono text-slate-500 bg-slate-50 border border-slate-200 rounded p-2 max-h-24 overflow-hidden relative">
+                                                            {msg.proposedDiagnosis.codeSnippet.slice(0, 300)}
+                                                            {msg.proposedDiagnosis.codeSnippet.length > 300 && (
+                                                                <span className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-slate-50 to-transparent block" />
+                                                            )}
+                                                        </pre>
+                                                    )}
+                                                </div>
                                                 <div className="flex gap-2">
                                                     <button
-                                                        onClick={() => handleConfirmForm(msg.proposedForm!, msg.id)}
-                                                        disabled={isProcessing}
-                                                        className="flex-1 bg-emerald-600 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-1.5"
+                                                        onClick={() => handleConfirmDiagnosis(msg.proposedDiagnosis!, msg.id)}
+                                                        disabled={diagnosingId === msg.id}
+                                                        className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-1.5"
                                                     >
-                                                        {isProcessing ? (
+                                                        {diagnosingId === msg.id ? (
                                                             <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
                                                         ) : (
                                                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                                                         )}
-                                                        Confirmar e Gerar Link
+                                                        {diagnosingId === msg.id ? 'Analisando...' : (msg.proposedDiagnosis.mode === 'snippet' ? 'Analisar Snippet' : 'Analisar Repositório')}
                                                     </button>
                                                     <button
-                                                        onClick={() => { setInput('Ajustar formulário: '); setTimeout(() => textareaRef.current?.focus(), 50); }}
-                                                        disabled={isProcessing}
-                                                        className="flex-1 bg-slate-100 text-slate-500 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 disabled:opacity-50 transition-all flex items-center justify-center gap-1.5"
+                                                        onClick={() => { setInput(`Ajustar diagnóstico: `); setTimeout(() => textareaRef.current?.focus(), 50); }}
+                                                        className="flex-1 bg-slate-100 text-slate-500 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all flex items-center justify-center gap-1.5"
                                                     >
                                                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                                         Ajustar
                                                     </button>
                                                 </div>
-                                            ) : (
-                                                <div className="text-center p-2 rounded-lg bg-slate-50 border border-slate-100">
-                                                    <p className="text-[10px] font-bold text-slate-400">Esta versão foi superada por um rascunho mais recente.</p>
-                                                </div>
-                                            )}
-                                        </div>
-                                        );
-                                    })()}
+                                            </div>
+                                        )}
 
-                                    {/* Proposta de Apresentação de Slides */}
-                                    {msg.proposedPresentation && (
-                                        <div className="mt-4 p-4 bg-white rounded-xl border border-violet-200 shadow-sm">
-                                            <p className="text-[10px] font-black uppercase tracking-widest text-violet-600 flex items-center gap-2 mb-1">
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" /></svg>
-                                                Esqueleto da Apresentação
-                                            </p>
-                                            <p className="text-[11px] font-bold text-slate-700 mb-3 truncate">{msg.proposedPresentation.temaGeral}</p>
-                                            <div className="space-y-2 mb-4 max-h-52 overflow-y-auto pr-1">
-                                                {msg.proposedPresentation.slides.map((slide, idx) => (
-                                                    <div key={idx} className="p-2 rounded-lg bg-violet-50 border border-violet-100">
-                                                        <div className="flex items-center gap-1.5 mb-1">
-                                                            <span className="text-[9px] font-black text-violet-400 uppercase">{slide.tipo_layout}</span>
-                                                            <span className="text-[9px] text-slate-400">#{slide.ordem}</span>
-                                                        </div>
-                                                        <p className="text-[11px] font-bold text-slate-700 leading-tight">{slide.titulo}</p>
-                                                        {slide.subtitulo && <p className="text-[10px] text-slate-500 mt-0.5">{slide.subtitulo}</p>}
-                                                        {slide.topicos.length > 0 && (
-                                                            <ul className="mt-1 space-y-0.5">
-                                                                {slide.topicos.map((t, ti) => (
-                                                                    <li key={ti} className="text-[10px] text-slate-500 flex gap-1">
-                                                                        <span className="text-violet-400">•</span>{t}
-                                                                    </li>
-                                                                ))}
-                                                            </ul>
-                                                        )}
+
+                                        {/* Proposta de Rascunho de Formulário */}
+                                        {msg.proposedForm && (() => {
+                                            // "State Lock": only enable if this is the LAST form draft in the entire session.
+                                            // That means we find the last message index that has a proposedForm.
+                                            const lastFormIndex = messages.reduce((acc, m, idx) => m.proposedForm ? idx : acc, -1);
+                                            const isLatestForm = i === lastFormIndex;
+                                            const isProcessing = creatingFormId === msg.id;
+
+                                            return (
+                                                <div className="mt-4 p-4 bg-white rounded-xl border border-emerald-200 shadow-sm">
+                                                    <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 flex items-center gap-2 mb-1">
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                                                        Rascunho de Formulário
+                                                    </p>
+                                                    <p className="text-[11px] font-bold text-slate-700 mb-1 truncate">{msg.proposedForm.titulo}</p>
+                                                    {msg.proposedForm.descricao && <p className="text-[10px] text-slate-500 mb-3">{msg.proposedForm.descricao}</p>}
+                                                    <div className="space-y-2 mb-4 max-h-52 overflow-y-auto pr-1">
+                                                        {msg.proposedForm.perguntas.map((q, idx) => (
+                                                            <div key={idx} className="p-2 rounded-lg bg-emerald-50 border border-emerald-100">
+                                                                <div className="flex items-center gap-1.5 mb-1">
+                                                                    <span className="text-[9px] font-black text-emerald-500 uppercase">{q.tipo.replace('_', ' ')}</span>
+                                                                    {q.obrigatoria && <span className="text-[9px] text-red-500 font-bold">*</span>}
+                                                                </div>
+                                                                <p className="text-[10px] font-bold text-slate-700 leading-tight">{q.texto}</p>
+                                                                {q.opcoes && q.opcoes.length > 0 && (
+                                                                    <ul className="mt-1 space-y-0.5">
+                                                                        {q.opcoes.map((opt, optIdx) => (
+                                                                            <li key={optIdx} className="text-[9px] text-slate-500 flex gap-1">
+                                                                                <span className="text-emerald-400">•</span>{opt}
+                                                                            </li>
+                                                                        ))}
+                                                                    </ul>
+                                                                )}
+                                                                {q.tipo === 'escala_linear' && (
+                                                                    <p className="text-[9px] text-slate-500 mt-1">Escala de {q.escala_min || 1} a {q.escala_max || 5}</p>
+                                                                )}
+                                                            </div>
+                                                        ))}
                                                     </div>
-                                                ))}
+                                                    {isLatestForm ? (
+                                                        <div className="flex gap-2">
+                                                            <button
+                                                                onClick={() => handleConfirmForm(msg.proposedForm!, msg.id)}
+                                                                disabled={isProcessing}
+                                                                className="flex-1 bg-emerald-600 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-1.5"
+                                                            >
+                                                                {isProcessing ? (
+                                                                    <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                                                ) : (
+                                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                                )}
+                                                                Confirmar e Gerar Link
+                                                            </button>
+                                                            <button
+                                                                onClick={() => { setInput('Ajustar formulário: '); setTimeout(() => textareaRef.current?.focus(), 50); }}
+                                                                disabled={isProcessing}
+                                                                className="flex-1 bg-slate-100 text-slate-500 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 disabled:opacity-50 transition-all flex items-center justify-center gap-1.5"
+                                                            >
+                                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                                Ajustar
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="text-center p-2 rounded-lg bg-slate-50 border border-slate-100">
+                                                            <p className="text-[10px] font-bold text-slate-400">Esta versão foi superada por um rascunho mais recente.</p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })()}
+
+                                        {/* Proposta de Apresentação de Slides */}
+                                        {msg.proposedPresentation && (
+                                            <div className="mt-4 p-4 bg-white rounded-xl border border-violet-200 shadow-sm">
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-violet-600 flex items-center gap-2 mb-1">
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" /></svg>
+                                                    Esqueleto da Apresentação
+                                                </p>
+                                                <p className="text-[11px] font-bold text-slate-700 mb-3 truncate">{msg.proposedPresentation.temaGeral}</p>
+                                                <div className="space-y-2 mb-4 max-h-52 overflow-y-auto pr-1">
+                                                    {msg.proposedPresentation.slides.map((slide, idx) => (
+                                                        <div key={idx} className="p-2 rounded-lg bg-violet-50 border border-violet-100">
+                                                            <div className="flex items-center gap-1.5 mb-1">
+                                                                <span className="text-[9px] font-black text-violet-400 uppercase">{slide.tipo_layout}</span>
+                                                                <span className="text-[9px] text-slate-400">#{slide.ordem}</span>
+                                                            </div>
+                                                            <p className="text-[11px] font-bold text-slate-700 leading-tight">{slide.titulo}</p>
+                                                            {slide.subtitulo && <p className="text-[10px] text-slate-500 mt-0.5">{slide.subtitulo}</p>}
+                                                            {slide.topicos.length > 0 && (
+                                                                <ul className="mt-1 space-y-0.5">
+                                                                    {slide.topicos.map((t, ti) => (
+                                                                        <li key={ti} className="text-[10px] text-slate-500 flex gap-1">
+                                                                            <span className="text-violet-400">•</span>{t}
+                                                                        </li>
+                                                                    ))}
+                                                                </ul>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        onClick={() => handleConfirmPresentation(msg.proposedPresentation!)}
+                                                        className="flex-1 bg-violet-600 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-violet-700 transition-all flex items-center justify-center gap-1.5"
+                                                    >
+                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                                        Confirmar
+                                                    </button>
+                                                    <button
+                                                        onClick={() => { setInput('Ajustar apresentação: '); setTimeout(() => textareaRef.current?.focus(), 50); }}
+                                                        className="flex-1 bg-slate-100 text-slate-500 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all flex items-center justify-center gap-1.5"
+                                                    >
+                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                        Ajustar
+                                                    </button>
+                                                </div>
                                             </div>
-                                            <div className="flex gap-2">
-                                                <button
-                                                    onClick={() => handleConfirmPresentation(msg.proposedPresentation!)}
-                                                    className="flex-1 bg-violet-600 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-violet-700 transition-all flex items-center justify-center gap-1.5"
-                                                >
-                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                    Confirmar
-                                                </button>
-                                                <button
-                                                    onClick={() => { setInput('Ajustar apresentação: '); setTimeout(() => textareaRef.current?.focus(), 50); }}
-                                                    className="flex-1 bg-slate-100 text-slate-500 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all flex items-center justify-center gap-1.5"
-                                                >
-                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                                                    Ajustar
-                                                </button>
+                                        )}
+                                        {messageTimestamp && (
+                                            <div className={`mt-2 flex justify-end text-[9px] font-medium opacity-0 transition-opacity group-hover:opacity-100 ${msg.role === 'user'
+                                                ? 'text-white/65'
+                                                : isDark ? 'text-slate-400' : 'text-slate-400'
+                                                }`}>
+                                                <span>{messageTimestamp}</span>
                                             </div>
-                                        </div>
-                                    )}
-                                    {messageTimestamp && (
-                                        <div className={`mt-2 flex justify-end text-[9px] font-medium opacity-0 transition-opacity group-hover:opacity-100 ${msg.role === 'user'
-                                            ? 'text-white/65'
-                                            : isDark ? 'text-slate-400' : 'text-slate-400'
-                                            }`}>
-                                            <span>{messageTimestamp}</span>
-                                        </div>
-                                    )}
+                                        )}
+                                    </div>
                                 </div>
-                            </div>
-                        )})}
+                            )
+                        })}
 
                         {/* Indicador de loading com mensagem de fase */}
                         {isBlocked && (
@@ -2324,14 +2327,12 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                         className={`relative z-20 shrink-0 overflow-visible p-6 border-t ${isDark ? 'border-white/10' : 'border-slate-100'}`}
                     >
                         {isDragActive && (
-                            <div className={`pointer-events-none absolute inset-4 z-30 flex items-center justify-center rounded-3xl border-2 border-dashed backdrop-blur-sm ${
-                                isDark
-                                    ? 'border-blue-400 bg-blue-500/10'
-                                    : 'border-blue-400 bg-blue-50/90'
-                            }`}>
-                                <div className={`px-4 py-3 rounded-2xl text-center shadow-lg ${
-                                    isDark ? 'bg-slate-950/80 text-blue-200' : 'bg-white text-blue-700'
+                            <div className={`pointer-events-none absolute inset-4 z-30 flex items-center justify-center rounded-3xl border-2 border-dashed backdrop-blur-sm ${isDark
+                                ? 'border-blue-400 bg-blue-500/10'
+                                : 'border-blue-400 bg-blue-50/90'
                                 }`}>
+                                <div className={`px-4 py-3 rounded-2xl text-center shadow-lg ${isDark ? 'bg-slate-950/80 text-blue-200' : 'bg-white text-blue-700'
+                                    }`}>
                                     <p className="text-sm font-black uppercase tracking-widest">Solte para anexar</p>
                                     <p className="text-[11px] mt-1 opacity-80">O copiloto vai usar o mesmo anexo do botão de upload.</p>
                                 </div>
@@ -2386,7 +2387,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                             </div>
                         )}
 
-                            <div className="relative z-20 flex items-end">
+                        <div className="relative z-20 flex items-end">
                             {/* Input de arquivo oculto */}
                             <input
                                 ref={fileInputRef}
@@ -2467,136 +2468,136 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                 />
                                 <div
                                     aria-hidden="true"
-                                    className={`pointer-events-none absolute inset-x-1.5 bottom-1.5 z-[1] h-12 rounded-b-[15px] bg-gradient-to-t ${
-                                        isDark
-                                            ? 'from-[#0f172acc] via-[#0f172abf] to-transparent'
-                                            : 'from-white/95 via-white/85 to-transparent'
-                                    }`}
+                                    className={`pointer-events-none absolute inset-x-1.5 bottom-1.5 z-[1] h-12 rounded-b-[15px] bg-gradient-to-t ${isDark
+                                        ? 'from-[#0f172acc] via-[#0f172abf] to-transparent'
+                                        : 'from-white/95 via-white/85 to-transparent'
+                                        }`}
                                 />
                                 <div className="absolute inset-x-2.5 bottom-2.5 z-10 flex items-center justify-end">
                                     <div className="pointer-events-auto flex items-center gap-2">
-                                    <button
-                                        onClick={() => !isBlocked && fileInputRef.current?.click()}
-                                        disabled={isBlocked}
-                                        title="Anexar arquivo"
-                                        className={`flex h-6 w-6 items-center justify-center rounded-full transition-all ${attachedFile
+                                        <button
+                                            onClick={() => !isBlocked && fileInputRef.current?.click()}
+                                            disabled={isBlocked}
+                                            title="Anexar arquivo"
+                                            className={`flex h-6 w-6 items-center justify-center rounded-full transition-all ${attachedFile
                                                 ? 'bg-blue-500/10 text-blue-500'
                                                 : isDark
                                                     ? 'bg-white/5 text-white/30 hover:bg-white/10 hover:text-white/70'
                                                     : 'bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-500'
-                                            } disabled:opacity-30 disabled:cursor-not-allowed`}
-                                    >
-                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                                        </svg>
-                                    </button>
-                                    <div className="relative" ref={toolMenuRef}>
-                                        <button
-                                            onClick={() => setShowToolMenu(prev => !prev)}
-                                            disabled={isBlocked}
-                                            aria-label="Ações Rápidas"
-                                            aria-expanded={showToolMenu}
-                                            title="Atalhos de ferramentas"
-                                            className={`flex h-6 w-6 items-center justify-center rounded-full transition-all ${isDark ? 'bg-white/5 text-white/30 hover:bg-white/10 hover:text-white/70' : 'bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-500'} disabled:opacity-30 disabled:cursor-not-allowed`}
+                                                } disabled:opacity-30 disabled:cursor-not-allowed`}
                                         >
-                                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                                <circle cx="5" cy="5" r="1.8" />
-                                                <circle cx="12" cy="5" r="1.8" />
-                                                <circle cx="19" cy="5" r="1.8" />
-                                                <circle cx="5" cy="12" r="1.8" />
-                                                <circle cx="12" cy="12" r="1.8" />
-                                                <circle cx="19" cy="12" r="1.8" />
-                                                <circle cx="5" cy="19" r="1.8" />
-                                                <circle cx="12" cy="19" r="1.8" />
-                                                <circle cx="19" cy="19" r="1.8" />
+                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                                             </svg>
                                         </button>
-                                        {showToolMenu && (
-                                            <div className={`absolute bottom-full right-0 mb-2 z-[80] min-w-[280px] max-w-[min(22rem,calc(100vw-2rem))] max-h-[min(28rem,calc(100vh-14rem))] overflow-y-auto overflow-x-hidden rounded-2xl border shadow-2xl ${isDark ? 'border-white/10 bg-[#101827]' : 'border-slate-200 bg-white'}`}>
-                                                {/* Ferramentas interativas (UI) */}
-                                                <div className={`sticky top-0 z-10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'border-b border-white/10 bg-[#101827] text-white/40' : 'border-b border-slate-100 bg-white text-slate-400'}`}>
-                                                    Ferramentas Interativas
-                                                </div>
-                                                <div className="p-2">
-                                                    {toolsRegistry.map(tool => (
-                                                        <button
-                                                            key={tool.id}
-                                                            onClick={() => insertToolShortcut(tool.ui_metadata.tag)}
-                                                            className={`w-full rounded-xl px-3 py-2 text-left transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-50'}`}
-                                                        >
-                                                            <div className="flex items-center justify-between gap-3">
-                                                                <span className={`text-[11px] font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{tool.ui_metadata.title}</span>
-                                                                <span className={`text-[9px] font-mono ${isDark ? 'text-blue-300' : 'text-blue-600'}`}>{tool.ui_metadata.tag}</span>
+                                        <div className="relative" ref={toolMenuRef}>
+                                            <button
+                                                onClick={() => setShowToolMenu(prev => !prev)}
+                                                disabled={isBlocked}
+                                                aria-label="Ações Rápidas"
+                                                aria-expanded={showToolMenu}
+                                                title="Atalhos de ferramentas"
+                                                className={`flex h-6 w-6 items-center justify-center rounded-full transition-all ${isDark ? 'bg-white/5 text-white/30 hover:bg-white/10 hover:text-white/70' : 'bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-500'} disabled:opacity-30 disabled:cursor-not-allowed`}
+                                            >
+                                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <circle cx="5" cy="5" r="1.8" />
+                                                    <circle cx="12" cy="5" r="1.8" />
+                                                    <circle cx="19" cy="5" r="1.8" />
+                                                    <circle cx="5" cy="12" r="1.8" />
+                                                    <circle cx="12" cy="12" r="1.8" />
+                                                    <circle cx="19" cy="12" r="1.8" />
+                                                    <circle cx="5" cy="19" r="1.8" />
+                                                    <circle cx="12" cy="19" r="1.8" />
+                                                    <circle cx="19" cy="19" r="1.8" />
+                                                </svg>
+                                            </button>
+                                            {showToolMenu && (
+                                                <div className={`absolute bottom-full right-0 mb-2 z-[80] min-w-[280px] max-w-[min(22rem,calc(100vw-2rem))] max-h-[min(28rem,calc(100vh-14rem))] overflow-y-auto overflow-x-hidden rounded-2xl border shadow-2xl ${isDark ? 'border-white/10 bg-[#101827]' : 'border-slate-200 bg-white'}`}>
+                                                    {/* Ferramentas interativas (UI) */}
+                                                    <div className={`sticky top-0 z-10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'border-b border-white/10 bg-[#101827] text-white/40' : 'border-b border-slate-100 bg-white text-slate-400'}`}>
+                                                        Ferramentas Interativas
+                                                    </div>
+                                                    <div className="p-2">
+                                                        {toolsRegistry.map(tool => (
+                                                            <button
+                                                                key={tool.id}
+                                                                onClick={() => insertToolShortcut(tool.ui_metadata.tag)}
+                                                                className={`w-full rounded-xl px-3 py-2 text-left transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-50'}`}
+                                                            >
+                                                                <div className="flex items-center justify-between gap-3">
+                                                                    <span className={`text-[11px] font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{tool.ui_metadata.title}</span>
+                                                                    <span className={`text-[9px] font-mono ${isDark ? 'text-blue-300' : 'text-blue-600'}`}>{tool.ui_metadata.tag}</span>
+                                                                </div>
+                                                                <p className={`mt-1 text-[10px] leading-relaxed ${isDark ? 'text-white/50' : 'text-slate-500'}`}>{tool.ui_metadata.description}</p>
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                    {/* Capacidades de IA (backend automático) */}
+                                                    <div className={`sticky top-0 z-10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'border-t border-white/10 bg-[#101827] text-white/40' : 'border-t border-slate-100 bg-white text-slate-400'}`}>
+                                                        Capacidades de IA
+                                                    </div>
+                                                    <div className="p-2 pb-3">
+                                                        {([
+                                                            { key: 'pesquisar_internet', label: 'Pesquisar na Internet', desc: 'Busca informações em tempo real na web.' },
+                                                            { key: 'ler_pagina_web', label: 'Ler Página Web', desc: 'Extrai e resume o conteúdo de um URL.' },
+                                                            { key: 'buscar_arquivos_acervo', label: 'Buscar no Acervo', desc: 'Localiza documentos e arquivos do sistema.' },
+                                                            { key: 'consultar_historico_acoes', label: 'Consultar Histórico', desc: 'Recupera o grafo de execução de ações.' },
+                                                            { key: 'consultar_financas_v2', label: 'Consultar Finanças', desc: 'Acesse balanços, metas e extratos financeiros internos.' },
+                                                            { key: 'registrar_item_financeiro_v2', label: 'Registrar Item Financeiro', desc: 'Adiciona novas rendas ou despesas ao sistema.' },
+                                                            { key: 'criar_acao_no_sistema', label: 'Criar Ação', desc: 'Cria uma nova ação diretamente no sistema.' },
+                                                            { key: 'registrar_no_diario', label: 'Registrar no Diário', desc: 'Adiciona uma entrada no diário de bordo.' },
+                                                            { key: 'gerar_relatorio', label: 'Gerar Relatório', desc: 'Compila um relatório estruturado.' },
+                                                            { key: 'consultar_agenda', label: 'Consultar Agenda', desc: 'Verifica compromissos e eventos do calendário.' },
+                                                            { key: 'encontrar_slot_livre', label: 'Encontrar Slot Livre', desc: 'Sugere horários disponíveis na agenda.' },
+                                                            { key: 'buscar_e_analisar_email', label: 'Analisar E-mail', desc: 'Busca e analisa e-mails relevantes.' },
+                                                            { key: 'salvar_memoria_global', label: 'Salvar Memória', desc: 'Persiste informações na memória global.' },
+                                                            { key: 'gerar_rascunho_formulario', label: 'Gerar Formulário', desc: 'Cria rascunho de formulário estruturado.' },
+                                                        ] as { key: string; label: string; desc: string }[]).map(cap => (
+                                                            <div
+                                                                key={cap.key}
+                                                                className={`rounded-xl px-3 py-2 ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}
+                                                            >
+                                                                <span className={`text-[11px] font-black ${isDark ? 'text-white/80' : 'text-slate-700'}`}>{cap.label}</span>
+                                                                <p className={`mt-0.5 text-[10px] leading-relaxed ${isDark ? 'text-white/40' : 'text-slate-400'}`}>{cap.desc}</p>
                                                             </div>
-                                                            <p className={`mt-1 text-[10px] leading-relaxed ${isDark ? 'text-white/50' : 'text-slate-500'}`}>{tool.ui_metadata.description}</p>
-                                                        </button>
-                                                    ))}
+                                                        ))}
+                                                    </div>
                                                 </div>
-                                                {/* Capacidades de IA (backend automático) */}
-                                                <div className={`sticky top-0 z-10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'border-t border-white/10 bg-[#101827] text-white/40' : 'border-t border-slate-100 bg-white text-slate-400'}`}>
-                                                    Capacidades de IA
-                                                </div>
-                                                <div className="p-2 pb-3">
-                                                    {([
-                                                        { key: 'pesquisar_internet', label: 'Pesquisar na Internet', desc: 'Busca informações em tempo real na web.' },
-                                                        { key: 'ler_pagina_web', label: 'Ler Página Web', desc: 'Extrai e resume o conteúdo de um URL.' },
-                                                        { key: 'buscar_arquivos_acervo', label: 'Buscar no Acervo', desc: 'Localiza documentos e arquivos do sistema.' },
-                                                        { key: 'consultar_historico_acoes', label: 'Consultar Histórico', desc: 'Recupera o grafo de execução de ações.' },
-                                                        { key: 'criar_acao_no_sistema', label: 'Criar Ação', desc: 'Cria uma nova ação diretamente no sistema.' },
-                                                        { key: 'registrar_no_diario', label: 'Registrar no Diário', desc: 'Adiciona uma entrada no diário de bordo.' },
-                                                        { key: 'gerar_relatorio', label: 'Gerar Relatório', desc: 'Compila um relatório estruturado.' },
-                                                        { key: 'consultar_agenda', label: 'Consultar Agenda', desc: 'Verifica compromissos e eventos do calendário.' },
-                                                        { key: 'encontrar_slot_livre', label: 'Encontrar Slot Livre', desc: 'Sugere horários disponíveis na agenda.' },
-                                                        { key: 'buscar_e_analisar_email', label: 'Analisar E-mail', desc: 'Busca e analisa e-mails relevantes.' },
-                                                        { key: 'salvar_memoria_global', label: 'Salvar Memória', desc: 'Persiste informações na memória global.' },
-                                                        { key: 'gerar_rascunho_formulario', label: 'Gerar Formulário', desc: 'Cria rascunho de formulário estruturado.' },
-                                                    ] as { key: string; label: string; desc: string }[]).map(cap => (
-                                                        <div
-                                                            key={cap.key}
-                                                            className={`rounded-xl px-3 py-2 ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}
-                                                        >
-                                                            <span className={`text-[11px] font-black ${isDark ? 'text-white/80' : 'text-slate-700'}`}>{cap.label}</span>
-                                                            <p className={`mt-0.5 text-[10px] leading-relaxed ${isDark ? 'text-white/40' : 'text-slate-400'}`}>{cap.desc}</p>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                    <button
-                                        onClick={() => isRecording ? stopRecording() : startRecording()}
-                                        disabled={isBlocked && !isRecording}
-                                        title={isRecording ? 'Parar gravação' : 'Gravar Áudio'}
-                                        className={`flex h-6 w-6 items-center justify-center rounded-full transition-all active:scale-90 shadow-sm ${
-                                            isRecording
+                                            )}
+                                        </div>
+                                        <button
+                                            onClick={() => isRecording ? stopRecording() : startRecording()}
+                                            disabled={isBlocked && !isRecording}
+                                            title={isRecording ? 'Parar gravação' : 'Gravar Áudio'}
+                                            className={`flex h-6 w-6 items-center justify-center rounded-full transition-all active:scale-90 shadow-sm ${isRecording
                                                 ? 'bg-red-500 text-white animate-pulse hover:bg-red-600'
                                                 : isDark
                                                     ? 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white disabled:opacity-30'
                                                     : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700 disabled:opacity-30'
-                                        } disabled:cursor-not-allowed`}
-                                    >
-                                        {isProcessingMic ? (
-                                            <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
-                                        ) : (
-                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 10v2a7 7 0 01-14 0v-2m14 0h2m-16 0H3m9 10v3m-3 0h6" />
-                                            </svg>
-                                        )}
-                                    </button>
-                                    <button
-                                        onClick={() => {
-                                            if (!currentSessionId) {
-                                                handleCreateSession(input);
-                                            } else {
-                                                sendMessage(input);
-                                            }
-                                        }}
-                                        disabled={isBlocked || (!input.trim() && !attachedFile)}
-                                        className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 disabled:opacity-40 transition-all"
-                                    >
-                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                                    </button>
+                                                } disabled:cursor-not-allowed`}
+                                        >
+                                            {isProcessingMic ? (
+                                                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                                            ) : (
+                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 10v2a7 7 0 01-14 0v-2m14 0h2m-16 0H3m9 10v3m-3 0h6" />
+                                                </svg>
+                                            )}
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                if (!currentSessionId) {
+                                                    handleCreateSession(input);
+                                                } else {
+                                                    sendMessage(input);
+                                                }
+                                            }}
+                                            disabled={isBlocked || (!input.trim() && !attachedFile)}
+                                            className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 disabled:opacity-40 transition-all"
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                                        </button>
                                     </div>
                                 </div>
                             </div>
@@ -2604,13 +2605,12 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                 onClick={() => isRecording ? stopRecording() : startRecording()}
                                 disabled={isBlocked && !isRecording}
                                 title={isRecording ? 'Parar gravação' : 'Gravar Áudio'}
-                                className={`absolute right-8 bottom-2.5 z-10 hidden h-6 w-6 items-center justify-center rounded-full transition-all active:scale-90 shadow-sm ${
-                                    isRecording
-                                        ? 'bg-red-500 text-white animate-pulse hover:bg-red-600'
-                                        : isDark
-                                            ? 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white disabled:opacity-30'
-                                            : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700 disabled:opacity-30'
-                                } disabled:cursor-not-allowed`}
+                                className={`absolute right-8 bottom-2.5 z-10 hidden h-6 w-6 items-center justify-center rounded-full transition-all active:scale-90 shadow-sm ${isRecording
+                                    ? 'bg-red-500 text-white animate-pulse hover:bg-red-600'
+                                    : isDark
+                                        ? 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white disabled:opacity-30'
+                                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700 disabled:opacity-30'
+                                    } disabled:cursor-not-allowed`}
                             >
                                 {isProcessingMic ? (
                                     <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>

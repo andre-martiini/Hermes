@@ -650,4 +650,137 @@ def execute(tool_name: str, slots: dict, db) -> str:
         })
         return json.dumps({"success": True, "person_id": pessoa_ref.id}, ensure_ascii=False)
 
+    if tool_name == "consultar_financas_v2":
+        mes = slots.get("mes")
+        ano = slots.get("ano")
+        now = datetime.now()
+        if mes is None:
+            mes = now.month - 1  # JS month is 0-indexed
+            if mes < 0:
+                mes = 11
+                ano = (ano or now.year) - 1
+        if ano is None:
+            ano = now.year
+
+        # Fetch data
+        bills_docs = db.collection("fixed_bills").where("month", "==", mes).where("year", "==", ano).stream()
+        income_docs = db.collection("income_entries").where("month", "==", mes).where("year", "==", ano).where("status", "==", "active").stream()
+        goals_docs = db.collection("finance_goals").stream()
+        settings_doc = db.collection("finance_settings").document("config").get()
+
+        bills = []
+        total_bills = 0.0
+        total_paid_bills = 0.0
+        for doc in bills_docs:
+            d = doc.to_dict()
+            d["id"] = doc.id
+            bills.append(d)
+            amount = float(d.get("amount", 0))
+            total_bills += amount
+            if d.get("isPaid"):
+                total_paid_bills += amount
+
+        income = []
+        total_income = 0.0
+        total_received_income = 0.0
+        for doc in income_docs:
+            d = doc.to_dict()
+            d["id"] = doc.id
+            income.append(d)
+            amount = float(d.get("amount", 0))
+            total_income += amount
+            if d.get("isReceived"):
+                total_received_income += amount
+
+        goals = []
+        for doc in goals_docs:
+            d = doc.to_dict()
+            d["id"] = doc.id
+            goals.append(d)
+        goals.sort(key=lambda x: x.get("priority", 99))
+
+        settings = settings_doc.to_dict() or {}
+
+        summary = {
+            "periodo": {"mes": int(mes), "ano": int(ano)},
+            "resumo": {
+                "total_renda": total_income,
+                "renda_recebida": total_received_income,
+                "total_contas": total_bills,
+                "contas_pagas": total_paid_bills,
+                "saldo_previsto": total_income - total_bills,
+                "saldo_atual": total_received_income - total_paid_bills
+            },
+            "metas": goals,
+            "reserva_emergencia": {
+                "alvo": settings.get("emergencyReserveTarget", 0),
+                "atual": settings.get("emergencyReserveCurrent", 0)
+            },
+            "detalhes": {
+                "contas": bills,
+                "rendas": income
+            }
+        }
+        return json.dumps(summary, ensure_ascii=False)
+
+    if tool_name == "registrar_item_financeiro_v2":
+        tipo = slots.get("tipo")
+        descricao = str(slots.get("descricao") or "").strip()
+        valor = float(slots.get("valor") or 0)
+        categoria = str(slots.get("categoria") or "Geral").strip()
+        
+        now = datetime.now()
+        mes = slots.get("mes")
+        if mes is None:
+            mes = now.month - 1
+        ano = slots.get("ano") or now.year
+        data_iso = slots.get("data") or now.isoformat()
+
+        if tipo == "renda":
+            ref = db.collection("income_entries").document()
+            ref.set({
+                "description": descricao,
+                "amount": valor,
+                "category": categoria,
+                "month": int(mes),
+                "year": int(ano),
+                "isReceived": False,
+                "status": "active",
+                "date": data_iso,
+                "source": "hermes_v2"
+            })
+            return json.dumps({"success": True, "tipo": "renda", "id": ref.id})
+
+        elif tipo == "obrigacao_fixa":
+            ref = db.collection("fixed_bills").document()
+            ref.set({
+                "description": descricao,
+                "amount": valor,
+                "category": categoria,
+                "month": int(mes),
+                "year": int(ano),
+                "isPaid": False,
+                "date": data_iso,
+                "source": "hermes_v2"
+            })
+            return json.dumps({"success": True, "tipo": "obrigacao_fixa", "id": ref.id})
+
+        elif tipo == "transacao_avulsa":
+            day = now.day
+            sprint = 1 if day < 8 else 2 if day < 15 else 3 if day < 22 else 4
+            ref = db.collection("finance_transactions").document()
+            ref.set({
+                "description": descricao,
+                "amount": valor,
+                "category": categoria,
+                "date": data_iso,
+                "sprint": sprint,
+                "status": "active",
+                "origin": "internal",
+                "source": "hermes_v2"
+            })
+            return json.dumps({"success": True, "tipo": "transacao_avulsa", "id": ref.id})
+
+        return json.dumps({"success": False, "reason": "tipo_invalido"})
+
     raise KeyError(tool_name)

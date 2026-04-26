@@ -31,6 +31,8 @@ _CATALOG: dict[str, str] = {
     "mutar_lista_compras": "Cria, atualiza, remove ou importa itens da lista de compras interna",
     "obter_projeto_bolsas_publico": "Consulta dados publicos de um projeto de bolsas por ID",
     "registrar_inscricao_bolsa_publica": "Registra uma inscricao publica em um projeto de bolsas",
+    "consultar_financas_v2": "Consulta detalhada do financeiro interno: rendas, obrigações, metas e transações",
+    "registrar_item_financeiro_v2": "Registra uma nova movimentação (renda ou despesa) no financeiro interno",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {
@@ -44,6 +46,7 @@ _NEEDS_CONFIRMATION: set[str] = {
     "mutar_lista_compras",
     "mutar_portal_compras_publico",
     "registrar_inscricao_bolsa_publica",
+    "registrar_item_financeiro_v2",
 }
 
 _ASYNC_TOOLS: set[str] = {

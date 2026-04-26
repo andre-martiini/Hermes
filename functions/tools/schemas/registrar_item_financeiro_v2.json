@@ -1,0 +1,47 @@
+{
+    "name": "registrar_item_financeiro_v2",
+    "description": "Registra uma nova movimentação financeira no sistema principal (Renda, Obrigação fixa ou Transação diária).",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tipo": {
+                "type": "string",
+                "description": "Tipo de registro: 'renda', 'obrigacao_fixa' ou 'transacao_avulsa'.",
+                "enum": [
+                    "renda",
+                    "obrigacao_fixa",
+                    "transacao_avulsa"
+                ]
+            },
+            "descricao": {
+                "type": "string",
+                "description": "Descrição ou título do item (ex: 'Salário', 'Aluguel', 'Supermercado')."
+            },
+            "valor": {
+                "type": "number",
+                "description": "Valor monetário do item."
+            },
+            "categoria": {
+                "type": "string",
+                "description": "Categoria do item (ex: 'Moradia', 'Alimentação', 'Lazer', 'Trabalho')."
+            },
+            "mes": {
+                "type": "integer",
+                "description": "Mês de referência (0-11). Relevante para rendas e obrigações fixas."
+            },
+            "ano": {
+                "type": "integer",
+                "description": "Ano de referência. Relevante para rendas e obrigações fixas."
+            },
+            "data": {
+                "type": "string",
+                "description": "Data ISO (YYYY-MM-DD) para transações avulsas. Se não fornecido, usa hoje."
+            }
+        },
+        "required": [
+            "tipo",
+            "descricao",
+            "valor"
+        ]
+    }
+}

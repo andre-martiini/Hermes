@@ -7691,6 +7691,30 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             except Exception as e:
                 return f"Erro ao buscar slot livre: {e}"
 
+        def consultar_financas_v2(mes: int = None, ano: int = None):
+            """Retorna resumo financeiro unificado (rendas, obrigações, metas e balancete) para um período. Use mes (0-11) e ano (YYYY)."""
+            try:
+                from tools.telegram_extended import execute
+                return execute("consultar_financas_v2", {"mes": mes, "ano": ano}, db)
+            except Exception as e:
+                return f"Erro ao consultar finanças: {e}"
+
+        def registrar_item_financeiro_v2(tipo: str, descricao: str, valor: float, categoria: str = "Geral", mes: int = None, ano: int = None, data: str = None):
+            """
+            Registra uma nova entrada financeira (renda, obrigacao_fixa ou transacao_avulsa).
+            Obrigatório apresentar rascunho (draft) ao usuário para confirmação antes de persistir.
+            Parâmetros:
+            - tipo: 'renda', 'obrigacao_fixa' ou 'transacao_avulsa'
+            - valor: valor numérico
+            - mes/ano: período de competência (opcional)
+            """
+            try:
+                from tools.telegram_extended import execute
+                slots = {"tipo": tipo, "descricao": descricao, "valor": valor, "categoria": categoria, "mes": mes, "ano": ano, "data": data}
+                return execute("registrar_item_financeiro_v2", slots, db)
+            except Exception as e:
+                return f"Erro ao registrar item financeiro: {e}"
+
         def criar_acao_no_sistema(
             titulo: str,
             descricao: str = "",
@@ -8565,7 +8589,12 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "Quando descrever uma tarefa encontrada por consultar_historico_acoes, "
             "use SOMENTE os campos retornados por essa ferramenta (Titulo, Status, Prazo, Area, Descricao, Tags, Sintese, Plano de Acao, Diario de Bordo, Notas). "
             "E PROIBIDO completar, interpretar ou inferir informacoes da tarefa usando dados do RAG, acervo ou memoria global. "
-            "Se um campo nao constar no retorno da ferramenta, responda 'nao informado' em vez de inventar.\n"
+            "Se um campo nao constar no retorno da ferramenta, responda 'nao informado' em vez de inventar.\n\n"
+            "## GOVERNANÇA FINANCEIRA — REGRA ABSOLUTA\n"
+            "10. Você NUNCA deve inventar, supor ou estimar valores financeiros (gastos, rendas ou saldos).\n"
+            "11. Para qualquer dúvida sobre finanças, use EXCLUSIVAMENTE a ferramenta `consultar_financas_v2`.\n"
+            "12. Para novos registros, use `registrar_item_financeiro_v2` sempre apresentando um rascunho para o usuário confirmar antes.\n"
+            "Caso a ferramenta retorne que não há dados, relate isso honestamente. Não tente usar o RAG para buscar dados financeiros internos.\n"
         )
 
         # --- RECUPERAÇÃO DE HISTÓRICO DA SESSÃO ---
@@ -8647,6 +8676,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'consultar_agenda': consultar_agenda,
             'encontrar_slot_livre': encontrar_slot_livre,
             'preparar_reagendamento_em_lote': preparar_reagendamento_em_lote,
+            'consultar_financas_v2': consultar_financas_v2,
+            'registrar_item_financeiro_v2': registrar_item_financeiro_v2,
         }
 
         # Cria função genérica de acionamento que o loop manual do Python irá ignorar
@@ -8723,6 +8754,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'consultar_agenda': consultar_agenda,
             'encontrar_slot_livre': encontrar_slot_livre,
             'preparar_reagendamento_em_lote': preparar_reagendamento_em_lote,
+            'consultar_financas_v2': consultar_financas_v2,
+            'registrar_item_financeiro_v2': registrar_item_financeiro_v2,
         }
         # Ferramentas internas que não devem aparecer para o usuário
         _HIDDEN_TOOLS = {'registrar_correcao_procedimento', 'resolver_conflito_memoria'}
@@ -8754,6 +8787,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     consultar_agenda,
                     encontrar_slot_livre,
                     preparar_reagendamento_em_lote,
+                    consultar_financas_v2,
+                    registrar_item_financeiro_v2,
                 ] + dynamic_tools,
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
             ),

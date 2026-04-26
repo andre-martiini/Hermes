@@ -1034,6 +1034,7 @@ def _build_system_instruction(copilot_core: str, copilot_soul: str, contexto_ati
         "4. Para criar uma ação, apresente um draft estruturado primeiro com Título, Início/Fim (se houver), Área Temática e Tipo. Aguarde confirmação explicita.\n"
         "5. Links de tarefas: use o formato task:{ID} no texto (ex: 'Ação task:abc123').\n"
         "6. Acione salvar_memoria_global apenas para fatos duráveis e preferências estáveis.\n"
+        "7. ACESSO FINANCEIRO: para consultas sobre balanço, rendas, obrigações ou metas, use consultar_financas_v2. Para registrar novas movimentações, use registrar_item_financeiro_v2. NUNCA invente números ou tente prever saldos sem consultar as ferramentas.\n"
     )
 
 def _build_system_instruction_guarded(
@@ -1072,10 +1073,8 @@ def _build_system_instruction_guarded(
         "6. Para criar uma acao, apresente um draft estruturado primeiro com Titulo, Inicio/Fim (se houver), Area Tematica e Tipo. Aguarde confirmacao explicita.\n"
         "7. Links de tarefas: use o formato task:{ID} no texto (ex: 'Acao task:abc123').\n"
         "8. Acione salvar_memoria_global apenas para fatos duraveis e preferencias estaveis.\n"
-        "9. GOVERNANCA DE FONTES: ao descrever uma tarefa encontrada por consultar_historico_acoes, "
-        "use SOMENTE os campos retornados por essa ferramenta (Titulo, Status, Prazo, Descricao, Notas, Diario). "
-        "E PROIBIDO completar ou inferir informacoes da tarefa usando dados do RAG, acervo ou memoria global. "
-        "Se um campo nao constar no retorno da ferramenta, diga 'nao informado' em vez de inventar.\n"
+        "9. GOVERNANCA DE FONTES: ao descrever uma tarefa encontrada por consultar_historico_acoes, use SOMENTE os campos retornados por essa ferramenta. Se um campo nao constar no retorno da ferramenta, diga 'nao informado' em vez de inventar.\n"
+        "10. ACESSO FINANCEIRO: use exclusivamente consultar_financas_v2 e registrar_item_financeiro_v2 para lidar com dados financeiros internos (rendas, contas, metas). Proibido inventar valores.\n"
     )
 
     if not acao_snapshot:
@@ -1146,6 +1145,7 @@ def _build_system_instruction_guarded_v2(
         "9. GOVERNANCA DE FONTES: ao descrever uma tarefa encontrada por consultar_historico_acoes, use SOMENTE os campos retornados por essa ferramenta. Se um campo nao constar no retorno da ferramenta, diga 'nao informado' em vez de inventar.\n"
         "10. LINKS E ARQUIVOS: nunca crie hiperlinks, texto-ancora ou URLs que nao aparecam literalmente no contexto, em uma ferramenta ou em um DRIVE_FILE_ID real. Se o usuario pedir links e eles nao estiverem disponiveis, diga que nao encontrou.\n"
         "11. PESQUISA DE ACOES: se o usuario pedir para pesquisar/localizar uma acao ou tarefa, use consultar_historico_acoes primeiro. Nao substitua resultado ausente por acervo, email ou internet, salvo se o usuario pedir explicitamente essa ampliacao.\n"
+        "12. ACESSO FINANCEIRO: para qualquer dado sobre rendas, contas, metas ou balanco interno, use consultar_financas_v2. Para novos registros, use registrar_item_financeiro_v2. Detalhe os valores com precisao absoluta conforme retornado pelo sistema.\n"
     )
 
     if not acao_snapshot:
@@ -2346,6 +2346,21 @@ def _process_telegram_message(db, data: dict):
         except Exception as e:
             return f"Erro: {e}"
 
+    def consultar_financas_v2(mes: int = None, ano: int = None):
+        """Retorna resumo financeiro (balancete, metas, extrato). mes (0-11), ano (YYYY). Se mes for omitido, assume o mes anterior ao atual."""
+        from tools.telegram_extended import execute
+        return execute("consultar_financas_v2", {"mes": mes, "ano": ano}, db)
+
+    def registrar_item_financeiro_v2(tipo: str, descricao: str, valor: float, categoria: str = "Geral", mes: int = None, ano: int = None, data: str = None):
+        """
+        Registra nova renda, obrigacao_fixa ou transacao_avulsa no sistema financeiro.
+        tipo: 'renda' | 'obrigacao_fixa' | 'transacao_avulsa'.
+        Obrigatório apresentar rascunho completo ao usuário para confirmação antes de persistir.
+        """
+        from tools.telegram_extended import execute
+        slots = {"tipo": tipo, "descricao": descricao, "valor": valor, "categoria": categoria, "mes": mes, "ano": ano, "data": data}
+        return execute("registrar_item_financeiro_v2", slots, db)
+
     def buscar_e_analisar_email(query: str, max_results: int = 5):
         """Busca e analisa e-mails no Gmail. Use query padrão do Gmail (ex: 'from:x@y.com newer_than:2d')."""
         try:
@@ -2366,6 +2381,8 @@ def _process_telegram_message(db, data: dict):
         salvar_memoria_global,
         registrar_correcao_procedimento,
         buscar_e_analisar_email,
+        consultar_financas_v2,
+        registrar_item_financeiro_v2,
     ]
 
     function_map = {fn.__name__: fn for fn in tools_list}

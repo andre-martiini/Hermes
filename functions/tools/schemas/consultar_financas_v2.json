@@ -1,0 +1,17 @@
+{
+    "name": "consultar_financas_v2",
+    "description": "Consulta o balanço financeiro detalhado (rendas, obrigações, metas e transações) para um mês e ano específicos.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "mes": {
+                "type": "integer",
+                "description": "Mês da consulta (0-11, onde 0 é Janeiro e 11 é Dezembro). Se não fornecido, usa o mês atual."
+            },
+            "ano": {
+                "type": "integer",
+                "description": "Ano da consulta (ex: 2024). Se não fornecido, usa o ano atual."
+            }
+        }
+    }
+}
