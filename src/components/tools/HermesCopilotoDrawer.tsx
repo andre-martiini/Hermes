@@ -1285,7 +1285,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             const askCopiloto = httpsCallable(functions, 'askCopilotoHermes', { timeout: 300000 });
 
             const contextPrefix = activeDocument
-                ? `[CONTEXTO: Visualizando ${activeDocument.tipo} "${activeDocument.nome}" em Tela Cheia]\nLocal: ${activeDocument.url}${activeDocument.driveFileId ? `\nID para leitura profunda: ${activeDocument.driveFileId}\nPara ler o arquivo, use a ferramenta 'ler_arquivo_drive' com este ID.` : ''}\n\n`
+                ? `[CONTEXTO: Visualizando ${activeDocument.tipo} "${activeDocument.nome}" em Tela Cheia]\nLocal: ${activeDocument.url}${activeDocument.driveFileId ? `\nID para leitura profunda: ${activeDocument.driveFileId}\nPara ler o arquivo e responder dúvidas técnicas ou realizar cálculos, utilize a ferramenta 'ler_documento_na_integra' com este ID.` : ''}\n\n`
                 : '';
 
             const response = await askCopiloto({

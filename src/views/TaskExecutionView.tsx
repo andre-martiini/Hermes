@@ -21,7 +21,7 @@ const DocumentViewer = ({ file, onClose, isDark }: {
   onClose: () => void;
   isDark: boolean;
 }) => {
-  const isGoogleDrive = file.url.includes('drive.google.com');
+  const isGoogleDrive = file.url.includes('drive.google.com') || file.url.includes('docs.google.com');
 
   let finalUrl = file.url;
   if (isGoogleDrive) {
@@ -125,7 +125,7 @@ const buildReminderPayload = (reminders: TaskReminder[]) => {
   const nextReminder = getNextPendingReminder(sortedReminders);
   return {
     reminders: sortedReminders,
-    reminder_at: nextReminder?.reminder_at || null,
+    reminder_at: nextReminder?.reminder_at || undefined,
     reminder_sent: nextReminder ? nextReminder.reminder_sent : true,
   };
 };
@@ -375,8 +375,8 @@ export const TaskExecutionView = ({
   const [isProcessingTranscription, setIsProcessingTranscription] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const diaryEndRef = useRef<HTMLDivElement>(null);
-  const workspaceRef = useRef<HTMLDivElement>(null);
+  const diaryEndRef = useRef<HTMLDivElement>(null!);
+  const workspaceRef = useRef<HTMLDivElement>(null!);
 
   const isBreakActive = false;
 
@@ -913,7 +913,7 @@ export const TaskExecutionView = ({
     if (msg.startsWith('/pesquisa-profunda')) {
       const topic = msg.replace('/pesquisa-profunda', '').trim();
       if (!topic) {
-        showToast('Por favor, informe um tema. Ex: /pesquisa-profunda Inteligência Artificial', 'warning');
+        showToast('Por favor, informe um tema. Ex: /pesquisa-profunda Inteligência Artificial', 'info');
         return;
       }
       setDeepResearchTopic(topic);
@@ -925,7 +925,7 @@ export const TaskExecutionView = ({
       const parts = msg.split(' ');
       const idToCancel = parts.length > 1 ? parts[1] : pendingDeepResearchId;
       if (!idToCancel) {
-        showToast('Nenhuma pesquisa em andamento ou ID inválido.', 'warning');
+        showToast('Nenhuma pesquisa em andamento ou ID inválido.', 'info');
         return;
       }
       try {
@@ -946,7 +946,7 @@ export const TaskExecutionView = ({
     const topic = deepResearchTopic.trim();
     if (!topic) {
       setShowDeepResearchModal(false);
-      showToast('Por favor, informe um tema para a pesquisa profunda.', 'warning');
+      showToast('Por favor, informe um tema para a pesquisa profunda.', 'info');
       return;
     }
 

@@ -7270,6 +7270,29 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     _answer = (_response.text or "").strip()
                     return f"[Leitura de '{_real_name}']\n{_answer}" if _answer else "Não foi possível extrair a resposta do documento."
 
+                if _mime == _OFFICE_XLSX or _real_name.lower().endswith('.xlsx'):
+                    import pandas as _pd
+                    _df_list = _pd.read_excel(_io.BytesIO(_file_bytes), sheet_name=None)
+                    _sheets_text = []
+                    for _sheet_name, _df in _df_list.items():
+                        _sheets_text.append(f"ABA: {_sheet_name}\n{_df.to_csv(index=False)}")
+                    _office_text = "\n\n".join(_sheets_text).strip()
+                    _response = client.models.generate_content(
+                        model=model_id,
+                        contents=[(
+                            f"Você recebeu o conteúdo extraído da planilha Excel '{_real_name}'. "
+                            f"Responda exclusivamente à pergunta abaixo com base nesse conteúdo.\n\n"
+                            f"PERGUNTA: {query_especifica}\n\n"
+                            "REGRAS:\n"
+                            "- Se a informação existir, responda de forma precisa e cite o trecho de origem.\n"
+                            "- Se a informação não existir, declare: 'A informação solicitada não foi encontrada neste documento.'\n"
+                            "- Não invente dados externos.\n\n"
+                            f"CONTEÚDO DO DOCUMENTO:\n{_office_text[:120000]}"
+                        )]
+                    )
+                    _answer = (_response.text or "").strip()
+                    return f"[Leitura de '{_real_name}']\n{_answer}" if _answer else "Não foi possível extrair a resposta do documento."
+
                 if is_pdf_mime_type(_real_name, _mime):
                     _pdf_result = extract_pdf_text_with_fallback(
                         _file_bytes,
