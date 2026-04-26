@@ -251,7 +251,7 @@ const FinanceView = ({
         const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
 
         const prevIncome = incomeEntries
-            .filter(e => e.month === prevMonth && e.year === prevYear && e.isReceived)
+            .filter(e => e.month === prevMonth && e.year === prevYear)
             .reduce((acc, curr) => acc + curr.amount, 0);
 
         const prevBills = fixedBills
@@ -343,8 +343,8 @@ const FinanceView = ({
     const billsOverallTotal = currentMonthBills.reduce((acc, curr) => acc + curr.amount, 0);
 
     const getHealthStatus = () => {
-        if (currentMonthIncome === 0) return { label: 'Aguardando Renda', color: 'text-slate-400', icon: '⏳' };
-        const ratio = currentTotalBills / currentMonthIncome;
+        if (incomeOverallTotal === 0) return { label: 'Aguardando Renda', color: 'text-slate-400', icon: '⏳' };
+        const ratio = currentTotalBills / incomeOverallTotal;
         if (ratio < 0.4) return { label: 'Saúde Excelente', color: 'text-emerald-500', icon: '✨' };
         if (ratio < 0.7) return { label: 'Saúde Estável', color: 'text-blue-500', icon: '✅' };
         if (ratio < 0.9) return { label: 'Atenção Necessária', color: 'text-amber-500', icon: '⚠️' };
@@ -965,15 +965,15 @@ const FinanceView = ({
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                     <div>
                                         <div className="text-[10px] font-black text-emerald-500 uppercase mb-2 tracking-widest flex items-center gap-2">
-                                            Total Recebido
+                                            Total Previsto
                                             {prevIncome > 0 && (
-                                                <span className={`text-[9px] px-1.5 py-0.5 rounded-md ${currentMonthIncome >= prevIncome ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' : 'bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400'}`}>
-                                                    {currentMonthIncome >= prevIncome ? '↑' : '↓'} {Math.round(Math.abs((currentMonthIncome - prevIncome) / prevIncome) * 100)}%
+                                                <span className={`text-[9px] px-1.5 py-0.5 rounded-md ${incomeOverallTotal >= prevIncome ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' : 'bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400'}`}>
+                                                    {incomeOverallTotal >= prevIncome ? '↑' : '↓'} {Math.round(Math.abs((incomeOverallTotal - prevIncome) / prevIncome) * 100)}%
                                                 </span>
                                             )}
                                         </div>
                                         <div className="text-4xl font-black text-slate-900 dark:text-white tracking-tighter">
-                                            R$ {currentMonthIncome.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            R$ {incomeOverallTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </div>
                                     </div>
                                     <div>
@@ -992,23 +992,23 @@ const FinanceView = ({
                                 </div>
                                 <div className="mt-8">
                                     <div className="flex justify-between text-[10px] font-black uppercase tracking-widest mb-2">
-                                        <span className="text-slate-400 dark:text-slate-500">Comprometimento da Renda ({Math.round((currentTotalBills / (currentMonthIncome || 1)) * 100)}%)</span>
+                                        <span className="text-slate-400 dark:text-slate-500">Comprometimento da Renda ({Math.round((currentTotalBills / (incomeOverallTotal || 1)) * 100)}%)</span>
                                         <span className="text-slate-300 dark:text-slate-700 italic">Limite sugerido: 70%</span>
                                     </div>
                                     <div className="h-3 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                                         <div
-                                            className={`h-full rounded-full transition-all duration-1000 ${currentMonthIncome > 0 && (currentTotalBills / currentMonthIncome) > 0.7 ? 'bg-rose-500' : 'bg-emerald-500'}`}
-                                            style={{ width: `${Math.min(currentMonthIncome > 0 ? (currentTotalBills / currentMonthIncome) * 100 : 0, 100)}%` }}
+                                            className={`h-full rounded-full transition-all duration-1000 ${incomeOverallTotal > 0 && (currentTotalBills / incomeOverallTotal) > 0.7 ? 'bg-rose-500' : 'bg-emerald-500'}`}
+                                            style={{ width: `${Math.min(incomeOverallTotal > 0 ? (currentTotalBills / incomeOverallTotal) * 100 : 0, 100)}%` }}
                                         ></div>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        <div className={`p-8 rounded-none md:rounded-[2rem] border shadow-none md:shadow-xl flex flex-col justify-center items-center text-center transition-all ${currentMonthIncome - currentTotalBills >= 0 ? 'bg-emerald-950 border-emerald-900 text-white' : 'bg-rose-950 border-rose-900 text-white'}`}>
+                        <div className={`p-8 rounded-none md:rounded-[2rem] border shadow-none md:shadow-xl flex flex-col justify-center items-center text-center transition-all ${incomeOverallTotal - currentTotalBills >= 0 ? 'bg-emerald-950 border-emerald-900 text-white' : 'bg-rose-950 border-rose-900 text-white'}`}>
                             <h4 className="text-[10px] font-black uppercase tracking-[0.2em] mb-2 opacity-60">Saldo Projetado</h4>
                             <div className="text-4xl md:text-5xl font-black tracking-tighter mb-2">
-                                R$ {(currentMonthIncome - currentTotalBills).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                R$ {(incomeOverallTotal - currentTotalBills).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </div>
                             <p className="text-[10px] font-bold uppercase opacity-40 tracking-widest">Disponível após obrigações</p>
                         </div>
@@ -1482,6 +1482,7 @@ const FinanceView = ({
                                                 <div className="text-[10px] text-white/50 font-bold italic mt-1">
                                                     Dia {rubric.dueDay}
                                                     {rubric.defaultAmount ? ` • R$ ${rubric.defaultAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : ' • Valor Variável'}
+                                                    {rubric.pixCode && ' • PIX'}
                                                 </div>
                                             </div>
                                             <div className="flex gap-1">
@@ -1506,7 +1507,7 @@ const FinanceView = ({
                                     <h6 className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-4">
                                         {editingRubric ? 'Editar Rubrica' : 'Cadastrar Nova Rubrica'}
                                     </h6>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
                                         <input
                                             type="text"
                                             placeholder="Nome da Conta"
@@ -1537,6 +1538,13 @@ const FinanceView = ({
                                                 <option key={cat} value={cat} className="bg-slate-900 text-white">{cat}</option>
                                             ))}
                                         </select>
+                                        <input
+                                            type="text"
+                                            placeholder="Chave Pix (Opcional)"
+                                            className="bg-white/10 border border-white/20 rounded-xl px-4 py-2 text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none text-white"
+                                            value={newRubric.pixCode || ''}
+                                            onChange={e => setNewRubric({ ...newRubric, pixCode: e.target.value })}
+                                        />
                                         <div className="flex gap-2">
                                             <button
                                                 onClick={async () => {
@@ -1672,6 +1680,7 @@ const FinanceView = ({
                                                     category: rubric.category,
                                                     dueDay: rubric.dueDay,
                                                     amount: rubric.defaultAmount,
+                                                    pixCode: rubric.pixCode,
                                                     rubricId: rubric.id
                                                 });
                                                 setIsAddingBill(true);

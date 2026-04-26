@@ -17,17 +17,20 @@ import { SpeedDialMenu } from '../components/ui/SpeedDialMenu';
 import { HermesCopilotoDrawer } from '../components/tools/HermesCopilotoDrawer';
 
 const DocumentViewer = ({ file, onClose, isDark }: {
-  file: { url: string; nome: string; tipo: 'link' | 'file' | 'image' };
+  file: { url: string; nome: string; tipo: 'link' | 'file' | 'image'; driveFileId?: string };
   onClose: () => void;
   isDark: boolean;
 }) => {
   const isGoogleDrive = file.url.includes('drive.google.com') || file.url.includes('docs.google.com');
 
   let finalUrl = file.url;
+  let canEmbed = !isGoogleDrive;
+
   if (isGoogleDrive) {
-    const match = file.url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-    if (match && match[1]) {
-      finalUrl = `https://drive.google.com/file/d/${match[1]}/preview`;
+    const fileId = file.driveFileId || file.url.match(/\/d\/([a-zA-Z0-9_-]+)/)?.[1];
+    if (fileId) {
+      finalUrl = `https://drive.google.com/file/d/${fileId}/preview`;
+      canEmbed = true;
     }
   }
 
@@ -54,8 +57,23 @@ const DocumentViewer = ({ file, onClose, isDark }: {
           <div className="w-full h-full flex items-center justify-center p-8">
             <img src={file.url} alt={file.nome} className="max-w-full max-h-full object-contain rounded-lg shadow-2xl transition-all hover:scale-[1.01]" />
           </div>
-        ) : (
+        ) : canEmbed ? (
           <iframe src={finalUrl} className="w-full h-full border-none" title={file.nome} />
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center gap-5 p-8 text-center">
+            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center ${isDark ? 'bg-white/5' : 'bg-slate-100'}`}>
+              <svg className={`w-8 h-8 ${isDark ? 'text-white/30' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </div>
+            <div>
+              <p className={`text-sm font-bold ${isDark ? 'text-white/70' : 'text-slate-700'}`}>Pré-visualização não disponível</p>
+              <p className={`text-xs mt-1 ${isDark ? 'text-white/40' : 'text-slate-400'}`}>O arquivo não pode ser incorporado aqui</p>
+            </div>
+            <a href={file.url} target="_blank" rel="noreferrer" className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${isDark ? 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}>
+              Abrir no Google Drive
+            </a>
+          </div>
         )}
       </div>
     </div>

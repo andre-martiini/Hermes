@@ -269,6 +269,7 @@ export interface BillRubric {
     dueDay: number;
     category: string;
     defaultAmount?: number;
+    pixCode?: string;
 }
 
 export interface IncomeEntry {
