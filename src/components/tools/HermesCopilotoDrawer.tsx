@@ -40,7 +40,12 @@ const LARGE_PASTE_THRESHOLD = 1500;
 
 const isCopilotoFileSupported = (file: File) => {
     const fileName = file.name.toLowerCase();
-    return COPILOTO_SUPPORTED_FILE_EXTENSIONS.some((extension) => fileName.endsWith(extension));
+    const isExtensionSupported = COPILOTO_SUPPORTED_FILE_EXTENSIONS.some((extension) => fileName.endsWith(extension));
+    if (isExtensionSupported) return true;
+
+    // Fallback para tipos MIME comuns de imagem (útil para colagem direta e blobs sem nome)
+    const mimeSupported = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'].includes(file.type);
+    return mimeSupported;
 };
 
 interface SlideItem {
@@ -1100,55 +1105,69 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     // ── Transcrição de áudio colado ───────────────────────────────────────────
     const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
         const files = Array.from(e.clipboardData.files);
-        const audioFile = files.find(f => f.type.startsWith('audio/'));
 
-        if (!audioFile) {
-            const pastedText = e.clipboardData.getData('text');
-            if (pastedText.length > LARGE_PASTE_THRESHOLD) {
+        // Se houver arquivos (imagem, pdf, etc no clipboard)
+        if (files.length > 0) {
+            const audioFile = files.find(f => f.type.startsWith('audio/'));
+
+            // Prioridade para o fluxo de áudio se for um arquivo de áudio
+            if (audioFile) {
                 e.preventDefault();
-                const dateStr = new Date().toISOString().slice(0, 10);
-                const file = new File([pastedText], `contexto-${dateStr}.txt`, { type: 'text/plain' });
-                attachFileToCopiloto(file);
-            }
-            return;
-        }
+                setIsTranscribing(true);
+                setFooterError(null);
 
-        e.preventDefault();
-        setIsTranscribing(true);
-        setFooterError(null);
-
-        try {
-            const reader = new FileReader();
-            reader.readAsDataURL(audioFile);
-            reader.onloadend = async () => {
                 try {
-                    const b64 = (reader.result as string).split(',')[1];
-                    // Tenta extrair extensão do nome do arquivo, senão deriva do MIME
-                    const nameParts = audioFile.name.split('.');
-                    const ext = nameParts.length > 1
-                        ? '.' + nameParts.pop()
-                        : '.' + (audioFile.type.split('/')[1]?.split(';')[0] || 'm4a');
+                    const reader = new FileReader();
+                    reader.readAsDataURL(audioFile);
+                    reader.onloadend = async () => {
+                        try {
+                            const b64 = (reader.result as string).split(',')[1];
+                            const nameParts = audioFile.name.split('.');
+                            const ext = nameParts.length > 1
+                                ? '.' + nameParts.pop()
+                                : '.' + (audioFile.type.split('/')[1]?.split(';')[0] || 'm4a');
 
-                    const fn = httpsCallable(functions, 'transcreverAudio');
-                    const res = await fn({ audioBase64: b64, extension: ext });
-                    const data = res.data as { raw: string; refined: string };
+                            const fn = httpsCallable(functions, 'transcreverAudio');
+                            const res = await fn({ audioBase64: b64, extension: ext });
+                            const data = res.data as { raw: string; refined: string };
 
-                    if (data.refined) {
-                        setInput(prev => prev + (prev ? '\n' : '') + data.refined);
-                    }
+                            if (data.refined) {
+                                setInput(prev => prev + (prev ? '\n' : '') + data.refined);
+                            }
+                        } catch (err: any) {
+                            setFooterError('Erro ao transcrever áudio: ' + (err?.message || 'Tente novamente.'));
+                        } finally {
+                            setIsTranscribing(false);
+                        }
+                    };
+                    reader.onerror = () => {
+                        setFooterError('Não foi possível ler o arquivo de áudio colado.');
+                        setIsTranscribing(false);
+                    };
                 } catch (err: any) {
                     setFooterError('Erro ao transcrever áudio: ' + (err?.message || 'Tente novamente.'));
-                } finally {
                     setIsTranscribing(false);
                 }
-            };
-            reader.onerror = () => {
-                setFooterError('Não foi possível ler o arquivo de áudio colado.');
-                setIsTranscribing(false);
-            };
-        } catch (err: any) {
-            setFooterError('Erro ao transcrever áudio: ' + (err?.message || 'Tente novamente.'));
-            setIsTranscribing(false);
+                return;
+            }
+
+            // Se não for áudio, mas houver arquivos (como imagens ou outros)
+            // Filtra o primeiro arquivo suportado e anexa
+            const firstSupported = files.find(f => isCopilotoFileSupported(f));
+            if (firstSupported) {
+                e.preventDefault();
+                attachFileToCopiloto(firstSupported, 'input');
+                return;
+            }
+        }
+
+        // Fluxo normal para texto
+        const pastedText = e.clipboardData.getData('text');
+        if (pastedText.length > LARGE_PASTE_THRESHOLD) {
+            e.preventDefault();
+            const dateStr = new Date().toISOString().slice(0, 10);
+            const file = new File([pastedText], `contexto-${dateStr}.txt`, { type: 'text/plain' });
+            attachFileToCopiloto(file);
         }
     };
 
@@ -1481,9 +1500,30 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
     return (
         <div
+            onDragEnter={handleComposerDragEnter}
+            onDragOver={handleComposerDragOver}
+            onDragLeave={handleComposerDragLeave}
+            onDrop={handleComposerDrop}
             className={containerClassName}
             style={{ width: effectiveDrawerWidth, maxWidth: isMobileViewport ? '100vw' : undefined }}
         >
+            {isDragActive && (
+                <div className={`pointer-events-none absolute inset-0 z-[100] flex items-center justify-center backdrop-blur-sm ${isDark
+                    ? 'border-4 border-blue-400 bg-blue-500/10'
+                    : 'border-4 border-blue-400 bg-blue-50/90'
+                    }`}>
+                    <div className={`px-8 py-6 rounded-[2.5rem] text-center shadow-2xl ${isDark ? 'bg-slate-900/90 text-blue-200 border border-blue-400/30' : 'bg-white text-blue-700 border border-blue-100'
+                        }`}>
+                        <div className="w-16 h-16 rounded-3xl bg-blue-500/10 flex items-center justify-center mx-auto mb-4">
+                            <svg className="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                            </svg>
+                        </div>
+                        <p className="text-lg font-black uppercase tracking-widest">Solte para anexar</p>
+                        <p className="text-xs mt-2 opacity-80 max-w-[240px]">O Hermes usará este contexto para analisar documentos ou salvar no acervo.</p>
+                    </div>
+                </div>
+            )}
             {/* Handle de redimensionamento — borda esquerda */}
             {!isEmbedded && (
                 <div
@@ -2438,24 +2478,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                     {/* Footer Input */}
                     <div
-                        onDragEnter={handleComposerDragEnter}
-                        onDragOver={handleComposerDragOver}
-                        onDragLeave={handleComposerDragLeave}
-                        onDrop={handleComposerDrop}
                         className={`relative z-20 shrink-0 overflow-visible p-6 border-t ${isDark ? 'border-white/10' : 'border-slate-100'}`}
                     >
-                        {isDragActive && (
-                            <div className={`pointer-events-none absolute inset-4 z-30 flex items-center justify-center rounded-3xl border-2 border-dashed backdrop-blur-sm ${isDark
-                                ? 'border-blue-400 bg-blue-500/10'
-                                : 'border-blue-400 bg-blue-50/90'
-                                }`}>
-                                <div className={`px-4 py-3 rounded-2xl text-center shadow-lg ${isDark ? 'bg-slate-950/80 text-blue-200' : 'bg-white text-blue-700'
-                                    }`}>
-                                    <p className="text-sm font-black uppercase tracking-widest">Solte para anexar</p>
-                                    <p className="text-[11px] mt-1 opacity-80">O copiloto vai usar o mesmo anexo do botão de upload.</p>
-                                </div>
-                            </div>
-                        )}
 
                         {/* Banner de erro inline */}
                         {footerError && (
