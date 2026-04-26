@@ -597,6 +597,18 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         );
     }, [userId]);
 
+    // Auto-select session for the current task when drawer opens
+    useEffect(() => {
+        if (isOpen && taskId && sessions.length > 0) {
+            // Only auto-select if no session is selected or if the current one doesn't match the taskId
+            // and we haven't manually switched to another one in this "open" session.
+            const latestTaskSession = sessions.find(s => s.taskId === taskId);
+            if (latestTaskSession && !currentSessionId) {
+                setCurrentSessionId(latestTaskSession.id);
+            }
+        }
+    }, [isOpen, taskId, sessions, currentSessionId]);
+
     // Load Messages for current session
     useEffect(() => {
         if (!currentSessionId) {
@@ -1494,43 +1506,66 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                             <span className="text-[10px] font-black uppercase tracking-widest">Histórico de Sessões</span>
                             <button onClick={() => handleCreateSession()} className="text-[10px] bg-blue-600 text-white px-3 py-1.5 rounded-lg font-black uppercase tracking-widest">+ Nova</button>
                         </div>
-                        <div className={`flex-1 overflow-y-auto p-4 space-y-2 ${isDark ? 'bg-[#0b1220]' : 'bg-white'}`}>
-                            {sessions.map(s => (
-                                <div
-                                    key={s.id}
-                                    className={`group flex items-center gap-2 rounded-2xl border p-2 transition-all ${currentSessionId === s.id ? (isDark ? 'bg-blue-500/15 border-blue-400/30' : 'bg-blue-50 border-blue-200') : (isDark ? 'bg-white/5 border-white/10 hover:border-white/20' : 'bg-white border-slate-100 hover:border-slate-200')}`}
-                                >
-                                    <button
-                                        onClick={() => { setCurrentSessionId(s.id); setShowHistory(false); }}
-                                        className="min-w-0 flex-1 text-left rounded-xl px-2 py-2"
-                                    >
-                                        <p className={`text-xs font-bold truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{s.title}</p>
-                                        <p className={`text-[9px] mt-1 ${isDark ? 'text-white/45' : 'text-slate-400'}`}>{s.lastMessageAt?.toDate()?.toLocaleDateString()}</p>
-                                    </button>
-                                    <button
-                                        onClick={() => void handleDeleteSession(s.id)}
-                                        disabled={Boolean(deletingSessionId && deletingSessionId !== s.id)}
-                                        title={sessionPendingDeleteId === s.id ? 'Clique novamente para excluir' : 'Excluir sessão'}
-                                        className={`shrink-0 rounded-xl border px-2.5 py-2 text-[9px] font-black uppercase tracking-widest transition-all ${sessionPendingDeleteId === s.id
-                                            ? (isDark ? 'border-red-400/40 bg-red-500/10 text-red-300 hover:bg-red-500/15' : 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100')
-                                            : (isDark ? 'border-white/10 bg-white/5 text-white/45 hover:border-white/20 hover:text-red-300' : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300 hover:text-red-600')
-                                            } disabled:cursor-not-allowed disabled:opacity-40`}
-                                    >
-                                        {deletingSessionId === s.id ? (
-                                            <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                                            </svg>
-                                        ) : sessionPendingDeleteId === s.id ? (
-                                            <span>Excluir</span>
-                                        ) : (
-                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16" />
-                                            </svg>
-                                        )}
-                                    </button>
+                        <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${isDark ? 'bg-[#0b1220]' : 'bg-white'}`}>
+                            {/* Sessões da Ação Atual */}
+                            {taskId && (
+                                <div className="space-y-2">
+                                    <h4 className={`text-[9px] font-black uppercase tracking-[0.2em] px-2 mb-3 pb-1 border-b ${isDark ? 'text-emerald-400 border-emerald-500/20' : 'text-emerald-600 border-emerald-100'}`}>
+                                        Conversas nesta Ação
+                                    </h4>
+                                    {sessions.filter(s => s.taskId === taskId).length === 0 ? (
+                                        <p className={`text-[10px] px-2 italic ${isDark ? 'text-white/30' : 'text-slate-400'}`}>Nenhuma conversa anterior nesta ação.</p>
+                                    ) : (
+                                        sessions.filter(s => s.taskId === taskId).map(s => (
+                                            <div
+                                                key={s.id}
+                                                className={`group flex items-center gap-2 rounded-2xl border p-1.5 transition-all ${currentSessionId === s.id ? (isDark ? 'bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_15px_rgba(16,185,129,0.1)]' : 'bg-emerald-50 border-emerald-200 shadow-sm') : (isDark ? 'bg-white/5 border-white/10 hover:border-white/20' : 'bg-white border-slate-100 hover:border-slate-200')}`}
+                                            >
+                                                <button
+                                                    onClick={() => { setCurrentSessionId(s.id); setShowHistory(false); }}
+                                                    className="min-w-0 flex-1 text-left rounded-xl px-2 py-1.5"
+                                                >
+                                                    <p className={`text-xs font-bold truncate ${isDark ? (currentSessionId === s.id ? 'text-emerald-300' : 'text-white') : (currentSessionId === s.id ? 'text-emerald-700' : 'text-slate-900')}`}>{s.title}</p>
+                                                    <p className={`text-[9px] mt-0.5 ${isDark ? 'text-white/45' : 'text-slate-400'}`}>{s.lastMessageAt?.toDate()?.toLocaleDateString()} · {s.lastMessageAt?.toDate()?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                                                </button>
+                                                <button
+                                                    onClick={() => void handleDeleteSession(s.id)}
+                                                    className={`shrink-0 opacity-0 group-hover:opacity-100 p-2 rounded-xl transition-all ${isDark ? 'hover:bg-red-500/20 text-red-400' : 'hover:bg-red-50 text-red-600'}`}
+                                                >
+                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16" /></svg>
+                                                </button>
+                                            </div>
+                                        ))
+                                    )}
                                 </div>
-                            ))}
+                            )}
+
+                            {/* Outras Sessões */}
+                            <div className="space-y-2 pt-2">
+                                <h4 className={`text-[9px] font-black uppercase tracking-[0.2em] px-2 mb-3 pb-1 border-b ${isDark ? 'text-slate-500 border-white/10' : 'text-slate-400 border-slate-100'}`}>
+                                    {taskId ? 'Outras Conversas' : 'Histórico Geral'}
+                                </h4>
+                                {sessions.filter(s => s.taskId !== taskId).map(s => (
+                                    <div
+                                        key={s.id}
+                                        className={`group flex items-center gap-2 rounded-2xl border p-1.5 transition-all ${currentSessionId === s.id ? (isDark ? 'bg-blue-500/15 border-blue-400/30' : 'bg-blue-50 border-blue-200') : (isDark ? 'bg-white/5 border-white/10 hover:border-white/20' : 'bg-white border-slate-100 hover:border-slate-200')}`}
+                                    >
+                                        <button
+                                            onClick={() => { setCurrentSessionId(s.id); setShowHistory(false); }}
+                                            className="min-w-0 flex-1 text-left rounded-xl px-2 py-1.5"
+                                        >
+                                            <p className={`text-xs font-bold truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{s.title}</p>
+                                            <p className={`text-[9px] mt-0.5 ${isDark ? 'text-white/45' : 'text-slate-400'}`}>{s.lastMessageAt?.toDate()?.toLocaleDateString()}</p>
+                                        </button>
+                                        <button
+                                            onClick={() => void handleDeleteSession(s.id)}
+                                            className={`shrink-0 opacity-0 group-hover:opacity-100 p-2 rounded-xl transition-all ${isDark ? 'hover:bg-red-500/20 text-red-400' : 'hover:bg-red-50 text-red-600'}`}
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16" /></svg>
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     </div>
                 )}
@@ -1639,7 +1674,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                 strong: ({ node, ...props }) => <strong className={`font-bold ${isDark ? 'text-blue-300' : 'text-blue-600'}`} {...props} />,
                                                 pre: ({ node, children, ...props }) => {
                                                     const arr = React.Children.toArray(children);
-                                                    const first = arr[0] as React.ReactElement | undefined;
+                                                    const first = arr[0] as React.ReactElement<any> | undefined;
                                                     if (first?.props?.className === 'language-mermaid') {
                                                         return <>{children}</>;
                                                     }
