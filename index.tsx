@@ -13,7 +13,7 @@ import {
   formatDate, formatDateLocalISO, Sistema, SistemaStatus, WorkItem, WorkItemPhase,
   WorkItemPriority, QualityLog, WorkItemAudit, GoogleCalendarEvent,
   PoolItem, CustomNotification, HealthExam, ConhecimentoItem, UndoAction, HermesModalProps,
-  ShoppingItem, Projeto, SlideHistoryEntry, BaseConhecimento, TipoAcao, Servico
+  ShoppingItem, Projeto, SlideHistoryEntry, BaseConhecimento, TipoAcao, Servico, Toast
 } from './types';
 import HealthView from './HealthView';
 import { MeetingTranscriptionTool } from './src/components/tools/MeetingTranscriptionTool';
@@ -75,13 +75,7 @@ type SortOption = 'date-asc' | 'date-desc' | 'priority-high' | 'priority-low';
 type DateFilter = 'today' | 'week' | 'month';
 type ThemeMode = 'system' | 'dark' | 'light';
 
-interface Toast {
-  id: string;
-  message: string;
-  type: 'success' | 'error' | 'info';
-  action?: { label: string | React.ReactNode, onClick: () => void };
-  actions?: { label: string | React.ReactNode, onClick: () => void }[];
-}
+
 
 // --- Utilitários ---
 
@@ -1161,7 +1155,7 @@ const App: React.FC = () => {
   const [isImportPlanOpen, setIsImportPlanOpen] = useState(false);
   const [isCompletedTasksOpen, setIsCompletedTasksOpen] = useState(false);
   const [brainstormIdeas, setBrainstormIdeas] = useState<BrainstormIdea[]>([]);
-  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'whatsapp_assistant' | 'diagnostico' | null>(null);
+  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'whatsapp_assistant' | 'diagnostico' | 'pop_manager' | null>(null);
   const [initialDraftId, setInitialDraftId] = useState<string | undefined>(undefined);
   const [initialDiagnosisId, setInitialDiagnosisId] = useState<string | undefined>(undefined);
   const [isBrainstormingAddingText, setIsBrainstormingAddingText] = useState(false);
@@ -1718,7 +1712,7 @@ const App: React.FC = () => {
   }, [services, incomeEntries, db]);
 
 
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success', action?: { label: string | React.ReactNode, onClick: () => void }, actions?: { label: string | React.ReactNode, onClick: () => void }[]) => {
+  const showToast = (message: string, type: 'success' | 'error' | 'info' | 'warning' = 'success', action?: { label: string | React.ReactNode, onClick: () => void }, actions?: { label: string | React.ReactNode, onClick: () => void }[]) => {
     const id = Math.random().toString(36).substring(2, 9);
     setToasts(prev => {
       const hasInteractiveAction = Boolean(action || (actions && actions.length > 0));
@@ -2677,7 +2671,7 @@ const App: React.FC = () => {
       if (oldDate !== todayStr) {
         // Contar WIP atual de 'avanco' agendado para hoje e em andamento
         const wipCount = tarefas.filter(t => {
-          if (normalizeStatus(t.status) === 'concluido' || t.status === 'excluído') return false;
+          if (normalizeStatus(t.status) === 'concluido' || (t.status as string) === 'excluído') return false;
           const tLane = t.execution_lane || 'avanco';
           if (tLane !== 'avanco') return false;
           const tDate = t.data_limite || t.data_inicio;
@@ -3608,7 +3602,7 @@ const App: React.FC = () => {
 
     if (isWipConstrained && isToday) {
       const wipCount = tarefas.filter(t => {
-        if (normalizeStatus(t.status) === 'concluido' || t.status === 'excluído') return false;
+        if (normalizeStatus(t.status) === 'concluido' || (t.status as string) === 'excluído') return false;
         const tLane = t.execution_lane || 'avanco';
         if (tLane !== 'avanco') return false;
         const tDate = t.data_limite || t.data_inicio;
@@ -3621,8 +3615,8 @@ const App: React.FC = () => {
         showToast(`Limite de WIP (${wipLimit}) atingido! A tarefa será adicionada ao Backlog.`, 'warning');
         data.data_limite = '';
         data.data_inicio = '';
-        data.horario_inicio = null;
-        data.horario_fim = null;
+        data.horario_inicio = undefined;
+        data.horario_fim = undefined;
       }
     }
 
@@ -4994,7 +4988,7 @@ const App: React.FC = () => {
                 {activePopup.link && (
                   <button
                     onClick={() => {
-                      handleNotificationNavigate(activePopup.link);
+                      handleNotificationNavigate(activePopup.link!);
                       setActivePopup(null);
                     }}
                     className="flex-1 px-5 py-3 bg-slate-900 text-white rounded-lg md:rounded-xl text-[9px] font-black uppercase tracking-widest transition-all hover:bg-slate-800 shadow-lg shadow-slate-200"
@@ -6066,7 +6060,7 @@ const App: React.FC = () => {
                     }}
                     onConvertToTask={handleConvertToTask}
                     activeTool={activeFerramenta}
-                    setActiveTool={setActiveFerramenta}
+                    setActiveTool={(tool) => setActiveFerramenta(tool)}
                     isAddingText={isBrainstormingAddingText}
                     setIsAddingText={setIsBrainstormingAddingText}
                     showToast={showToast}
@@ -6622,7 +6616,7 @@ const App: React.FC = () => {
                                                       <WysiwygEditor
                                                         value={newLogText}
                                                         onChange={setNewLogText}
-                                                        onPaste={async e => {
+                                                        onPaste={async (e: React.ClipboardEvent) => {
                                                           const items = e.clipboardData?.items;
                                                           if (!items) return;
                                                           for (let i = 0; i < items.length; i++) {
@@ -7380,7 +7374,7 @@ const App: React.FC = () => {
                                       onCreateActivity={async (draft) => {
                                         let targetId = entregaId;
                                         if (!targetId) {
-                                          targetId = await handleCreateEntregaFromPlan(item);
+                                          targetId = await handleCreateEntregaFromPlan(item) || undefined;
                                         }
                                         if (targetId) handleCreatePgdActivity(targetId, draft);
                                       }}
@@ -7393,7 +7387,7 @@ const App: React.FC = () => {
                                       onProcessRawText={async (rawText) => {
                                         let targetId = entregaId;
                                         if (!targetId) {
-                                          targetId = await handleCreateEntregaFromPlan(item);
+                                          targetId = await handleCreateEntregaFromPlan(item) || undefined;
                                         }
                                         if (targetId) handleGeneratePgdFromRawText(targetId, item, rawText);
                                       }}
@@ -8253,7 +8247,7 @@ const App: React.FC = () => {
           onClose={() => setIsCopilotoOpen(false)}
           isDark={isDarkTheme}
           taskId={selectedTask?.id || selectedWorkItem?.id}
-          systemId={selectedSystemId || selectedTask?.sistema_id || selectedWorkItem?.sistema_id}
+          systemId={selectedSystemId || (selectedTask as any)?.sistema_id || selectedWorkItem?.sistema_id}
           userId={user?.uid || ''}
           onOpenTask={async (id) => {
             const task = tarefas.find(t => t.id === id);

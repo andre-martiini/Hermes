@@ -30,7 +30,7 @@ interface SistemaExecutionViewProps {
   knowledgeItems: ConhecimentoItem[];
   onClose: () => void;
   onUpdateSistema: (id: string, updates: Partial<Sistema>) => void;
-  onCreateWorkItem: (sistemaId: string, tipo: string, text: string, attachments: PoolItem[]) => void;
+  onCreateWorkItem: (sistemaId: string, tipo: 'desenvolvimento' | 'ajuste' | 'log' | 'geral', text: string, attachments: PoolItem[]) => void | Promise<void>;
   onUpdateWorkItem: (id: string, updates: Partial<WorkItem>) => void;
   onDeleteWorkItem: (id: string) => void;
   onSyncGithubRepo: (sistemaId: string, repoUrl: string) => void;

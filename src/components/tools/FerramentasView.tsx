@@ -11,7 +11,7 @@ import { MeetingTranscriptionTool } from './MeetingTranscriptionTool';
 import { DiagnosticoTool } from './DiagnosticoTool';
 import { PopManagerTool } from './PopManagerTool';
 
-type FerramentaAtiva = 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'diagnostico' | 'pop_manager' | null;
+type FerramentaAtiva = 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'diagnostico' | 'pop_manager' | 'whatsapp_assistant' | null;
 
 interface FerramentasViewProps {
   ideas: BrainstormIdea[];
@@ -129,13 +129,13 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
 
   if (activeTool === 'choir_rehearsals') {
     return <ChoirRehearsalsTool
-             onBack={() => setActiveTool(null)}
-             showToast={showToast}
-             knowledgeItems={knowledgeItems}
-             onUploadFile={onUploadFile}
-             initialFile={pendingSharedVideoFile}
-             onInitialFileConsumed={onPendingSharedVideoFileConsumed}
-           />;
+      onBack={() => setActiveTool(null)}
+      showToast={showToast}
+      knowledgeItems={knowledgeItems}
+      onUploadFile={onUploadFile}
+      initialFile={pendingSharedVideoFile}
+      onInitialFileConsumed={onPendingSharedVideoFileConsumed}
+    />;
   }
 
   if (activeTool === 'meeting_transcription') {

@@ -1,5 +1,14 @@
+import React from 'react';
 
 export type Status = 'em andamento' | 'stand-by' | 'concluído';
+
+export interface Toast {
+    id: string;
+    message: string;
+    type: 'success' | 'error' | 'info' | 'warning';
+    action?: { label: string | React.ReactNode, onClick: () => void };
+    actions?: { label: string | React.ReactNode, onClick: () => void }[];
+}
 
 export interface Acompanhamento {
     data: string;

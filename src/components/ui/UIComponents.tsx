@@ -1,20 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Tarefa, HermesNotification, WysiwygEditorProps, PlanoTrabalhoItem,
-  EntregaInstitucional, AtividadeRealizada
+  EntregaInstitucional, AtividadeRealizada, Toast
 } from '@/types';
 import { formatDate } from '@/types';
 import { STATUS_COLORS, PROJECT_COLORS } from '@/constants';
 import { normalizeStatus } from '../../utils/helpers';
 
 // Local Toast type (matches the one in index.tsx)
-interface Toast {
-  id: string;
-  message: string;
-  type: 'success' | 'error' | 'info';
-  action?: { label: string | React.ReactNode, onClick: () => void };
-  actions?: { label: string | React.ReactNode, onClick: () => void }[];
-}
+
 
 export const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[], removeToast: (id: string) => void }) => {
   return (
@@ -24,13 +18,15 @@ export const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[], remov
           key={toast.id}
           className={`pointer-events-auto px-6 py-4 rounded-lg sm:rounded-lg md:rounded-[1.25rem] shadow-[0_20px_50px_rgba(0,0,0,0.3)] backdrop-blur-md flex items-center gap-4 animate-in slide-in-from-bottom-12 sm:slide-in-from-right-12 fade-in duration-500 min-w-[320px] border border-white/10 ${toast.type === 'success' ? 'bg-emerald-600/95 text-white' :
             toast.type === 'error' ? 'bg-rose-600/95 text-white' :
-              'bg-slate-900/95 text-white'
+              toast.type === 'warning' ? 'bg-amber-500/95 text-white' :
+                'bg-slate-900/95 text-white'
             }`}
         >
           <div className="flex-shrink-0">
             {toast.type === 'success' && <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg></div>}
             {toast.type === 'error' && <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg></div>}
             {toast.type === 'info' && <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></div>}
+            {toast.type === 'warning' && <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg></div>}
           </div>
           <div className="flex-1">
             <span className="text-[10px] font-black uppercase tracking-[0.2em] leading-none opacity-60 block mb-0.5">{toast.type}</span>
@@ -352,7 +348,7 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
           </div>
           {task.tags && task.tags.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-0.5 opacity-60">
-              {task.tags.map(tag => (
+              {task.tags.map((tag: string) => (
                 <span key={tag} className={`text-[8px] md:text-[9px] font-bold lowercase tracking-wide before:content-['#'] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
                   {tag}
                 </span>
@@ -432,7 +428,7 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
                   </svg>
                 </button>
               )}
-{onUpdateTask && (
+              {onUpdateTask && (
                 <DatePickerButton taskId={task.id} onUpdateTask={onUpdateTask} />
               )}
 

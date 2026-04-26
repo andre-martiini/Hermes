@@ -410,6 +410,12 @@ def _handle_command(text: str, session: dict) -> Optional[str]:
         ctx_display = f"ação trancada — <b>{acao_titulo}</b>" if ctx == "acao" else f"<b>{ctx}</b>"
         return f"Contexto ativo: {ctx_display}\nTurnos no histórico: {turns}"
 
+    if re.match(r"^/limpar$", text, re.IGNORECASE):
+        ctx = session.get("contexto_ativo", "geral")
+        hist_key = "history_acao" if ctx == "acao" else "history"
+        session[hist_key] = []
+        return f"✅ Histórico do contexto <b>{ctx}</b> foi limpo. Podemos recomeçar!"
+
     return None
 
 
@@ -536,6 +542,24 @@ def _extract_natural_context_query(text: str) -> str | None:
         if match:
             return (match.group(1) or "").strip(" .,:;-")
     return None
+
+
+def _is_reset_request(text: str) -> bool:
+    """Detecta se o usuário quer resetar/limpar a sessão via linguagem natural."""
+    lowered = _normalize_for_matching(text).strip()
+    if not lowered:
+        return False
+    
+    # Marcadores de ação
+    reset_markers = ["limpar", "limpa", "resetar", "reset", "recomecar", "recomeca", "reiniciar", "reinicia"]
+    # Marcadores de objeto
+    context_markers = ["chat", "conversa", "historico", "sessao", "memoria"]
+    
+    has_reset = any(m in lowered for m in reset_markers)
+    has_context = any(m in lowered for m in context_markers)
+    
+    # Se disser apenas "reset" ou "limpa tudo", ou combinar reset + contexto
+    return (has_reset and has_context) or (has_reset and len(lowered.split()) <= 2)
 
 
 def _select_context_result(query: str, results: list) -> dict | None:
@@ -854,6 +878,12 @@ def _build_action_keyboard(results: list) -> list:
 
 
 _EXIT_KEYBOARD = [[{"text": "🔓 Sair do Contexto", "callback_data": "exit_context"}]]
+_RESET_CONFIRM_KEYBOARD = [
+    [
+        {"text": "✅ Sim, limpar", "callback_data": "reset_session_confirm"},
+        {"text": "❌ Não, manter", "callback_data": "reset_session_cancel"}
+    ]
+]
 
 
 def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn.Response":
@@ -916,6 +946,18 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
             f"Use <i>Sair do Contexto</i> para retornar ao modo geral.",
             _EXIT_KEYBOARD,
         )
+
+    elif data == "reset_session_confirm":
+        ctx = session.get("contexto_ativo", "geral")
+        hist_key = "history_acao" if ctx == "acao" else "history"
+        session[hist_key] = []
+        _save_session(db, chat_id, session)
+        _answer_callback_query(token, query_id, "Histórico limpo!")
+        _send_telegram_message(token, chat_id, f"✅ Histórico do contexto <b>{ctx}</b> foi limpo. Podemos recomeçar!")
+
+    elif data == "reset_session_cancel":
+        _answer_callback_query(token, query_id, "Ação cancelada.")
+        _send_telegram_message(token, chat_id, "Ok, mantive o histórico atual.")
 
     else:
         _answer_callback_query(token, query_id)
@@ -1801,6 +1843,16 @@ def _process_telegram_message(db, data: dict):
             _send_telegram_session_message(db, token, chat_id, reply, session=session)
             return
         # Unknown command — fall through to Gemini
+
+    # --- Natural-language reset request ---
+    if _is_reset_request(text):
+        ctx = session.get("contexto_ativo", "geral")
+        _send_telegram_message_with_keyboard(
+            token, chat_id,
+            f"Você tem certeza que deseja limpar o histórico desta sessão (<b>{ctx}</b>)? Isto ajudará a evitar alucinações, mas eu esquecerei o que acabamos de conversar.",
+            _RESET_CONFIRM_KEYBOARD,
+        )
+        return
 
     # --- Load copilot personality ---
     try:
