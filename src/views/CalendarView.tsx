@@ -162,15 +162,22 @@ export const CalendarView = ({
     onDateChange(d);
   };
 
-  const monthName = useMemo(() => {
+  const dateInfo = useMemo(() => {
     try {
-      if (!currentDate || isNaN(currentDate.getTime())) return "Data Inválida";
-      return viewMode === 'day'
-        ? new Intl.DateTimeFormat('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' }).format(currentDate)
-        : new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(currentDate);
+      if (!currentDate || isNaN(currentDate.getTime())) return { main: "Data Inválida", sub: "" };
+
+      const weekday = new Intl.DateTimeFormat('pt-BR', { weekday: 'long' }).format(currentDate);
+      const isDay = viewMode === 'day';
+
+      return {
+        main: isDay
+          ? new Intl.DateTimeFormat('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' }).format(currentDate)
+          : new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(currentDate),
+        sub: isDay ? weekday : (viewMode === 'week' ? 'Visualização Semanal' : 'Visualização Mensal')
+      };
     } catch (e) {
       console.error("Error formatting date:", e);
-      return "Erro na Data";
+      return { main: "Erro na Data", sub: "" };
     }
   }, [currentDate, viewMode]);
 
@@ -188,9 +195,14 @@ export const CalendarView = ({
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
             </button>
           </div>
-          <h3 className={`text-[10px] font-black uppercase tracking-tight md:tracking-[0.2em] md:border-l ${isDark ? 'text-slate-100 border-slate-700' : 'text-slate-700 border-slate-200'} md:pl-4 text-center md:text-left truncate max-w-full`}>
-            {monthName}
-          </h3>
+          <div className={`flex flex-col md:border-l ${isDark ? 'text-slate-100 border-slate-700' : 'text-slate-700 border-slate-200'} md:pl-4 items-center md:items-start leading-tight truncate`}>
+            <span className={`text-[8px] font-bold uppercase tracking-[0.1em] md:tracking-[0.2em] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              {dateInfo.sub}
+            </span>
+            <h3 className={`text-[10px] font-black uppercase tracking-tight md:tracking-[0.2em] ${isDark ? 'text-slate-100' : 'text-slate-700'} truncate max-w-full`}>
+              {dateInfo.main}
+            </h3>
+          </div>
 
           {viewMode === 'week' && (
             <div className={`flex ${isDark ? 'bg-slate-800' : 'bg-slate-100'} p-0.5 rounded-lg shadow-inner shrink-0 scale-90 md:scale-100 ml-2`}>

@@ -10830,18 +10830,20 @@ DIÁRIO (entradas recentes):
 CLASSIFICAÇÃO:
 - NIVEL_1 (Crítico): contradição lógica clara, prazo inatingível evidente, gargalo crítico não mapeado
 - NIVEL_2 (Otimização): sugestão de melhoria, reorganização, passo faltante importante
+- NIVEL_3 (Ideia Criativa): Sugestão de novas ações relacionadas que transcendem o plano atual, conexões estratégicas ou ideias que agreguem valor lateral.
 - SEM_INSIGHT: situação está adequada
 
 REGRAS:
 - Só retorne insight se for genuinamente valioso. Evite insights genéricos ou óbvios.
 - Para alvo "plano", inclua plano_proposto com todos os itens revisados (array de objetos com "id", "text", "completed").
-- Use IDs de 8 chars para itens novos. Preserve id e completed dos itens existentes quando mantidos.
-- Para alvo "diario", plano_proposto deve ser null.
+- Para alvo "acoes", inclua acoes_propostas (array de objetos com "titulo", "descricao", "tags").
+- Use IDs de 8 chars para itens novos no plano. Preserve id e completed dos itens existentes quando mantidos.
+- Se o alvo não for "plano", plano_proposto deve ser null. Se não houver novas ações, acoes_propostas deve ser null.
 
 RESPONDA APENAS COM JSON VÁLIDO (sem markdown):
-{{"nivel": 1|2|null, "texto": "...", "alvo": "diario"|"plano"|null, "plano_proposto": [...]|null}}
+{{"nivel": 1|2|3|null, "texto": "...", "alvo": "diario"|"plano"|"acoes"|null, "plano_proposto": [...]|null, "acoes_propostas": [...]|null}}
 
-Se SEM_INSIGHT: {{"nivel": null, "texto": null, "alvo": null, "plano_proposto": null}}"""
+Se SEM_INSIGHT: {{"nivel": null, "texto": null, "alvo": null, "plano_proposto": null, "acoes_propostas": null}}"""
 
         response = client.models.generate_content(
             model="gemini-2.0-flash",
@@ -10860,17 +10862,19 @@ Se SEM_INSIGHT: {{"nivel": null, "texto": null, "alvo": null, "plano_proposto": 
         texto = parsed.get('texto')
         alvo = parsed.get('alvo')
         plano_proposto = parsed.get('plano_proposto')
+        acoes_propostas = parsed.get('acoes_propostas')
 
-        if nivel not in (1, 2, None):
+        if nivel not in (1, 2, 3, None):
             nivel = None
-        if alvo not in ('diario', 'plano', None):
+        if alvo not in ('diario', 'plano', 'acoes', None):
             alvo = None
 
         return {
             "nivel": nivel,
             "texto": texto,
             "alvo": alvo,
-            "planoProposto": plano_proposto if alvo == 'plano' and isinstance(plano_proposto, list) else None
+            "planoProposto": plano_proposto if alvo == 'plano' and isinstance(plano_proposto, list) else None,
+            "acoesPropostas": acoes_propostas if alvo == 'acoes' and isinstance(acoes_propostas, list) else None
         }
 
     except Exception as e:

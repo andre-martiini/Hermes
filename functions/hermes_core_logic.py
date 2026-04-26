@@ -2275,7 +2275,7 @@ def _process_telegram_message(db, data: dict):
         max_por_semana: int = 5,
         estrategia: str = "data_criacao",
         filtro_data: str = None,
-        task_ids: list = None,
+        task_ids: list[str] = None,
         justificativa: str = "",
     ):
         """
