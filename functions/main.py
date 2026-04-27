@@ -190,7 +190,7 @@ def get_google_creds(scopes=None):
         raise Exception("Credenciais não encontradas no Firestore.")
 
     creds_data = creds_doc.to_dict()
-    scopes = scopes or GOOGLE_BASE_SCOPES
+    stored_scopes = creds_data.get('scopes') or GOOGLE_BASE_SCOPES
 
     creds = Credentials(
         token=creds_data.get('token'),
@@ -198,7 +198,7 @@ def get_google_creds(scopes=None):
         token_uri=creds_data.get('token_uri'),
         client_id=creds_data.get('client_id'),
         client_secret=creds_data.get('client_secret'),
-        scopes=scopes
+        scopes=stored_scopes
     )
 
     # Verifica se o token expirou e tenta renovar

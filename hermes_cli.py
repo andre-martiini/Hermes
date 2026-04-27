@@ -25,7 +25,8 @@ SCOPES = [
     'https://www.googleapis.com/auth/tasks',
     'https://www.googleapis.com/auth/gmail.readonly',
     'https://www.googleapis.com/auth/calendar',
-    'https://www.googleapis.com/auth/drive'
+    'https://www.googleapis.com/auth/drive',
+    'https://www.googleapis.com/auth/forms.body'
 ]
 
 DEBUG_MODE = True # Ativa log detalhado de cada tarefa no terminal do sistema
@@ -724,6 +725,7 @@ def classify_task(title, notes, mapping=None):
 
 def watch_commands(db):
     print("MÓDULO DE SINCRONIZAÇÃO AUTOMÁTICA INICIADO")
+    get_google_creds()  # força autenticação OAuth antes de entrar no loop
     sync_doc_ref = db.collection('system').document('sync')
     def on_snapshot(doc_snapshot, changes, read_time):
         for doc in doc_snapshot:
