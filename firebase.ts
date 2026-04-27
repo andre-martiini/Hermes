@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { initializeFirestore } from "firebase/firestore";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
 import { getFunctions } from "firebase/functions";
 import { getMessaging } from "firebase/messaging";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from "firebase/auth";
@@ -23,6 +23,7 @@ export { signInWithPopup, signOut, browserLocalPersistence, browserSessionPersis
 
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 });
 
 export const functions = getFunctions(app, "us-central1");
