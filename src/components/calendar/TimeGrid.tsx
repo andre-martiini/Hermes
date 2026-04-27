@@ -6,6 +6,11 @@ import { timeToMinutes, minutesToTime, getYFromTime, getTimeFromY, snapToGrid, g
 import { PROJECT_COLORS } from '../../../constants';
 import { TaskActionSelector } from './TaskActionSelector';
 
+const CALENDAR_START_HOUR = 6;
+const CALENDAR_END_HOUR = 22;
+const CALENDAR_START_MIN = CALENDAR_START_HOUR * 60;
+const CALENDAR_END_MIN = CALENDAR_END_HOUR * 60;
+
 interface TimeGridProps {
   days: Date[];
   tasks: Tarefa[];
@@ -156,7 +161,7 @@ export const TimeGrid = ({
       if (containerRef.current && onTaskCreate) {
         const rect = containerRef.current.getBoundingClientRect();
         const y = clientY - rect.top + containerRef.current.scrollTop;
-        const timeStr = getTimeFromY(y, hourHeight, step);
+        const timeStr = getTimeFromY(y + (CALENDAR_START_HOUR * hourHeight), hourHeight, step);
 
         onTaskCreate({
           data_limite: formatDateLocalISO(day),
@@ -193,7 +198,7 @@ export const TimeGrid = ({
     if (taskId && containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
       const relativeY = e.clientY - rect.top + containerRef.current.scrollTop;
-      const timeStr = getTimeFromY(relativeY, hourHeight, step);
+      const timeStr = getTimeFromY(relativeY + (CALENDAR_START_HOUR * hourHeight), hourHeight, step);
 
       const newDate = days[dayIndex];
       onTaskUpdate(taskId, {
@@ -246,7 +251,7 @@ export const TimeGrid = ({
 
           const deltaY = dragging.currentY - dragging.startY;
           const deltaMin = Math.round((deltaY / hourHeight) * 60 / step) * step;
-          const newStartMin = Math.max(0, Math.min(1440 - dragging.duration, dragging.originalStartMin + deltaMin));
+          const newStartMin = Math.max(CALENDAR_START_MIN, Math.min(CALENDAR_END_MIN - dragging.duration, dragging.originalStartMin + deltaMin));
 
           const timeAxisWidth = 48;
           const gridWidth = rect.width - timeAxisWidth;
@@ -276,10 +281,10 @@ export const TimeGrid = ({
         let newEnd = resizing.originalEndMin;
         if (resizing.type === 'top') {
           newStart = Math.min(newStart + deltaMin, newEnd - 15);
-          newStart = Math.max(0, newStart);
+          newStart = Math.max(CALENDAR_START_MIN, newStart);
         } else {
           newEnd = Math.max(newStart + 15, newEnd + deltaMin);
-          newEnd = Math.min(1440, newEnd);
+          newEnd = Math.min(CALENDAR_END_MIN, newEnd);
         }
         if (newStart !== resizing.originalStartMin || newEnd !== resizing.originalEndMin) {
           onTaskUpdate(resizing.id, {
@@ -309,12 +314,15 @@ export const TimeGrid = ({
     <div className={`flex flex-col h-full overflow-hidden border-t relative select-none ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-100'}`}>
       <div className="flex flex-1 overflow-hidden relative">
         <div className="flex-1 overflow-y-auto custom-scrollbar relative flex" ref={containerRef}>
-          <div className={`w-12 flex-shrink-0 border-r relative sticky left-0 z-20 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`} style={{ height: 24 * hourHeight }}>
-            {Array.from({ length: 24 }).map((_, i) => (
-              <div key={i} className={`absolute right-2 text-[10px] font-mono ${isDark ? 'text-slate-600' : 'text-slate-300'}`} style={{ top: i * hourHeight - 6 }}>
-                {i.toString().padStart(2, '0')}:00
-              </div>
-            ))}
+          <div className={`w-12 flex-shrink-0 border-r relative sticky left-0 z-20 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`} style={{ height: (CALENDAR_END_HOUR - CALENDAR_START_HOUR) * hourHeight }}>
+            {Array.from({ length: CALENDAR_END_HOUR - CALENDAR_START_HOUR + 1 }).map((_, i) => {
+              const hour = i + CALENDAR_START_HOUR;
+              return (
+                <div key={hour} className={`absolute right-2 text-[10px] font-mono ${isDark ? 'text-slate-600' : 'text-slate-300'}`} style={{ top: i * hourHeight - 6 }}>
+                  {hour.toString().padStart(2, '0')}:00
+                </div>
+              );
+            })}
           </div>
 
           {days.map((day, dayIndex) => {
@@ -326,7 +334,7 @@ export const TimeGrid = ({
               <div
                 key={dayStr}
                 className={`flex-1 relative border-r min-w-[150px] cursor-crosshair active:cursor-grabbing ${isDark ? 'border-slate-800' : 'border-slate-100'} ${day.getDay() === 0 || day.getDay() === 6 ? isDark ? 'bg-black/20' : 'bg-slate-50/40' : 'bg-transparent'}`}
-                style={{ height: 24 * hourHeight }}
+                style={{ height: (CALENDAR_END_HOUR - CALENDAR_START_HOUR) * hourHeight }}
                 onMouseDown={(e) => handleGridMouseDown(e, day)}
                 onMouseUp={handleGridMouseUp}
                 onMouseMove={handleGridMouseMove}
@@ -336,12 +344,12 @@ export const TimeGrid = ({
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => handleDropFromSidebar(e, dayIndex)}
               >
-                {Array.from({ length: 24 }).map((_, i) => (
+                {Array.from({ length: CALENDAR_END_HOUR - CALENDAR_START_HOUR }).map((_, i) => (
                   <div key={i} className={`absolute left-0 right-0 border-t ${isDark ? 'border-slate-800/50' : 'border-slate-50'}`} style={{ top: i * hourHeight, height: hourHeight }}></div>
                 ))}
 
-                {isToday && (
-                  <div className="absolute left-0 right-0 border-t-2 border-red-500 z-20 pointer-events-none" style={{ top: (currentTime.getHours() * 60 + currentTime.getMinutes()) / 60 * hourHeight }}>
+                {isToday && (currentTime.getHours() * 60 + currentTime.getMinutes() >= CALENDAR_START_MIN) && (currentTime.getHours() * 60 + currentTime.getMinutes() <= CALENDAR_END_MIN) && (
+                  <div className="absolute left-0 right-0 border-t-2 border-red-500 z-20 pointer-events-none" style={{ top: ((currentTime.getHours() * 60 + currentTime.getMinutes() - CALENDAR_START_MIN) / 60) * hourHeight }}>
                     <div className="absolute -left-1.5 -top-1.5 w-3 h-3 bg-red-500 rounded-full"></div>
                   </div>
                 )}
@@ -351,7 +359,7 @@ export const TimeGrid = ({
                   const isResizing = resizing?.id === event.id;
                   const startMin = event.start;
                   const endMin = event.end;
-                  const top = (startMin / 60) * hourHeight;
+                  const top = ((startMin - CALENDAR_START_MIN) / 60) * hourHeight;
                   const height = ((endMin - startMin) / 60) * hourHeight;
                   const columnWidth = 100 / event.totalCols;
                   const left = event.colIndex * columnWidth;
@@ -493,12 +501,12 @@ export const TimeGrid = ({
                           let previewEnd = resizing.originalEndMin;
                           if (resizing.type === 'top') {
                             previewStart = Math.min(previewStart + deltaMin, previewEnd - 15);
-                            previewStart = Math.max(0, previewStart);
+                            previewStart = Math.max(CALENDAR_START_MIN, previewStart);
                           } else {
                             previewEnd = Math.max(previewStart + 15, previewEnd + deltaMin);
-                            previewEnd = Math.min(1440, previewEnd);
+                            previewEnd = Math.min(CALENDAR_END_MIN, previewEnd);
                           }
-                          const previewTop = (previewStart / 60) * hourHeight;
+                          const previewTop = ((previewStart - CALENDAR_START_MIN) / 60) * hourHeight;
                           const previewHeight = ((previewEnd - previewStart) / 60) * hourHeight;
 
                           return (
@@ -523,10 +531,10 @@ export const TimeGrid = ({
           {dragging && (
             (() => {
               const deltaY = dragging.currentY - dragging.startY;
-              const newStartMin = Math.max(0, Math.min(1440 - dragging.duration, dragging.originalStartMin + (deltaY / hourHeight) * 60));
+              const newStartMin = Math.max(CALENDAR_START_MIN, Math.min(CALENDAR_END_MIN - dragging.duration, dragging.originalStartMin + (deltaY / hourHeight) * 60));
 
               const snappedStartMin = snapToGrid(newStartMin, step);
-              const top = (snappedStartMin / 60) * hourHeight;
+              const top = ((snappedStartMin - CALENDAR_START_MIN) / 60) * hourHeight;
               const height = (dragging.duration / 60) * hourHeight;
 
               let left = 0;

@@ -901,6 +901,22 @@ _RESET_CONFIRM_KEYBOARD = [
     ]
 ]
 
+# Novos teclados para fluxo de "Proposta -> Confirmação"
+_CONFIRM_ACAO_KEYBOARD = [
+    [
+        {"text": "✅ Confirmar Registro", "callback_data": "confirm_acao"},
+        {"text": "❌ Cancelar", "callback_data": "cancel_acao"}
+    ]
+]
+
+_CONFIRM_FINANCEIRO_KEYBOARD = [
+    [
+        {"text": "✅ Confirmar Lançamento", "callback_data": "confirm_financeiro"},
+        {"text": "❌ Cancelar", "callback_data": "cancel_financeiro"}
+    ]
+]
+
+
 
 def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn.Response":
     """Processa um callback_query de botão inline de forma síncrona (sem LLM)."""
@@ -975,7 +991,102 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
         _answer_callback_query(token, query_id, "Ação cancelada.")
         _send_telegram_message(token, chat_id, "Ok, mantive o histórico atual.")
 
+    elif data == "confirm_acao":
+        _answer_callback_query(token, query_id, "Processando registro...")
+        pending = session.get("pending_confirmations", {}).get("acao")
+        if not pending:
+            _send_telegram_message(token, chat_id, "⚠️ Nenhuma ação pendente de confirmação encontrada ou o prazo expirou.")
+            return https_fn.Response("OK", status=200)
+            
+        # Executa a criação (lógica de criar_acao_no_sistema)
+        try:
+            import uuid as _uuid
+            now_iso = datetime.now(timezone.utc).isoformat()
+            task_id = str(_uuid.uuid4())[:20]
+            
+            # Reuso da lógica de reagendamento se houver horários
+            try:
+                from main import get_calendar_service, get_target_calendar_id
+                import hermes_calendar_tools as hc_tools
+                c_service = get_calendar_service()
+                c_id = get_target_calendar_id(db)
+                if c_service and c_id and pending.get("horario_inicio") and pending.get("horario_fim"):
+                    hc_tools.reagendar_acoes_hermes(db, c_service, c_id, pending.get("data_limite"), pending.get("horario_inicio"), pending.get("horario_fim"))
+            except Exception: pass
+
+            plano_convertido = [
+                {"id": str(_uuid.uuid4())[:8], "text": str(p), "completed": False}
+                for p in (pending.get("plano_acao") or []) if str(p).strip()
+            ]
+            
+            doc = {
+                "id": task_id,
+                "titulo": pending["titulo"].strip(),
+                "descricao": pending.get("descricao") or "",
+                "area_tematica": pending.get("area_tematica") or "GERAL",
+                "data_limite": pending.get("data_limite"),
+                "horario_inicio": pending.get("horario_inicio"),
+                "horario_fim": pending.get("horario_fim"),
+                "tipo_acao": pending.get("tipo_acao") or "fast",
+                "tags": pending.get("tags") or [],
+                "notas": pending.get("notas") or "",
+                "plano_acao": plano_convertido,
+                "status": "em andamento",
+                "criado_em": now_iso,
+                "data_criacao": now_iso,
+                "origem_ingestao": "telegram",
+                "sync_status": "new",
+            }
+            db.collection("tarefas").document(task_id).set(doc)
+            
+            # Limpa pendência
+            session.get("pending_confirmations", {}).pop("acao", None)
+            if session.get("_pending_confirm_type") == "acao":
+                session.pop("_pending_confirm_type", None)
+            _save_session(db, chat_id, session)
+            
+            _send_telegram_message(token, chat_id, f"✅ <b>Ação registrada com sucesso!</b>\nID: <code>{task_id}</code>\nTítulo: {pending['titulo']}")
+        except Exception as e:
+            _send_telegram_message(token, chat_id, f"❌ Erro ao registrar ação: {e}")
+
+    elif data == "cancel_acao":
+        _answer_callback_query(token, query_id, "Cancelado.")
+        session.get("pending_confirmations", {}).pop("acao", None)
+        if session.get("_pending_confirm_type") == "acao":
+            session.pop("_pending_confirm_type", None)
+        _save_session(db, chat_id, session)
+        _send_telegram_message(token, chat_id, "❌ Registro de ação cancelado pelo usuário.")
+
+    elif data == "confirm_financeiro":
+        _answer_callback_query(token, query_id, "Processando lançamento...")
+        pending = session.get("pending_confirmations", {}).get("financeiro")
+        if not pending:
+            _send_telegram_message(token, chat_id, "⚠️ Nenhum lançamento financeiro pendente.")
+            return https_fn.Response("OK", status=200)
+            
+        try:
+            from tools.telegram_extended import execute
+            res = execute("registrar_item_financeiro_v2", pending, db)
+            
+            session.get("pending_confirmations", {}).pop("financeiro", None)
+            if session.get("_pending_confirm_type") == "financeiro":
+                session.pop("_pending_confirm_type", None)
+            _save_session(db, chat_id, session)
+            
+            _send_telegram_message(token, chat_id, f"✅ <b>Lançamento financeiro realizado!</b>\n{res}")
+        except Exception as e:
+            _send_telegram_message(token, chat_id, f"❌ Erro no financeiro: {e}")
+
+    elif data == "cancel_financeiro":
+        _answer_callback_query(token, query_id, "Cancelado.")
+        session.get("pending_confirmations", {}).pop("financeiro", None)
+        if session.get("_pending_confirm_type") == "financeiro":
+            session.pop("_pending_confirm_type", None)
+        _save_session(db, chat_id, session)
+        _send_telegram_message(token, chat_id, "❌ Lançamento financeiro descartado.")
+
     else:
+
         _answer_callback_query(token, query_id)
 
     return https_fn.Response("OK", status=200)
@@ -1089,10 +1200,10 @@ def _build_system_instruction(copilot_core: str, copilot_soul: str, contexto_ati
         "1. JAMAIS expanda siglas arbitrariamente.\n"
         "2. Se qualquer ferramenta retornar campo 'erro', reproduza o erro literal.\n"
         "3. Agendamento/Agenda: Você DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horário de funcionamento: 08:00 às 19:00, janela D+7. Se houver conflito em horário específico, pergunte se força inserção ou busca outro slot. Na criação, use os campos horario_inicio e horario_fim.\n"
-        "4. Para criar uma ação, apresente um draft estruturado primeiro com Título, Início/Fim (se houver), Área Temática e Tipo. Aguarde confirmação explicita.\n"
+        "4. Para criar uma nova ação, você DEVE usar obrigatoriamente a ferramenta propor_acao_para_confirmacao. Ela gerará botões de ✅/❌ para o usuário confirmar o registro.\n"
         "5. Links de tarefas: use o formato task:{ID} no texto (ex: 'Ação task:abc123').\n"
         "6. Acione salvar_memoria_global apenas para fatos duráveis e preferências estáveis.\n"
-        "7. ACESSO FINANCEIRO: para consultas sobre balanço, rendas, obrigações ou metas, use consultar_financas_v2. Para registrar novas movimentações, use registrar_item_financeiro_v2. NUNCA invente números ou tente prever saldos sem consultar as ferramentas.\n"
+        "7. ACESSO FINANCEIRO: para consultas sobre balanço, rendas, obrigações ou metas, use consultar_financas_v2. Para novos registros, use obrigatoriamente propor_lancamento_financeiro para que o usuário receba botões de confirmação. NUNCA invente números.\n"
     )
 
 def _build_system_instruction_guarded(
@@ -1128,11 +1239,11 @@ def _build_system_instruction_guarded(
         "2. Se qualquer ferramenta retornar campo 'erro', reproduza o erro literal.\n"
         "4. Se o pedido for sobre dados internos do Hermes, tarefas, acoes, historico, agenda ou documentos do sistema, NUNCA use internet como fallback. Nesses casos, use apenas ferramentas internas. Se nao encontrar nada apos usar as ferramentas, admita explicitamente que nao encontrou nos registros do sistema.\n"
         "5. Agendamento/Agenda: Voce DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horario de funcionamento: 08:00 as 19:00, janela D+7. Se houver conflito em horario especifico, pergunte se forca insercao ou busca outro slot. Na criacao, use os campos horario_inicio e horario_fim.\n"
-        "6. Para criar uma acao, apresente um draft estruturado primeiro com Titulo, Inicio/Fim (se houver), Area Tematica e Tipo. Aguarde confirmacao explicita.\n"
+        "6. Para criar uma nova ação, você DEVE usar obrigatoriamente a ferramenta propor_acao_para_confirmacao. Isso apresentará os botões de ✅/❌ ao usuário.\n"
         "7. Links de tarefas: use o formato task:{ID} no texto (ex: 'Acao task:abc123').\n"
         "8. Acione salvar_memoria_global apenas para fatos duraveis e preferencias estaveis.\n"
         "9. GOVERNANCA DE FONTES: ao descrever uma tarefa encontrada por consultar_historico_acoes, use SOMENTE os campos retornados por essa ferramenta. Se um campo nao constar no retorno da ferramenta, diga 'nao informado' em vez de inventar.\n"
-        "10. ACESSO FINANCEIRO: use exclusivamente consultar_financas_v2 e registrar_item_financeiro_v2 para lidar com dados financeiros internos (rendas, contas, metas). Proibido inventar valores.\n"
+        "10. ACESSO FINANCEIRO: use exclusivamente consultar_financas_v2 e para novos registros use propor_lancamento_financeiro para lidar com dados financeiros internos (rendas, contas, metas). Proibido inventar valores.\n"
     )
 
     if not acao_snapshot:
@@ -1197,13 +1308,13 @@ def _build_system_instruction_guarded_v2(
         "2. Se qualquer ferramenta retornar campo 'erro', reproduza o erro literal.\n"
         "4. Se o pedido for sobre dados internos do Hermes, tarefas, acoes, historico, agenda ou documentos do sistema, NUNCA use internet como fallback. Nesses casos, use apenas ferramentas internas. Se nao encontrar nada apos usar as ferramentas, admita explicitamente que nao encontrou nos registros do sistema.\n"
         "5. Agendamento/Agenda: Voce DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horario de funcionamento: 08:00 as 19:00, janela D+7. Se houver conflito em horario especifico, pergunte se forca insercao ou busca outro slot. Na criacao, use os campos horario_inicio e horario_fim.\n"
-        "6. Para criar uma acao, apresente um draft estruturado primeiro com Titulo, Inicio/Fim (se houver), Area Tematica e Tipo. Aguarde confirmacao explicita.\n"
+        "6. Para criar uma nova ação, você DEVE usar obrigatoriamente a ferramenta propor_acao_para_confirmacao. Isso apresentará os botões de ✅/❌ ao usuário.\n"
         "7. Links de tarefas: use o formato task:{ID} no texto (ex: 'Acao task:abc123').\n"
         "8. Acione salvar_memoria_global apenas para fatos duraveis e preferencias estaveis.\n"
         "9. GOVERNANCA DE FONTES: ao descrever uma tarefa encontrada por consultar_historico_acoes, use SOMENTE os campos retornados por essa ferramenta. Se um campo nao constar no retorno da ferramenta, diga 'nao informado' em vez de inventar.\n"
         "10. LINKS E ARQUIVOS: nunca crie hiperlinks, texto-ancora ou URLs que nao aparecam literalmente no contexto, em uma ferramenta ou em um DRIVE_FILE_ID real. Se o usuario pedir links e eles nao estiverem disponiveis, diga que nao encontrou.\n"
         "11. PESQUISA DE ACOES: se o usuario pedir para pesquisar/localizar uma acao ou tarefa, use consultar_historico_acoes primeiro. Nao substitua resultado ausente por acervo, email ou internet, salvo se o usuario pedir explicitamente essa ampliacao.\n"
-        "12. ACESSO FINANCEIRO: para qualquer dado sobre rendas, contas, metas ou balanco interno, use consultar_financas_v2. Para novos registros, use registrar_item_financeiro_v2. Detalhe os valores com precisao absoluta conforme retornado pelo sistema.\n"
+        "12. ACESSO FINANCEIRO: para qualquer dado sobre rendas, contas, metas ou balanco interno, use consultar_financas_v2. Para novos registros, use obrigatoriamente propor_lancamento_financeiro para que o usuário receba os botões de confirmação. Detalhe os valores com precisao absoluta conforme retornado pelo sistema.\n"
     )
 
     if not acao_snapshot:
@@ -2437,7 +2548,76 @@ def _process_telegram_message(db, data: dict):
         except Exception as e:
             return f"Erro: {e}"
 
+    def propor_acao_para_confirmacao(
+        titulo: str,
+        descricao: str = "",
+        area_tematica: str = "GERAL",
+        data_limite: str = None,
+        tipo_acao: str = "fast",
+        tags: list[str] = None,
+        notas: str = "",
+        plano_acao: list[str] = None,
+        horario_inicio: str = None,
+        horario_fim: str = None,
+    ):
+        """
+        Gera uma proposta de criação de ação para o usuário confirmar via botões.
+        Use esta ferramenta SEMPRE antes de criar uma ação.
+        """
+        pending_data = {
+            "titulo": titulo,
+            "descricao": descricao,
+            "area_tematica": area_tematica,
+            "data_limite": data_limite or (datetime.now(timezone.utc)).strftime("%Y-%m-%d"),
+            "tipo_acao": tipo_acao,
+            "tags": tags or [],
+            "notas": notas,
+            "plano_acao": plano_acao or [],
+            "horario_inicio": horario_inicio,
+            "horario_fim": horario_fim,
+        }
+        session.setdefault("pending_confirmations", {})["acao"] = pending_data
+        session["_pending_confirm_type"] = "acao"
+        
+        draft = (
+            f"📝 <b>PROPOSTA DE AÇÃO</b>\n"
+            f"• Título: {titulo}\n"
+            f"• Área: {area_tematica}\n"
+            f"• Prazo: {pending_data['data_limite']}\n"
+        )
+        if tags: draft += f"• Tags: {', '.join(tags)}\n"
+        if plano_acao: draft += f"• Passos: {len(plano_acao)}\n"
+        
+        return f"Proposta gerada com sucesso. Draft: {draft}\n\n[SISTEMA: Os botões de confirmação serão anexados automaticamente a esta resposta.]"
+
+    def propor_lancamento_financeiro(tipo: str, descricao: str, valor: float, categoria: str = "Geral", mes: int = None, ano: int = None, data: str = None):
+        """
+        Gera uma proposta de lançamento financeiro para o usuário confirmar via botões.
+        tipo: 'renda' | 'obrigacao_fixa' | 'transacao_avulsa'.
+        """
+        pending_data = {
+            "tipo": tipo,
+            "descricao": descricao,
+            "valor": valor,
+            "categoria": categoria,
+            "mes": mes,
+            "ano": ano,
+            "data": data
+        }
+        session.setdefault("pending_confirmations", {})["financeiro"] = pending_data
+        session["_pending_confirm_type"] = "financeiro"
+        
+        draft = (
+            f"💰 <b>PROPOSTA DE LANÇAMENTO</b>\n"
+            f"• Tipo: {tipo}\n"
+            f"• Descrição: {descricao}\n"
+            f"• Valor: R$ {valor:.2f}\n"
+            f"• Categoria: {categoria}\n"
+        )
+        return f"Proposta financeira gerada. Draft: {draft}\n\n[SISTEMA: Os botões de confirmação serão anexados automaticamente a esta resposta.]"
+
     tools_list = [
+
         consultar_historico_acoes,
         buscar_arquivos_acervo,
         pesquisar_internet,
@@ -2451,7 +2631,10 @@ def _process_telegram_message(db, data: dict):
         buscar_e_analisar_email,
         consultar_financas_v2,
         registrar_item_financeiro_v2,
+        propor_acao_para_confirmacao,
+        propor_lancamento_financeiro,
     ]
+
 
     function_map = {fn.__name__: fn for fn in tools_list}
 
@@ -2501,6 +2684,13 @@ def _process_telegram_message(db, data: dict):
     if len(new_history) > _MAX_HISTORY_TURNS * 2:
         new_history = new_history[-(_MAX_HISTORY_TURNS * 2):]
     latest_session = _get_session(db, chat_id)
+    
+    # Sincroniza mudanças feitas pelas ferramentas (closures) no objeto 'session' original
+    if "pending_confirmations" in session:
+        latest_session["pending_confirmations"] = session["pending_confirmations"]
+    if "_pending_confirm_type" in session:
+        latest_session["_pending_confirm_type"] = session["_pending_confirm_type"]
+
     if not _session_matches_processing_state(latest_session, contexto_ativo, request_acao_id):
         print(
             f"[Session] Discarding stale response for chat_id={chat_id} "
@@ -2514,9 +2704,17 @@ def _process_telegram_message(db, data: dict):
         return
     latest_session[hist_key] = new_history
 
+    # --- Detecção de propostas pendentes para anexar botões ---
+    inline_keyboard = None
+    if latest_session.get("_pending_confirm_type") == "acao":
+        inline_keyboard = _CONFIRM_ACAO_KEYBOARD
+    elif latest_session.get("_pending_confirm_type") == "financeiro":
+        inline_keyboard = _CONFIRM_FINANCEIRO_KEYBOARD
+
     # --- Send response ---
     # Text goes out first; session is persisted after so it doesn't block the user.
-    _send_telegram_session_message(db, token, chat_id, response_text, session=latest_session)
+    _send_telegram_session_message(db, token, chat_id, response_text, session=latest_session, inline_keyboard=inline_keyboard)
+
     _perf_mark(perf_state, "telegram.text_response")
 
     _save_session(db, chat_id, latest_session)

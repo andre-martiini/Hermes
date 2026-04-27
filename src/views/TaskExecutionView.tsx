@@ -1333,7 +1333,7 @@ export const TaskExecutionView = ({
               >
                 <option value="em andamento">Em Andamento</option>
                 <option value="stand-by">Stand-by</option>
-                <option value="conclu?do">Conclu?do</option>
+                <option value="concluído">Concluído</option>
               </select>
             </div>
 
@@ -1391,7 +1391,7 @@ export const TaskExecutionView = ({
             >
               <option value="em andamento">Em Andamento</option>
               <option value="stand-by">Stand-by</option>
-              <option value="conclu?do">Conclu?do</option>
+              <option value="concluído">Concluído</option>
             </select>
             {(currentTaskData.plano_acao || []).length > 0 && (
               <>
@@ -1455,7 +1455,7 @@ export const TaskExecutionView = ({
             >
               <option value="em andamento">Em Andamento</option>
               <option value="stand-by">Stand-by</option>
-              <option value="conclu?do">Conclu?do</option>
+              <option value="concluído">Concluído</option>
             </select>
           </div>
         </div>

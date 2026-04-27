@@ -871,19 +871,29 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
 
             if t.get('status') == 'excluído':
 
+                # 1. Remover do Google Tasks
                 if g_id:
 
                     try: 
 
                         service.tasks().delete(tasklist=tasklist_id, task=g_id).execute()
 
-                        log_to_firestore(sync_ref, logs, f"[X] REMOVIDA DO GOOGLE: {title}")
+                        log_to_firestore(sync_ref, logs, f"[X] REMOVIDA DO GOOGLE TASKS: {title}")
 
                     except HttpError as e:
 
                         if e.resp.status == 404:
 
-                            log_to_firestore(sync_ref, logs, f"[!] Task {g_id} já não existia no Google.")
+                            log_to_firestore(sync_ref, logs, f"[!] Task {g_id} já não existia no Google Tasks.")
+
+                # 2. Remover do Google Calendar
+                cal_id = t.get('google_calendar_id')
+                if cal_id:
+                    try:
+                        calendar_service.events().delete(calendarId=calendar_id, eventId=cal_id).execute()
+                        log_to_firestore(sync_ref, logs, f"[X] REMOVIDA DO CALENDAR: {title}")
+                    except Exception as e:
+                        log_to_firestore(sync_ref, logs, f"[!] Erro ao remover do Calendar: {e}")
 
                 doc.reference.delete()
 
