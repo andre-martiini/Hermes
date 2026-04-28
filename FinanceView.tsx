@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { FinanceTransaction, FinanceGoal, FinanceSettings, FixedBill, BillRubric, IncomeEntry, IncomeRubric } from './types';
 import { storage, db } from './firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -186,6 +186,19 @@ const FinanceView = ({
 
     // NFSe Generator State
     const [isNFSeGeneratorOpen, setIsNFSeGeneratorOpen] = useState(false);
+
+    // Emergency Reserve Local State for Sync
+    const [localEmergencyCurrent, setLocalEmergencyCurrent] = useState(emergencyReserve.current);
+    const [localEmergencyTarget, setLocalEmergencyTarget] = useState(emergencyReserve.target);
+
+    // Sync local state when props change (from parent/firebase)
+    useEffect(() => {
+        setLocalEmergencyCurrent(emergencyReserve.current);
+    }, [emergencyReserve.current]);
+
+    useEffect(() => {
+        setLocalEmergencyTarget(emergencyReserve.target);
+    }, [emergencyReserve.target]);
 
     const handleTwoStepDelete = (key: string, action: () => void | Promise<void>) => {
         const decision = resolveTwoStepAction(pendingDeleteKey, key);
@@ -430,7 +443,8 @@ const FinanceView = ({
                         <div className="flex gap-4">
                             <input
                                 type="number"
-                                defaultValue={settings.emergencyReserveTarget}
+                                value={localEmergencyTarget}
+                                onChange={(e) => setLocalEmergencyTarget(Number(e.target.value))}
                                 onBlur={(e) => onUpdateSettings({ ...settings, emergencyReserveTarget: Number(e.target.value) })}
                                 className="bg-white/10 border border-white/20 rounded-xl px-4 py-2 text-white font-bold outline-none focus:ring-2 focus:ring-emerald-500 w-full md:w-64"
                             />
@@ -441,7 +455,8 @@ const FinanceView = ({
                         <div className="flex gap-4">
                             <input
                                 type="number"
-                                defaultValue={settings.emergencyReserveCurrent}
+                                value={localEmergencyCurrent}
+                                onChange={(e) => setLocalEmergencyCurrent(Number(e.target.value))}
                                 onBlur={(e) => onUpdateSettings({ ...settings, emergencyReserveCurrent: Number(e.target.value) })}
                                 className="bg-white/10 border border-white/20 rounded-xl px-4 py-2 text-white font-bold outline-none focus:ring-2 focus:ring-emerald-500 w-full md:w-64"
                             />
@@ -805,7 +820,8 @@ const FinanceView = ({
                                             <input
                                                 type="number"
                                                 className="text-2xl font-black text-emerald-600 bg-transparent border-none outline-none focus:ring-0 w-32 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                                defaultValue={emergencyReserve.current}
+                                                value={localEmergencyCurrent}
+                                                onChange={(e) => setLocalEmergencyCurrent(Number(e.target.value))}
                                                 onBlur={(e) => onUpdateSettings({ ...settings, emergencyReserveCurrent: Number(e.target.value) })}
                                             />
                                             <div className="opacity-0 group-hover/edit:opacity-100 transition-opacity ml-1 text-emerald-600/30 dark:text-emerald-500/10">
