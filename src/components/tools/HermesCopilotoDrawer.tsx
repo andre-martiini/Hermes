@@ -397,6 +397,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
     // Estado de anexo
     const [attachedFile, setAttachedFile] = useState<File | null>(null);
+    const [pastedContext, setPastedContext] = useState<{ text: string; name: string } | null>(null);
     const [uploadPhase, setUploadPhase] = useState<UploadPhase>('idle');
     // Controla a largura da barra de progresso via CSS transition
     const [progressWidth, setProgressWidth] = useState<number>(0);
@@ -722,6 +723,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
     const handleRemoveFile = () => {
         setAttachedFile(null);
+        setPastedContext(null);
     };
 
     const handleComposerDragEnter = React.useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -1167,8 +1169,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         if (pastedText.length > LARGE_PASTE_THRESHOLD) {
             e.preventDefault();
             const dateStr = new Date().toISOString().slice(0, 10);
-            const file = new File([pastedText], `contexto-${dateStr}.txt`, { type: 'text/plain' });
-            attachFileToCopiloto(file);
+            setPastedContext({ text: pastedText, name: `contexto-${dateStr}.txt` });
         }
     };
 
@@ -1246,12 +1247,15 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const sendMessage = async (text: string, sessionId?: string) => {
         const sId = sessionId || currentSessionId;
         const hasFile = !!attachedFile;
+        const hasPaste = !!pastedContext;
 
-        if (!sId || (!text.trim() && !hasFile)) return;
+        if (!sId || (!text.trim() && !hasFile && !hasPaste)) return;
 
         const fileToSend = attachedFile;
+        const pasteToSend = pastedContext;
         setInput('');
         setAttachedFile(null);
+        setPastedContext(null);
         setFooterError(null);
         setIsLoading(true);
 
@@ -1292,6 +1296,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             // Constrói o conteúdo da mensagem do usuário para o histórico
             const userMessageContent = hasFile && fileToSend
                 ? `📎 ${fileToSend.name}${text.trim() ? `\n\n${text.trim()}` : ''}`
+                : hasPaste && pasteToSend
+                ? `📎 ${pasteToSend.name}${text.trim() ? `\n\n${text.trim()}` : ''}`
                 : text;
 
             // 1. Salva mensagem do usuário no Firestore
@@ -1308,9 +1314,13 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 ? `[CONTEXTO: Visualizando ${activeDocument.tipo} "${activeDocument.nome}" em Tela Cheia]\nLocal: ${activeDocument.url}${activeDocument.driveFileId ? `\nID para leitura profunda: ${activeDocument.driveFileId}\nPara ler o arquivo e responder dúvidas técnicas ou realizar cálculos, utilize a ferramenta 'ler_documento_na_integra' com este ID.` : ''}\n\n`
                 : '';
 
+            const pastePrefix = pasteToSend
+                ? `[CONTEXTO COLADO]\n${pasteToSend.text}\n[/CONTEXTO]\n\n`
+                : '';
+
             const response = await askCopiloto({
                 sessionId: sId,
-                prompt: contextPrefix + (text.trim() || (hasFile ? '' : text)),
+                prompt: contextPrefix + pastePrefix + (text.trim() || (hasFile || hasPaste ? '' : text)),
                 taskId: taskId || null,
                 systemId: systemId || null,
                 driveFileId: driveFileId || null,
@@ -2514,12 +2524,12 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                         )}
 
                         {/* Badge de arquivo anexado */}
-                        {attachedFile && !isBlocked && (
+                        {(attachedFile || pastedContext) && !isBlocked && (
                             <div className={`flex items-center gap-2 mb-3 px-3 py-2 rounded-xl text-xs font-semibold ${isDark ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
                                 <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                                 </svg>
-                                <span className="truncate flex-1">{attachedFile.name}</span>
+                                <span className="truncate flex-1">{attachedFile?.name ?? pastedContext?.name}</span>
                                 <button
                                     onClick={handleRemoveFile}
                                     className="shrink-0 hover:text-red-500 transition-colors"
@@ -2608,7 +2618,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             }
                                         }
                                     }}
-                                    placeholder={isRecording ? '🎙 Gravando… clique no microfone para parar' : isProcessingMic ? 'Transcrevendo áudio...' : isTranscribing ? 'Transcrevendo áudio...' : attachedFile ? 'Pergunte sobre o arquivo ou envie sem texto…' : 'Estrategize com Hermes…'}
+                                    placeholder={isRecording ? '🎙 Gravando… clique no microfone para parar' : isProcessingMic ? 'Transcrevendo áudio...' : isTranscribing ? 'Transcrevendo áudio...' : attachedFile ? 'Pergunte sobre o arquivo ou envie sem texto…' : pastedContext ? 'Pergunte sobre o contexto ou envie sem texto…' : 'Estrategize com Hermes…'}
                                     className={`w-full px-4 pt-3.5 pb-11 rounded-2xl text-sm font-medium outline-none border resize-none ${isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-blue-500' : 'bg-slate-50 border-slate-200 text-slate-700 placeholder:text-slate-400 focus:border-blue-500'} transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed`}
                                 />
                                 <div
@@ -2624,7 +2634,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             onClick={() => !isBlocked && fileInputRef.current?.click()}
                                             disabled={isBlocked}
                                             title="Anexar arquivo"
-                                            className={`flex h-6 w-6 items-center justify-center rounded-full transition-all ${attachedFile
+                                            className={`flex h-6 w-6 items-center justify-center rounded-full transition-all ${(attachedFile || pastedContext)
                                                 ? 'bg-blue-500/10 text-blue-500'
                                                 : isDark
                                                     ? 'bg-white/5 text-white/30 hover:bg-white/10 hover:text-white/70'
@@ -2738,7 +2748,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                     sendMessage(input);
                                                 }
                                             }}
-                                            disabled={isBlocked || (!input.trim() && !attachedFile)}
+                                            disabled={isBlocked || (!input.trim() && !attachedFile && !pastedContext)}
                                             className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 disabled:opacity-40 transition-all"
                                         >
                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
@@ -2774,7 +2784,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         sendMessage(input);
                                     }
                                 }}
-                                disabled={isBlocked || (!input.trim() && !attachedFile)}
+                                disabled={isBlocked || (!input.trim() && !attachedFile && !pastedContext)}
                                 className="absolute right-0 bottom-2.5 z-10 hidden h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 disabled:opacity-40 transition-all"
                             >
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
