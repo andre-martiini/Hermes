@@ -10,6 +10,7 @@ import { formatDate, PoolItem } from '@/types';
 import { ReportModal } from './ReportModal';
 import { getRoutingIndex, toolsRegistry } from './toolRegistry';
 import { isInternalAppHref, navigateWithinApp } from '../../utils/internalNavigation';
+import { CollapsibleContainer } from '../ui/UIComponents';
 
 // URL do endpoint HTTP de upload (Node.js Functions)
 const UPLOAD_ENDPOINT = 'https://us-central1-gestao-hermes.cloudfunctions.net/uploadFileForCopiloto';
@@ -1776,123 +1777,125 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                 </div>
                                             </div>
                                         )}
-                                        <ReactMarkdown
-                                            remarkPlugins={[remarkGfm]}
-                                            urlTransform={(url) => url}
-                                            components={{
-                                                p: ({ node, ...props }) => <p className="mb-2 last:mb-0 break-words [overflow-wrap:anywhere]" {...props} />,
-                                                ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-2 break-words [overflow-wrap:anywhere]" {...props} />,
-                                                li: ({ node, ...props }) => <li className="mb-0.5 break-words [overflow-wrap:anywhere]" {...props} />,
-                                                strong: ({ node, ...props }) => <strong className={`font-bold ${isDark ? 'text-blue-300' : 'text-blue-600'}`} {...props} />,
-                                                pre: ({ node, children, ...props }) => {
-                                                    const arr = React.Children.toArray(children);
-                                                    const first = arr[0] as React.ReactElement<any> | undefined;
-                                                    if (first?.props?.className === 'language-mermaid') {
-                                                        return <>{children}</>;
-                                                    }
-                                                    return (
-                                                        <pre
-                                                            className="max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] overflow-x-hidden rounded-xl"
-                                                            {...props}
-                                                        >
-                                                            {children}
-                                                        </pre>
-                                                    );
-                                                },
-                                                code: ({ node, className, children, ...props }) => {
-                                                    if (className === 'language-mermaid') {
-                                                        return <MermaidBlock code={String(children).trim()} isDark={isDark} />;
-                                                    }
-                                                    return (
-                                                        <code
-                                                            className={`${className ?? ''} whitespace-pre-wrap break-words [overflow-wrap:anywhere]`}
-                                                            {...props}
-                                                        >
-                                                            {children}
-                                                        </code>
-                                                    );
-                                                },
-                                                a: ({ node, ...props }) => {
-                                                    const href = props.href || '';
+                                        <CollapsibleContainer maxLines={8}>
+                                            <ReactMarkdown
+                                                remarkPlugins={[remarkGfm]}
+                                                urlTransform={(url) => url}
+                                                components={{
+                                                    p: ({ node, ...props }) => <p className="mb-2 last:mb-0 break-words [overflow-wrap:anywhere]" {...props} />,
+                                                    ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-2 break-words [overflow-wrap:anywhere]" {...props} />,
+                                                    li: ({ node, ...props }) => <li className="mb-0.5 break-words [overflow-wrap:anywhere]" {...props} />,
+                                                    strong: ({ node, ...props }) => <strong className={`font-bold ${isDark ? 'text-blue-300' : 'text-blue-600'}`} {...props} />,
+                                                    pre: ({ node, children, ...props }) => {
+                                                        const arr = React.Children.toArray(children);
+                                                        const first = arr[0] as React.ReactElement<any> | undefined;
+                                                        if (first?.props?.className === 'language-mermaid') {
+                                                            return <>{children}</>;
+                                                        }
+                                                        return (
+                                                            <pre
+                                                                className="max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] overflow-x-hidden rounded-xl"
+                                                                {...props}
+                                                            >
+                                                                {children}
+                                                            </pre>
+                                                        );
+                                                    },
+                                                    code: ({ node, className, children, ...props }) => {
+                                                        if (className === 'language-mermaid') {
+                                                            return <MermaidBlock code={String(children).trim()} isDark={isDark} />;
+                                                        }
+                                                        return (
+                                                            <code
+                                                                className={`${className ?? ''} whitespace-pre-wrap break-words [overflow-wrap:anywhere]`}
+                                                                {...props}
+                                                            >
+                                                                {children}
+                                                            </code>
+                                                        );
+                                                    },
+                                                    a: ({ node, ...props }) => {
+                                                        const href = props.href || '';
 
-                                                    if (isInternalAppHref(href)) {
+                                                        if (isInternalAppHref(href)) {
+                                                            return (
+                                                                <a
+                                                                    className={`underline break-all ${isDark ? 'text-blue-300 hover:text-blue-200' : 'text-blue-600 hover:text-blue-800'}`}
+                                                                    href={href}
+                                                                    onClick={(event) => {
+                                                                        event.preventDefault();
+                                                                        console.log("[HermesCopiloto] Link clicked:", href);
+                                                                        navigateWithinApp(href);
+                                                                        if (shouldAutoCloseOnNavigate) onClose?.();
+                                                                    }}
+                                                                >
+                                                                    {props.children}
+                                                                </a>
+                                                            );
+                                                        }
+
+                                                        if (href.includes('task:')) {
+                                                            const id = href.split('task:')[1];
+                                                            return (
+                                                                <button
+                                                                    onClick={() => {
+                                                                        console.log("[HermesCopiloto] Link clicked:", href);
+                                                                        onOpenTask?.(id);
+                                                                        if (shouldAutoCloseOnNavigate) onClose?.();
+                                                                    }}
+                                                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm group/btn ${isDark ? 'bg-blue-500/10 hover:bg-blue-600 hover:text-white text-blue-300 border-blue-400/30' : 'bg-white/10 hover:bg-blue-600 hover:text-white text-blue-400 border-blue-500/30'}`}
+                                                                >
+                                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                                                    <span className="group-hover/btn:underline">{props.children}</span>
+                                                                    <svg className="w-3 h-3 opacity-0 group-hover/btn:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
+                                                                </button>
+                                                            );
+                                                        }
+                                                        if (href.includes('tool:slides:')) {
+                                                            const draftId = href.split('tool:slides:')[1];
+                                                            return (
+                                                                <button
+                                                                    onClick={() => {
+                                                                        console.log("[HermesCopiloto] Link clicked:", href);
+                                                                        onOpenTool?.('slides', draftId);
+                                                                    }}
+                                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm"
+                                                                >
+                                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" /></svg>
+                                                                    {props.children}
+                                                                </button>
+                                                            );
+                                                        }
+                                                        if (href.includes('tool:diagnosis:')) {
+                                                            const diagId = href.split('tool:diagnosis:')[1];
+                                                            return (
+                                                                <button
+                                                                    onClick={() => {
+                                                                        console.log("[HermesCopiloto] Link clicked:", href);
+                                                                        handleOpenDiagnosis(diagId);
+                                                                    }}
+                                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm"
+                                                                >
+                                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+                                                                    {props.children}
+                                                                </button>
+                                                            );
+                                                        }
                                                         return (
                                                             <a
                                                                 className={`underline break-all ${isDark ? 'text-blue-300 hover:text-blue-200' : 'text-blue-600 hover:text-blue-800'}`}
-                                                                href={href}
-                                                                onClick={(event) => {
-                                                                    event.preventDefault();
-                                                                    console.log("[HermesCopiloto] Link clicked:", href);
-                                                                    navigateWithinApp(href);
-                                                                    if (shouldAutoCloseOnNavigate) onClose?.();
-                                                                }}
-                                                            >
-                                                                {props.children}
-                                                            </a>
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                onClick={() => console.log("[HermesCopiloto] Link clicked:", href)}
+                                                                {...props}
+                                                            />
                                                         );
-                                                    }
-
-                                                    if (href.includes('task:')) {
-                                                        const id = href.split('task:')[1];
-                                                        return (
-                                                            <button
-                                                                onClick={() => {
-                                                                    console.log("[HermesCopiloto] Link clicked:", href);
-                                                                    onOpenTask?.(id);
-                                                                    if (shouldAutoCloseOnNavigate) onClose?.();
-                                                                }}
-                                                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm group/btn ${isDark ? 'bg-blue-500/10 hover:bg-blue-600 hover:text-white text-blue-300 border-blue-400/30' : 'bg-white/10 hover:bg-blue-600 hover:text-white text-blue-400 border-blue-500/30'}`}
-                                                            >
-                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                                                                <span className="group-hover/btn:underline">{props.children}</span>
-                                                                <svg className="w-3 h-3 opacity-0 group-hover/btn:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
-                                                            </button>
-                                                        );
-                                                    }
-                                                    if (href.includes('tool:slides:')) {
-                                                        const draftId = href.split('tool:slides:')[1];
-                                                        return (
-                                                            <button
-                                                                onClick={() => {
-                                                                    console.log("[HermesCopiloto] Link clicked:", href);
-                                                                    onOpenTool?.('slides', draftId);
-                                                                }}
-                                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm"
-                                                            >
-                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" /></svg>
-                                                                {props.children}
-                                                            </button>
-                                                        );
-                                                    }
-                                                    if (href.includes('tool:diagnosis:')) {
-                                                        const diagId = href.split('tool:diagnosis:')[1];
-                                                        return (
-                                                            <button
-                                                                onClick={() => {
-                                                                    console.log("[HermesCopiloto] Link clicked:", href);
-                                                                    handleOpenDiagnosis(diagId);
-                                                                }}
-                                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm"
-                                                            >
-                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
-                                                                {props.children}
-                                                            </button>
-                                                        );
-                                                    }
-                                                    return (
-                                                        <a
-                                                            className={`underline break-all ${isDark ? 'text-blue-300 hover:text-blue-200' : 'text-blue-600 hover:text-blue-800'}`}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
-                                                            onClick={() => console.log("[HermesCopiloto] Link clicked:", href)}
-                                                            {...props}
-                                                        />
-                                                    );
-                                                },
-                                            }}
-                                        >
-                                            {msg.content}
-                                        </ReactMarkdown>
+                                                    },
+                                                }}
+                                            >
+                                                {msg.content}
+                                            </ReactMarkdown>
+                                        </CollapsibleContainer>
 
                                         {msg.toolInvocation && (
                                             <div className={`mt-4 p-4 rounded-xl overflow-hidden ${isDark ? 'bg-slate-900 border border-slate-700' : 'bg-white/5 border border-white/10'}`}>

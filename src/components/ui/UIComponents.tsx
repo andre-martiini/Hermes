@@ -755,6 +755,59 @@ export const NotificationCenter = ({
   );
 };
 
+export const CollapsibleContainer = ({ children, maxLines = 5, className = "" }: { children: React.ReactNode, maxLines?: number, className?: string }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [isTruncated, setIsTruncated] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const checkTruncation = () => {
+      if (containerRef.current && !isExpanded) {
+        const { scrollHeight, clientHeight } = containerRef.current;
+        if (scrollHeight > clientHeight) {
+          setIsTruncated(true);
+        }
+      }
+    };
+
+    const timer = setTimeout(checkTruncation, 100);
+    window.addEventListener('resize', checkTruncation);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', checkTruncation);
+    };
+  }, [children, maxLines, isExpanded]);
+
+  return (
+    <div className={`relative ${className}`}>
+      <div
+        ref={containerRef}
+        className={`transition-all duration-300 ${!isExpanded ? 'overflow-hidden' : ''}`}
+        style={!isExpanded ? {
+          display: '-webkit-box',
+          WebkitLineClamp: maxLines,
+          WebkitBoxOrient: 'vertical',
+        } : {}}
+      >
+        {children}
+      </div>
+      {(isTruncated || isExpanded) && (
+        <button
+          onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }}
+          className="text-[10px] font-black uppercase tracking-widest text-blue-500 hover:text-blue-600 mt-2 flex items-center gap-1 transition-all group/expand"
+        >
+          {isExpanded ? (
+            <>Ocultar <svg className="w-3 h-3 rotate-180 transition-transform group-hover/expand:-translate-y-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" /></svg></>
+          ) : (
+            <>Ver tudo <svg className="w-3 h-3 transition-transform group-hover/expand:translate-y-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" /></svg></>
+          )}
+        </button>
+      )}
+    </div>
+  );
+};
+
+
 
 
 

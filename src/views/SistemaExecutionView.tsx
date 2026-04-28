@@ -8,6 +8,8 @@ import {
 import { normalizeStatus } from '../utils/helpers';
 import { STATUS_COLORS } from '../../constants';
 
+import { CollapsibleContainer } from '../components/ui/UIComponents';
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Unidade = { id: string; nome: string };
@@ -590,7 +592,9 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
                           <span className="text-[8px] font-black text-emerald-600 uppercase">{log.pool_dados.length} anexo{log.pool_dados.length !== 1 ? 's' : ''}</span>
                         )}
                       </div>
-                      <p className="text-sm font-medium text-slate-700 leading-relaxed">{log.descricao}</p>
+                      <CollapsibleContainer maxLines={4}>
+                        <p className="text-sm font-medium text-slate-700 leading-relaxed">{log.descricao}</p>
+                      </CollapsibleContainer>
                       {log.pool_dados && log.pool_dados.length > 0 && (
                         <div className="flex flex-wrap gap-2 mt-2">
                           {log.pool_dados.map((at, i) => (

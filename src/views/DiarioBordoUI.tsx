@@ -1,5 +1,5 @@
 ﻿import React from 'react';
-import { AutoExpandingTextarea } from '../components/ui/UIComponents';
+import { AutoExpandingTextarea, CollapsibleContainer } from '../components/ui/UIComponents';
 import { formatWhatsAppText } from '../utils/helpers';
 import { ensureHttpUrl, parseDiaryRichNote } from '../utils/diaryEntries';
 import EmojiPicker from 'emoji-picker-react';
@@ -197,7 +197,11 @@ export const DiarioBordoUI = ({
       );
     }
 
-    return <div className={`text-xs md:text-sm leading-relaxed break-words [overflow-wrap:anywhere] ${isTimerRunning ? 'text-white/90' : 'text-slate-700'}`}>{formatWhatsAppText(text, isTimerRunning)}</div>;
+    return (
+      <CollapsibleContainer maxLines={6}>
+        <div className={`text-xs md:text-sm leading-relaxed break-words [overflow-wrap:anywhere] ${isTimerRunning ? 'text-white/90' : 'text-slate-700'}`}>{formatWhatsAppText(text, isTimerRunning)}</div>
+      </CollapsibleContainer>
+    );
   };
 
   return (
