@@ -1,13 +1,13 @@
 @echo off
-REM Script para verificar credenciais do Google Tasks
+REM Script para renovar credenciais do Google usadas pelo Hermes
 
 echo ========================================
-echo   VERIFICACAO DE CREDENCIAIS
+echo   RENOVACAO DE CREDENCIAIS GOOGLE
 echo ========================================
 echo.
 
 cd functions
-python setup_credentials.py
+python setup_credentials.py --force
 
 pause
 

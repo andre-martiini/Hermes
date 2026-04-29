@@ -180,6 +180,29 @@ GOOGLE_FORMS_SCOPES = GOOGLE_BASE_SCOPES + [
 ]
 
 
+class GoogleAuthRevokedError(Exception):
+    """Raised when Google OAuth credentials need a new user consent flow."""
+
+
+GOOGLE_REAUTH_MESSAGE = (
+    "Autenticacao Google expirada ou revogada. Execute setup_credentials.bat "
+    "na raiz do projeto para refazer o login Google e atualizar system/google_credentials."
+)
+
+
+def is_google_invalid_grant_error(exc):
+    text = str(exc).lower()
+    if "invalid_grant" in text or "token has been expired or revoked" in text:
+        return True
+    cause = getattr(exc, "__cause__", None)
+    if cause and cause is not exc:
+        return is_google_invalid_grant_error(cause)
+    context = getattr(exc, "__context__", None)
+    if context and context is not exc:
+        return is_google_invalid_grant_error(context)
+    return False
+
+
 def get_google_creds(scopes=None):
     """Busca as credenciais OAuth2 do Firestore e renova se necessário"""
     from google.oauth2.credentials import Credentials
@@ -215,6 +238,14 @@ def get_google_creds(scopes=None):
             print("Token Google renovado e salvo no Firestore com sucesso.")
         except Exception as e:
             print(f"Erro ao renovar token do Google: {e}")
+            if is_google_invalid_grant_error(e):
+                db.collection('system').document('google_credentials').set({
+                    'auth_status': 'reauth_required',
+                    'auth_error': 'invalid_grant',
+                    'auth_error_message': GOOGLE_REAUTH_MESSAGE,
+                    'updated_at': firestore.SERVER_TIMESTAMP
+                }, merge=True)
+                raise GoogleAuthRevokedError(GOOGLE_REAUTH_MESSAGE) from e
             
     return creds
 
@@ -1015,6 +1046,9 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
 
     except Exception as e:
 
+        if is_google_invalid_grant_error(e):
+            raise GoogleAuthRevokedError(GOOGLE_REAUTH_MESSAGE) from e
+
         log_to_firestore(sync_ref, logs, f"ERRO PUSH: {e}")
 
 
@@ -1062,6 +1096,9 @@ def sync_google_calendar(service, sync_ref, logs):
                 events = events_result.get('items', [])
 
             except Exception as cal_err:
+
+                if is_google_invalid_grant_error(cal_err):
+                    raise GoogleAuthRevokedError(GOOGLE_REAUTH_MESSAGE) from cal_err
 
                 log_to_firestore(sync_ref, logs, f"[CAL][!] Falha ao listar agenda '{calendar_id}': {cal_err}")
 
@@ -1162,6 +1199,9 @@ def sync_google_calendar(service, sync_ref, logs):
         log_to_firestore(sync_ref, logs, f"[CAL] {count} eventos sincronizados em {len(calendar_ids)} agenda(s). {deleted_count} removidos.")
 
     except Exception as e:
+
+        if is_google_invalid_grant_error(e):
+            raise GoogleAuthRevokedError(GOOGLE_REAUTH_MESSAGE) from e
 
         log_to_firestore(sync_ref, logs, f"ERRO CAL: {e}")
 
@@ -1761,7 +1801,19 @@ def run_full_sync(trigger_reason='unspecified'):
 
     except Exception as e:
 
-        error_msg = f"ERRO na sincronização: {str(e)}"
+        if isinstance(e, GoogleAuthRevokedError) or is_google_invalid_grant_error(e):
+            error_msg = f"ERRO GOOGLE AUTH: {GOOGLE_REAUTH_MESSAGE}"
+            try:
+                db.collection('system').document('google_credentials').set({
+                    'auth_status': 'reauth_required',
+                    'auth_error': 'invalid_grant',
+                    'auth_error_message': GOOGLE_REAUTH_MESSAGE,
+                    'updated_at': firestore.SERVER_TIMESTAMP
+                }, merge=True)
+            except Exception as auth_status_err:
+                print(f"Falha ao marcar reautenticacao Google: {auth_status_err}")
+        else:
+            error_msg = f"ERRO na sincronização: {str(e)}"
 
         print(error_msg)
 
