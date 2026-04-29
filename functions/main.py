@@ -63,6 +63,8 @@ DEFAULT_GOOGLE_CALENDAR_ID = 'cf4953b9512ee2e85a7e064f9d5ce4eaf6e3634564c91e5c7e
 SYNC_LOCK_DOC_ID = 'sync_lock'
 SYNC_LOCK_STALE_SECONDS = 15 * 60
 MAX_SYNC_PASSES = 3
+COPILOT_FUNCTION_TIMEOUT_SEC = 540
+COPILOT_SOFT_DEADLINE_SEC = 510
 
 # ---------------------------------------------------------------------------
 # In-process Firestore document cache (TTL = 60 s per Cloud Function instance)
@@ -6463,6 +6465,7 @@ def askTaskAssistant(req: https_fn.CallableRequest):
     Injeta contexto do Grafo de Conhecimento (RAG Dinâmica) com citações inline [N].
     """
     from google import genai
+    from firebase_admin import firestore
 
     data = req.data or {}
     prompt = data.get('prompt')
@@ -6471,7 +6474,7 @@ def askTaskAssistant(req: https_fn.CallableRequest):
     rag_context_id = data.get('ragContext')
     extra_context_id = data.get('extraContextId')
     knowledge_item_ids = data.get('knowledgeItemIds', [])
-    kg_tags = data.get('kgTags', [])  # tags kg da tarefa atual para scoring do grafo
+    kg_tags = data.get('kgTags', [])
 
     if not isinstance(prompt, str) or not prompt.strip():
         raise https_fn.HttpsError(
@@ -6525,6 +6528,74 @@ def askTaskAssistant(req: https_fn.CallableRequest):
                 extra_rag_context = retrieve_extra_context_rag(db, genai, prompt, extra_context_id, knowledge_item_ids)
             except Exception as e:
                 print(f"Erro ao recuperar contexto extra: {e}")
+
+        # --- DADOS FINANCEIROS (Módulo Financeiro) ---
+        finance_context = ""
+        if area_tematica == 'FINANCEIRO':
+            try:
+                from datetime import datetime
+                import json
+                from tools.telegram_extended import execute
+                
+                now = datetime.now()
+                mes_atual = now.month - 1
+                ano_atual = now.year
+                
+                fin_data_atual = execute("consultar_financas_v2", {"mes": mes_atual, "ano": ano_atual}, db)
+                data_json = json.loads(fin_data_atual)
+                
+                resumo = data_json.get("resumo", {})
+                metas = data_json.get("metas", [])
+                reserva = data_json.get("reserva_emergencia", {})
+                detalhes = data_json.get("detalhes", {})
+                
+                parts = []
+                parts.append("=== DADOS FINANCEIROS ATUAIS ===")
+                parts.append(f"Período: {mes_atual+1}/{ano_atual}")
+                parts.append(f"Renda Total: R$ {resumo.get('total_renda', 0):.2f} (Recebida: R$ {resumo.get('renda_recebida', 0):.2f})")
+                parts.append(f"Contas Totais: R$ {resumo.get('total_contas', 0):.2f} (Pagas: R$ {resumo.get('contas_pagas', 0):.2f})")
+                parts.append(f"Saldo Previsto: R$ {resumo.get('saldo_previsto', 0):.2f}")
+                parts.append(f"Saldo Atual: R$ {resumo.get('saldo_atual', 0):.2f}")
+                
+                parts.append("\nReserva de Emergência:")
+                parts.append(f"- Alvo: R$ {reserva.get('alvo', 0):.2f}")
+                parts.append(f"- Atual: R$ {reserva.get('atual', 0):.2f}")
+                
+                parts.append("\nMetas Financeiras:")
+                for meta in metas:
+                    parts.append(f"- {meta.get('name')}: R$ {meta.get('targetAmount', 0):.2f} (Prioridade: {meta.get('priority')})")
+                
+                parts.append("\nRendas Detalhadas:")
+                for r in detalhes.get("rendas", []):
+                    status = "Recebido" if r.get("isReceived") else "Pendente"
+                    parts.append(f"- {r.get('description')}: R$ {r.get('amount', 0):.2f} ({status}, Categoria: {r.get('category')})")
+                
+                parts.append("\nContas Detalhadas:")
+                for c in detalhes.get("contas", []):
+                    status = "Pago" if c.get("isPaid") else "Pendente"
+                    parts.append(f"- {c.get('description')}: R$ {c.get('amount', 0):.2f} ({status}, Categoria: {c.get('category')})")
+                
+                trans_docs = db.collection("finance_transactions").where("status", "==", "active").stream()
+                avulsas = []
+                for doc in trans_docs:
+                    d = doc.to_dict()
+                    date_str = d.get("date")
+                    if date_str:
+                        try:
+                            dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                            if dt.month - 1 == mes_atual and dt.year == ano_atual:
+                                avulsas.append(d)
+                        except:
+                            pass
+                
+                if avulsas:
+                    parts.append("\nTransações Avulsas do Mês:")
+                    for t in avulsas:
+                        parts.append(f"- {t.get('description')}: R$ {t.get('amount', 0):.2f} (Sprint {t.get('sprint')}, Categoria: {t.get('category')})")
+                
+                finance_context = "\n".join(parts)
+            except Exception as e:
+                print(f"Erro ao extrair dados financeiros: {e}")
 
         # --- GRAFO DE CONHECIMENTO (RAG Dinâmica) ---
         kg_context = ""
@@ -6586,6 +6657,8 @@ def askTaskAssistant(req: https_fn.CallableRequest):
         === MANUAL DE PROCEDIMENTOS ===
         {manual_context if manual_context else 'Nenhum guia mestre para esta area_tematica.'}
 
+        {finance_context if finance_context else ''}
+
         {kg_context if kg_context else ''}
 
         === COMANDO DO USUÁRIO ===
@@ -6600,9 +6673,11 @@ def askTaskAssistant(req: https_fn.CallableRequest):
 
         return {
             "result": result,
-            "kg_nodes": kg_nodes_payload,  # enviado ao frontend para montar tooltips
+            "kg_nodes": kg_nodes_payload,
         }
 
+    except https_fn.HttpsError:
+        raise
     except Exception as e:
         print(f"Erro em askTaskAssistant: {e}")
         raise https_fn.HttpsError(
@@ -6666,9 +6741,9 @@ def askChatbot(req: https_fn.CallableRequest):
 
 
 @https_fn.on_call(
-    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
     memory=options.MemoryOption.GB_1,
-    timeout_sec=300
+    timeout_sec=COPILOT_FUNCTION_TIMEOUT_SEC
 )
 def askCopilotoHermes(req: https_fn.CallableRequest):
     """
@@ -6680,6 +6755,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
     data = req.data or {}
     perf_state = {"start_ms": _perf_now_ms(), "_last_ms": _perf_now_ms(), "steps": [], "tool_calls": []}
+    request_start_monotonic = time.monotonic()
     prompt = (data.get('prompt') or "").strip()
     task_id = data.get('taskId')
     system_id = data.get('systemId')
@@ -6688,6 +6764,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
     drive_file_name = (data.get('driveFileName') or 'documento').strip()
     routing_index = data.get('routingIndex') or []
     user_uid = req.auth.uid if req.auth else None
+
+    def _copilot_remaining_sec() -> float:
+        elapsed = time.monotonic() - request_start_monotonic
+        return max(0.0, COPILOT_SOFT_DEADLINE_SEC - elapsed)
 
     # Ingestão muda: arquivo sem texto → prompt padrão de catalogação
     if not prompt and drive_file_id:
@@ -9175,10 +9255,20 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         pending_memory_conflict = None
         report_data = None
         tool_invocation_data = None
+        deadline_fallback_text = None
         response = chat.send_message(final_prompt)
         _perf_mark(perf_state, "web.first_model_response")
         _max_iter = 10
         for _round in range(_max_iter):
+            if _copilot_remaining_sec() < 75:
+                deadline_fallback_text = (
+                    "A consulta chegou perto do limite seguro de processamento. "
+                    "Interrompi antes do timeout para preservar a conversa. "
+                    "Tente pedir uma leitura mais especifica ou dividir a solicitacao em partes menores."
+                )
+                _perf_mark(perf_state, "web.soft_deadline")
+                break
+
             fcs = response.function_calls
             if not fcs:
                 break
@@ -9274,6 +9364,15 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             if break_loop:
                 break
 
+            if _copilot_remaining_sec() < 75:
+                deadline_fallback_text = (
+                    "Executei as ferramentas necessarias, mas a consolidacao da resposta chegou perto "
+                    "do limite seguro de processamento. Para evitar uma falha por timeout, parei aqui. "
+                    "Tente refazer a pergunta de forma mais focada ou solicitar o proximo trecho."
+                )
+                _perf_mark(perf_state, "web.soft_deadline")
+                break
+
             try:
                 response = chat.send_message(function_response_parts)
                 _perf_mark(perf_state, "web.tool_roundtrip")
@@ -9337,11 +9436,14 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 "suggestedTitle": suggested_title
             }
 
-        try:
-            result_text = response.text or ""
-        except Exception as _text_err:
-            print(f"[Copiloto] response.text falhou: {_text_err}")
-            result_text = ""
+        if deadline_fallback_text:
+            result_text = deadline_fallback_text
+        else:
+            try:
+                result_text = response.text or ""
+            except Exception as _text_err:
+                print(f"[Copiloto] response.text falhou: {_text_err}")
+                result_text = ""
         # Extração de Proposta [PROPOSAL]{...}[/PROPOSAL]
         proposal_data = None
         clean_text = result_text

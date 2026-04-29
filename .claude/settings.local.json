@@ -6,7 +6,17 @@
       "Bash(python -c \"from main import cosine_similarity; print\\(cosine_similarity\\([1,0],[0,1]\\), cosine_similarity\\([1,0],[1,0]\\)\\)\")",
       "mcp__plugin_claude-mem_mcp-search__smart_search",
       "Bash(gcloud firestore *)",
-      "Bash(grep -n \"function_map = {fn\\\\|_send_telegram_session_message\\(db, token, chat_id, response_text\\\\|_perf_log.*telegram.text_response\\\\|_perf_mark.*telegram.text_response\\\\|Send response\" c:/Users/T-GAMER/Documents/gestao-Hermes/functions/hermes_core_logic.py)"
+      "Bash(grep -n \"function_map = {fn\\\\|_send_telegram_session_message\\(db, token, chat_id, response_text\\\\|_perf_log.*telegram.text_response\\\\|_perf_mark.*telegram.text_response\\\\|Send response\" c:/Users/T-GAMER/Documents/gestao-Hermes/functions/hermes_core_logic.py)",
+      "Bash(python3 -c ' *)",
+      "PowerShell(cmdkey /list)",
+      "PowerShell(Select-String -Pattern \"antigravity|gemini|cloudcode|google\" -CaseSensitive:$false)",
+      "Bash(git -C \"C:/Users/T-GAMER/Documents/gestao-Hermes\" worktree list)",
+      "Bash(git -C \"C:/Users/T-GAMER/Documents/gestao-Hermes\" status)",
+      "Bash(git -C \"C:/Users/T-GAMER/Documents/gestao-Hermes\" worktree remove --force \".claude/worktrees/elegant-goldwasser\")",
+      "Bash(git -C \"C:/Users/T-GAMER/Documents/gestao-Hermes\" worktree remove --force \".claude/worktrees/fervent-chandrasekhar\")",
+      "Bash(git -C \"C:/Users/T-GAMER/Documents/gestao-Hermes\" worktree remove --force \".claude/worktrees/laughing-cartwright\")",
+      "Bash(git -C \"C:/Users/T-GAMER/Documents/gestao-Hermes\" worktree remove --force \".claude/worktrees/sweet-khorana\")",
+      "Bash(git -C \"C:/Users/T-GAMER/Documents/gestao-Hermes\" worktree prune)"
     ]
   }
 }

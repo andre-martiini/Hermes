@@ -5592,6 +5592,7 @@ const App: React.FC = () => {
                             <option value="CLC">CLC</option>
                             <option value="ASSISTÊNCIA">ASSISTÊNCIA</option>
                             <option value="GERAL">GERAL</option>
+                            <option value="FINANCEIRO">FINANCEIRO</option>
                             <option value="NÃO CLASSIFICADA">PENDENTES</option>
                             {unidades.filter(u => !['CLC', 'ASSISTÊNCIA', 'ASSISTÊNCIA ESTUDANTIL'].includes(u.nome.toUpperCase())).map(u => (
                               <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>

@@ -25,12 +25,16 @@ const DocumentViewer = ({ file, onClose, isDark }: {
 
   let finalUrl = file.url;
   let canEmbed = !isGoogleDrive;
+  let imageUrl = file.url;
 
   if (isGoogleDrive) {
-    const fileId = file.driveFileId || file.url.match(/\/d\/([a-zA-Z0-9_-]+)/)?.[1];
+    const fileId = file.driveFileId || file.url.match(/\/d\/([a-zA-Z0-9_-]+)/)?.[1] || file.url.match(/[?&]id=([a-zA-Z0-9_-]+)/)?.[1];
     if (fileId) {
       finalUrl = `https://drive.google.com/file/d/${fileId}/preview`;
       canEmbed = true;
+      if (file.tipo === 'image') {
+        imageUrl = `https://drive.google.com/thumbnail?id=${fileId}&sz=w1600`;
+      }
     }
   }
 
@@ -55,7 +59,7 @@ const DocumentViewer = ({ file, onClose, isDark }: {
       <div className="flex-1 bg-black/5 relative">
         {file.tipo === 'image' ? (
           <div className="w-full h-full flex items-center justify-center p-8">
-            <img src={file.url} alt={file.nome} className="max-w-full max-h-full object-contain rounded-lg shadow-2xl transition-all hover:scale-[1.01]" />
+            <img src={imageUrl} alt={file.nome} className="max-w-full max-h-full object-contain rounded-lg shadow-2xl transition-all hover:scale-[1.01]" />
           </div>
         ) : canEmbed ? (
           <iframe src={finalUrl} className="w-full h-full border-none" title={file.nome} />
@@ -332,6 +336,21 @@ export const TaskExecutionView = ({
   // Inline editing
   const [editingStatus, setEditingStatus] = useState(false);
   const [pendingStatus, setPendingStatus] = useState(task.status);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editedTitle, setEditedTitle] = useState(currentTaskData.titulo);
+
+  useEffect(() => {
+    setEditedTitle(currentTaskData.titulo);
+  }, [currentTaskData.titulo, currentTaskData.id]);
+
+  const handleSaveTitle = () => {
+    if (editedTitle.trim() && editedTitle !== currentTaskData.titulo) {
+      onSave(task.id, { titulo: editedTitle.trim() });
+      showToast('Título da ação atualizado!', 'success');
+    }
+    setIsEditingTitle(false);
+  };
+
 
   // Modal system
   const [modalConfig, setModalConfig] = useState<{
@@ -531,10 +550,17 @@ export const TaskExecutionView = ({
       }
     }
 
+    const allCompleted = updated.length > 0 && updated.every(i => i.completed);
+
     onSave(task.id, {
       plano_acao: updated,
-      acompanhamento: updatedAcompanhamento
+      acompanhamento: updatedAcompanhamento,
+      ...(allCompleted && { status: 'concluído' })
     });
+
+    if (allCompleted) {
+      showToast('Status atualizado para Concluído!', 'success');
+    }
 
     // Feature 3: sugere revisão do plano restante quando uma etapa é concluída
     if (newCompleted) {
@@ -819,11 +845,18 @@ export const TaskExecutionView = ({
     const successMsg: ChatMessage = { role: 'assistant', content: '✅ Plano de ação atualizado com sucesso!' };
     const newHistory = [...updatedMessages, successMsg];
 
+    const allCompleted = appliedPlan.length > 0 && appliedPlan.every(i => i.completed);
+
     onSave(task.id, {
       plano_acao: appliedPlan,
       plano_acao_historico: updatedHistory,
-      chat_history: newHistory
+      chat_history: newHistory,
+      ...(allCompleted && { status: 'concluído' })
     });
+
+    if (allCompleted) {
+      showToast('Status atualizado para Concluído!', 'success');
+    }
     setChatMessages(newHistory);
     setEditingProposal(null);
     setShowPlanHistory(false);
@@ -1057,9 +1090,16 @@ export const TaskExecutionView = ({
   };
 
   const savePlanDraft = () => {
-    onSave(task.id, { plano_acao: planDraft });
+    const allCompleted = planDraft.length > 0 && planDraft.every(i => i.completed);
+    onSave(task.id, { 
+      plano_acao: planDraft,
+      ...(allCompleted && { status: 'concluído' })
+    });
     setShowPlanModal(false);
     showToast('Plano atualizado!', 'success');
+    if (allCompleted) {
+      showToast('Status atualizado para Concluído!', 'success');
+    }
   };
 
   const handleInsightApply = () => {
@@ -1079,8 +1119,16 @@ export const TaskExecutionView = ({
       const updatedHistory = currentPlan.length > 0
         ? [...existingHistory.slice(-4), { data: new Date().toISOString(), items: currentPlan }]
         : existingHistory;
-      onSave(task.id, { plano_acao: insightState.planoProposto, plano_acao_historico: updatedHistory });
+      const allCompleted = insightState.planoProposto.length > 0 && insightState.planoProposto.every(i => i.completed);
+      onSave(task.id, { 
+        plano_acao: insightState.planoProposto, 
+        plano_acao_historico: updatedHistory,
+        ...(allCompleted && { status: 'concluído' })
+      });
       showToast('Plano atualizado com o insight!', 'success');
+      if (allCompleted) {
+        showToast('Status atualizado para Concluído!', 'success');
+      }
     }
 
     setInsightState(null);
@@ -1294,9 +1342,31 @@ export const TaskExecutionView = ({
             {/* Label + Title */}
             <div className="order-3 sm:order-2 flex-1 min-w-0 w-full sm:w-auto">
               <p className={`text-[8px] font-black uppercase tracking-[0.3em] ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>Sala de Operações</p>
-              <h1 className={`text-base md:text-xl font-black tracking-tight leading-tight break-words whitespace-normal ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                {currentTaskData.titulo}
-              </h1>
+              {isEditingTitle ? (
+                <input
+                  type="text"
+                  value={editedTitle}
+                  onChange={e => setEditedTitle(e.target.value)}
+                  onBlur={handleSaveTitle}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') handleSaveTitle();
+                    if (e.key === 'Escape') {
+                      setEditedTitle(currentTaskData.titulo);
+                      setIsEditingTitle(false);
+                    }
+                  }}
+                  className={`w-full bg-transparent border-b border-blue-500/50 outline-none text-base md:text-xl font-black tracking-tight leading-tight break-words ${isDark ? 'text-white' : 'text-slate-900'}`}
+                  autoFocus
+                />
+              ) : (
+                <h1
+                  onClick={() => setIsEditingTitle(true)}
+                  className={`text-base md:text-xl font-black tracking-tight leading-tight break-words whitespace-normal cursor-pointer hover:text-blue-600 transition-colors ${isDark ? 'text-white' : 'text-slate-900'}`}
+                  title="Clique para alterar o título"
+                >
+                  {currentTaskData.titulo}
+                </h1>
+              )}
             </div>
 
             <div className="order-2 sm:order-3 shrink-0 flex items-center gap-2">
@@ -1345,9 +1415,31 @@ export const TaskExecutionView = ({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <p className={`text-[9px] font-black uppercase tracking-[0.22em] ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>Sala de Operações</p>
-              <h1 className={`mt-1 text-[1rem] font-black leading-[1.12] tracking-tight break-words ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                {currentTaskData.titulo}
-              </h1>
+              {isEditingTitle ? (
+                <input
+                  type="text"
+                  value={editedTitle}
+                  onChange={e => setEditedTitle(e.target.value)}
+                  onBlur={handleSaveTitle}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') handleSaveTitle();
+                    if (e.key === 'Escape') {
+                      setEditedTitle(currentTaskData.titulo);
+                      setIsEditingTitle(false);
+                    }
+                  }}
+                  className={`w-full mt-1 bg-transparent border-b border-blue-500/50 outline-none text-[1rem] font-black leading-[1.12] tracking-tight break-words ${isDark ? 'text-white' : 'text-slate-900'}`}
+                  autoFocus
+                />
+              ) : (
+                <h1
+                  onClick={() => setIsEditingTitle(true)}
+                  className={`mt-1 text-[1rem] font-black leading-[1.12] tracking-tight break-words cursor-pointer hover:text-blue-600 transition-colors ${isDark ? 'text-white' : 'text-slate-900'}`}
+                  title="Clique para alterar o título"
+                >
+                  {currentTaskData.titulo}
+                </h1>
+              )}
             </div>
             <div className="shrink-0 pt-0.5">
               <SpeedDialMenu
@@ -1417,9 +1509,31 @@ export const TaskExecutionView = ({
 
           <div className="order-3 sm:order-2 flex-1 min-w-0 w-full sm:w-auto">
             <p className={`text-[8px] font-black uppercase tracking-[0.3em] ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>Sala de Operações</p>
-            <h1 className={`text-base md:text-xl font-black tracking-tight leading-tight break-words whitespace-normal ${isDark ? 'text-white' : 'text-slate-900'}`}>
-              {currentTaskData.titulo}
-            </h1>
+            {isEditingTitle ? (
+              <input
+                type="text"
+                value={editedTitle}
+                onChange={e => setEditedTitle(e.target.value)}
+                onBlur={handleSaveTitle}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleSaveTitle();
+                  if (e.key === 'Escape') {
+                    setEditedTitle(currentTaskData.titulo);
+                    setIsEditingTitle(false);
+                  }
+                }}
+                className={`w-full bg-transparent border-b border-blue-500/50 outline-none text-base md:text-xl font-black tracking-tight leading-tight break-words ${isDark ? 'text-white' : 'text-slate-900'}`}
+                autoFocus
+              />
+            ) : (
+              <h1
+                onClick={() => setIsEditingTitle(true)}
+                className={`text-base md:text-xl font-black tracking-tight leading-tight break-words whitespace-normal cursor-pointer hover:text-blue-600 transition-colors ${isDark ? 'text-white' : 'text-slate-900'}`}
+                title="Clique para alterar o título"
+              >
+                {currentTaskData.titulo}
+              </h1>
+            )}
           </div>
 
           <div className="order-2 sm:order-3 shrink-0 flex items-center gap-2">

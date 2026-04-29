@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { AutoExpandingTextarea, CollapsibleContainer } from '../components/ui/UIComponents';
 import { formatWhatsAppText } from '../utils/helpers';
 import { ensureHttpUrl, parseDiaryRichNote } from '../utils/diaryEntries';
@@ -163,7 +163,7 @@ export const DiarioBordoUI = ({
       // Conversão do link do Web View do Drive para Embed URL
       let embedUrl = url;
       if (isImage && url.includes('drive.google.com')) {
-        const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+        const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
         if (match && match[1]) {
           embedUrl = `https://drive.google.com/thumbnail?id=${match[1]}&sz=w800`;
         }
@@ -174,7 +174,7 @@ export const DiarioBordoUI = ({
           onClick={(e) => {
             if (onFocusFile) {
               e.preventDefault();
-              const dMatch = url.match(/\/d\/([a-zA-Z0-9_-]{10,})/);
+              const dMatch = url.match(/\/d\/([a-zA-Z0-9_-]{10,})/) || url.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
               onFocusFile({ url, nome, tipo: isImage ? 'image' : 'file', driveFileId: dMatch ? dMatch[1] : undefined });
             }
           }}

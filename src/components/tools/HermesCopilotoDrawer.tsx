@@ -14,6 +14,7 @@ import { CollapsibleContainer } from '../ui/UIComponents';
 
 // URL do endpoint HTTP de upload (Node.js Functions)
 const UPLOAD_ENDPOINT = 'https://us-central1-gestao-hermes.cloudfunctions.net/uploadFileForCopiloto';
+const COPILOTO_CALLABLE_TIMEOUT_MS = 540000;
 const COPILOTO_SUPPORTED_FILE_EXTENSIONS = [
     '.pdf',
     '.doc',
@@ -1308,7 +1309,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             });
 
             // 2. Chama a Cloud Function
-            const askCopiloto = httpsCallable(functions, 'askCopilotoHermes', { timeout: 300000 });
+            const askCopiloto = httpsCallable(functions, 'askCopilotoHermes', { timeout: COPILOTO_CALLABLE_TIMEOUT_MS });
 
             const contextPrefix = activeDocument
                 ? `[CONTEXTO: Visualizando ${activeDocument.tipo} "${activeDocument.nome}" em Tela Cheia]\nLocal: ${activeDocument.url}${activeDocument.driveFileId ? `\nID para leitura profunda: ${activeDocument.driveFileId}\nPara ler o arquivo e responder dúvidas técnicas ou realizar cálculos, utilize a ferramenta 'ler_documento_na_integra' com este ID.` : ''}\n\n`
