@@ -1,6 +1,6 @@
 ﻿import React, { useState, useMemo } from 'react';
 import { Tarefa, GoogleCalendarEvent, formatDateLocalISO } from '../../types';
-import { normalizeStatus, isStandbyStatus } from '../utils/helpers';
+import { normalizeStatus } from '../utils/helpers';
 import { TimeGrid } from '../components/calendar/TimeGrid';
 import { TaskCard } from '../components/calendar/TaskCard';
 import { addDoc, collection } from 'firebase/firestore';
@@ -45,9 +45,9 @@ export const DayView = ({
       const isConcluido = normalizeStatus(t.status) === 'concluido';
       if (isConcluido) return false;
 
-      // Novo critério: Standby = Status de standby OU data_limite vazia
+      // Standby visual/backlog: sem data valida. Se existe data, ela prevalece.
       const noDate = !t.data_limite || t.data_limite === '-' || t.data_limite === '0000-00-00';
-      const isStandBy = isStandbyStatus(t.status) || noDate;
+      const isStandBy = noDate;
 
       // Se o botão de standby estiver desligado, oculta tudo que se encaixa no critério acima
       if (isStandBy && !showStandby) return false;

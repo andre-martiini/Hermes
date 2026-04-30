@@ -1,7 +1,7 @@
 ﻿
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Tarefa, GoogleCalendarEvent, formatDateLocalISO } from '../../../types';
-import { normalizeStatus, isStandbyStatus } from '../../utils/helpers';
+import { normalizeStatus } from '../../utils/helpers';
 import { timeToMinutes, minutesToTime, getYFromTime, getTimeFromY, snapToGrid, getColumnFromX } from '../../utils/calendarUtils';
 import { PROJECT_COLORS } from '../../../constants';
 import { TaskActionSelector } from './TaskActionSelector';
@@ -39,7 +39,6 @@ export const TimeGrid = ({
   sidebar,
   isDark,
   hourHeight = 60,
-  showStandby = false,
   disableExecuteOnClick = false
 }: TimeGridProps) => {
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -93,7 +92,6 @@ export const TimeGrid = ({
       });
       const dayTasks = tasks.filter(t => {
         if ((t.status as any) === 'excluído') return false;
-        if (!showStandby && isStandbyStatus(t.status)) return false;
         const taskDate = t.data_limite || t.data_inicio;
         if (t.horario_inicio && taskDate) return taskDate === dayStr;
         return false;

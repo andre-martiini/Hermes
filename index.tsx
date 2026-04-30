@@ -35,7 +35,7 @@ import { INTERNAL_NAVIGATION_EVENT } from './src/utils/internalNavigation';
 import {
   DEFAULT_APP_SETTINGS, getDaysInMonth, isWorkDay, callScrapeSipac,
   getMonthWorkDays, normalizeStatus, formatWhatsAppText,
-  formatInlineWhatsAppText, detectAreaFromTitle, isStandbyStatus
+  formatInlineWhatsAppText, detectAreaFromTitle
 } from './src/utils/helpers';
 import {
   ToastContainer, FilterChip, PgcMiniTaskCard,
@@ -4550,7 +4550,11 @@ const App: React.FC = () => {
         return;
       }
 
-      if (isStandbyStatus(t.status) || !t.data_limite || t.data_limite === "-" || t.data_limite === "0000-00-00" || !/^\d{4}-\d{2}-\d{2}$/.test(t.data_limite)) {
+      const hasValidDate = Boolean(t.data_limite && t.data_limite !== "-" && t.data_limite !== "0000-00-00" && /^\d{4}-\d{2}-\d{2}$/.test(t.data_limite));
+
+      // A data valida deve prevalecer na organizacao visual: uma acao marcada
+      // para hoje nao pode ficar escondida no stand-by so por causa do status.
+      if (!hasValidDate) {
         buckets.standBy.push(t);
         return;
       }
