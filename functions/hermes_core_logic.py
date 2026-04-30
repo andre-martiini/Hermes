@@ -543,6 +543,28 @@ def _extract_action_search_context_query(text: str) -> str | None:
     return cleaned or None
 
 
+def _extract_action_lookup_query(text: str) -> str | None:
+    """Detects requests that only ask to find/list an action, without locking context."""
+    lowered = _normalize_for_matching(text).strip()
+    if not lowered:
+        return None
+    wants_search = any(marker in lowered for marker in (
+        "pesquisa", "pesquise", "pesquisar", "buscar", "busca", "busque",
+        "procura", "procurar", "procure", "localiza", "localizar", "localize",
+        "encontra", "encontrar", "encontre", "ache", "achar",
+    ))
+    mentions_action = any(marker in lowered for marker in ("acao", "acoes", "tarefa", "tarefas"))
+    wants_context = "contexto" in lowered and any(marker in lowered for marker in (
+        "ative", "ativa", "ativar", "entre", "entra", "entrar",
+    ))
+    if not (wants_search and mentions_action) or wants_context:
+        return None
+    cleaned = _clean_action_search_query(text)
+    cleaned = re.sub(r"\b(?:relacionad[ao]s?|referente|sobre|chamad[ao]s?|nomead[ao]s?)\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .,:;-")
+    return cleaned or None
+
+
 def _extract_natural_context_query(text: str) -> str | None:
     """Detects natural-language requests such as 'entre no contexto da acao X'."""
     lowered = _normalize_for_matching(text).strip()
@@ -891,6 +913,35 @@ def _build_action_keyboard(results: list) -> list:
         label = titulo + (f" [{area}]" if area else "")
         keyboard.append([{"text": label[:60], "callback_data": f"lock:{task_id}"}])
     return keyboard
+
+
+def _format_action_lookup_results(query: str, results: list) -> str:
+    query_label = html.escape(query or "sua busca")
+    if not results:
+        return (
+            f"Nenhuma acao encontrada para <i>{query_label}</i> no historico do Hermes.\n"
+            "Nao pesquisei e-mails, acervo ou internet porque voce pediu uma acao do sistema."
+        )
+
+    if len(results) == 1:
+        header = f"Encontrei esta acao para <i>{query_label}</i>:"
+    else:
+        header = f"Encontrei {len(results)} acoes mais provaveis para <i>{query_label}</i>:"
+
+    lines = [header]
+    for idx, r in enumerate(results[:5], 1):
+        titulo = html.escape(r.get("titulo") or "sem titulo")
+        task_id = html.escape(str(r.get("id") or ""))
+        status = html.escape(r.get("status") or "nao informado")
+        area = html.escape(r.get("area") or "nao informada")
+        prazo = html.escape(str(r.get("data_limite") or "nao informado"))
+        lines.append(f"\n<b>{idx}. {titulo}</b>")
+        lines.append(f"ID: <code>{task_id}</code>")
+        lines.append(f"Status: {status} | Area: {area} | Prazo: {prazo}")
+        if r.get("processo_sei"):
+            lines.append(f"Processo SEI: {html.escape(str(r.get('processo_sei')))}")
+        lines.append(f"Abrir: task:{task_id}")
+    return "\n".join(lines)
 
 
 _EXIT_KEYBOARD = [[{"text": "🔓 Sair do Contexto", "callback_data": "exit_context"}]]
@@ -1954,6 +2005,23 @@ def _process_telegram_message(db, data: dict):
             token,
             chat_id,
             f"Nenhuma acao encontrada para <i>{html.escape(natural_context_query or text)}</i>. Nao ativei contexto sem uma acao real.",
+            session=session,
+            response_mode=response_mode,
+            gemini_key=gemini_key,
+            voice_profile=voice_profile,
+            perf_state=perf_state,
+        )
+        return
+
+    # --- Deterministic action lookup ("busque a acao relacionada a X") ---
+    action_lookup_query = _extract_action_lookup_query(text)
+    if action_lookup_query:
+        results = _search_actions_for_context(db, action_lookup_query)
+        _send_contextual_response(
+            db,
+            token,
+            chat_id,
+            _format_action_lookup_results(action_lookup_query, results),
             session=session,
             response_mode=response_mode,
             gemini_key=gemini_key,

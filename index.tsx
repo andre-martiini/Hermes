@@ -35,7 +35,8 @@ import { INTERNAL_NAVIGATION_EVENT } from './src/utils/internalNavigation';
 import {
   DEFAULT_APP_SETTINGS, getDaysInMonth, isWorkDay, callScrapeSipac,
   getMonthWorkDays, normalizeStatus, formatWhatsAppText,
-  formatInlineWhatsAppText, detectAreaFromTitle
+  formatInlineWhatsAppText, detectAreaFromTitle, isStandbyStatus,
+  applyStandbyDateRules
 } from './src/utils/helpers';
 import {
   ToastContainer, FilterChip, PgcMiniTaskCard,
@@ -2276,6 +2277,7 @@ const App: React.FC = () => {
     const overdue = tarefas.filter(t =>
       normalizeStatus(t.status) !== 'concluido' &&
       t.status !== 'excluído' as any &&
+      !isStandbyStatus(t.status) &&
       t.data_limite && t.data_limite !== "-" && t.data_limite !== "0000-00-00" &&
       t.data_limite < todayStr
     );
@@ -2317,13 +2319,12 @@ const App: React.FC = () => {
   const handleUpdateToToday = async (task: Tarefa) => {
     const todayStr = formatDateLocalISO(new Date());
     try {
-      await updateDoc(doc(db, 'tarefas', task.id), {
+      await handleUpdateTarefa(task.id, {
         data_limite: todayStr,
         data_inicio: todayStr,
         horario_inicio: null,
-        horario_fim: null,
-        data_atualizacao: new Date().toISOString()
-      });
+        horario_fim: null
+      }, true);
       showToast("Ação atualizada para hoje!", 'success');
     } catch (err) {
       console.error(err);
@@ -2490,6 +2491,7 @@ const App: React.FC = () => {
       const overdueCount = tarefas.filter(t =>
         normalizeStatus(t.status) !== 'concluido' &&
         t.status !== 'excluído' as any &&
+        !isStandbyStatus(t.status) &&
         t.data_limite && t.data_limite !== "-" && t.data_limite !== "0000-00-00" &&
         t.data_limite < todayStr
       ).length;
@@ -2690,18 +2692,12 @@ const App: React.FC = () => {
     try {
       const docRef = doc(db, 'tarefas', id);
       const now = new Date().toISOString();
-      const payload: Record<string, any> = {
+      let payload: Record<string, any> = {
         ...updates,
         data_atualizacao: now
       };
 
-      const hasDateLimit = Object.prototype.hasOwnProperty.call(updates, 'data_limite');
-      const hasDateStart = Object.prototype.hasOwnProperty.call(updates, 'data_inicio');
-      if (hasDateLimit || hasDateStart) {
-        const singleDate = (updates.data_limite ?? updates.data_inicio ?? '') as string;
-        payload.data_limite = singleDate;
-        payload.data_inicio = singleDate;
-      }
+      payload = applyStandbyDateRules(payload, previousTask);
 
       if (Object.prototype.hasOwnProperty.call(payload, 'is_single_day')) {
         delete payload.is_single_day;
@@ -2711,11 +2707,6 @@ const App: React.FC = () => {
       }
 
       const oldStatusNormalized = normalizeStatus(previousTask?.status || '');
-
-      // Auto-reopen if a date is set on a stand-by task
-      if (hasDateLimit && updates.data_limite && updates.data_limite !== "-" && (oldStatusNormalized === 'stand-by' || oldStatusNormalized === 'cgby')) {
-        payload.status = 'em andamento';
-      }
       const newStatusNormalized = Object.prototype.hasOwnProperty.call(payload, 'status') ? normalizeStatus(String(payload.status)) : oldStatusNormalized;
       const statusChanged = Boolean(previousTask && Object.prototype.hasOwnProperty.call(payload, 'status') && newStatusNormalized !== oldStatusNormalized);
 
@@ -2725,12 +2716,6 @@ const App: React.FC = () => {
         }
         if (newStatusNormalized !== 'concluido' && oldStatusNormalized === 'concluido' && !Object.prototype.hasOwnProperty.call(payload, 'data_conclusao')) {
           payload.data_conclusao = null;
-        }
-        if (newStatusNormalized === 'stand-by' || newStatusNormalized === 'cgby') {
-          payload.data_limite = '';
-          payload.data_inicio = '';
-          payload.horario_inicio = null;
-          payload.horario_fim = null;
         }
       }
 
@@ -2816,11 +2801,10 @@ const App: React.FC = () => {
 
       // Atualiza a data da tarefa arrastada para coincidir com o bucket de destino
       const newDate = targetTask.data_limite || formatDateLocalISO(new Date());
-      await updateDoc(doc(db, 'tarefas', taskId), {
+      await handleUpdateTarefa(taskId, {
         data_limite: newDate,
-        data_inicio: newDate,
-        data_atualizacao: new Date().toISOString()
-      });
+        data_inicio: newDate
+      }, true);
 
       // Insere na posição correta para o remapeamento de ordem
       tasksInBucket.splice(newIndex, 0, { ...draggedTask, data_limite: newDate, data_inicio: newDate });
@@ -3623,12 +3607,13 @@ const App: React.FC = () => {
     try {
       setLoading(true);
       const { is_single_day: _ignoredSingleDay, ...inputData } = data as any;
-      const isStandByTask = normalizeStatus(inputData.status || 'em andamento') === 'stand-by';
+      const isStandByTask = isStandbyStatus(inputData.status || 'em andamento');
       const singleDate = inputData.data_limite || inputData.data_inicio || (isStandByTask ? '' : formatDateLocalISO(new Date()));
       const normalizedTitle = normalizeTaskTitle(inputData.titulo || '');
-      const taskPayload: Record<string, any> = {
+      const taskPayload: Record<string, any> = applyStandbyDateRules({
         ...inputData,
         titulo: normalizedTitle,
+        status: inputData.status || 'em andamento',
         data_limite: singleDate,
         data_inicio: singleDate,
         google_id: "", // Sinaliza que precisa de PUSH
@@ -3637,7 +3622,7 @@ const App: React.FC = () => {
         contabilizar_meta: inputData.area_tematica === 'CLC' || inputData.area_tematica === 'ASSISTÊNCIA',
         acompanhamento: [],
         entregas_relacionadas: []
-      };
+      }, null);
 
       // Sanitiza: remove campos com valor undefined (Firestore não aceita undefined)
       const sanitizedPayload = Object.fromEntries(
@@ -3690,7 +3675,7 @@ const App: React.FC = () => {
     const unsubscribeTarefas = onSnapshot(qTarefas, (snapshot) => {
       const normalized: Tarefa[] = snapshot.docs.map(taskDoc => {
         const raw = { id: taskDoc.id, ...taskDoc.data() } as any;
-        const singleDate = raw.data_limite || raw.data_inicio || '';
+        const singleDate = isStandbyStatus(raw.status) ? '' : (raw.data_limite || raw.data_inicio || '');
         return {
           ...raw,
           area_tematica: raw.area_tematica || raw.categoria,
@@ -3703,7 +3688,7 @@ const App: React.FC = () => {
       // Migração leve: força dados legados de intervalo para data única (usa término como fonte da verdade)
       const legacyWithRange = snapshot.docs
         .map(taskDoc => ({ id: taskDoc.id, ...taskDoc.data() } as Tarefa))
-        .filter(task => !!task.data_limite && task.data_limite !== '-' && task.data_limite !== '0000-00-00' && task.data_limite !== task.data_inicio);
+        .filter(task => !isStandbyStatus(task.status) && !!task.data_limite && task.data_limite !== '-' && task.data_limite !== '0000-00-00' && task.data_limite !== task.data_inicio);
       if (legacyWithRange.length > 0) {
         const batch = writeBatch(db);
         const now = new Date().toISOString();
@@ -3715,6 +3700,29 @@ const App: React.FC = () => {
           });
         });
         batch.commit().catch((migrationErr) => console.error('Erro ao normalizar tarefas legadas:', migrationErr));
+      }
+
+      const standbyWithDates = snapshot.docs
+        .map(taskDoc => ({ id: taskDoc.id, ...taskDoc.data() } as Tarefa))
+        .filter(task => isStandbyStatus(task.status) && Boolean(
+          (task.data_limite && task.data_limite !== '-' && task.data_limite !== '0000-00-00') ||
+          (task.data_inicio && task.data_inicio !== '-' && task.data_inicio !== '0000-00-00') ||
+          task.horario_inicio ||
+          task.horario_fim
+        ));
+      if (standbyWithDates.length > 0) {
+        const batch = writeBatch(db);
+        const now = new Date().toISOString();
+        standbyWithDates.forEach(task => {
+          batch.update(doc(db, 'tarefas', task.id), {
+            data_inicio: '',
+            data_limite: '',
+            horario_inicio: null,
+            horario_fim: null,
+            data_atualizacao: now
+          });
+        });
+        batch.commit().catch((migrationErr) => console.error('Erro ao limpar datas de standby:', migrationErr));
       }
 
       // Automação: Atualizar tarefas atrasadas para o dia de hoje
@@ -3729,7 +3737,7 @@ const App: React.FC = () => {
             task.data_limite !== '-' &&
             task.data_limite !== '0000-00-00' &&
             task.data_limite < today;
-          return isPending && hasPastDeadline;
+          return isPending && !isStandbyStatus(task.status) && hasPastDeadline;
         });
 
       if (overdueTasks.length > 0) {

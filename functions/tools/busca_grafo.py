@@ -292,6 +292,21 @@ def _normalizar_data_comparavel(valor) -> str:
     return match.group(0).replace(" ", "T") if match else texto
 
 
+def _query_menciona_filtro(query: str, valor: str | None) -> bool:
+    if not query or not valor:
+        return False
+    return _normalizar_texto_busca(valor) in _normalizar_texto_busca(query)
+
+
+def _query_menciona_filtro_temporal(query: str) -> bool:
+    texto = _normalizar_texto_busca(query)
+    if not texto:
+        return False
+    if re.search(r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b", texto):
+        return True
+    return bool(re.search(r"\b(prazo|vencimento|vence|vencem|data limite|periodo|período|entre|antes|depois|ate|até|hoje|amanha|amanhã|ontem)\b", texto))
+
+
 def _partes_texto_busca(data: dict) -> list[tuple[str, str, list[str], float]]:
     partes = []
     for campo, peso in _SEARCH_FIELDS:
@@ -587,6 +602,7 @@ def buscar_tarefas(
     """
     try:
         db = firestore.Client()
+        query_original = query or ""
 
         # ── Extração automática de status da query ───────────────────────────
         if not status and query:
@@ -607,11 +623,27 @@ def buscar_tarefas(
             corte_str = corte_dt.isoformat().replace("+00:00", "Z")
 
         avisos = []
+        effective_area_tematica = area_tematica
+        effective_status = status
+        effective_data_limite_inicio = data_limite_inicio
+        effective_data_limite_fim = data_limite_fim
+        if termos:
+            if area_tematica and not _query_menciona_filtro(query_original, area_tematica):
+                effective_area_tematica = None
+                avisos.append("area ignorada por nao constar na query")
+            if status and not _query_menciona_filtro(query_original, status):
+                effective_status = None
+                avisos.append("status ignorado por nao constar na query")
+            if (data_limite_inicio or data_limite_fim) and not _query_menciona_filtro_temporal(query_original):
+                effective_data_limite_inicio = None
+                effective_data_limite_fim = None
+                avisos.append("prazo ignorado por nao constar na query")
+
         docs_stream = []
         vistos: set[str] = set()
 
-        if status:
-            status_canonico = _normalizar_status(status)
+        if effective_status:
+            status_canonico = _normalizar_status(effective_status)
             status_variants = [status_canonico]
             _ACENTO_MAP = {
                 "concluido": "concluído",
@@ -641,47 +673,76 @@ def buscar_tarefas(
         _adicionar_docs_unicos(docs_stream, base_docs, vistos)
 
         # ── Filtragem in-memory ───────────────────────────────────────────────
-        resultados = []
-        for doc in docs_stream:
-            data = doc.to_dict() or {}
-            if not _matches_filters(
-                data,
-                termos=termos,
-                match_mode=match_mode,
-                query=query or "",
-                area_tematica=area_tematica,
-                data_limite_inicio=data_limite_inicio,
-                data_limite_fim=data_limite_fim,
-                status=status,
-                corte_str=corte_str,
-            ):
-                continue
-            result = _formatar_resultado(doc.id, data)
-            result["_match_score"] = _calcular_score(data, termos, query=query or "")
-            resultados.append(result)
-            if not termos and len(resultados) >= collect_limit:
-                break
-
-        # ── Segunda chance: relaxa match_mode para "any" ──────────────────────
-        if not resultados and termos and match_mode == "all":
-            avisos.append("busca ampliada any")
-            for doc in docs_stream:  # reitera o mesmo stream já carregado
+        def _coletar_resultados(
+            modo: str,
+            area_filtro: str | None,
+            inicio_filtro: str | None,
+            fim_filtro: str | None,
+            status_filtro: str | None,
+            corte_filtro: str | None,
+        ) -> list[dict]:
+            encontrados = []
+            for doc in docs_stream:
                 data = doc.to_dict() or {}
                 if not _matches_filters(
                     data,
                     termos=termos,
-                    match_mode="any",
+                    match_mode=modo,
                     query=query or "",
-                    area_tematica=area_tematica,
-                    data_limite_inicio=data_limite_inicio,
-                    data_limite_fim=data_limite_fim,
-                    status=status,
-                    corte_str=None,  # ignora corte temporal na segunda chance
+                    area_tematica=area_filtro,
+                    data_limite_inicio=inicio_filtro,
+                    data_limite_fim=fim_filtro,
+                    status=status_filtro,
+                    corte_str=corte_filtro,
                 ):
                     continue
                 result = _formatar_resultado(doc.id, data)
                 result["_match_score"] = _calcular_score(data, termos, query=query or "")
-                resultados.append(result)
+                encontrados.append(result)
+                if not termos and len(encontrados) >= collect_limit:
+                    break
+            return encontrados
+
+        resultados = _coletar_resultados(
+            match_mode,
+            effective_area_tematica,
+            effective_data_limite_inicio,
+            effective_data_limite_fim,
+            effective_status,
+            corte_str,
+        )
+
+        # ── Segunda chance: relaxa match_mode para "any" ──────────────────────
+        if not resultados and termos and match_mode == "all":
+            avisos.append("busca ampliada any")
+            resultados = _coletar_resultados(
+                "any",
+                effective_area_tematica,
+                effective_data_limite_inicio,
+                effective_data_limite_fim,
+                effective_status,
+                None,
+            )
+
+        # Terceira chance: se o LLM tiver inventado filtros opcionais (data,
+        # area ou status) que o usuario nao mencionou, nao deixe isso zerar uma
+        # busca textual forte.
+        if not resultados and termos and (effective_area_tematica or effective_data_limite_inicio or effective_data_limite_fim or effective_status):
+            relaxed_area = area_tematica if _query_menciona_filtro(query_original, area_tematica) else None
+            relaxed_status = status if _query_menciona_filtro(query_original, status) else None
+            keep_dates = _query_menciona_filtro_temporal(query_original)
+            relaxed_inicio = data_limite_inicio if keep_dates else None
+            relaxed_fim = data_limite_fim if keep_dates else None
+            if (relaxed_area, relaxed_status, relaxed_inicio, relaxed_fim) != (effective_area_tematica, effective_status, effective_data_limite_inicio, effective_data_limite_fim):
+                avisos.append("filtros opcionais relaxados")
+                resultados = _coletar_resultados(
+                    "any" if match_mode == "all" else match_mode,
+                    relaxed_area,
+                    relaxed_inicio,
+                    relaxed_fim,
+                    relaxed_status,
+                    None,
+                )
 
         resultados = sorted(resultados, key=lambda r: r.get("_match_score", 0), reverse=True)[:limite]
         for result in resultados:

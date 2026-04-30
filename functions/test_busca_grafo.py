@@ -217,6 +217,38 @@ class TestBuscaGrafo(unittest.TestCase):
         self.assertIsNone(result["erro"])
         self.assertEqual([r["id"] for r in result["resultados"]], ["task-target"])
 
+    def test_buscar_tarefas_relaxa_filtro_de_data_nao_mencionado(self):
+        docs = [
+            _FakeDoc(
+                "task-target",
+                {
+                    "titulo": "Publicação de Dispensa Eletrônica: Locação de Mobiliário e Som para Eventos",
+                    "status": "em andamento",
+                    "area_tematica": "COMPRAS",
+                    "data_criacao": "2026-04-20T10:00:00Z",
+                },
+            )
+        ]
+
+        import tools.busca_grafo as busca_grafo
+
+        original_client = busca_grafo.firestore.Client
+        try:
+            busca_grafo.firestore.Client = lambda: _FakeDb(docs)
+            result = buscar_tarefas(
+                "contratação de imobiliário para som e eventos",
+                match_mode="all",
+                data_limite_inicio="2025-01-01",
+                data_limite_fim="2026-12-31",
+                limite=5,
+            )
+        finally:
+            busca_grafo.firestore.Client = original_client
+
+        self.assertIsNone(result["erro"])
+        self.assertEqual(result["resultados"][0]["id"], "task-target")
+        self.assertIn("prazo ignorado por nao constar na query", result.get("aviso", ""))
+
 
 if __name__ == "__main__":
     unittest.main()

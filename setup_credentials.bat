@@ -6,8 +6,18 @@ echo   RENOVACAO DE CREDENCIAIS GOOGLE
 echo ========================================
 echo.
 
-cd functions
+pushd "%~dp0functions"
+if errorlevel 1 (
+    echo Nao foi possivel acessar a pasta functions.
+    pause
+    exit /b 1
+)
+
 python setup_credentials.py --force
+set "EXIT_CODE=%ERRORLEVEL%"
+
+popd
 
 pause
+exit /b %EXIT_CODE%
 

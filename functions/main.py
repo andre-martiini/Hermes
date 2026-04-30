@@ -1501,6 +1501,8 @@ def sync_boletos_gmail(service, sync_ref, logs):
             log_to_firestore(sync_ref, logs, "ERRO: Gemini API Key não encontrada (em system/api_keys).")
             return
         
+        from google.genai import types
+
         genai = get_genai_module()
         client = genai.Client(api_key=api_key)
 
@@ -1589,7 +1591,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
             
             content_parts = [prompt, f"E-mail Fragment: {snippet}"]
             if pdf_data:
-                content_parts.append({"mime_type": "application/pdf", "data": pdf_data})
+                content_parts.append(types.Part.from_bytes(data=pdf_data, mime_type="application/pdf"))
             
             try:
                 response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=content_parts)

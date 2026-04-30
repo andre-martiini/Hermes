@@ -69,14 +69,14 @@ def _authenticate(credentials_path, token_path, force):
             creds = None
 
     if force or not creds or not creds.valid:
-        if force:
-            _backup_and_remove(token_path)
-
         flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
         print("")
         print("Abrindo login Google. Autorize a conta que o Hermes deve usar.")
         print("Se o navegador nao abrir, copie a URL exibida no terminal.")
+        print("Aguarde esta janela mostrar a mensagem de sucesso antes de fechar.")
         print("")
+        previous_relax_scope = os.environ.get("OAUTHLIB_RELAX_TOKEN_SCOPE")
+        os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
         try:
             creds = flow.run_local_server(
                 port=8080,
@@ -84,16 +84,18 @@ def _authenticate(credentials_path, token_path, force):
                 access_type="offline",
                 include_granted_scopes="true",
             )
-        except Exception as exc:
-            print(f"Falha ao abrir servidor local ({exc}). Usando modo console.")
-            creds = flow.run_console(
-                prompt="consent",
-                access_type="offline",
-                include_granted_scopes="true",
-            )
+        finally:
+            if previous_relax_scope is None:
+                os.environ.pop("OAUTHLIB_RELAX_TOKEN_SCOPE", None)
+            else:
+                os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = previous_relax_scope
 
-    with open(token_path, "w", encoding="utf-8") as token_fh:
+    tmp_token_path = f"{token_path}.tmp"
+    with open(tmp_token_path, "w", encoding="utf-8") as token_fh:
         token_fh.write(creds.to_json())
+    if force:
+        _backup_and_remove(token_path)
+    os.replace(tmp_token_path, token_path)
     return creds
 
 

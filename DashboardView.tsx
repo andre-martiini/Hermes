@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
     Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry,
     HealthWeight, DailyHabits, HealthSettings, WorkItem, Sistema
@@ -25,7 +25,7 @@ interface DashboardViewProps {
 
 // --- SUBCOMPONENTES MOVIDOS PARA FORA ---
 
-const DashboardCard = ({ title, iconColor, onRedirect, children, isDark = false }: { title: string, iconColor: string, onRedirect: () => void, children: React.ReactNode, isDark?: boolean }) => (
+const DashboardCard = ({ title, iconColor, onRedirect, children, isDark = false, headerAction }: { title: string, iconColor: string, onRedirect: () => void, children: React.ReactNode, isDark?: boolean, headerAction?: React.ReactNode }) => (
     <div
         onClick={onRedirect}
         className={`group p-3 md:p-4 rounded-2xl md:rounded-[1.5rem] border h-full transition-all flex flex-col cursor-pointer min-h-0 ${isDark ? 'bg-slate-900/85 border-slate-800 hover:border-slate-700' : 'bg-white border-slate-200 shadow-sm md:shadow-md hover:shadow-xl hover:border-slate-300'}`}
@@ -37,10 +37,13 @@ const DashboardCard = ({ title, iconColor, onRedirect, children, isDark = false 
                 <span className={`w-1.5 h-5 md:h-7 ${iconColor} rounded-full`}></span>
                 <h3 className={`text-xs md:text-base font-black uppercase tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{title}</h3>
             </div>
-            <div className={`p-2 rounded-xl transition-all ${isDark ? 'text-slate-500 group-hover:bg-slate-800 group-hover:text-slate-100' : 'text-slate-400 group-hover:bg-slate-50 group-hover:text-slate-900'}`}>
-                <svg className="w-5 h-5 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                </svg>
+            <div className="flex items-center gap-1">
+                {headerAction}
+                <div className={`p-2 rounded-xl transition-all ${isDark ? 'text-slate-500 group-hover:bg-slate-800 group-hover:text-slate-100' : 'text-slate-400 group-hover:bg-slate-50 group-hover:text-slate-900'}`}>
+                    <svg className="w-5 h-5 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                    </svg>
+                </div>
             </div>
         </div>
         <div className="flex-1 flex flex-col justify-center min-h-0 overflow-hidden">
@@ -132,6 +135,33 @@ const SystemsBarChart = ({ data, isDark = false }: { data: [string, number][], i
     );
 };
 
+const HiddenMoney = ({ className = "", compact = false }: { className?: string, compact?: boolean }) => (
+    <span className={`inline-block font-black tracking-normal select-none ${className}`} aria-label="valor oculto">
+        R$ {compact ? '••••' : '••••••'}
+    </span>
+);
+
+const HiddenPercent = ({ className = "" }: { className?: string }) => (
+    <span className={`inline-flex items-center gap-1 font-bold select-none ${className}`} aria-label="percentual oculto">
+        ••%
+    </span>
+);
+
+const HiddenBarChart = ({ isDark = false }: { isDark?: boolean }) => (
+    <div className={`relative flex items-end gap-0.5 md:gap-1 h-[40px] md:h-[65px] w-full rounded-lg md:rounded-xl px-1 md:px-2 pb-1 md:pb-2 overflow-hidden ${isDark ? 'bg-slate-950/80' : 'bg-slate-50/50'}`}>
+        {Array.from({ length: 12 }).map((_, i) => (
+            <div
+                key={i}
+                className={`flex-1 rounded-t-sm md:rounded-t-md ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}
+                style={{ height: `${18 + ((i * 7) % 32)}px`, opacity: 0.55 }}
+            />
+        ))}
+        <div className={`absolute inset-0 flex items-center justify-center text-[9px] md:text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-slate-500 bg-slate-950/40' : 'text-slate-400 bg-white/35'}`}>
+            Dados ocultos
+        </div>
+    </div>
+);
+
 const OrphanItemsDebugger = ({ workItems, unidades, sistemasDetalhes }: { workItems: WorkItem[], unidades: { id: string, nome: string }[], sistemasDetalhes: Sistema[] }) => {
     const orphans = workItems.filter(w => !w.concluido && !unidades.some(u => u.id === w.sistema_id) && !sistemasDetalhes.some(s => s.id === w.sistema_id));
 
@@ -175,6 +205,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     onNavigate,
     onOpenBacklog
 }) => {
+    const [isFinanceVisible, setIsFinanceVisible] = useState(false);
+
     const { todayStr, tomorrowStr } = useMemo(() => {
         const now = new Date();
         const formatDate = (d: Date) => {
@@ -378,31 +410,70 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                 </DashboardCard>
 
                 {/* CARD: FINANCEIRO */}
-                <DashboardCard title="Financeiro" iconColor="bg-emerald-500" onRedirect={() => onNavigate('finance')} isDark={isDark}>
+                <DashboardCard
+                    title="Financeiro"
+                    iconColor="bg-emerald-500"
+                    onRedirect={() => onNavigate('finance')}
+                    isDark={isDark}
+                    headerAction={
+                        <button
+                            type="button"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                setIsFinanceVisible(prev => !prev);
+                            }}
+                            onMouseDown={(event) => event.stopPropagation()}
+                            className={`p-2 rounded-xl transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500/60 ${isDark ? 'text-slate-500 hover:bg-slate-800 hover:text-emerald-300' : 'text-slate-400 hover:bg-emerald-50 hover:text-emerald-700'}`}
+                            title={isFinanceVisible ? 'Ocultar dados financeiros' : 'Mostrar dados financeiros'}
+                            aria-label={isFinanceVisible ? 'Ocultar dados financeiros' : 'Mostrar dados financeiros'}
+                            aria-pressed={isFinanceVisible}
+                        >
+                            {isFinanceVisible ? (
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.4" d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.4" d="M12 9.2a2.8 2.8 0 110 5.6 2.8 2.8 0 010-5.6z" />
+                                </svg>
+                            ) : (
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.4" d="M3 3l18 18" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.4" d="M9.5 5.5A10.7 10.7 0 0112 5c6 0 9.5 7 9.5 7a17.4 17.4 0 01-3.1 4.1M14.1 14.1A3 3 0 019.9 9.9M6.7 6.7C4.1 8.5 2.5 12 2.5 12s3.5 7 9.5 7c1.5 0 2.8-.3 4-.8" />
+                                </svg>
+                            )}
+                        </button>
+                    }
+                >
                     <div className="space-y-2 md:space-y-4">
                         <div>
                             <p className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-0.5 md:mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Saldo Disponível</p>
                             <div className={`text-lg md:text-2xl font-black tracking-tight ${availableBalance < 0 ? 'text-rose-600' : isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                                R$ {availableBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                {isFinanceVisible ? `R$ ${availableBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : <HiddenMoney />}
                             </div>
                         </div>
                         <div className="flex-1">
                             <p className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Gastos Diários</p>
-                            <BarChart data={dailySpending} color={isDark ? "#34d399" : "#10b981"} isDark={isDark} />
+                            {isFinanceVisible ? (
+                                <BarChart data={dailySpending} color={isDark ? "#34d399" : "#10b981"} isDark={isDark} />
+                            ) : (
+                                <HiddenBarChart isDark={isDark} />
+                            )}
                         </div>
                         <div className={`grid grid-cols-2 gap-2 md:gap-4 pt-2 md:pt-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
                             <div className="group">
                                 <p className={`text-[7px] md:text-[9px] font-black uppercase tracking-widest mb-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Recebido</p>
-                                <div className={`text-[10px] md:text-sm font-black transition-colors ${isDark ? 'text-slate-100 group-hover:text-emerald-300' : 'text-slate-900 group-hover:text-emerald-600'}`}>R$ {currentMonthIncome.toLocaleString('pt-BR')}</div>
+                                <div className={`text-[10px] md:text-sm font-black transition-colors ${isDark ? 'text-slate-100 group-hover:text-emerald-300' : 'text-slate-900 group-hover:text-emerald-600'}`}>
+                                    {isFinanceVisible ? `R$ ${currentMonthIncome.toLocaleString('pt-BR')}` : <HiddenMoney compact />}
+                                </div>
                                 <div className={`text-[7px] md:text-[9px] font-bold inline-flex items-center gap-1 ${incomeVariation >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                    {incomeVariation >= 0 ? '↑' : '↓'} {Math.abs(incomeVariation).toFixed(0)}%
+                                    {isFinanceVisible ? `${incomeVariation >= 0 ? '↑' : '↓'} ${Math.abs(incomeVariation).toFixed(0)}%` : <HiddenPercent />}
                                 </div>
                             </div>
                             <div className="group">
                                 <p className={`text-[7px] md:text-[9px] font-black uppercase tracking-widest mb-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Em Contas</p>
-                                <div className={`text-[10px] md:text-sm font-black transition-colors ${isDark ? 'text-slate-100 group-hover:text-rose-300' : 'text-slate-900 group-hover:text-rose-600'}`}>R$ {currentTotalBills.toLocaleString('pt-BR')}</div>
+                                <div className={`text-[10px] md:text-sm font-black transition-colors ${isDark ? 'text-slate-100 group-hover:text-rose-300' : 'text-slate-900 group-hover:text-rose-600'}`}>
+                                    {isFinanceVisible ? `R$ ${currentTotalBills.toLocaleString('pt-BR')}` : <HiddenMoney compact />}
+                                </div>
                                 <div className={`text-[7px] md:text-[9px] font-bold inline-flex items-center gap-1 ${billsVariation <= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                    {billsVariation <= 0 ? '↓' : '↑'} {Math.abs(billsVariation).toFixed(0)}%
+                                    {isFinanceVisible ? `${billsVariation <= 0 ? '↓' : '↑'} ${Math.abs(billsVariation).toFixed(0)}%` : <HiddenPercent />}
                                 </div>
                             </div>
                         </div>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { AppSettings, Categoria } from '../../types';
+import { AppSettings, Categoria, Tarefa } from '../../types';
 import { functions } from '../../firebase';
 import { httpsCallable } from 'firebase/functions';
 
@@ -93,6 +93,44 @@ export const isStandbyStatus = (status?: string | null) => {
   return normalized === 'stand-by' || normalized === 'standby' || normalized === 'stand by' || normalized === 'cgby';
 };
 export const isCompletedStatus = (status?: string | null) => normalizeStatus(status || '') === 'concluido';
+
+export const hasValidTaskDate = (date?: string | null) => {
+  return Boolean(date && date !== '-' && date !== '0000-00-00');
+};
+
+export const applyStandbyDateRules = (
+  updates: Partial<Tarefa> & Record<string, any>,
+  previousTask?: Partial<Tarefa> | null
+) => {
+  const payload: Record<string, any> = { ...updates };
+  const hasDateLimit = Object.prototype.hasOwnProperty.call(payload, 'data_limite');
+  const hasDateStart = Object.prototype.hasOwnProperty.call(payload, 'data_inicio');
+
+  if (hasDateLimit || hasDateStart) {
+    const singleDate = (payload.data_limite ?? payload.data_inicio ?? '') as string;
+    payload.data_limite = singleDate;
+    payload.data_inicio = singleDate;
+  }
+
+  const dateWasAdded = (hasDateLimit || hasDateStart) && hasValidTaskDate(payload.data_limite || payload.data_inicio);
+  if (dateWasAdded && isStandbyStatus(previousTask?.status)) {
+    payload.status = 'em andamento';
+  }
+
+  const nextStatus = Object.prototype.hasOwnProperty.call(payload, 'status')
+    ? String(payload.status)
+    : previousTask?.status;
+
+  if (isStandbyStatus(nextStatus)) {
+    payload.data_limite = '';
+    payload.data_inicio = '';
+    payload.horario_inicio = null;
+    payload.horario_fim = null;
+    return payload;
+  }
+
+  return payload;
+};
 
 export const formatWhatsAppText = (text: string, isDarkMode: boolean = false) => {
   if (!text) return text;
