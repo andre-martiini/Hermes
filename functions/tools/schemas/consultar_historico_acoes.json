@@ -1,12 +1,12 @@
 {
   "name": "consultar_historico_acoes",
-  "description": "Busca ações, tarefas e projetos no Hermes",
+  "description": "Busca ações, tarefas e projetos no Hermes com pesquisa flexível por frase natural, termos aproximados, sinônimos, erros de digitação e número de processo",
   "parameters": {
     "type": "object",
     "properties": {
       "query": {
         "type": "string",
-        "description": "Termos de busca (ex: 'relatório financeiro', 'sprint 3')"
+        "description": "Frase natural ou termos de busca. Pode incluir palavras aproximadas, sinônimos, erros de digitação ou número de processo (ex: 'contratação de mobiliário para som e eventos', 'relatório financeiro', '23543.000286/2026-39')"
       },
       "area_tematica": {
         "type": "string",

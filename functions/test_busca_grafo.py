@@ -117,6 +117,106 @@ class TestBuscaGrafo(unittest.TestCase):
         self.assertEqual(result["resultados"][0]["id"], "task-1")
         self.assertIn("fallback local", result.get("aviso", "").lower())
 
+    def test_buscar_tarefas_encontra_acao_com_termos_aproximados(self):
+        docs = [
+            _FakeDoc(
+                "task-target",
+                {
+                    "titulo": "Publicação de Dispensa Eletrônica: Locação de Mobiliário e Som para Eventos (processo 23543.000286/2026-39)",
+                    "descricao": "Contratação por dispensa para estrutura de eventos.",
+                    "status": "em andamento",
+                    "area_tematica": "COMPRAS",
+                    "processo_sei": "23543.000286/2026-39",
+                    "data_criacao": "2026-04-20T10:00:00Z",
+                },
+            ),
+            _FakeDoc(
+                "task-distractor",
+                {
+                    "titulo": "Contratação de limpeza predial",
+                    "descricao": "Serviço continuado para manutenção.",
+                    "status": "em andamento",
+                    "area_tematica": "SERVICOS",
+                    "data_criacao": "2026-04-21T10:00:00Z",
+                },
+            ),
+        ]
+
+        import tools.busca_grafo as busca_grafo
+
+        original_client = busca_grafo.firestore.Client
+        try:
+            busca_grafo.firestore.Client = lambda: _FakeDb(docs)
+            result = buscar_tarefas(
+                "Por favor, busque a ação relacionada à contratação de imobiliário para som e eventos",
+                match_mode="all",
+                limite=5,
+            )
+        finally:
+            busca_grafo.firestore.Client = original_client
+
+        self.assertIsNone(result["erro"])
+        self.assertGreaterEqual(len(result["resultados"]), 1)
+        self.assertEqual(result["resultados"][0]["id"], "task-target")
+
+    def test_buscar_tarefas_encontra_por_frase_curta_som_eventos(self):
+        docs = [
+            _FakeDoc(
+                "task-target",
+                {
+                    "titulo": "Publicação de Dispensa Eletrônica: Locação de Mobiliário e Som para Eventos",
+                    "status": "em andamento",
+                    "data_criacao": "2026-04-20T10:00:00Z",
+                },
+            )
+        ]
+
+        import tools.busca_grafo as busca_grafo
+
+        original_client = busca_grafo.firestore.Client
+        try:
+            busca_grafo.firestore.Client = lambda: _FakeDb(docs)
+            result = buscar_tarefas("som eventos", match_mode="all", limite=5)
+        finally:
+            busca_grafo.firestore.Client = original_client
+
+        self.assertIsNone(result["erro"])
+        self.assertEqual(result["resultados"][0]["id"], "task-target")
+
+    def test_buscar_tarefas_numero_processo_prioriza_identificador_exato(self):
+        docs = [
+            _FakeDoc(
+                "task-target",
+                {
+                    "titulo": "Locação de Mobiliário e Som para Eventos",
+                    "processo_sei": "23543.000286/2026-39",
+                    "status": "em andamento",
+                    "data_criacao": "2026-04-20T10:00:00Z",
+                },
+            ),
+            _FakeDoc(
+                "task-similar-process",
+                {
+                    "titulo": "Trabalhar no Processo de Chaveiro",
+                    "processo_sei": "23543.000056/2026-70",
+                    "status": "em andamento",
+                    "data_criacao": "2026-04-21T10:00:00Z",
+                },
+            ),
+        ]
+
+        import tools.busca_grafo as busca_grafo
+
+        original_client = busca_grafo.firestore.Client
+        try:
+            busca_grafo.firestore.Client = lambda: _FakeDb(docs)
+            result = buscar_tarefas("23543.000286/2026-39", match_mode="all", limite=5)
+        finally:
+            busca_grafo.firestore.Client = original_client
+
+        self.assertIsNone(result["erro"])
+        self.assertEqual([r["id"] for r in result["resultados"]], ["task-target"])
+
 
 if __name__ == "__main__":
     unittest.main()

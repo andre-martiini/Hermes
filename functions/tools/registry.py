@@ -4,7 +4,7 @@ import os
 _SCHEMA_DIR = os.path.join(os.path.dirname(__file__), "schemas")
 
 _CATALOG: dict[str, str] = {
-    "consultar_historico_acoes": "Busca acoes, tarefas e projetos no Hermes por texto, status, area ou prazo",
+    "consultar_historico_acoes": "Busca acoes, tarefas e projetos no Hermes por frase natural, texto aproximado, status, area ou prazo",
     "buscar_arquivos_acervo": "Busca documentos, manuais e arquivos no Acervo Global do Hermes",
     "pesquisar_internet": "Busca informacoes recentes e atuais na internet",
     "ler_pagina_web": "Le e extrai o conteudo completo de uma URL",

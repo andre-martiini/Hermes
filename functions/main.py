@@ -8297,6 +8297,25 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             try:
                 _ALLOWED_FIELDS = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas'}
 
+                def _normalizar_status_acao(valor):
+                    if valor is None:
+                        return valor
+                    raw = str(valor).strip().lower()
+                    try:
+                        import unicodedata
+                        raw = ''.join(c for c in unicodedata.normalize('NFD', raw) if unicodedata.category(c) != 'Mn')
+                    except Exception:
+                        pass
+                    raw = raw.replace('_', ' ').replace('-', ' ')
+                    raw = ' '.join(raw.split())
+                    if raw in ('concluido', 'concluida', 'concluir', 'finalizado', 'finalizada', 'completed', 'done'):
+                        return 'concluído'
+                    if raw in ('stand by', 'standby', 'pausado', 'pausada', 'pausar'):
+                        return 'stand-by'
+                    if raw in ('em andamento', 'andamento', 'pendente', 'aberto', 'aberta', 'reabrir'):
+                        return 'em andamento'
+                    return valor
+
                 task_ref = db.collection('tarefas').document(task_id)
                 task_doc = task_ref.get()
 
@@ -8313,6 +8332,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 for campo, novo_valor in (alteracoes or {}).items():
                     if campo not in _ALLOWED_FIELDS:
                         continue
+                    if campo == 'status':
+                        novo_valor = _normalizar_status_acao(novo_valor)
                     original = task_data.get(campo)
                     original_str = ', '.join(str(v) for v in original) if isinstance(original, list) else (str(original) if original is not None else '')
                     novo_str = ', '.join(str(v) for v in novo_valor) if isinstance(novo_valor, list) else (str(novo_valor) if novo_valor is not None else '')
@@ -9674,15 +9695,38 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
 
         # Aplica mudanças — somente campos whitelistados
         _ALLOWED = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas'}
+
+        def _normalizar_status_acao(valor):
+            if valor is None:
+                return valor
+            raw = str(valor).strip().lower()
+            try:
+                import unicodedata
+                raw = ''.join(c for c in unicodedata.normalize('NFD', raw) if unicodedata.category(c) != 'Mn')
+            except Exception:
+                pass
+            raw = raw.replace('_', ' ').replace('-', ' ')
+            raw = ' '.join(raw.split())
+            if raw in ('concluido', 'concluida', 'concluir', 'finalizado', 'finalizada', 'completed', 'done'):
+                return 'concluído'
+            if raw in ('stand by', 'standby', 'pausado', 'pausada', 'pausar'):
+                return 'stand-by'
+            if raw in ('em andamento', 'andamento', 'pendente', 'aberto', 'aberta', 'reabrir'):
+                return 'em andamento'
+            return valor
+
         updates = {}
         for campo, novo_valor in alteracoes.items():
             if campo not in _ALLOWED:
                 continue
-            if campo == 'status' and novo_valor not in ('em andamento', 'stand-by', 'concluído'):
-                continue
+            if campo == 'status':
+                novo_valor = _normalizar_status_acao(novo_valor)
+                if novo_valor not in ('em andamento', 'stand-by', 'concluído'):
+                    continue
             updates[campo] = novo_valor
 
         if not updates:
+            _set_card_status(db_ref, 'error', 'Nenhum campo válido para atualizar.')
             raise https_fn.HttpsError(
                 code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
                 message="Nenhum campo válido para atualizar."
@@ -9690,8 +9734,12 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
 
         now_iso = _dt.now(_tz.utc).isoformat()
         updates['data_atualizacao'] = now_iso
+        if updates.get('status') == 'concluído':
+            updates['data_conclusao'] = now_iso
+        elif updates.get('status') in ('em andamento', 'stand-by'):
+            updates['data_conclusao'] = None
 
-        campos_desc = ', '.join(k for k in updates if k != 'data_atualizacao')
+        campos_desc = ', '.join(k for k in updates if k not in ('data_atualizacao', 'data_conclusao'))
         diary_entry = {
             'data': now_iso,
             'nota': f"[Copiloto Hermes] Ação editada via card de confirmação. Campos alterados: {campos_desc}."
