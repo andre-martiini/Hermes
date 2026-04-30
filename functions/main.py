@@ -1780,6 +1780,8 @@ def run_full_sync(trigger_reason='unspecified'):
             log_to_firestore(sync_ref, logs, "[SYNC] Verificando novos documentos na Pasta de Deságue (Acervo Global)...", True)
             executar_monitoramento_acervo_global()
 
+            sync_system_repositories_to_rag(db, sync_ref, logs)
+
             sync_boletos_gmail(gs, sync_ref, logs)
 
             sync_state = sync_ref.get().to_dict() or {}
@@ -2321,6 +2323,21 @@ def upload_to_drive(req: https_fn.CallableRequest):
     except Exception as e:
 
         print(f"Erro no upload para o Drive: {str(e)}")
+
+        if isinstance(e, GoogleAuthRevokedError) or is_google_invalid_grant_error(e):
+            try:
+                get_db().collection('system').document('google_credentials').set({
+                    'auth_status': 'reauth_required',
+                    'auth_error': 'invalid_grant',
+                    'auth_error_message': GOOGLE_REAUTH_MESSAGE,
+                    'updated_at': firestore.SERVER_TIMESTAMP
+                }, merge=True)
+            except Exception as auth_status_err:
+                print(f"Falha ao marcar reautenticacao Google: {auth_status_err}")
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                message=GOOGLE_REAUTH_MESSAGE
+            )
 
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=str(e))
 
@@ -3131,20 +3148,16 @@ def processExtraContextFile(req: https_fn.CallableRequest):
     return {'success': True, 'docId': doc_id, 'vectorized': vectorized}
 
 
-@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=180, cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]))
-def sync_github_repo(req: https_fn.CallableRequest):
+def _sync_github_repo_internal(sistema_id: str, repo_url: str, skip_if_unchanged: bool = False, db=None) -> dict:
     """
     Extrai informações principais de um repositório GitHub e cria/atualiza
     uma base RAG vinculada ao sistema no Hermes.
     Extrai: README, árvore de arquivos, dependências e configs.
     """
     import requests as http_req
-    import re
     import base64 as b64
 
-    data = req.data
-    sistema_id = data.get('sistema_id')
-    repo_url = data.get('repo_url', '').strip()
+    repo_url = (repo_url or '').strip()
 
     if not sistema_id or not repo_url:
         raise https_fn.HttpsError(
@@ -3152,7 +3165,7 @@ def sync_github_repo(req: https_fn.CallableRequest):
             message="sistema_id e repo_url são obrigatórios."
         )
 
-    db = get_db()
+    db = db or get_db()
 
     # Busca chaves da API
     keys_doc = _cached_doc_get(db, 'system', 'api_keys')
@@ -3194,6 +3207,34 @@ def sync_github_repo(req: https_fn.CallableRequest):
     repo_data = repo_resp.json()
     default_branch = repo_data.get('default_branch', 'main')
     sistema_nome = repo_data.get('name', repo)
+    branch_sha = None
+    branch_resp = http_req.get(f'{base_url}/branches/{default_branch}', headers=headers, timeout=30)
+    if branch_resp.status_code == 200:
+        branch_sha = ((branch_resp.json().get('commit') or {}).get('sha') or '').strip() or None
+    if not branch_sha:
+        branch_sha = (repo_data.get('pushed_at') or repo_data.get('updated_at') or '').strip() or None
+
+    sistema_ref = db.collection('sistemas_detalhes').document(sistema_id)
+    if skip_if_unchanged and branch_sha:
+        sistema_data = sistema_ref.get().to_dict() or {}
+        last_sha = (sistema_data.get('github_rag_last_commit_sha') or '').strip()
+        last_repo_url = (sistema_data.get('github_rag_repo_url') or sistema_data.get('repositorio_principal') or '').strip()
+        if last_sha == branch_sha and last_repo_url == repo_url:
+            checked_at = datetime.now(timezone.utc).isoformat()
+            sistema_ref.set({
+                'github_rag_checked_at': checked_at,
+                'github_rag_repo_url': repo_url,
+                'data_atualizacao': checked_at,
+            }, merge=True)
+            return {
+                'success': True,
+                'skipped': True,
+                'reason': 'unchanged',
+                'base_id': f"github_{sistema_id}",
+                'chunks_created': 0,
+                'repo_name': sistema_nome,
+                'commit_sha': branch_sha,
+            }
 
     # 2. README
     readme_content = ""
@@ -3316,17 +3357,70 @@ def sync_github_repo(req: https_fn.CallableRequest):
     kb_ref.set(kb_data, merge=True)
 
     # ─── Atualiza sistema com data de sincronização ───────────────
-    db.collection('sistemas_detalhes').document(sistema_id).set({
-        'github_rag_synced_at': datetime.now(timezone.utc).isoformat(),
-        'data_atualizacao': datetime.now(timezone.utc).isoformat(),
+    synced_at = datetime.now(timezone.utc).isoformat()
+    sistema_ref.set({
+        'github_rag_synced_at': synced_at,
+        'github_rag_checked_at': synced_at,
+        'github_rag_last_commit_sha': branch_sha,
+        'github_rag_repo_url': repo_url,
+        'data_atualizacao': synced_at,
     }, merge=True)
 
     return {
         'success': True,
+        'skipped': False,
         'base_id': base_id,
         'chunks_created': created_count,
         'repo_name': sistema_nome,
+        'commit_sha': branch_sha,
     }
+
+
+def sync_system_repositories_to_rag(db, sync_ref, logs):
+    """Sincroniza bases RAG de sistemas apenas quando o repo mudou."""
+    try:
+        sistemas = []
+        for doc_snap in db.collection('sistemas_detalhes').stream():
+            data = doc_snap.to_dict() or {}
+            repo_url = (data.get('repositorio_principal') or '').strip()
+            if repo_url:
+                sistemas.append((doc_snap.id, data.get('nome') or data.get('nome_sistema') or doc_snap.id, repo_url))
+
+        if not sistemas:
+            log_to_firestore(sync_ref, logs, "[RAG] Nenhum repositorio de sistema configurado.", True)
+            return
+
+        synced_count = 0
+        skipped_count = 0
+        failed_count = 0
+        log_to_firestore(sync_ref, logs, f"[RAG] Verificando {len(sistemas)} repositorio(s) de sistemas...", True)
+
+        for sistema_id, sistema_nome, repo_url in sistemas:
+            try:
+                result = _sync_github_repo_internal(sistema_id, repo_url, skip_if_unchanged=True, db=db)
+                if result.get('skipped'):
+                    skipped_count += 1
+                    log_to_firestore(sync_ref, logs, f"[RAG] Sem alteracoes: {sistema_nome}.")
+                else:
+                    synced_count += 1
+                    log_to_firestore(sync_ref, logs, f"[RAG] Sincronizado: {sistema_nome} ({result.get('chunks_created', 0)} chunks).")
+            except Exception as e:
+                failed_count += 1
+                log_to_firestore(sync_ref, logs, f"[RAG][!] Falha ao verificar {sistema_nome}: {e}")
+
+        log_to_firestore(sync_ref, logs, f"[RAG] Concluido. {synced_count} sincronizado(s), {skipped_count} sem alteracao, {failed_count} falha(s).", True)
+    except Exception as e:
+        log_to_firestore(sync_ref, logs, f"[RAG][!] Erro geral na sincronizacao de sistemas: {e}", True)
+
+
+@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=180, cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]))
+def sync_github_repo(req: https_fn.CallableRequest):
+    data = req.data or {}
+    return _sync_github_repo_internal(
+        data.get('sistema_id'),
+        data.get('repo_url', ''),
+        skip_if_unchanged=bool(data.get('skip_if_unchanged', False)),
+    )
 
 
 @https_fn.on_call()

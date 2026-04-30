@@ -84,7 +84,17 @@ const DocumentViewer = ({ file, onClose, isDark }: {
   );
 };
 
-const getPendingFileKey = (file: File) => `${file.name}-${file.size}-${file.lastModified}`;
+type PendingUploadFile = {
+  id: string;
+  file: File;
+  customName: string;
+};
+
+const createPendingUploadFile = (file: File): PendingUploadFile => ({
+  id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2, 10)}`,
+  file,
+  customName: file.name,
+});
 
 interface Artifact {
   id: string;
@@ -363,8 +373,7 @@ export const TaskExecutionView = ({
   const [reminderDate, setReminderDate] = useState('');
   const [reminderTime, setReminderTime] = useState('');
   const [showReminderHistory, setShowReminderHistory] = useState(false);
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const [pendingFileNames, setPendingFileNames] = useState<Record<string, string>>({});
+  const [pendingFiles, setPendingFiles] = useState<PendingUploadFile[]>([]);
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
 
   const streamRef = useRef<MediaStream | null>(null);
@@ -666,7 +675,10 @@ export const TaskExecutionView = ({
       showToast(`${uploadedItems.length} arquivo(s) carregado(s).`, 'success');
       return uploadedItems;
     } catch (err) {
-      showToast('Erro ao carregar para o Drive.', 'error');
+      const errorCode = typeof (err as any)?.code === 'string' ? (err as any).code : '';
+      const message = err instanceof Error ? err.message : '';
+      const shouldShowBackendMessage = errorCode.includes('failed-precondition') || message.includes('Autenticacao Google');
+      showToast(shouldShowBackendMessage && message ? message : 'Erro ao carregar para o Drive.', 'error');
       return [];
     } finally {
       setIsUploading(false);
@@ -682,9 +694,7 @@ export const TaskExecutionView = ({
 
   const handleDiaryFilesSelected = (selectedFiles: File[]) => {
     if (selectedFiles.length === 0) return;
-    const initialNames = selectedFiles.reduce((acc, f) => { acc[getPendingFileKey(f)] = f.name; return acc; }, {} as Record<string, string>);
-    setPendingFiles(selectedFiles);
-    setPendingFileNames(initialNames);
+    setPendingFiles(selectedFiles.map(createPendingUploadFile));
     setModalConfig({ type: 'file_upload', isOpen: true });
     setShowAttachMenu(false);
   };
@@ -796,10 +806,9 @@ export const TaskExecutionView = ({
         break;
       case 'file_upload':
         if (pendingFiles.length > 0) {
-          const filesToUpload = pendingFiles.map(f => ({ file: f, customName: pendingFileNames[getPendingFileKey(f)] }));
+          const filesToUpload = pendingFiles.map(({ file, customName }) => ({ file, customName }));
           setModalConfig({ ...modalConfig, isOpen: false });
           setPendingFiles([]);
-          setPendingFileNames({});
           handleFileUpload(filesToUpload);
           return;
         }
@@ -809,7 +818,6 @@ export const TaskExecutionView = ({
     setModalInputValue('');
     setModalInputName('');
     setPendingFiles([]);
-    setPendingFileNames({});
   };
 
   // ─── Chat / Copilot ───────────────────────────────────────────
@@ -2508,14 +2516,13 @@ export const TaskExecutionView = ({
             )}
             {modalConfig.type === 'file_upload' && (
               <div className="flex flex-col gap-3">
-                {pendingFiles.map((file, i) => {
-                  const key = getPendingFileKey(file);
+                {pendingFiles.map((pendingFile, i) => {
                   return (
-                    <div key={key}>
+                    <div key={pendingFile.id}>
                       <p className={`text-[9px] font-black uppercase tracking-widest mb-1 ${mutedText}`}>Arquivo {i + 1}</p>
-                      <input value={pendingFileNames[key] || ''} onChange={e => setPendingFileNames(prev => ({ ...prev, [key]: e.target.value }))}
+                      <input value={pendingFile.customName} onChange={e => setPendingFiles(prev => prev.map(item => item.id === pendingFile.id ? { ...item, customName: e.target.value } : item))}
                         className={`w-full p-3 rounded-xl border outline-none ${isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`} />
-                      <p className={`text-[10px] mt-0.5 ${mutedText}`}>Original: {file.name}</p>
+                      <p className={`text-[10px] mt-0.5 ${mutedText}`}>Original: {pendingFile.file.name}</p>
                     </div>
                   );
                 })}
@@ -2523,7 +2530,7 @@ export const TaskExecutionView = ({
             )}
 
             <div className="flex gap-3 mt-6 justify-end">
-              <button onClick={() => { setModalConfig({ ...modalConfig, isOpen: false }); setModalInputValue(''); setModalInputName(''); setPendingFiles([]); setPendingFileNames({}); }}
+              <button onClick={() => { setModalConfig({ ...modalConfig, isOpen: false }); setModalInputValue(''); setModalInputName(''); setPendingFiles([]); }}
                 className={`px-4 py-2 font-bold ${isDark ? 'text-white/40' : 'text-slate-400'}`}>Cancelar</button>
               <button onClick={handleModalConfirm}
                 className={`px-6 py-2 rounded-xl font-black text-white shadow-lg transition-all ${modalConfig.type === 'confirm_delete' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
