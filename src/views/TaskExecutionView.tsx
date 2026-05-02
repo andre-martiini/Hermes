@@ -203,6 +203,9 @@ export const TaskExecutionView = ({
   const [mobileTab, setMobileTab] = useState<MobileTab>('diario');
   const [desktopViewportWidth, setDesktopViewportWidth] = useState(() => window.innerWidth);
   const isDesktopViewport = desktopViewportWidth >= 1024;
+  const isCompactMobileViewport = desktopViewportWidth < 640;
+  const [isMobileHeaderHidden, setIsMobileHeaderHidden] = useState(false);
+  const [mobileHeaderHeight, setMobileHeaderHeight] = useState(0);
   const [planPanelWidth, setPlanPanelWidth] = useState(PLAN_PANEL_DEFAULT_WIDTH);
   const [copilotPanelWidth, setCopilotPanelWidth] = useState(COPILOT_PANEL_DEFAULT_WIDTH);
   const [isPlanCollapsed, setIsPlanCollapsed] = useState(false);
@@ -424,6 +427,8 @@ export const TaskExecutionView = ({
   const audioChunksRef = useRef<Blob[]>([]);
   const diaryEndRef = useRef<HTMLDivElement>(null!);
   const workspaceRef = useRef<HTMLDivElement>(null!);
+  const mobileHeaderRef = useRef<HTMLElement>(null!);
+  const lastMobileScrollTopRef = useRef(0);
 
   const isBreakActive = false;
 
@@ -467,6 +472,54 @@ export const TaskExecutionView = ({
     window.addEventListener('resize', handleViewportResize);
     return () => window.removeEventListener('resize', handleViewportResize);
   }, []);
+
+  useEffect(() => {
+    if (!isCompactMobileViewport) {
+      setIsMobileHeaderHidden(false);
+      lastMobileScrollTopRef.current = 0;
+    }
+  }, [isCompactMobileViewport]);
+
+  useEffect(() => {
+    setIsMobileHeaderHidden(false);
+    lastMobileScrollTopRef.current = 0;
+  }, [mobileTab]);
+
+  useEffect(() => {
+    const header = mobileHeaderRef.current;
+    if (!header) return;
+
+    const updateHeaderHeight = () => setMobileHeaderHeight(header.offsetHeight);
+    updateHeaderHeight();
+
+    if (typeof ResizeObserver === 'undefined') return;
+    const resizeObserver = new ResizeObserver(updateHeaderHeight);
+    resizeObserver.observe(header);
+
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  const handleMobileHeaderScroll = (scrollTop: number) => {
+    if (!isCompactMobileViewport) return;
+
+    const previousScrollTop = lastMobileScrollTopRef.current;
+    const delta = scrollTop - previousScrollTop;
+    lastMobileScrollTopRef.current = Math.max(0, scrollTop);
+
+    if (scrollTop <= 12) {
+      setIsMobileHeaderHidden(false);
+      return;
+    }
+
+    if (delta > 6) {
+      setIsMobileHeaderHidden(true);
+      return;
+    }
+
+    if (delta < -6) {
+      setIsMobileHeaderHidden(false);
+    }
+  };
 
   useEffect(() => {
     try {
@@ -1341,7 +1394,11 @@ export const TaskExecutionView = ({
       {/* ══════════════════════════════════════════════════════════
           HEADER BAR
       ══════════════════════════════════════════════════════════ */}
-      <header className={`shrink-0 px-4 md:px-6 py-2 sm:py-3 border-b flex flex-col gap-2 ${isDark ? 'border-white/10 bg-black/30' : 'border-slate-200 bg-white/80 backdrop-blur-sm'}`}>
+      <header
+        ref={mobileHeaderRef}
+        style={{ marginTop: isCompactMobileViewport && isMobileHeaderHidden ? -mobileHeaderHeight : 0 }}
+        className={`shrink-0 px-4 md:px-6 py-2 sm:py-3 border-b flex flex-col gap-2 transition-[transform,margin,opacity] duration-300 ease-out max-sm:will-change-transform ${isCompactMobileViewport && isMobileHeaderHidden ? 'max-sm:-translate-y-full max-sm:opacity-0 max-sm:pointer-events-none' : 'max-sm:translate-y-0 max-sm:opacity-100'} ${isDark ? 'border-white/10 bg-black/30' : 'border-slate-200 bg-white/80 backdrop-blur-sm'}`}
+      >
         {/* Row 1: nav + title + controls */}
         <div className="hidden">
           {/* Back */}
@@ -1401,6 +1458,7 @@ export const TaskExecutionView = ({
                 onMarkAsRead={onMarkAsRead}
                 onDismiss={onDismiss}
                 onCreateAction={onCreateAction}
+                isDark={isDark}
                 direction="down"
               />
               {/* Status inline selector */}
@@ -1473,8 +1531,9 @@ export const TaskExecutionView = ({
                 onMarkAsRead={onMarkAsRead}
                 onDismiss={onDismiss}
                 onCreateAction={onCreateAction}
+                isDark={isDark}
                 direction="down"
-                triggerClassName="flex h-10 w-10 items-center justify-center rounded-[1rem] bg-white text-slate-700 border border-slate-200 shadow-[0_4px_12px_rgba(15,23,42,0.15)]"
+                triggerClassName={`flex h-10 w-10 items-center justify-center rounded-[1rem] border shadow-[0_4px_12px_rgba(15,23,42,0.15)] ${isDark ? 'bg-slate-900 text-slate-300 border-slate-800' : 'bg-white text-slate-700 border-slate-200'}`}
                 triggerIconClassName="h-4 w-4"
               />
             </div>
@@ -1568,6 +1627,7 @@ export const TaskExecutionView = ({
               onMarkAsRead={onMarkAsRead}
               onDismiss={onDismiss}
               onCreateAction={onCreateAction}
+              isDark={isDark}
               direction="down"
             />
             <select
@@ -1651,7 +1711,9 @@ export const TaskExecutionView = ({
               renderCollapsedPanelRail('plan', 'Plano', 'Sala de Operações', () => setIsPlanCollapsed(false))
             ) : (
               <>
-                <div className={`flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4 lg:flex-none lg:p-0 ${!showMapa ? 'hidden lg:flex' : 'flex'} shrink-0`}
+                <div
+                  onScroll={(event) => handleMobileHeaderScroll(event.currentTarget.scrollTop)}
+                  className={`flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4 lg:flex-none lg:p-0 ${!showMapa ? 'hidden lg:flex' : 'flex'} shrink-0`}
                   style={{ scrollbarWidth: 'thin', scrollbarColor: '#CBD5E0 transparent', width: isDesktopViewport ? mapPanelDesktopWidth : undefined }}>
                   <div className="hidden lg:flex items-center justify-between px-1 pb-1">
                     <div>
@@ -2156,7 +2218,7 @@ export const TaskExecutionView = ({
                   applyFormatting={() => { }}
                   isTimerRunning={isDark}
                   diaryEndRef={diaryEndRef}
-                  handleDiaryScroll={() => { }}
+                  handleDiaryScroll={(event) => handleMobileHeaderScroll(event.currentTarget.scrollTop)}
                   handleEditDiaryEntry={(index) => {
                     setModalInputValue(currentTaskData.acompanhamento![index].nota);
                     setModalConfig({ type: 'edit_diary', data: { index }, isOpen: true });
@@ -2178,6 +2240,11 @@ export const TaskExecutionView = ({
           renderCollapsedPanelRail('copilot', 'Copiloto', 'Hermes', () => setIsCopilotCollapsed(false))
         ) : (
           <div
+            onScrollCapture={(event) => {
+              if (event.target instanceof HTMLElement) {
+                handleMobileHeaderScroll(event.target.scrollTop);
+              }
+            }}
             className={`${showCopiloto ? 'flex' : 'hidden'} lg:flex min-h-0 flex-1 lg:flex-none flex-col overflow-hidden`}
             style={{ width: isDesktopViewport ? copilotoDesktopWidth : undefined }}
           >

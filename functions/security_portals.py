@@ -1,4 +1,5 @@
 from datetime import datetime
+import base64
 import json
 import re
 import secrets
@@ -247,11 +248,12 @@ def matchShoppingItemsAI(req: https_fn.CallableRequest):
     data = req.data or {}
     text = str(data.get('text') or '').strip()
     catalog_items = data.get('catalogItems') or []
+    images = data.get('images') or []
 
-    if not text:
+    if not text and not images:
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
-            message="Texto do pedido e obrigatorio."
+            message="Texto ou imagem do pedido e obrigatorio."
         )
 
     db = get_db()
@@ -275,6 +277,9 @@ CATALOGO DISPONIVEL (id|nome|categoria):
 PEDIDO DO USUARIO:
 "{text}"
 
+IMAGENS RECEBIDAS:
+{len(images)} imagem(ns). Quando houver imagens, leia listas manuscritas, fotografadas, prints ou notas fiscais simples e extraia apenas itens de compra claramente identificaveis.
+
 Regras OBRIGATORIAS de matching:
 1. Ignore maiusculas/minusculas e acentos. "arroz" casa com "Arroz", "feijao" casa com "Feijão".
 2. Use matching semantico e fuzzy: abreviacoes, sinonimos, plurais, erros de digitacao devem ser aceitos.
@@ -292,8 +297,22 @@ Responda SOMENTE com JSON valido, sem markdown, sem explicacoes:
 
     try:
         genai = get_genai_module()
+        from google.genai import types
         client = genai.Client(api_key=gemini_key)
-        result = client.models.generate_content(model='gemini-3-flash-preview', contents=prompt)
+        content_parts = [prompt]
+        for image in images[:4]:
+            if not isinstance(image, dict):
+                continue
+            mime_type = str(image.get('mimeType') or 'image/png')
+            raw_base64 = str(image.get('base64') or '')
+            if not raw_base64 or not mime_type.startswith('image/'):
+                continue
+            try:
+                content_parts.append(types.Part.from_bytes(data=base64.b64decode(raw_base64), mime_type=mime_type))
+            except Exception as img_err:
+                print(f"Imagem ignorada em matchShoppingItemsAI: {img_err}")
+
+        result = client.models.generate_content(model='gemini-3-flash-preview', contents=content_parts)
         parsed = parse_json_response(result.text or '')
         itens = parsed.get('itens') or []
 

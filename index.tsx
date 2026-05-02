@@ -18,10 +18,10 @@ import {
 import HealthView from './HealthView';
 import { MeetingTranscriptionTool } from './src/components/tools/MeetingTranscriptionTool';
 import { STATUS_COLORS, PROJECT_COLORS, SLIDES_HISTORY_KEY } from './constants';
-import { db, functions, messaging, auth, googleProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from './firebase';
+import { db, functions, getFirebaseMessaging, auth, googleProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, onSnapshot, query, orderBy, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, writeBatch, getDoc, getDocs, where } from 'firebase/firestore';
-import { getToken, onMessage, isSupported } from 'firebase/messaging';
+import { getToken, onMessage } from 'firebase/messaging';
 import { httpsCallable } from 'firebase/functions';
 import FinanceView from './FinanceView';
 import DashboardView from './DashboardView';
@@ -641,13 +641,30 @@ interface AIMatchedItem {
   isNew?: boolean;    // not in catalog yet
 }
 
+interface ShoppingAIImage {
+  id: string;
+  name: string;
+  mimeType: string;
+  base64: string;
+  previewUrl: string;
+}
+
+interface ShoppingAIConfirmItem {
+  id?: string;
+  nome?: string;
+  categoria?: string;
+  quantidade: string;
+  unit?: string;
+  isNew?: boolean;
+}
+
 const ShoppingAIModal = ({
   isOpen, onClose, catalogItems, onConfirmItems, onViewList
 }: {
   isOpen: boolean;
   onClose: () => void;
   catalogItems: ShoppingItem[];
-  onConfirmItems: (items: { id: string; quantidade: string }[]) => void;
+  onConfirmItems: (items: ShoppingAIConfirmItem[]) => void;
   onViewList: () => void;
 }) => {
   const [step, setStep] = useState<'input' | 'processing' | 'validation'>('input');
@@ -655,6 +672,9 @@ const ShoppingAIModal = ({
   const [isRecording, setIsRecording] = useState(false);
   const [matchedItems, setMatchedItems] = useState<AIMatchedItem[]>([]);
   const [errorMsg, setErrorMsg] = useState('');
+  const [attachedImages, setAttachedImages] = useState<ShoppingAIImage[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const imageUrlsRef = useRef<string[]>([]);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
@@ -671,8 +691,68 @@ const ShoppingAIModal = ({
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
+      imageUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
     };
   }, []);
+
+  const handleImageFiles = async (files: File[]) => {
+    const imageFiles = files.filter(file => file.type.startsWith('image/'));
+    if (imageFiles.length === 0) return;
+
+    const availableSlots = Math.max(0, 4 - attachedImages.length);
+    if (availableSlots === 0) {
+      setErrorMsg('Limite de 4 imagens por processamento.');
+      return;
+    }
+
+    const acceptedFiles = imageFiles.slice(0, availableSlots);
+    const oversized = acceptedFiles.find(file => file.size > 4 * 1024 * 1024);
+    if (oversized) {
+      setErrorMsg('Use imagens de atÃ© 4 MB cada.');
+      return;
+    }
+
+    const images = await Promise.all(acceptedFiles.map(file => new Promise<ShoppingAIImage>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result || '');
+        const previewUrl = URL.createObjectURL(file);
+        imageUrlsRef.current.push(previewUrl);
+        resolve({
+          id: `${Date.now()}_${Math.random()}`,
+          name: file.name || 'imagem-colada',
+          mimeType: file.type || 'image/png',
+          base64: dataUrl.split(',')[1] || '',
+          previewUrl,
+        });
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    })));
+
+    setErrorMsg('');
+    setAttachedImages(prev => [...prev, ...images]);
+  };
+
+  const removeImage = (id: string) => {
+    setAttachedImages(prev => {
+      const target = prev.find(image => image.id === id);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter(image => image.id !== id);
+    });
+  };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handlePaste = (e: ClipboardEvent) => {
+      const files = Array.from(e.clipboardData?.files || []).filter(file => file.type.startsWith('image/'));
+      if (files.length === 0) return;
+      e.preventDefault();
+      handleImageFiles(files);
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [isOpen, attachedImages.length]);
 
   if (!isOpen) return null;
 
@@ -731,7 +811,7 @@ const ShoppingAIModal = ({
   };
 
   // --- Gemini matching ---
-  const processWithGemini = async (text: string) => {
+  const processWithGemini = async (text: string, images: ShoppingAIImage[] = attachedImages) => {
     setStep('processing');
     setErrorMsg('');
     try {
@@ -759,6 +839,11 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
       const fn = httpsCallable(functions, 'matchShoppingItemsAI');
       const result = await fn({
         text,
+        images: images.map(image => ({
+          mimeType: image.mimeType,
+          base64: image.base64,
+          name: image.name,
+        })),
         catalogItems: catalogItems.map((item) => ({
           id: item.id,
           nome: item.nome,
@@ -796,8 +881,8 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
   };
 
   const handleSubmitText = async () => {
-    if (!textInput.trim()) return;
-    await processWithGemini(textInput.trim());
+    if (!textInput.trim() && attachedImages.length === 0) return;
+    await processWithGemini(textInput.trim(), attachedImages);
   };
 
   const toggleItem = (id: string) => {
@@ -808,36 +893,49 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
     setMatchedItems(prev => prev.map(i => i.id === id ? { ...i, quantidade: val } : i));
   };
 
+  const updateMatchedItem = (id: string, updates: Partial<AIMatchedItem>) => {
+    setMatchedItems(prev => prev.map(i => i.id === id ? { ...i, ...updates } : i));
+  };
+
   const handleConfirm = () => {
-    const toAdd = matchedItems.filter(i => i.confirmed && !i.isNew);
+    const toAdd = matchedItems.filter(i => i.confirmed && (!i.isNew || i.nome.trim()));
     if (toAdd.length === 0) { onClose(); return; }
-    onConfirmItems(toAdd.map(i => ({ id: i.id, quantidade: i.quantidade })));
+    onConfirmItems(toAdd.map(i => ({
+      id: i.isNew ? undefined : i.id,
+      nome: i.nome.trim(),
+      categoria: i.categoria.trim() || 'Geral',
+      quantidade: i.quantidade || '1',
+      unit: i.unit || 'un',
+      isNew: i.isNew,
+    })));
     setTextInput('');
+    attachedImages.forEach(image => URL.revokeObjectURL(image.previewUrl));
+    setAttachedImages([]);
     setMatchedItems([]);
     setStep('input');
     onClose();
   };
 
-  const confirmedCount = matchedItems.filter(i => i.confirmed && !i.isNew).length;
+  const confirmedCount = matchedItems.filter(i => i.confirmed && (!i.isNew || i.nome.trim())).length;
   const newCount = matchedItems.filter(i => i.isNew).length;
 
   return (
-    <div className="fixed inset-0 z-[250] flex items-center justify-center p-0 md:p-4 bg-slate-900/70 backdrop-blur-md animate-in fade-in">
-      <div className="bg-white w-full max-w-2xl h-full md:h-auto md:max-h-[92vh] rounded-none md:rounded-[2.5rem] shadow-[0_40px_80px_-20px_rgba(0,0,0,0.35)] flex flex-col overflow-hidden animate-in zoom-in-95 duration-300">
+    <div className="fixed inset-0 z-[250] flex items-center justify-center p-0 md:p-4 bg-slate-900/70 dark:bg-black/80 backdrop-blur-md animate-in fade-in">
+      <div className="bg-white dark:bg-slate-950 w-full max-w-2xl h-full md:h-auto md:max-h-[92vh] rounded-none md:rounded-[2.5rem] shadow-[0_40px_80px_-20px_rgba(0,0,0,0.35)] dark:shadow-[0_40px_100px_-20px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden animate-in zoom-in-95 duration-300">
 
         {/* Header */}
-        <div className="p-7 md:p-8 border-b border-slate-100 bg-gradient-to-br from-emerald-50/80 to-white flex items-center gap-4 flex-shrink-0">
-          <div className="w-12 h-12 bg-emerald-600 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-200 flex-shrink-0">
+        <div className="p-7 md:p-8 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-br from-emerald-50/80 to-white dark:from-emerald-950/45 dark:to-slate-950 flex items-center gap-4 flex-shrink-0">
+          <div className="w-12 h-12 bg-emerald-600 dark:bg-emerald-500 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-200 dark:shadow-emerald-950/40 flex-shrink-0">
             <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
           </div>
           <div className="flex-1 min-w-0">
-            <h3 className="text-xl font-black text-slate-900 tracking-tight">Assistente de Compras IA</h3>
-            <p className="text-emerald-600 text-[10px] font-black uppercase tracking-[0.2em] mt-0.5">
+            <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">Assistente de Compras IA</h3>
+            <p className="text-emerald-600 dark:text-emerald-300 text-[10px] font-black uppercase tracking-[0.2em] mt-0.5">
               {step === 'input' ? 'Diga o que você quer comprar' : step === 'processing' ? 'Buscando no catálogo...' : 'Valide os itens identificados'}
             </p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-2xl transition-all flex-shrink-0">
-            <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-2xl transition-all flex-shrink-0">
+            <svg className="w-5 h-5 text-slate-400 dark:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
 
@@ -848,26 +946,44 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
           {step === 'input' && (
             <>
               {errorMsg && (
-                <div className="bg-rose-50 border border-rose-100 rounded-2xl px-5 py-3 flex items-center gap-3">
+                <div className="bg-rose-50 dark:bg-rose-950/35 border border-rose-100 dark:border-rose-900/60 rounded-2xl px-5 py-3 flex items-center gap-3">
                   <svg className="w-4 h-4 text-rose-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                  <p className="text-rose-700 text-sm font-bold">{errorMsg}</p>
+                  <p className="text-rose-700 dark:text-rose-200 text-sm font-bold">{errorMsg}</p>
                 </div>
               )}
 
-              <div className="bg-slate-50 rounded-[2rem] border-2 border-slate-100 focus-within:border-emerald-400 transition-all shadow-inner overflow-hidden">
+              <div className="bg-slate-50 dark:bg-slate-900 rounded-[2rem] border-2 border-slate-100 dark:border-slate-800 focus-within:border-emerald-400 dark:focus-within:border-emerald-500 transition-all shadow-inner overflow-hidden">
                 <div className="flex items-start gap-3 p-4">
                   <button
                     onClick={isRecording ? stopRecording : startRecording}
-                    className={`mt-1 w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all ${isRecording ? 'bg-rose-500 text-white animate-pulse shadow-lg shadow-rose-200' : 'bg-white border border-slate-200 text-slate-400 hover:text-emerald-600 hover:border-emerald-200 hover:shadow-md'}`}
+                    className={`mt-1 w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all ${isRecording ? 'bg-rose-500 text-white animate-pulse shadow-lg shadow-rose-200 dark:shadow-rose-950/50' : 'bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-300 hover:border-emerald-200 dark:hover:border-emerald-700 hover:shadow-md'}`}
                     title={isRecording ? 'Parar gravação' : 'Gravar áudio'}
                   >
                     {isRecording
                       ? <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
                       : <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>}
                   </button>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="mt-1 w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-300 hover:border-emerald-200 dark:hover:border-emerald-700 hover:shadow-md"
+                    title="Carregar imagem"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-8h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={e => {
+                      handleImageFiles(Array.from(e.target.files || []));
+                      e.currentTarget.value = '';
+                    }}
+                  />
                   <textarea
                     autoFocus
-                    className="flex-1 bg-transparent border-none outline-none py-3 text-base font-bold text-slate-800 placeholder:text-slate-300 resize-none min-h-[120px]"
+                    className="flex-1 bg-transparent border-none outline-none py-3 text-base font-bold text-slate-800 dark:text-slate-100 placeholder:text-slate-300 dark:placeholder:text-slate-600 resize-none min-h-[120px]"
                     placeholder={isRecording ? 'Gravando... Fale os itens que deseja comprar...' : 'Ex: "2 kg de arroz, 1 caixa de leite, ricota, sabão em pó e 3 iogurtes"'}
                     value={textInput}
                     disabled={isRecording}
@@ -885,11 +1001,30 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
                     <span className="text-rose-600 text-[11px] font-black uppercase tracking-widest">Gravando</span>
                   </div>
                 )}
+                {attachedImages.length > 0 && (
+                  <div className="px-5 pb-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {attachedImages.map(image => (
+                      <div key={image.id} className="relative overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950">
+                        <img src={image.previewUrl} alt={image.name} className="h-24 w-full object-cover" />
+                        <button
+                          onClick={() => removeImage(image.id)}
+                          className="absolute right-2 top-2 w-7 h-7 rounded-xl bg-slate-950/80 text-white flex items-center justify-center hover:bg-rose-500 transition-colors"
+                          title="Remover imagem"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                        <div className="px-3 py-2">
+                          <p className="truncate text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">{image.name}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              <div className="bg-emerald-50/60 rounded-2xl border border-emerald-100/60 px-5 py-4 flex gap-3">
-                <svg className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                <p className="text-[11px] font-bold text-emerald-800 leading-relaxed">
+              <div className="bg-emerald-50/60 dark:bg-emerald-950/25 rounded-2xl border border-emerald-100/60 dark:border-emerald-900/50 px-5 py-4 flex gap-3">
+                <svg className="w-4 h-4 text-emerald-600 dark:text-emerald-300 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                <p className="text-[11px] font-bold text-emerald-800 dark:text-emerald-100 leading-relaxed">
                   O Hermes vai buscar os itens no seu catálogo usando IA. "Ricota" pode corresponder a "Queijo Ricota", "Bombril" a "Palha de Aço", etc.
                 </p>
               </div>
@@ -900,7 +1035,7 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
           {step === 'processing' && (
             <div className="py-20 flex flex-col items-center justify-center gap-6 text-center">
               <div className="relative w-20 h-20">
-                <div className="w-20 h-20 rounded-full border-4 border-emerald-100 animate-spin border-t-emerald-500" />
+                <div className="w-20 h-20 rounded-full border-4 border-emerald-100 dark:border-emerald-950 animate-spin border-t-emerald-500 dark:border-t-emerald-300" />
                 <div className="absolute inset-0 flex items-center justify-center">
                   <svg className="w-8 h-8 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
                 </div>
@@ -917,7 +1052,7 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
             <div className="space-y-4 animate-in fade-in duration-300">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="font-black text-slate-800">{matchedItems.filter(i => !i.isNew).length} itens identificados</p>
+                  <p className="font-black text-slate-800 dark:text-slate-100">{matchedItems.filter(i => !i.isNew).length} itens identificados</p>
                   {newCount > 0 && <p className="text-[10px] text-amber-600 font-black uppercase tracking-widest mt-0.5">{newCount} não encontrado{newCount > 1 ? 's' : ''} no catálogo</p>}
                 </div>
                 <button onClick={resetToInput} className="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-700 transition-colors">
@@ -929,43 +1064,61 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
                 {matchedItems.map(item => (
                   <div
                     key={item.id}
-                    onClick={() => !item.isNew && toggleItem(item.id)}
-                    className={`rounded-2xl border px-5 py-4 flex items-center gap-4 transition-all ${item.isNew ? 'bg-amber-50/50 border-amber-100 opacity-60 cursor-not-allowed' : item.confirmed ? 'bg-emerald-50/40 border-emerald-200 cursor-pointer hover:bg-emerald-50' : 'bg-slate-50 border-slate-100 cursor-pointer opacity-50 hover:opacity-70'}`}
+                    onClick={() => toggleItem(item.id)}
+                    className={`rounded-2xl border px-5 py-4 flex items-center gap-4 transition-all ${item.isNew ? 'bg-amber-50/70 dark:bg-amber-950/20 border-amber-100 dark:border-amber-900/50' : item.confirmed ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/60 cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-950/35' : 'bg-slate-50 dark:bg-slate-900 border-slate-100 dark:border-slate-800 cursor-pointer opacity-50 hover:opacity-70'}`}
                   >
                     {/* Checkbox */}
-                    <div className={`w-7 h-7 rounded-xl border-2 flex items-center justify-center flex-shrink-0 transition-all ${item.isNew ? 'border-amber-300 bg-amber-100' : item.confirmed ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 bg-white'}`}>
-                      {item.isNew
-                        ? <svg className="w-3.5 h-3.5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01" /></svg>
-                        : item.confirmed ? <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                          : null}
+                    <div className={`w-7 h-7 rounded-xl border-2 flex items-center justify-center flex-shrink-0 transition-all ${item.confirmed ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-950'}`}>
+                      {item.confirmed ? <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> : null}
                     </div>
 
                     {/* Item info */}
-                    <div className="flex-1 min-w-0">
-                      <p className={`font-black text-sm truncate ${item.isNew ? 'text-amber-700' : 'text-slate-900'}`}>{item.nome}</p>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
+                    <div className="flex-1 min-w-0" onClick={e => item.isNew && e.stopPropagation()}>
+                      {item.isNew ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-[1fr_9rem] gap-2">
+                          <input
+                            value={item.nome}
+                            onChange={e => updateMatchedItem(item.id, { nome: e.target.value })}
+                            className="w-full rounded-xl border border-amber-200 dark:border-amber-900/60 bg-white dark:bg-slate-950 px-3 py-2 text-sm font-black text-amber-800 dark:text-amber-100 outline-none focus:border-emerald-400"
+                            placeholder="Nome do item"
+                          />
+                          <input
+                            value={item.categoria}
+                            onChange={e => updateMatchedItem(item.id, { categoria: e.target.value })}
+                            className="w-full rounded-xl border border-amber-200 dark:border-amber-900/60 bg-white dark:bg-slate-950 px-3 py-2 text-sm font-bold text-slate-700 dark:text-slate-200 outline-none focus:border-emerald-400"
+                            placeholder="Categoria"
+                          />
+                          <p className="sm:col-span-2 text-[10px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-300">Novo item: serÃ¡ cadastrado no catÃ¡logo e adicionado ao planejamento</p>
+                        </div>
+                      ) : (
+                        <>
+                      <p className="font-black text-sm truncate text-slate-900 dark:text-slate-100">{item.nome}</p>
+                      <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-0.5">
                         {item.isNew ? '? Não no catálogo' : item.categoria}
                       </p>
+                        </>
+                      )}
                     </div>
 
                     {/* Quantity editor */}
-                    {!item.isNew && (
-                      <div onClick={e => e.stopPropagation()} className="flex items-center gap-2 bg-white border border-slate-100 rounded-xl px-3 py-2 shadow-sm">
-                        <button onClick={() => updateQtd(item.id, String(Math.max(0.5, parseFloat(item.quantidade) - 1)))} className="w-5 h-5 rounded-lg bg-slate-100 font-black flex items-center justify-center text-slate-600 hover:bg-emerald-100 transition-all text-sm leading-none">-</button>
-                        <span className="w-12 text-center font-black text-slate-800 text-sm">
-                          {item.quantidade} <span className="text-slate-400 font-medium text-[10px]">{item.unit}</span>
-                        </span>
-                        <button onClick={() => updateQtd(item.id, String(parseFloat(item.quantidade) + 1))} className="w-5 h-5 rounded-lg bg-slate-100 font-black flex items-center justify-center text-slate-600 hover:bg-emerald-100 transition-all text-sm leading-none">+</button>
-                      </div>
-                    )}
+                    <div onClick={e => e.stopPropagation()} className="flex items-center gap-2 bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-800 rounded-xl px-3 py-2 shadow-sm">
+                      <button onClick={() => updateQtd(item.id, String(Math.max(0.5, (parseFloat(item.quantidade) || 1) - 1)))} className="w-5 h-5 rounded-lg bg-slate-100 dark:bg-slate-800 font-black flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-all text-sm leading-none">-</button>
+                      <span className="w-12 text-center font-black text-slate-800 dark:text-slate-100 text-sm">
+                        {item.quantidade} <span className="text-slate-400 dark:text-slate-500 font-medium text-[10px]">{item.unit}</span>
+                      </span>
+                      <button onClick={() => updateQtd(item.id, String((parseFloat(item.quantidade) || 0) + 1))} className="w-5 h-5 rounded-lg bg-slate-100 dark:bg-slate-800 font-black flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-all text-sm leading-none">+</button>
+                    </div>
                   </div>
                 ))}
               </div>
 
               {newCount > 0 && (
-                <div className="bg-amber-50 border border-amber-100 rounded-2xl px-5 py-3 flex gap-3">
+                <div className="bg-amber-50 dark:bg-amber-950/25 border border-amber-100 dark:border-amber-900/50 rounded-2xl px-5 py-3 flex gap-3">
                   <svg className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                  <p className="text-[11px] font-bold text-amber-800 leading-relaxed">
+                  <p className="text-[11px] font-bold text-amber-800 dark:text-amber-100 leading-relaxed">
+                    {newCount} item(ns) nÃ£o foram encontrados no catÃ¡logo. Revise o nome e a categoria aqui; ao confirmar, eles serÃ£o cadastrados e adicionados ao planejamento.
+                  </p>
+                  <p className="hidden">
                     {newCount} item(ns) não foram encontrados no catálogo. Cadastre-os primeiro na aba "Cadastro" e o assistente os reconhecerá na próxima vez.
                   </p>
                 </div>
@@ -978,11 +1131,11 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
         <div className="flex-shrink-0 p-6 md:p-8 pt-0 space-y-3">
           {step === 'input' && (
             <div className="flex gap-4">
-              <button onClick={onClose} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-2xl transition-all">Fechar</button>
+              <button onClick={onClose} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-900 rounded-2xl transition-all">Fechar</button>
               <button
                 onClick={handleSubmitText}
-                disabled={!textInput.trim() || isRecording}
-                className="flex-[2] bg-emerald-600 text-white py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all disabled:opacity-50 disabled:grayscale flex items-center justify-center gap-2 active:scale-[0.98]"
+                disabled={(!textInput.trim() && attachedImages.length === 0) || isRecording}
+                className="flex-[2] bg-emerald-600 dark:bg-emerald-500 text-white py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-100 dark:shadow-emerald-950/40 hover:bg-emerald-700 dark:hover:bg-emerald-400 transition-all disabled:opacity-50 disabled:grayscale flex items-center justify-center gap-2 active:scale-[0.98]"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
                 Processar com IA
@@ -992,11 +1145,11 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
 
           {step === 'validation' && (
             <div className="flex gap-4">
-              <button onClick={resetToInput} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-2xl transition-all">Voltar</button>
+              <button onClick={resetToInput} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-900 rounded-2xl transition-all">Voltar</button>
               <button
                 onClick={handleConfirm}
                 disabled={confirmedCount === 0}
-                className="flex-[2] bg-slate-900 text-white py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:bg-emerald-600 transition-all disabled:opacity-50 disabled:grayscale flex items-center justify-center gap-2 active:scale-[0.98]"
+                className="flex-[2] bg-slate-900 dark:bg-emerald-500 text-white py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:bg-emerald-600 dark:hover:bg-emerald-400 transition-all disabled:opacity-50 disabled:grayscale flex items-center justify-center gap-2 active:scale-[0.98]"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                 Confirmar {confirmedCount} iten{confirmedCount !== 1 ? 's' : ''}
@@ -2130,6 +2283,10 @@ const App: React.FC = () => {
 
   // --- Firebase Cloud Messaging (FCM) & Push Notifications ---
   useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    let isCancelled = false;
+    const seenPushIds = new Set<string>();
+
     const setupFCM = async () => {
       if (!user) return;
       const isLocalhost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
@@ -2139,13 +2296,35 @@ const App: React.FC = () => {
       }
 
       try {
-        // Dynamic import and support check to avoid errors in unsupported browsers
-        const { isSupported } = await import('firebase/messaging');
-        const supported = await isSupported();
-        if (!supported || !messaging) {
+        const messaging = await getFirebaseMessaging();
+        if (isCancelled) return;
+        if (!messaging) {
           console.log('Push Notifications não suportadas neste navegador.');
           return;
         }
+
+        unsubscribe = onMessage(messaging, (payload) => {
+          console.log('Mensagem PUSH recebida em primeiro plano:', payload);
+          const payloadData = (payload.data || {}) as Record<string, string>;
+          const pushId = payloadData.id || payload.messageId || `${payloadData.link || ''}_${payloadData.title || ''}_${payloadData.message || ''}`;
+          if (seenPushIds.has(pushId)) return;
+          seenPushIds.add(pushId);
+          window.setTimeout(() => seenPushIds.delete(pushId), 15000);
+
+          const title = payload.notification?.title || payloadData.title || 'Hermes';
+          const message = payload.notification?.body || payloadData.message || '';
+          const newNotif: HermesNotification = {
+            id: pushId,
+            title,
+            message,
+            type: 'info',
+            timestamp: new Date().toISOString(),
+            isRead: false,
+            link: payloadData.link || ""
+          };
+          setNotifications(prev => prev.some(n => n.id === newNotif.id) ? prev : [newNotif, ...prev]);
+          setActivePopup(newNotif);
+        });
 
         console.log('Iniciando configuração de Push...');
         const permission = await Notification.requestPermission();
@@ -2183,33 +2362,10 @@ const App: React.FC = () => {
 
     setupFCM();
 
-    const seenPushIds = new Set<string>();
-
-    if (!messaging || !user) return;
-    const unsubscribe = onMessage(messaging, (payload) => {
-      console.log('Mensagem PUSH recebida em primeiro plano:', payload);
-      const payloadData = (payload.data || {}) as Record<string, string>;
-      const pushId = payloadData.id || payload.messageId || `${payloadData.link || ''}_${payloadData.title || ''}_${payloadData.message || ''}`;
-      if (seenPushIds.has(pushId)) return;
-      seenPushIds.add(pushId);
-      window.setTimeout(() => seenPushIds.delete(pushId), 15000);
-
-      const title = payload.notification?.title || payloadData.title || 'Hermes';
-      const message = payload.notification?.body || payloadData.message || '';
-      const newNotif: HermesNotification = {
-        id: pushId,
-        title,
-        message,
-        type: 'info',
-        timestamp: new Date().toISOString(),
-        isRead: false,
-        link: payloadData.link || ""
-      };
-      setNotifications(prev => prev.some(n => n.id === newNotif.id) ? prev : [newNotif, ...prev]);
-      setActivePopup(newNotif);
-    });
-
-    return () => unsubscribe();
+    return () => {
+      isCancelled = true;
+      unsubscribe?.();
+    };
   }, [user]);
 
   const emitNotification = async (title: string, message: string, type: 'info' | 'warning' | 'success' | 'error' = 'info', link?: string, id?: string) => {
@@ -3114,14 +3270,33 @@ const App: React.FC = () => {
     }
   };
 
-  const handleShoppingAIConfirm = async (confirmedItems: { id: string; quantidade: string }[]) => {
+  const handleShoppingAIConfirm = async (confirmedItems: ShoppingAIConfirmItem[]) => {
     try {
       const batch = writeBatch(db);
       let count = 0;
       confirmedItems.forEach(c => {
-        const exists = shoppingItems.find(i => i.id === c.id);
+        const exists = c.id ? shoppingItems.find(i => i.id === c.id) : null;
         if (exists) {
-          batch.update(doc(db, 'shopping_items', c.id), { isPlanned: true, quantidade: c.quantidade, isPurchased: false });
+          batch.update(doc(db, 'shopping_items', c.id!), { isPlanned: true, quantidade: c.quantidade, isPurchased: false });
+          count++;
+          return;
+        }
+
+        if (c.isNew && c.nome?.trim()) {
+          const duplicate = shoppingItems.find(i => i.nome.trim().toLowerCase() === c.nome!.trim().toLowerCase());
+          if (duplicate) {
+            batch.update(doc(db, 'shopping_items', duplicate.id), { isPlanned: true, quantidade: c.quantidade, isPurchased: false });
+          } else {
+            const ref = doc(collection(db, 'shopping_items'));
+            batch.set(ref, {
+              nome: c.nome.trim(),
+              categoria: c.categoria?.trim() || 'Geral',
+              quantidade: c.quantidade || '1',
+              unit: c.unit || 'un',
+              isPlanned: true,
+              isPurchased: false,
+            });
+          }
           count++;
         }
       });
@@ -5186,6 +5361,7 @@ const App: React.FC = () => {
                       onUpdateOverdue={handleUpdateOverdueTasks}
                       onNavigate={handleNotificationNavigate}
                       onCreateAction={() => setIsCreateModalOpen(true)}
+                      isDark={isDarkTheme}
                     />
 
                     {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && (
@@ -5322,7 +5498,7 @@ const App: React.FC = () => {
                       <div className="flex items-center gap-3 animate-in fade-in slide-in-from-left duration-500">
                         <button
                           onClick={handleExportModule}
-                          className="p-2 bg-white border border-slate-200 text-slate-400 rounded-xl hover:bg-slate-50 transition-all shadow-sm"
+                          className={`p-2 border rounded-xl transition-all shadow-sm ${isDarkTheme ? 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800' : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}
                           title="Exportar Markdown"
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4v12" /></svg>
@@ -5480,6 +5656,7 @@ const App: React.FC = () => {
                     onUpdateOverdue={handleUpdateOverdueTasks}
                     onNavigate={handleNotificationNavigate}
                     onCreateAction={() => setIsCreateModalOpen(true)}
+                    isDark={isDarkTheme}
                   />
 
                 </div>
@@ -5914,7 +6091,7 @@ const App: React.FC = () => {
                     )}
                   </>
                 ) : viewMode === 'concluidas' ? (
-                  <div className="animate-in border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl bg-white">
+                  <div className={`actions-completed-view animate-in border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl bg-white ${isDarkTheme ? 'actions-view-dark' : ''}`}>
                     <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <span className="w-2 h-6 bg-emerald-500 rounded-full"></span>
@@ -5961,6 +6138,7 @@ const App: React.FC = () => {
                     onSelectTask={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
                     onExecuteTask={(t) => { setSelectedTask(t); setTaskModalMode('execute'); }}
                     onAnalysePatterns={handleAnalysePatterns}
+                    isDark={isDarkTheme}
                   />
                 ) : viewMode === 'sistemas' ? (
                   <div className="animate-in space-y-8">
@@ -6059,6 +6237,7 @@ const App: React.FC = () => {
                       await updateDoc(doc(db, 'exames', id), updates);
                       showToast("Registro atualizado.", "success");
                     }}
+                    isDark={isDarkTheme}
                   />
                 ) : viewMode === 'ferramentas' ? (
                   <FerramentasView
@@ -6227,7 +6406,7 @@ const App: React.FC = () => {
                   </div>
 
                 ) : viewMode === 'sistemas-dev' ? (
-                  <div className="animate-in fade-in duration-500 pb-20">
+                  <div className={`systems-view animate-in fade-in duration-500 pb-20 ${isDarkTheme ? 'systems-view-dark' : ''}`}>
                     {!selectedSystemId ? (
                       /* TABLE VIEW */
                       (() => {
@@ -7274,7 +7453,7 @@ const App: React.FC = () => {
 
 
                 ) : (
-                  <div className="space-y-3 md:space-y-10">
+                  <div className={`actions-pgd-view space-y-3 md:space-y-10 ${isDarkTheme ? 'actions-view-dark' : ''}`}>
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 md:gap-6 bg-white p-3 md:p-8 rounded-none md:rounded-[2rem] border border-slate-200 shadow-xl">
                       <div className="hidden md:block">
                         <h3 className="text-4xl font-black text-slate-900 tracking-tighter">Gestão PGD</h3>
@@ -7866,6 +8045,7 @@ const App: React.FC = () => {
                   }
                 }}
                 onOpenCopilotoTool={(tool, id) => {
+                  setSelectedTask(null);
                   setActiveModule('acoes');
                   setViewMode('ferramentas');
                   if (tool === 'slides') {
@@ -7924,6 +8104,7 @@ const App: React.FC = () => {
               showToast={showToast}
               handleFileUploadToDrive={handleFileUploadToDrive}
               isUploading={isUploading}
+              isDark={isDarkTheme}
             />
           );
         })()}
@@ -8276,6 +8457,7 @@ const App: React.FC = () => {
             }
           }}
           onOpenTool={(tool, id) => {
+            setIsCopilotoOpen(false);
             setActiveModule('acoes');
             setViewMode('ferramentas');
             if (tool === 'slides') {

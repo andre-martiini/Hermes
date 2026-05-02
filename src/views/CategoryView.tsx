@@ -2,7 +2,7 @@ import React from 'react';
 import { Tarefa, formatDate, formatDateLocalISO } from '../../types';
 import { normalizeStatus } from '../utils/helpers';
 
-export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask, onAnalysePatterns }: { tasks: Tarefa[], viewMode: string, onSelectTask: (t: Tarefa) => void, onExecuteTask: (t: Tarefa) => void, onAnalysePatterns?: (cat: string) => void }) => {
+export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask, onAnalysePatterns, isDark = false }: { tasks: Tarefa[], viewMode: string, onSelectTask: (t: Tarefa) => void, onExecuteTask: (t: Tarefa) => void, onAnalysePatterns?: (cat: string) => void, isDark?: boolean }) => {
   const isCLC = viewMode === 'licitacoes';
   const areaTematica = isCLC ? 'CLC' : 'ASSISTÊNCIA';
   const color = isCLC ? 'blue' : 'emerald';
@@ -34,7 +34,7 @@ export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask, onA
     });
 
   return (
-    <div className="animate-in grid grid-cols-1 lg:grid-cols-12 gap-10">
+    <div className={`actions-category-view animate-in grid grid-cols-1 lg:grid-cols-12 gap-10 ${isDark ? 'actions-view-dark' : ''}`}>
       {/* Lado Esquerdo: Ações Pendentes */}
       <div className="lg:col-span-8 flex flex-col gap-6">
         <div className={`bg-white border-l-8 border-${color}-600 p-8 rounded-none md:rounded-[2rem] shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-6`}>
@@ -43,7 +43,7 @@ export const CategoryView = ({ tasks, viewMode, onSelectTask, onExecuteTask, onA
             <span className={`bg-${color}-100 text-${color}-600 text-[10px] font-black px-4 py-1.5 rounded-full`}>{pendentes.length}</span>
           </h3>
           <button
-            onClick={() => onAnalysePatterns?.(categoria)}
+            onClick={() => onAnalysePatterns?.(areaTematica)}
             className={`bg-slate-900 hover:bg-${color}-600 text-white px-6 py-3 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 shadow-lg active:scale-95`}
             title="Pedir para o HERMES aprender com seus processos recentes"
           >

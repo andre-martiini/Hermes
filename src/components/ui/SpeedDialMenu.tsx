@@ -25,6 +25,7 @@ interface SpeedDialMenuProps {
   direction?: 'up' | 'down';
   triggerClassName?: string;
   triggerIconClassName?: string;
+  isDark?: boolean;
 }
 
 export const SpeedDialMenu = ({
@@ -35,7 +36,8 @@ export const SpeedDialMenu = ({
   onCreateAction,
   direction = 'down',
   triggerClassName,
-  triggerIconClassName
+  triggerIconClassName,
+  isDark = false
 }: SpeedDialMenuProps) => {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -181,6 +183,9 @@ export const SpeedDialMenu = ({
         style={{ pointerEvents: open ? 'auto' : 'none' }}
       >
         {(direction === 'up' ? [...actions].reverse() : actions).map((action, i) => (
+          (() => {
+            const actionColor = isDark && action.color === 'text-slate-700' ? 'text-slate-300' : action.color;
+            return (
           <div
             key={action.label}
             className="flex items-center gap-2"
@@ -198,12 +203,14 @@ export const SpeedDialMenu = ({
             <button
               onClick={action.onClick}
               aria-label={action.label}
-              className={`relative bg-white border border-slate-200 ${action.color} p-2.5 rounded-xl shadow-md hover:shadow-lg hover:scale-110 active:scale-95 transition-all`}
+              className={`relative border ${isDark ? 'bg-slate-900 border-slate-800 hover:bg-slate-800' : 'bg-white border-slate-200'} ${actionColor} p-2.5 rounded-xl shadow-md hover:shadow-lg hover:scale-110 active:scale-95 transition-all`}
             >
               {action.icon}
               {action.badge}
             </button>
           </div>
+            );
+          })()
         ))}
       </div>
 
@@ -213,7 +220,7 @@ export const SpeedDialMenu = ({
         onClick={() => setOpen(prev => !prev)}
         aria-label="Ações Rápidas"
         aria-expanded={open}
-        className={`relative p-2 rounded-xl shadow-sm transition-all duration-200 active:scale-95 ${open ? 'bg-slate-900 border border-slate-900 text-white shadow-lg scale-105' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'} ${triggerClassName || ''}`}
+        className={`relative p-2 rounded-xl shadow-sm transition-all duration-200 active:scale-95 ${open ? 'bg-slate-900 border border-slate-900 text-white shadow-lg scale-105' : isDark ? 'bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800 hover:text-white' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'} ${triggerClassName || ''}`}
       >
         {/* 3×3 grid dots = "more actions" */}
         <svg className={triggerIconClassName || 'w-5 h-5'} viewBox="0 0 24 24" fill="currentColor">

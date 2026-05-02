@@ -41,6 +41,7 @@ interface SistemaExecutionViewProps {
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
   handleFileUploadToDrive: (file: File) => Promise<PoolItem | null>;
   isUploading: boolean;
+  isDark?: boolean;
 }
 
 // ─── Status maps ─────────────────────────────────────────────────────────────
@@ -81,6 +82,7 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
   showToast,
   handleFileUploadToDrive,
   isUploading,
+  isDark = false,
 }) => {
   const systemName = unit.nome.replace('SISTEMA:', '').trim();
   const systemWorkItems = workItems.filter(w => w.sistema_id === unit.id);
@@ -731,7 +733,7 @@ export const SistemaExecutionView: React.FC<SistemaExecutionViewProps> = ({
   // ─── Main render ──────────────────────────────────────────────────────────
 
   return (
-    <div className="fixed inset-0 z-[200] flex flex-col bg-white overflow-hidden">
+    <div className={`system-execution-view fixed inset-0 z-[200] flex flex-col bg-white overflow-hidden ${isDark ? 'system-execution-view-dark' : ''}`}>
 
       {/* ══════ HEADER ══════════════════════════════════════════════════════ */}
       <header className="shrink-0 px-4 md:px-6 py-3 border-b border-slate-200 bg-white flex flex-wrap items-center gap-x-3 gap-y-2">

@@ -16,6 +16,7 @@ interface HealthViewProps {
     onAddExam: (exam: Omit<HealthExam, 'id' | 'data_criacao' | 'pool_dados'>, files: File[]) => void;
     onDeleteExam: (id: string) => void;
     onUpdateExam: (id: string, updates: Partial<HealthExam>) => void;
+    isDark?: boolean;
 }
 
 const HealthSection = ({ title, children, iconColor, defaultExpanded = true }: { title: string, children: React.ReactNode, iconColor: string, defaultExpanded?: boolean }) => {
@@ -690,7 +691,8 @@ const HealthView: React.FC<HealthViewProps> = ({
     exams,
     onAddExam,
     onDeleteExam,
-    onUpdateExam
+    onUpdateExam,
+    isDark = false
 }) => {
     const todayStr = formatDateLocalISO(new Date());
     const [selectedDate, setSelectedDate] = useState<string>(todayStr);
@@ -789,7 +791,7 @@ const HealthView: React.FC<HealthViewProps> = ({
     };
 
     return (
-        <div className="space-y-0 md:space-y-8 pb-20">
+        <div className={`health-view space-y-0 md:space-y-8 pb-20 ${isDark ? 'health-view-dark' : ''}`}>
             {/* Header Metrics */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-0 md:gap-6 border-b md:border-none border-slate-100">
                 <div className="bg-white p-6 rounded-none md:rounded-[2rem] border-b md:border border-slate-200 shadow-none md:shadow-xl flex flex-col justify-center relative group">
