@@ -673,6 +673,26 @@ def is_remote_calendar_newer(remote_updated, local_updated):
     return False
 
 
+def is_iso_after(left_value, right_value):
+    from datetime import timezone
+    left_dt = parse_iso_datetime(left_value)
+    right_dt = parse_iso_datetime(right_value)
+
+    if left_dt and right_dt:
+        if left_dt.tzinfo is not None and right_dt.tzinfo is None:
+            right_dt = right_dt.replace(tzinfo=timezone.utc)
+        elif left_dt.tzinfo is None and right_dt.tzinfo is not None:
+            left_dt = left_dt.replace(tzinfo=timezone.utc)
+        return left_dt > right_dt
+    if left_dt and not right_dt:
+        return True
+    if right_dt and not left_dt:
+        return False
+    if left_value and right_value:
+        return str(left_value) > str(right_value)
+    return False
+
+
 
 def extract_schedule_from_calendar_event(event, tz_name='America/Sao_Paulo'):
 
@@ -796,7 +816,7 @@ def sync_google_tasks_pull(service, sync_ref, logs):
 
                 doc_id, t_old = local_tasks[g_id]
 
-                if t_old.get('data_atualizacao', '') < g_updated:
+                if is_iso_after(g_updated, t_old.get('data_atualizacao', '')):
 
                     applied_updated = datetime.now().isoformat() if title_was_normalized else g_updated
 
@@ -810,7 +830,9 @@ def sync_google_tasks_pull(service, sync_ref, logs):
 
                     }
 
-                    if g_due: update_data['data_limite'] = g_due
+                    if g_due:
+                        update_data['data_limite'] = g_due
+                        update_data['data_inicio'] = g_due
 
                     db.collection('tarefas').document(doc_id).update(update_data)
 
@@ -973,14 +995,21 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
                 doc.reference.update({'google_id': new_task['id'], 'data_atualizacao': new_task.get('updated'), 'notas': updated_notes, 'horario_fim': h_fim if not t.get('horario_fim') else t.get('horario_fim')})
                 log_to_firestore(sync_ref, logs, f"[+] ENVIADA TASKS: {title}")
                 g_id = new_task['id'] # Para usar no Calendar se precisar
-            elif g_id in g_tasks_map and local_updated > g_tasks_map[g_id].get('updated', ''):
+            elif g_id in g_tasks_map and is_iso_after(local_updated, g_tasks_map[g_id].get('updated', '')):
                 body = {'id': g_id, 'title': title, 'notes': updated_notes, 'status': g_status}
                 if g_due: body['due'] = g_due
                 try:
-                    service.tasks().update(tasklist=tasklist_id, task=g_id, body=body).execute()
+                    updated_task = service.tasks().update(tasklist=tasklist_id, task=g_id, body=body).execute()
                     log_to_firestore(sync_ref, logs, f"[^] ATUALIZADA NO TASKS: {title}")
+                    sync_updates = {}
+                    if updated_task.get('updated'):
+                        sync_updates['data_atualizacao'] = updated_task.get('updated')
                     if updated_notes != t.get('notas', ''):
-                        doc.reference.update({'notas': updated_notes})
+                        sync_updates['notas'] = updated_notes
+                    if h_fim and not t.get('horario_fim'):
+                        sync_updates['horario_fim'] = h_fim
+                    if sync_updates:
+                        doc.reference.update(sync_updates)
                 except HttpError as e:
                     if e.resp.status == 404:
                         doc.reference.update({'google_id': None})
@@ -1148,7 +1177,7 @@ def sync_google_calendar(service, sync_ref, logs):
                 event_updated = event.get('updated', '')
                 for task_ref, task_data in linked_tasks:
                     local_updated = task_data.get('data_atualizacao', '')
-                    if not is_remote_calendar_newer(event_updated, local_updated):
+                    if not is_iso_after(event_updated, local_updated):
                         continue
 
                     local_date = task_data.get('data_limite') or task_data.get('data_inicio')
