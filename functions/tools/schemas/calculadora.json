@@ -1,0 +1,16 @@
+{
+    "name": "calculadora",
+    "description": "Ferramenta dedicada para calculos ad-hoc ou projecoes hipoteticas em chat. Nao utilize para processar matrizes do banco.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "expressao": {
+                "type": "string",
+                "description": "A expressao matematica para calcular. Exemplo: '1500 * 1.05 ^ 12'"
+            }
+        },
+        "required": [
+            "expressao"
+        ]
+    }
+}

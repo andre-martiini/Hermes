@@ -5,8 +5,9 @@ import { DayView } from './DayView';
 import { TimeGrid } from '../components/calendar/TimeGrid';
 import { TaskCard } from '../components/calendar/TaskCard';
 import { normalizeStatus, isStandbyStatus } from '../utils/helpers';
-import { addDoc, collection } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { addDoc, collection, updateDoc, doc } from 'firebase/firestore';
+import { db, functions } from '../../firebase';
+import { httpsCallable } from 'firebase/functions';
 
 export const CalendarView = ({
   tasks,
@@ -70,16 +71,30 @@ export const CalendarView = ({
 
   const handleTaskCreate = async (task: Partial<Tarefa>) => {
     try {
-      await addDoc(collection(db, 'tarefas'), {
+      const docRef = await addDoc(collection(db, 'tarefas'), {
         ...task,
         titulo: 'Nova Tarefa',
         status: 'em andamento',
-        area_tematica: 'GERAL',
+        area_tematica: 'NÃO CLASSIFICADA',
         projeto: 'GERAL',
         contabilizar_meta: true,
         data_criacao: new Date().toISOString()
       });
       if (showToast) showToast("Tarefa criada!", "success");
+
+      // Auto-classificacao asincrona
+      try {
+        const classificar = httpsCallable(functions, 'classificarAreaTematica');
+        const result = await classificar({ titulo: 'Nova Tarefa' });
+        const areaTematica = (result.data as any)?.area_tematica;
+        if (areaTematica && areaTematica !== 'Nenhuma') {
+          await updateDoc(doc(db, 'tarefas', docRef.id), { area_tematica: areaTematica });
+          if (showToast) showToast(`Tarefa classificada como ${areaTematica} pela IA.`, 'info');
+        }
+      } catch (err) {
+        console.error('Falha na autoclassificação:', err);
+      }
+
     } catch (e) {
       console.error(e);
       if (showToast) showToast("Erro ao criar tarefa.", "error");

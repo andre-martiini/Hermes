@@ -1,10 +1,11 @@
-﻿import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Tarefa, GoogleCalendarEvent, formatDateLocalISO } from '../../types';
 import { normalizeStatus } from '../utils/helpers';
 import { TimeGrid } from '../components/calendar/TimeGrid';
 import { TaskCard } from '../components/calendar/TaskCard';
-import { addDoc, collection } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { addDoc, collection, updateDoc, doc } from 'firebase/firestore';
+import { db, functions } from '../../firebase';
+import { httpsCallable } from 'firebase/functions';
 
 export const DayView = ({
   tasks,
@@ -70,14 +71,29 @@ export const DayView = ({
 
   const handleCreateTarefa = async (titulo: string) => {
     try {
-      await addDoc(collection(db, 'tarefas'), {
+      const docRef = await addDoc(collection(db, 'tarefas'), {
         titulo,
         status: 'pendente',
         data_criacao: new Date().toISOString(),
         data_limite: dayStr,
-        ordem: dayTasks.length
+        ordem: dayTasks.length,
+        area_tematica: 'NÃO CLASSIFICADA'
       });
       if (showToast) showToast('Ação criada com sucesso!', 'success');
+
+      // Auto-classificacao asincrona (Hermes Copiloto AI)
+      try {
+        const classificar = httpsCallable(functions, 'classificarAreaTematica');
+        const result = await classificar({ titulo });
+        const areaTematica = (result.data as any)?.area_tematica;
+        if (areaTematica && areaTematica !== 'Nenhuma') {
+          await updateDoc(doc(db, 'tarefas', docRef.id), { area_tematica: areaTematica });
+          if (showToast) showToast(`Ação classificada como ${areaTematica} pela IA.`, 'info');
+        }
+      } catch (err) {
+        console.error('Falha na autoclassificação:', err);
+      }
+
     } catch (error) {
       console.error('Erro ao criar ação:', error);
       if (showToast) showToast('Erro ao criar ação', 'error');

@@ -33,6 +33,7 @@ _CATALOG: dict[str, str] = {
     "registrar_inscricao_bolsa_publica": "Registra uma inscricao publica em um projeto de bolsas",
     "consultar_financas_v2": "Consulta detalhada do financeiro interno: rendas, obrigações, metas e transações",
     "registrar_item_financeiro_v2": "Registra uma nova movimentação (renda ou despesa) no financeiro interno",
+    "calculadora": "Calculadora dedicada para calculos matematicos ad-hoc ou projecoes.",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {

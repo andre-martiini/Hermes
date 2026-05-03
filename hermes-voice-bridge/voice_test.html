@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hermes Voice Test</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #f4f6f8;
+        color: #17202a;
+      }
+
+      main {
+        width: min(720px, calc(100vw - 32px));
+        display: grid;
+        gap: 18px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 28px;
+        line-height: 1.15;
+        letter-spacing: 0;
+      }
+
+      p {
+        margin: 0;
+        color: #526171;
+        line-height: 1.5;
+      }
+
+      .panel {
+        border: 1px solid #d9e0e7;
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 22px;
+        display: grid;
+        gap: 18px;
+        box-shadow: 0 16px 48px rgba(24, 36, 54, 0.08);
+      }
+
+      .controls {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      button {
+        border: 0;
+        border-radius: 6px;
+        padding: 11px 16px;
+        font-weight: 700;
+        cursor: pointer;
+        background: #1f7a5a;
+        color: white;
+      }
+
+      button.secondary {
+        background: #324253;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      .status {
+        border: 1px solid #d9e0e7;
+        border-radius: 6px;
+        background: #f8fafb;
+        padding: 12px;
+        min-height: 48px;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        font-size: 13px;
+        white-space: pre-wrap;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #12161b;
+          color: #eef3f7;
+        }
+
+        p {
+          color: #aab8c6;
+        }
+
+        .panel,
+        .status {
+          background: #171d24;
+          border-color: #2b3642;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="panel">
+        <div>
+          <h1>Hermes Voice Test</h1>
+          <p>Converse com o copiloto por microfone, sem Twilio e sem chamada telefonica.</p>
+        </div>
+
+        <div class="controls">
+          <button id="start">Iniciar</button>
+          <button id="stop" class="secondary" disabled>Parar</button>
+        </div>
+
+        <div id="status" class="status">Pronto.</div>
+      </section>
+    </main>
+
+    <script>
+      const TARGET_SAMPLE_RATE = 24000;
+      const FRAME_SIZE = 2048;
+
+      const startButton = document.getElementById("start");
+      const stopButton = document.getElementById("stop");
+      const statusBox = document.getElementById("status");
+
+      let socket;
+      let audioContext;
+      let mediaStream;
+      let sourceNode;
+      let processorNode;
+      let playbackTime = 0;
+
+      function setStatus(message) {
+        statusBox.textContent = message;
+      }
+
+      function appendStatus(message) {
+        statusBox.textContent = `${statusBox.textContent}\n${message}`.trim();
+      }
+
+      function floatToPcm16(float32) {
+        const pcm = new Int16Array(float32.length);
+        for (let i = 0; i < float32.length; i += 1) {
+          const sample = Math.max(-1, Math.min(1, float32[i]));
+          pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+        }
+        return pcm;
+      }
+
+      function pcm16ToFloat(pcm16) {
+        const float32 = new Float32Array(pcm16.length);
+        for (let i = 0; i < pcm16.length; i += 1) {
+          float32[i] = pcm16[i] / 0x8000;
+        }
+        return float32;
+      }
+
+      function resample(input, fromRate, toRate) {
+        if (fromRate === toRate) {
+          return input;
+        }
+
+        const ratio = fromRate / toRate;
+        const outputLength = Math.round(input.length / ratio);
+        const output = new Float32Array(outputLength);
+
+        for (let i = 0; i < outputLength; i += 1) {
+          const sourceIndex = i * ratio;
+          const left = Math.floor(sourceIndex);
+          const right = Math.min(left + 1, input.length - 1);
+          const weight = sourceIndex - left;
+          output[i] = input[left] * (1 - weight) + input[right] * weight;
+        }
+
+        return output;
+      }
+
+      function bytesToBase64(bytes) {
+        let binary = "";
+        const chunkSize = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+        }
+        return btoa(binary);
+      }
+
+      function base64ToBytes(base64) {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes;
+      }
+
+      function playPcm24k(base64Audio) {
+        const bytes = base64ToBytes(base64Audio);
+        const pcm = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
+        const float32 = pcm16ToFloat(pcm);
+        const buffer = audioContext.createBuffer(1, float32.length, TARGET_SAMPLE_RATE);
+        buffer.copyToChannel(float32, 0);
+
+        const node = audioContext.createBufferSource();
+        node.buffer = buffer;
+        node.connect(audioContext.destination);
+
+        const now = audioContext.currentTime;
+        playbackTime = Math.max(playbackTime, now);
+        node.start(playbackTime);
+        playbackTime += buffer.duration;
+      }
+
+      async function start() {
+        startButton.disabled = true;
+        stopButton.disabled = false;
+        setStatus("Solicitando microfone...");
+
+        audioContext = new AudioContext();
+        playbackTime = audioContext.currentTime;
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+
+        const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+        socket = new WebSocket(`${protocol}://${window.location.host}/browser-voice-stream`);
+
+        socket.onopen = () => {
+          appendStatus("Conectado. Fale a senha e depois seu pedido.");
+          sourceNode = audioContext.createMediaStreamSource(mediaStream);
+          processorNode = audioContext.createScriptProcessor(FRAME_SIZE, 1, 1);
+
+          processorNode.onaudioprocess = (event) => {
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+              return;
+            }
+
+            const input = event.inputBuffer.getChannelData(0);
+            const resampled = resample(input, audioContext.sampleRate, TARGET_SAMPLE_RATE);
+            const pcm = floatToPcm16(resampled);
+            socket.send(
+              JSON.stringify({
+                type: "audio",
+                mime_type: "audio/pcm;rate=24000",
+                payload: bytesToBase64(new Uint8Array(pcm.buffer)),
+              })
+            );
+          };
+
+          sourceNode.connect(processorNode);
+          processorNode.connect(audioContext.destination);
+        };
+
+        socket.onmessage = (event) => {
+          const message = JSON.parse(event.data);
+          if (message.type === "audio") {
+            playPcm24k(message.payload);
+          } else if (message.type === "status") {
+            appendStatus(message.message);
+          } else if (message.type === "error") {
+            appendStatus(`Erro: ${message.message}`);
+          }
+        };
+
+        socket.onclose = () => {
+          appendStatus("Conexao encerrada.");
+          cleanup();
+        };
+      }
+
+      function cleanup() {
+        if (processorNode) processorNode.disconnect();
+        if (sourceNode) sourceNode.disconnect();
+        if (mediaStream) mediaStream.getTracks().forEach((track) => track.stop());
+        processorNode = null;
+        sourceNode = null;
+        mediaStream = null;
+        startButton.disabled = false;
+        stopButton.disabled = true;
+      }
+
+      function stop() {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: "stop" }));
+          socket.close();
+        }
+        cleanup();
+      }
+
+      startButton.addEventListener("click", () => {
+        start().catch((error) => {
+          setStatus(`Erro ao iniciar: ${error.message}`);
+          cleanup();
+        });
+      });
+      stopButton.addEventListener("click", stop);
+    </script>
+  </body>
+</html>

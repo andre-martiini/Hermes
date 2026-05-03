@@ -8989,6 +8989,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'preparar_reagendamento_em_lote': preparar_reagendamento_em_lote,
             'consultar_financas_v2': consultar_financas_v2,
             'registrar_item_financeiro_v2': registrar_item_financeiro_v2,
+            'calculadora': calculadora,
         }
 
         # Cria função genérica de acionamento que o loop manual do Python irá ignorar
@@ -9067,6 +9068,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'preparar_reagendamento_em_lote': preparar_reagendamento_em_lote,
             'consultar_financas_v2': consultar_financas_v2,
             'registrar_item_financeiro_v2': registrar_item_financeiro_v2,
+            'calculadora': calculadora,
         }
         # Ferramentas internas que não devem aparecer para o usuário
         _HIDDEN_TOOLS = {'registrar_correcao_procedimento', 'resolver_conflito_memoria'}
@@ -9100,6 +9102,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     preparar_reagendamento_em_lote,
                     consultar_financas_v2,
                     registrar_item_financeiro_v2,
+                    calculadora,
                 ] + dynamic_tools,
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
             ),
@@ -11218,6 +11221,56 @@ Se SEM_INSIGHT: {{"nivel": null, "texto": null, "alvo": null, "plano_proposto": 
         print(f"[analisarInsightProativo] Erro: {e}")
         return {"nivel": None, "texto": None, "alvo": None, "planoProposto": None}
 
+
+
+def calculadora(expressao: str) -> str:
+    """Calculadora dedicada para calculos matematicos ad-hoc ou projecoes hipoteticas. Nao utilize para grandes matrizes."""
+    import math
+    try:
+        allowed_names = {k: v for k, v in math.__dict__.items() if not k.startswith("__")}
+        code = compile(expressao, "<string>", "eval")
+        for name in code.co_names:
+            if name not in allowed_names:
+                raise NameError(f"O uso de '{name}' nao e permitido.")
+        result = eval(code, {"__builtins__": {}}, allowed_names)
+        return str(result)
+    except Exception as e:
+        return f"Erro de calculo: {e}"
+
+@https_fn.on_call(memory=options.MemoryOption.MB_256)
+def classificarAreaTematica(req: https_fn.CallableRequest) -> dict:
+    from google import genai
+    from google.genai import types
+    data = req.data
+    titulo = data.get("titulo", "")
+    descricao = data.get("descricao", "")
+    notas = data.get("notas", "")
+    texto = f"Titulo: {titulo}\nDescricao: {descricao}\nNotas: {notas}"
+    
+    api_key = get_gemini_api_key()
+    if not api_key:
+        return {"area_tematica": "Nenhuma"}
+        
+    client = genai.Client(api_key=api_key)
+    try:
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=f"Classifique a Area Tematica do seguinte texto como uma de: Saude, Financeira, Nenhuma. Retorne APENAS a palavra correta.\n\nTexto: {texto}",
+            config=types.GenerateContentConfig(
+                temperature=0.0,
+                max_output_tokens=10
+            )
+        )
+        res = (response.text or "Nenhuma").strip().strip('\'"').capitalize()
+        if res == "Saude":
+            res = "Saúde"
+        if res not in ["Saúde", "Financeira", "Nenhuma"]:
+            res = "Nenhuma"
+            
+        return {"area_tematica": res}
+    except Exception as e:
+        print(f"Erro na classificacao tematica: {e}")
+        return {"area_tematica": "Nenhuma"}
 
 # Import daily WIP reset job
 from daily_reset_job import daily_wip_reset_and_degradation

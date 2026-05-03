@@ -43,7 +43,11 @@ export const TaskCard: React.FC<TaskCardProps> = ({
 
     const areaStyles = degradationStyles || (task.area_tematica === 'CLC'
         ? isDark ? 'bg-blue-900/20 border-blue-800/50 text-blue-400 hover:border-blue-700' : 'bg-blue-50 border-blue-100 text-blue-700 hover:border-blue-300'
-        : task.area_tematica === 'ASSISTÊNCIA'
+        : task.area_tematica === 'ASSISTÊNCIA' || task.area_tematica === 'ASSISTÊNCIA ESTUDANTIL'
+            ? isDark ? 'bg-purple-900/20 border-purple-800/50 text-purple-400 hover:border-purple-700' : 'bg-purple-50 border-purple-100 text-purple-700 hover:border-purple-300'
+        : task.area_tematica === 'SAÚDE' || task.area_tematica === 'SAUDE'
+            ? isDark ? 'bg-rose-900/20 border-rose-800/50 text-rose-400 hover:border-rose-700' : 'bg-rose-50 border-rose-100 text-rose-700 hover:border-rose-300'
+        : task.area_tematica === 'FINANCEIRO' || task.area_tematica === 'FINANCEIRA'
             ? isDark ? 'bg-emerald-900/20 border-emerald-800/50 text-emerald-400 hover:border-emerald-700' : 'bg-emerald-50 border-emerald-100 text-emerald-700 hover:border-emerald-300'
             : isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600' : 'bg-slate-50 border-slate-100 text-slate-600 hover:border-slate-300');
 
