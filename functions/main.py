@@ -35,6 +35,26 @@ from security_portals import (
 )
 from pdf_precision import extract_pdf_text_with_fallback, is_pdf_mime_type
 
+DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def is_docx_mime_type(filename: str | None = None, mime_type: str | None = None) -> bool:
+    mime = (mime_type or "").lower().strip()
+    name = (filename or "").lower().strip()
+    return mime == DOCX_MIME_TYPE or name.endswith(".docx")
+
+
+def extract_docx_text(file_bytes: bytes) -> tuple[str, dict]:
+    import mammoth
+
+    result = mammoth.extract_raw_text(io.BytesIO(file_bytes))
+    warnings = [
+        getattr(message, "message", str(message))
+        for message in (getattr(result, "messages", None) or [])
+    ]
+    metadata = {"source": "mammoth", "warnings": warnings}
+    return (result.value or "").strip(), metadata
+
 from knowledge_graph import (  # noqa: F401 — registra as Cloud Functions
     on_tarefa_created_kg,
     on_tarefa_concluida_kg,
@@ -2684,6 +2704,7 @@ def extractAndVectorizeRAGItem(req: https_fn.CallableRequest):
     data = req.data
     file_base64 = data.get('fileBase64')
     mime_type = data.get('mimeType', 'application/octet-stream')
+    filename = data.get('filename') or data.get('fileName') or 'arquivo'
     knowledge_id = data.get('knowledgeId')
 
     if not file_base64 or not knowledge_id:
@@ -2711,16 +2732,19 @@ def extractAndVectorizeRAGItem(req: https_fn.CallableRequest):
     extraction_strategy = "text_decode"
     extraction_metadata = None
     try:
-        if is_pdf_mime_type(None, mime_type):
+        if is_pdf_mime_type(filename, mime_type):
             pdf_result = extract_pdf_text_with_fallback(
                 file_bytes,
-                "arquivo.pdf",
+                filename,
                 api_key=get_gemini_api_key(),
                 allow_gemini_fallback=True,
             )
             texto_bruto = pdf_result.get('text', '')
             extraction_strategy = pdf_result.get('strategy', 'none')
             extraction_metadata = pdf_result.get('metadata')
+        elif is_docx_mime_type(filename, mime_type):
+            texto_bruto, extraction_metadata = extract_docx_text(file_bytes)
+            extraction_strategy = "docx_mammoth"
         else:
             texto_bruto = file_bytes.decode('utf-8', errors='replace').strip()
     except Exception as e:
@@ -2738,7 +2762,7 @@ def extractAndVectorizeRAGItem(req: https_fn.CallableRequest):
         'texto_extraido_por': extraction_strategy,
     }
     if extraction_metadata:
-        doc_updates['pdf_extraction_metadata'] = extraction_metadata
+        doc_updates['extraction_metadata'] = extraction_metadata
     doc_ref.update(doc_updates)
 
     # Vetoriza
@@ -3119,6 +3143,7 @@ def processExtraContextFile(req: https_fn.CallableRequest):
     extraction_strategy = "text_decode"
     extraction_metadata = None
     is_pdf = is_pdf_mime_type(filename, mime_type)
+    is_docx = is_docx_mime_type(filename, mime_type)
 
     if is_pdf:
         try:
@@ -3134,6 +3159,13 @@ def processExtraContextFile(req: https_fn.CallableRequest):
         except Exception as e:
             print(f"Erro ao extrair PDF '{filename}': {e}")
             texto_bruto = ""
+    elif is_docx:
+        try:
+            texto_bruto, extraction_metadata = extract_docx_text(file_bytes)
+            extraction_strategy = "docx_mammoth"
+        except Exception as e:
+            print(f"Erro ao extrair DOCX '{filename}': {e}")
+            texto_bruto = ""
     else:
         # Arquivos de texto: TXT, MD, CSV, etc.
         try:
@@ -3143,7 +3175,7 @@ def processExtraContextFile(req: https_fn.CallableRequest):
 
     # Salva no Firestore
     doc_id = str(uuid.uuid4())
-    tipo = 'pdf' if is_pdf else 'texto'
+    tipo = 'pdf' if is_pdf else 'docx' if is_docx else 'texto'
     doc_data = {
         'id': doc_id,
         'titulo': filename,
@@ -3158,7 +3190,7 @@ def processExtraContextFile(req: https_fn.CallableRequest):
         'texto_extraido_por': extraction_strategy,
     }
     if extraction_metadata:
-        doc_data['pdf_extraction_metadata'] = extraction_metadata
+        doc_data['extraction_metadata'] = extraction_metadata
     db.collection('conhecimento').document(doc_id).set(doc_data)
 
     # Vetorização automática
@@ -3726,7 +3758,7 @@ def start_file_indexing(item_id, item_data):
 
             parts = [{"mime_type": mime_type, "data": content}, prompt]
 
-        elif mime_type == 'application/pdf':
+        elif is_pdf_mime_type(file_metadata.get('name'), mime_type):
 
             pdf_result = extract_pdf_text_with_fallback(
                 content,
@@ -3772,6 +3804,34 @@ def start_file_indexing(item_id, item_data):
             """
 
                 parts = [{"mime_type": mime_type, "data": content}, prompt]
+
+        elif is_docx_mime_type(file_metadata.get('name'), mime_type):
+
+            extracted_docx_text, docx_metadata = extract_docx_text(content)
+
+            prompt = f"""
+
+            Analise o texto abaixo, extraÃ­do de um arquivo Word DOCX, e retorne em JSON:
+
+            1. texto_bruto: ConteÃºdo principal extraÃ­do.
+
+            2. resumo_tldr: Resumo de atÃ© 3 linhas.
+
+            3. tags: Lista de 5-10 palavras-chave.
+
+            4. area_tematica: Uma Ãºnica palavra de classificaÃ§Ã£o.
+
+            METADADOS DA EXTRAÃ‡ÃƒO:
+
+            {json.dumps(docx_metadata, ensure_ascii=False)}
+
+            TEXTO EXTRAÃDO:
+
+            {extracted_docx_text[:100000]}
+
+            """
+
+            parts = [prompt]
 
         else:
 
@@ -9160,6 +9220,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 file_bytes = fh.read()
                 local_pdf_text = ""
                 local_pdf_metadata = None
+                local_docx_text = ""
+                local_docx_metadata = None
                 if is_pdf_mime_type(real_file_name, real_mime_type):
                     pdf_result = extract_pdf_text_with_fallback(
                         file_bytes,
@@ -9169,9 +9231,13 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     )
                     local_pdf_text = (pdf_result.get('text') or '').strip()
                     local_pdf_metadata = pdf_result.get('metadata')
+                elif is_docx_mime_type(real_file_name, real_mime_type):
+                    local_docx_text, local_docx_metadata = extract_docx_text(file_bytes)
 
                 gemini_file = None
-                if is_image_file or not local_pdf_text:
+                local_extracted_text = local_pdf_text or local_docx_text
+                local_extraction_metadata = local_pdf_metadata or local_docx_metadata
+                if is_image_file or not local_extracted_text:
                     # 3. Salva em arquivo temporário para a File API do Gemini
                     file_ext = os.path.splitext(real_file_name)[1] or '.bin'
                     with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
@@ -9214,7 +9280,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                             "- utilidade_pratica: diga como o Hermes deve usar esta imagem para apoiar a ação.\n"
                             f"\nCONTEXTO DA AÇÃO:\n{task_context_summary or 'Nenhuma tarefa ativa foi fornecida.'}"
                         )
-                    elif local_pdf_text:
+                    elif local_extracted_text:
                         extraction_prompt = (
                             f"Você recebeu o texto extraído localmente do arquivo '{real_file_name}'. "
                             "Retorne EXCLUSIVAMENTE um JSON válido, sem markdown, sem texto extra, com esta estrutura:\n"
@@ -9227,8 +9293,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                             "- relacao_com_acao: explique a conexão do arquivo com a tarefa atual; se não houver contexto suficiente, diga isso explicitamente\n"
                             "- utilidade_pratica: diga como o Hermes deve usar este arquivo para apoiar a ação\n"
                             f"\nCONTEXTO DA AÇÃO:\n{task_context_summary or 'Nenhuma tarefa ativa foi fornecida.'}\n\n"
-                            f"METADADOS DA EXTRAÇÃO LOCAL: {json.dumps(local_pdf_metadata or {}, ensure_ascii=False)}\n\n"
-                            f"TEXTO EXTRAÍDO:\n{local_pdf_text[:120000]}"
+                            f"METADADOS DA EXTRAÇÃO LOCAL: {json.dumps(local_extraction_metadata or {}, ensure_ascii=False)}\n\n"
+                            f"TEXTO EXTRAÍDO:\n{local_extracted_text[:120000]}"
                         )
                         extraction_response = client.models.generate_content(
                             model=model_id,
@@ -9249,7 +9315,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                             "- utilidade_pratica: diga como o Hermes deve usar este arquivo para apoiar a ação\n"
                             f"\nCONTEXTO DA AÇÃO:\n{task_context_summary or 'Nenhuma tarefa ativa foi fornecida.'}"
                         )
-                    if is_image_file or not local_pdf_text:
+                    if is_image_file or not local_extracted_text:
                         extraction_response = client.models.generate_content(
                             model=model_id,
                             contents=[
@@ -9316,7 +9382,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     db.collection('indice_artefatos').document(artefato_id).set({
                         'titulo': titulo_doc,
                         'trecho': resumo_doc,
-                        'texto_bruto': (local_pdf_text or ocr_doc or resumo_doc)[:500000],
+                        'texto_bruto': (local_extracted_text or ocr_doc or resumo_doc)[:500000],
                         'fonte': natureza_doc,
                         'embedding': Vector(embedding_floats),
                         'tipo_arquivo': real_mime_type.split('/')[-1],
@@ -9333,8 +9399,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         'descricao_visual': descricao_visual,
                         'elementos_chave': elementos_chave[:8],
                         'evidencias': evidencias[:8],
-                        'texto_extraido_por': 'pdf-inspector' if local_pdf_text else ('gemini_ocr' if is_image_file else 'gemini_file_api'),
-                        'pdf_extraction_metadata': local_pdf_metadata if local_pdf_metadata else None,
+                        'texto_extraido_por': 'local_extractor' if local_extracted_text else ('gemini_ocr' if is_image_file else 'gemini_file_api'),
+                        'extraction_metadata': local_extraction_metadata if local_extraction_metadata else None,
                     })
                     print(f"[Copiloto] Artefato '{titulo_doc}' gravado em indice_artefatos (id={artefato_id})")
 
@@ -9370,7 +9436,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         f"Resumo: {resumo_doc}\n"
                         f"Relação com a ação: {relacao_com_acao or 'Não inferida.'}\n"
                         f"Utilidade prática: {utilidade_pratica or 'Não inferida.'}\n"
-                        f"Texto local relevante: {local_pdf_text[:2500] if local_pdf_text else 'Não aplicável.'}\n"
+                        f"Texto local relevante: {local_extracted_text[:2500] if local_extracted_text else 'Não aplicável.'}\n"
                         f"OCR relevante: {ocr_doc[:2500] if ocr_doc else 'Sem texto legível relevante.'}\n"
                         f"Descrição visual: {descricao_visual or 'Não aplicável.'}\n"
                         f"Elementos-chave: {', '.join(elementos_chave[:8]) if elementos_chave else 'Nenhum listado.'}\n"

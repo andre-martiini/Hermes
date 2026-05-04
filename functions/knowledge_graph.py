@@ -29,6 +29,7 @@ Implementa as Cloud Functions e helpers do grafo de conhecimento:
 from __future__ import annotations
 
 import json
+import io
 import math
 import re
 import unicodedata
@@ -79,6 +80,19 @@ SUPPORTED_MIMES = frozenset({
     "text/markdown",
     "text/html",
 })
+
+DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def _is_docx(filename: str | None = None, mime_type: str | None = None) -> bool:
+    return (mime_type or "").lower().strip() == DOCX_MIME_TYPE or (filename or "").lower().endswith(".docx")
+
+
+def _extract_docx_text(file_bytes: bytes) -> str:
+    import mammoth
+
+    result = mammoth.extract_raw_text(io.BytesIO(file_bytes))
+    return (result.value or "").strip()
 _DRIVE_ID_RE = re.compile(
     r"(?:drive\.google\.com/(?:file/d/|open\?id=)|docs\.google\.com/\w+/d/)([a-zA-Z0-9_-]{20,})"
 )
@@ -1016,17 +1030,20 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
 
     # ── Extração de texto via Gemini ─────────────────────────────────────────
     try:
-        from google.genai import types
         client = _gemini_client(api_key)
-        extract_resp = client.models.generate_content(
-            model="gemini-3-flash-preview",
-            contents=[
-                "Extraia todo o texto relevante deste documento. "
-                "Ignore cabecalhos repetitivos, rodapes e numeracao de paginas.",
-                types.Part.from_bytes(data=file_bytes, mime_type=tipo_mime),
-            ],
-        )
-        texto = (extract_resp.text or "").strip()
+        if _is_docx(nome, tipo_mime):
+            texto = _extract_docx_text(file_bytes)
+        else:
+            from google.genai import types
+            extract_resp = client.models.generate_content(
+                model="gemini-3-flash-preview",
+                contents=[
+                    "Extraia todo o texto relevante deste documento. "
+                    "Ignore cabecalhos repetitivos, rodapes e numeracao de paginas.",
+                    types.Part.from_bytes(data=file_bytes, mime_type=tipo_mime),
+                ],
+            )
+            texto = (extract_resp.text or "").strip()
     except Exception as exc:
         if origem == "tarefa":
             _update_artefato_status(db, task_id, idx, "falha_acesso", None)

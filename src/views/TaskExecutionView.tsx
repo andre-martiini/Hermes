@@ -2136,8 +2136,8 @@ export const TaskExecutionView = ({
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
                             {isUploadingExtra ? 'Processando…' : 'Adicionar arquivo'}
                           </button>
-                          <p className={`text-[8px] text-center mt-1 ${mutedText}`}>PDF · TXT · MD — isolado da Base RAG</p>
-                          <input ref={extraFileInputRef} type="file" accept=".pdf,.txt,.md" className="hidden" onChange={handleUploadExtraContextFile} />
+                          <p className={`text-[8px] text-center mt-1 ${mutedText}`}>PDF · DOCX · TXT · MD — isolado da Base RAG</p>
+                          <input ref={extraFileInputRef} type="file" accept=".pdf,.docx,.txt,.md" className="hidden" onChange={handleUploadExtraContextFile} />
                         </div>
                       </div>
                     )}

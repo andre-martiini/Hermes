@@ -3493,7 +3493,7 @@ const App: React.FC = () => {
           reader.readAsDataURL(file);
         });
         const fn = httpsCallable(functions, 'extractAndVectorizeRAGItem');
-        const result = await fn({ fileBase64: base64, mimeType: file.type, knowledgeId: item.id });
+        const result = await fn({ fileBase64: base64, filename: file.name, mimeType: file.type, knowledgeId: item.id });
         const data = result.data as any;
         if (data.vectorized) {
           showToast("Arquivo indexado e vetorizado com sucesso!", "success");
