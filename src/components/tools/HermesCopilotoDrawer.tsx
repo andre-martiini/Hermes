@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db, functions, auth } from '@/firebase';
 import { httpsCallable } from 'firebase/functions';
-import { collection, onSnapshot, query, orderBy, where, addDoc, doc, updateDoc, getDoc, getDocs, writeBatch, deleteDoc, limit, Timestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, where, addDoc, doc, updateDoc, setDoc, getDoc, getDocs, writeBatch, deleteDoc, limit, Timestamp } from 'firebase/firestore';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import MermaidBlock from './MermaidBlock';
@@ -424,6 +424,26 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         setFooterError(error?.message || 'Erro ao carregar dados do copiloto.');
     };
 
+    const touchCopilotoSession = async (sessionId: string, updates: Partial<Session> = {}) => {
+        const sessionRef = doc(db, 'sessoes_copiloto', sessionId);
+        const snap = await getDoc(sessionRef).catch(() => null);
+        const fallback = snap?.exists()
+            ? {}
+            : {
+                userId,
+                title: 'Nova Conversa',
+                createdAt: Timestamp.now(),
+                taskId: taskId || null,
+                systemId: systemId || null
+            };
+
+        await setDoc(sessionRef, {
+            ...fallback,
+            ...updates,
+            lastMessageAt: updates.lastMessageAt || Timestamp.now()
+        }, { merge: true });
+    };
+
     const handleConfirmForm = async (form: ProposedForm, messageId?: string) => {
         if (!currentSessionId || creatingFormId) return;
         if (messageId) setCreatingFormId(messageId);
@@ -444,7 +464,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                     timestamp: Timestamp.now()
                 });
 
-                await updateDoc(doc(db, 'sessoes_copiloto', currentSessionId), {
+                await touchCopilotoSession(currentSessionId, {
                     lastMessageAt: Timestamp.now()
                 });
             }
@@ -1333,12 +1353,12 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
             // 3. Atualiza título da sessão se for a primeira mensagem
             if (messages.length === 0 && !sessionId) {
-                await updateDoc(doc(db, 'sessoes_copiloto', sId), {
+                await touchCopilotoSession(sId, {
                     title: data.suggestedTitle || userMessageContent.slice(0, 40) + '...',
                     lastMessageAt: Timestamp.now()
                 });
             } else {
-                await updateDoc(doc(db, 'sessoes_copiloto', sId), {
+                await touchCopilotoSession(sId, {
                     lastMessageAt: Timestamp.now()
                 });
             }

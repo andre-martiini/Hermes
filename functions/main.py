@@ -5591,9 +5591,9 @@ def criar_apresentacao_slides(req: https_fn.CallableRequest):
                 "content": f"✅ Apresentação gerada com sucesso!\n\n[Abrir Apresentação](tool:slides:{draft_id})",
                 "timestamp": firestore.SERVER_TIMESTAMP,
             })
-            db.collection('sessoes_copiloto').document(session_id).update({
+            db.collection('sessoes_copiloto').document(session_id).set({
                 "lastMessageAt": firestore.SERVER_TIMESTAMP
-            })
+            }, merge=True)
 
         return {"draftId": draft_id}
 
@@ -6261,9 +6261,9 @@ def diagnosticar_codigo(req: https_fn.CallableRequest):
                     ),
                     'timestamp': firestore.SERVER_TIMESTAMP,
                 })
-                db.collection('sessoes_copiloto').document(session_id).update({
+                db.collection('sessoes_copiloto').document(session_id).set({
                     'lastMessageAt': firestore.SERVER_TIMESTAMP,
-                })
+                }, merge=True)
             except Exception as msg_err:
                 print(f"Erro ao injetar mensagem de diagnóstico: {msg_err}")
 
@@ -9613,9 +9613,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         "toolsUsed": tools_used if tools_used else None,
                         "timestamp": firestore.SERVER_TIMESTAMP
                     })
-                    db.collection('sessoes_copiloto').document(session_id).update({
+                    db.collection('sessoes_copiloto').document(session_id).set({
                         "lastMessageAt": firestore.SERVER_TIMESTAMP
-                    })
+                    }, merge=True)
                 except Exception as e:
                     print(f"Erro ao salvar invocação de ferramenta no Firestore: {e}")
 
@@ -9713,9 +9713,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "timestamp": firestore.SERVER_TIMESTAMP
                 })
                 # Atualiza timestamp da sessão
-                db.collection('sessoes_copiloto').document(session_id).update({
+                db.collection('sessoes_copiloto').document(session_id).set({
                     "lastMessageAt": firestore.SERVER_TIMESTAMP
-                })
+                }, merge=True)
             except Exception as e:
                 print(f"Erro ao salvar resposta no Firestore: {e}")
 
