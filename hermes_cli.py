@@ -199,6 +199,31 @@ def normalize_task_title(title):
 
     return ' '.join(words)
 
+def parse_iso_datetime(value):
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith('Z'):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+def is_iso_after(left_value, right_value):
+    left = parse_iso_datetime(left_value)
+    right = parse_iso_datetime(right_value)
+    if not left:
+        return False
+    if not right:
+        return True
+    return left > right
+
 def sync_google_tasks(db, log_list=None, sync_ref=None):
     last_ui_update = [0]
     def log(msg, force_ui=False):
@@ -286,11 +311,11 @@ def sync_google_tasks(db, log_list=None, sync_ref=None):
                 
                 h_updated = t_old.get('data_atualizacao', '')
                 
-                # O prazo final deve sempre refletir o do Google (Fonte da Verdade)
+                remote_is_newer = is_iso_after(g_updated, h_updated)
+                if not remote_is_newer:
+                    continue
+
                 deadline_changed = t_old.get('data_limite') != deadline
-                
-                # Se o prazo mudou, ignoramos o shortcut do timestamp para garantir a sincronia
-                if h_updated and g_updated and h_updated >= g_updated and not deadline_changed: continue
                 
                 has_changed = (t_old.get('status') != h_status or 
                                t_old.get('titulo') != title or 
@@ -301,7 +326,7 @@ def sync_google_tasks(db, log_list=None, sync_ref=None):
                 if has_changed:
                     applied_updated = datetime.now().isoformat() if title_was_normalized else g_updated
                     db.collection('tarefas').document(doc_id).update({
-                        'titulo': title, 'data_limite': deadline, 'status': h_status,
+                        'titulo': title, 'data_limite': deadline, 'data_inicio': deadline, 'status': h_status,
                         'data_conclusao': gt.get('completed'), 'data_atualizacao': applied_updated,
                         'notas': g_notes, 'sync_status': 'updated', 
                         'last_sync_date': datetime.now().isoformat(),
@@ -315,7 +340,7 @@ def sync_google_tasks(db, log_list=None, sync_ref=None):
             else:
                 applied_updated = datetime.now().isoformat() if title_was_normalized else g_updated
                 db.collection('tarefas').add({
-                    'titulo': title, 'projeto': 'GOOGLE', 'data_limite': deadline,
+                    'titulo': title, 'projeto': 'GOOGLE', 'data_limite': deadline, 'data_inicio': deadline,
                     'google_id': g_id, 'status': h_status, 'data_criacao': datetime.now().isoformat(),
                     'data_conclusao': gt.get('completed'), 'data_atualizacao': applied_updated,
                     'area_tematica': area_tematica, 'contabilizar_meta': contabilizar_meta,

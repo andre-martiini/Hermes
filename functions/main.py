@@ -93,9 +93,10 @@ COPILOT_SOFT_DEADLINE_SEC = 510
 _DOC_CACHE: dict = {}
 _DOC_CACHE_TTL = 60  # seconds
 
-# Cache da coleção pops_diretrizes (muda raramente — TTL 5 min)
+# Cache da coleção pops_diretrizes. Mantemos curto porque POP recém-criado
+# precisa ser observado pelo copiloto na conversa seguinte.
 _POPS_DATA_CACHE: tuple | None = None  # (monotonic_ts, list[dict])
-_POPS_DATA_TTL = 300
+_POPS_DATA_TTL = 30
 
 # Cache de _bootstrap_user_ai_profile por UID (TTL 60 s)
 _PROFILE_CACHE: dict = {}  # uid -> (monotonic_ts, dict)
@@ -4652,12 +4653,13 @@ def _match_pop_directives(db, prompt: str) -> list[dict]:
         return []
 
     prompt_terms = set(prompt_norm.split())
-    matched: list[dict] = []
 
     try:
         now = time.monotonic()
+        used_cache = False
         if _POPS_DATA_CACHE and (now - _POPS_DATA_CACHE[0]) < _POPS_DATA_TTL:
             all_pops = _POPS_DATA_CACHE[1]
+            used_cache = True
         else:
             all_pops = [
                 {"id": d.id, **( d.to_dict() or {})}
@@ -4665,37 +4667,56 @@ def _match_pop_directives(db, prompt: str) -> list[dict]:
             ]
             _POPS_DATA_CACHE = (now, all_pops)
 
-        for pop in all_pops:
-            gatilhos = pop.get("gatilhos", []) or []
-            instrucao = (pop.get("instrucao_sistema") or "").strip()
-            titulo = (pop.get("titulo") or pop.get("id") or "POP").strip()
+        def _collect_matches(pops: list[dict]) -> list[dict]:
+            matched: list[dict] = []
 
-            if not instrucao or not isinstance(gatilhos, list):
-                continue
+            for pop in pops:
+                gatilhos = pop.get("gatilhos", []) or []
+                instrucao = (pop.get("instrucao_sistema") or "").strip()
+                titulo = (pop.get("titulo") or pop.get("id") or "POP").strip()
 
-            matched_triggers: list[str] = []
-            for gatilho in gatilhos:
-                gatilho_norm = _normalize_pop_text(str(gatilho))
-                if not gatilho_norm:
+                if not instrucao or not isinstance(gatilhos, list):
                     continue
 
-                gatilho_terms = gatilho_norm.split()
-                if gatilho_norm in prompt_norm:
-                    matched_triggers.append(str(gatilho))
-                    continue
+                matched_triggers: list[str] = []
+                for gatilho in gatilhos:
+                    gatilho_norm = _normalize_pop_text(str(gatilho))
+                    if not gatilho_norm:
+                        continue
 
-                if len(gatilho_terms) > 1 and all(term in prompt_terms for term in gatilho_terms):
-                    matched_triggers.append(str(gatilho))
-                    continue
+                    gatilho_terms = gatilho_norm.split()
+                    if gatilho_norm in prompt_norm:
+                        matched_triggers.append(str(gatilho))
+                        continue
 
-            if matched_triggers:
-                matched.append({
-                    "id": pop.get("id", ""),
-                    "titulo": titulo,
-                    "instrucao_sistema": instrucao,
-                    "matched_triggers": matched_triggers,
-                    "score": max(len(_normalize_pop_text(trigger).split()) for trigger in matched_triggers),
-                })
+                    if len(gatilho_terms) > 1 and all(term in prompt_terms for term in gatilho_terms):
+                        matched_triggers.append(str(gatilho))
+                        continue
+
+                if matched_triggers:
+                    matched.append({
+                        "id": pop.get("id", ""),
+                        "titulo": titulo,
+                        "instrucao_sistema": instrucao,
+                        "matched_triggers": matched_triggers,
+                        "score": max(len(_normalize_pop_text(trigger).split()) for trigger in matched_triggers),
+                    })
+
+            return matched
+
+        matched = _collect_matches(all_pops)
+
+        # Se o cache estiver velho e ainda dentro do TTL, um POP cadastrado há
+        # segundos pode não existir na lista local. Em caso de miss, revalida.
+        if not matched and used_cache:
+            refreshed_at = time.monotonic()
+            all_pops = [
+                {"id": d.id, **(d.to_dict() or {})}
+                for d in db.collection("pops_diretrizes").stream()
+            ]
+            _POPS_DATA_CACHE = (refreshed_at, all_pops)
+            matched = _collect_matches(all_pops)
+
     except Exception as pop_err:
         print(f"[POP] Erro ao buscar diretrizes: {pop_err}")
         return []
@@ -7782,6 +7803,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             Cria ou atualiza um POP operacional persistido em pops_diretrizes.
             Use apenas quando houver pedido explícito do usuário para cadastrar ou atualizar um POP.
             """
+            global _POPS_DATA_CACHE
             try:
                 titulo_clean = (titulo or "").strip()
                 instrucao_clean = (instrucao_sistema or "").strip()
@@ -7840,6 +7862,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 if existing_ref:
                     payload["created_at"] = existing_data.get("created_at", firestore.SERVER_TIMESTAMP)
                     existing_ref.set(payload, merge=True)
+                    _POPS_DATA_CACHE = None
                     return json.dumps({
                         "status": "updated",
                         "pop_id": existing_ref.id,
@@ -7850,6 +7873,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 new_ref = db.collection("pops_diretrizes").document()
                 payload["created_at"] = firestore.SERVER_TIMESTAMP
                 new_ref.set(payload)
+                _POPS_DATA_CACHE = None
                 return json.dumps({
                     "status": "saved",
                     "pop_id": new_ref.id,
@@ -9509,6 +9533,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 )
             pop_lines.append(
                 "Aplique as diretrizes acima ao responder e ao decidir quais ferramentas usar. "
+                "As diretrizes acima ja foram recuperadas do Gestor de POPs; nao declare ausencia de POP "
+                "nem use Acervo/Internet apenas para confirmar a existencia deste POP. "
                 "Se houver conflito entre POP e pedido literal do usuario, exponha o conflito antes de agir."
             )
             pop_lines.append("[/DIRETRIZES OPERACIONAIS (POPs) CORRESPONDENTES - OBRIGATORIAS]")
@@ -9919,6 +9945,13 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
                     continue
             updates[campo] = novo_valor
 
+        # Acoes usam data unica. Mantem data_limite e data_inicio espelhadas
+        # mesmo quando a edicao vier de ferramentas/backend que enviam so um campo.
+        if 'data_limite' in updates or 'data_inicio' in updates:
+            single_date = updates.get('data_limite') or updates.get('data_inicio') or ''
+            updates['data_limite'] = single_date
+            updates['data_inicio'] = single_date
+
         if not updates:
             _set_card_status(db_ref, 'error', 'Nenhum campo válido para atualizar.')
             raise https_fn.HttpsError(
@@ -10017,6 +10050,7 @@ def confirmarReagendamentoEmLote(req: https_fn.CallableRequest):
             updates = {'data_atualizacao': now_iso}
             if item.get('nova_data_limite'):
                 updates['data_limite'] = item['nova_data_limite']
+                updates['data_inicio'] = item['nova_data_limite']
             if item.get('novo_horario_inicio') is not None:
                 updates['horario_inicio'] = item['novo_horario_inicio']
             if item.get('novo_horario_fim') is not None:

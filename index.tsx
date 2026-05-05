@@ -3900,37 +3900,6 @@ const App: React.FC = () => {
         batch.commit().catch((migrationErr) => console.error('Erro ao limpar datas de standby:', migrationErr));
       }
 
-      // Automação: Atualizar tarefas atrasadas para o dia de hoje
-      const today = formatDateLocalISO(new Date());
-      const nowISO = new Date().toISOString();
-      const overdueTasks = snapshot.docs
-        .map(taskDoc => ({ id: taskDoc.id, ...taskDoc.data() } as Tarefa))
-        .filter(task => {
-          const status = normalizeStatus(task.status);
-          const isPending = status !== 'concluido' && task.status !== 'excluído' as any;
-          const hasPastDeadline = task.data_limite &&
-            task.data_limite !== '-' &&
-            task.data_limite !== '0000-00-00' &&
-            task.data_limite < today;
-          return isPending && !isStandbyStatus(task.status) && hasPastDeadline;
-        });
-
-      if (overdueTasks.length > 0) {
-        const batch = writeBatch(db);
-        overdueTasks.forEach(task => {
-          batch.update(doc(db, 'tarefas', task.id), {
-            data_inicio: today,
-            data_limite: today,
-            data_atualizacao: nowISO
-          });
-        });
-        batch.commit()
-          .then(() => {
-            showToast(`${overdueTasks.length} ação(ões) atrasada(s) atualizada(s) para hoje!`, 'info');
-          })
-          .catch((err) => console.error('Erro ao atualizar tarefas atrasadas:', err));
-      }
-
       setLoading(false);
       setIsInitialDataLoading(false);
     }, (err) => {

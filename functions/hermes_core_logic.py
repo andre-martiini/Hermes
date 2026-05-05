@@ -2536,6 +2536,7 @@ def _process_telegram_message(db, data: dict):
                 task_ref = db.collection('tarefas').document(task['_id'])
                 batch.update(task_ref, {
                     'data_limite': nova_data_str,
+                    'data_inicio': nova_data_str,
                     'data_atualizacao': now_iso,
                     'acompanhamento': firestore.ArrayUnion([diary_entry]),
                 })
