@@ -6,6 +6,7 @@ import {
     type KnowledgeResult,
     type KnowledgeFilters,
     type KnowledgeIntent,
+    type FileSearchCitation,
 } from './src/services/knowledgeService';
 import { db } from './firebase';
 
@@ -154,6 +155,79 @@ const SynthesisBlock: React.FC<{
 
 // ─── Card de resultado ───────────────────────────────────────────────────────
 
+const getCitationMetadata = (citation: FileSearchCitation, key: string): string => {
+    const item = citation.custom_metadata?.find((meta) => meta.key === key);
+    const value = item?.string_value ?? item?.numeric_value;
+    return value === undefined || value === null ? '' : String(value);
+};
+
+const FileSearchCitationsBlock: React.FC<{
+    citations: FileSearchCitation[];
+    results: KnowledgeResult[];
+    onOpenResult: (item: KnowledgeResult, index: number) => void;
+}> = ({ citations, results, onOpenResult }) => {
+    const visible = citations.filter((citation) => citation.title || citation.text || citation.page_number);
+    if (visible.length === 0) return null;
+
+    return (
+        <section className="mt-4 bg-white rounded-2xl border border-emerald-100 p-5 shadow-sm">
+            <div className="flex items-center justify-between gap-3 mb-4">
+                <div>
+                    <h3 className="text-[10px] font-black uppercase tracking-[0.25em] text-emerald-700">
+                        Fontes por página
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1">
+                        Trechos recuperados pelo Gemini File Search.
+                    </p>
+                </div>
+                <span className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-[9px] font-black uppercase tracking-widest">
+                    Gemini
+                </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {visible.map((citation, i) => {
+                    const acervoId = getCitationMetadata(citation, 'acervo_id');
+                    const resultIdx = acervoId ? results.findIndex((r) => r.acervo_id === acervoId || r.id === acervoId) : -1;
+                    const result = resultIdx >= 0 ? results[resultIdx] : null;
+                    const pageLabel = citation.page_number ? `p. ${citation.page_number}` : 'sem página';
+
+                    return (
+                        <button
+                            key={`${citation.index}-${i}`}
+                            onClick={() => result && onOpenResult(result, resultIdx)}
+                            disabled={!result}
+                            className="text-left rounded-xl border border-slate-200 bg-slate-50 p-4 hover:border-emerald-300 hover:bg-emerald-50 transition-all disabled:hover:border-slate-200 disabled:hover:bg-slate-50 disabled:cursor-default"
+                        >
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+                                    Fonte {citation.index}
+                                </span>
+                                <span className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-[9px] font-black uppercase tracking-widest text-slate-600">
+                                    {pageLabel}
+                                </span>
+                            </div>
+                            <p className="text-xs font-black text-slate-900 line-clamp-2 mb-2">
+                                {citation.title || result?.title || 'Documento recuperado'}
+                            </p>
+                            {citation.text && (
+                                <p className="text-xs leading-relaxed text-slate-600 line-clamp-4">
+                                    {citation.text}
+                                </p>
+                            )}
+                            {result && (
+                                <span className="inline-flex mt-3 text-[9px] font-black uppercase tracking-widest text-emerald-700">
+                                    Abrir documento
+                                </span>
+                            )}
+                        </button>
+                    );
+                })}
+            </div>
+        </section>
+    );
+};
+
 const KnowledgeCard: React.FC<{
     result: KnowledgeResult;
     index: number;
@@ -188,6 +262,14 @@ const KnowledgeCard: React.FC<{
                 </span>
             )}
         </div>
+
+        {result.file_search?.store_name && (
+            <div className="inline-flex w-fit items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-emerald-700">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                File Search
+                {result.file_search.status === 'pendente' ? ' pendente' : ''}
+            </div>
+        )}
 
         <h3 className="text-sm font-black tracking-tight text-slate-900 line-clamp-2">
             {result.title || '(sem título)'}
@@ -311,6 +393,11 @@ const KnowledgeDrawer: React.FC<{
                             {item.area_tematica && (
                                 <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[9px] font-black uppercase tracking-widest">
                                     {item.area_tematica}
+                                </span>
+                            )}
+                            {item.file_search?.store_name && (
+                                <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-700 text-[9px] font-black uppercase tracking-widest">
+                                    File Search
                                 </span>
                             )}
                         </div>
@@ -532,6 +619,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
     const [loadingMsgIdx, setLoadingMsgIdx] = useState(0);
     const [intent, setIntent] = useState<KnowledgeIntent | null>(null);
     const [synthesis, setSynthesis] = useState<string>('');
+    const [fileSearchCitations, setFileSearchCitations] = useState<FileSearchCitation[]>([]);
     const [results, setResults] = useState<KnowledgeResult[]>([]);
     const [error, setError] = useState<string | null>(null);
 
@@ -596,6 +684,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
         setLoading(true);
         setError(null);
         setSynthesis('');
+        setFileSearchCitations([]);
         setIntent(null);
         setFocusedIdx(null);
         setLoadingMsgIdx(0);
@@ -604,9 +693,11 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
             setIntent(res.intent);
             setResults(res.results || []);
             setSynthesis(res.synthesis || '');
+            setFileSearchCitations(res.file_search?.citations || []);
         } catch (e: any) {
             setError(e?.message || 'Falha na busca.');
             setResults([]);
+            setFileSearchCitations([]);
         } finally {
             setLoading(false);
         }
@@ -629,6 +720,17 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
         },
         [results]
     );
+
+    const handleOpenResult = useCallback((item: KnowledgeResult, index: number) => {
+        setFocusedIdx(index);
+        setDrawerItem(item);
+        requestAnimationFrame(() => {
+            const el = document.getElementById(`kg-card-${index + 1}`);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        });
+    }, []);
 
     const handleAddTag = () => {
         const t = tagInput.trim();
@@ -866,6 +968,11 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
                         {!loading && synthesis && (
                             <div className="mb-8">
                                 <SynthesisBlock text={synthesis} onCitationClick={handleCitationClick} />
+                                <FileSearchCitationsBlock
+                                    citations={fileSearchCitations}
+                                    results={results}
+                                    onOpenResult={handleOpenResult}
+                                />
                             </div>
                         )}
 

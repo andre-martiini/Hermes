@@ -32,6 +32,8 @@ import json
 import io
 import math
 import re
+import tempfile
+import time
 import unicodedata
 import uuid
 from datetime import datetime, timezone
@@ -79,9 +81,14 @@ SUPPORTED_MIMES = frozenset({
     "text/plain",
     "text/markdown",
     "text/html",
+    "image/jpeg",
+    "image/png",
 })
 
 DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+FILE_SEARCH_STORE_MODEL = "models/gemini-embedding-2"
+FILE_SEARCH_QUERY_MODEL = "gemini-3-flash-preview"
+FILE_SEARCH_WAIT_SECONDS = 90
 
 
 def _is_docx(filename: str | None = None, mime_type: str | None = None) -> bool:
@@ -470,6 +477,7 @@ def _update_acervo_doc(
     resumo: Optional[str],
     tags: list,
     embedding: list,
+    extra: Optional[dict] = None,
 ) -> None:
     """Atualiza um documento acervo_global com o resultado da indexação."""
     update: dict = {"status_indexacao": status}
@@ -479,6 +487,8 @@ def _update_acervo_doc(
         update["tags"] = tags
     if embedding:
         update["embedding"] = embedding
+    if extra:
+        update.update(extra)
     try:
         db.collection("acervo_global").document(acervo_id).update(update)
     except Exception as exc:
@@ -497,6 +507,7 @@ def _write_to_indice_artefatos(
     task_id: Optional[str] = None,
     acervo_id: Optional[str] = None,
     texto_bruto: Optional[str] = None,
+    file_search: Optional[dict] = None,
 ) -> None:
     """Grava entrada no índice vetorial unificado (indice_artefatos)."""
     doc_id = str(uuid.uuid4())[:16]
@@ -517,8 +528,207 @@ def _write_to_indice_artefatos(
     if texto_bruto:
         # Limite defensivo: o upstream já trunca em ARTEFATO_CHAR_CAP, mas garantimos aqui.
         entry["texto_bruto"] = texto_bruto[:ARTEFATO_CHAR_CAP]
+    if file_search:
+        entry["file_search"] = file_search
     db.collection("indice_artefatos").document(doc_id).set(entry)
     print(f"[KG IndiceArtefatos] Entrada gravada: {nome} ({origem})")
+
+
+def _plain_genai_value(value):
+    """Converte objetos do SDK Gemini para estruturas simples graváveis no Firestore."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_plain_genai_value(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _plain_genai_value(v) for k, v in value.items() if v is not None}
+    for method_name in ("model_dump", "to_dict"):
+        method = getattr(value, method_name, None)
+        if callable(method):
+            try:
+                return _plain_genai_value(method())
+            except Exception:
+                pass
+    if hasattr(value, "__dict__"):
+        return {
+            str(k): _plain_genai_value(v)
+            for k, v in vars(value).items()
+            if not k.startswith("_") and v is not None
+        }
+    return str(value)
+
+
+def _get_or_create_file_search_store(db, api_key: str) -> Optional[str]:
+    """Retorna o File Search Store do Hermes, criando um store piloto se necessário."""
+    doc_ref = db.collection("system").document("file_search")
+    try:
+        snap = doc_ref.get()
+        current_data = snap.to_dict() or {} if snap.exists else {}
+        current = current_data.get("store_name")
+        if current and current_data.get("embedding_model") == FILE_SEARCH_STORE_MODEL:
+            return current
+        if current:
+            print("[KG FileSearch] Store atual nao e multimodal; tentando criar store novo.")
+
+        client = _gemini_client(api_key)
+        store_name = None
+        store = None
+        try:
+            store = client.file_search_stores.create(
+                config={
+                    "display_name": "Hermes Acervo Global",
+                    "embedding_model": FILE_SEARCH_STORE_MODEL,
+                }
+            )
+            embedding_model_status = FILE_SEARCH_STORE_MODEL
+        except Exception as exc:
+            print(f"[KG FileSearch] SDK nao aceitou embedding_model; tentando REST: {exc}")
+            try:
+                import requests
+                rest_resp = requests.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/fileSearchStores?key={api_key}",
+                    json={
+                        "display_name": "Hermes Acervo Global",
+                        "embedding_model": FILE_SEARCH_STORE_MODEL,
+                    },
+                    timeout=30,
+                )
+                rest_resp.raise_for_status()
+                rest_data = rest_resp.json()
+                store_name = rest_data.get("name")
+                if not store_name:
+                    raise RuntimeError(f"REST sem name: {rest_data}")
+                store = None
+                embedding_model_status = FILE_SEARCH_STORE_MODEL
+            except Exception as rest_exc:
+                if current:
+                    print(f"[KG FileSearch] REST com embedding_model falhou; mantendo store atual: {rest_exc}")
+                    return current
+                print(f"[KG FileSearch] REST com embedding_model falhou; criando store padrao: {rest_exc}")
+                store = client.file_search_stores.create(
+                    config={"display_name": "Hermes Acervo Global"}
+                )
+                embedding_model_status = "default"
+        if not store_name:
+            store_name = getattr(store, "name", None)
+        if not store_name:
+            print("[KG FileSearch] Store criado sem campo name no retorno.")
+            return None
+        doc_ref.set({
+            "store_name": store_name,
+            "display_name": "Hermes Acervo Global",
+            "embedding_model": embedding_model_status,
+            "created_at": firestore.SERVER_TIMESTAMP,
+        }, merge=True)
+        print(f"[KG FileSearch] Store criado: {store_name}")
+        return store_name
+    except Exception as exc:
+        print(f"[KG FileSearch] Falha ao criar/obter store: {exc}")
+        return None
+
+
+def _build_file_search_metadata(
+    nome: str,
+    tipo_mime: str,
+    origem: str,
+    tags: list,
+    task_id: Optional[str] = None,
+    acervo_id: Optional[str] = None,
+) -> list[dict]:
+    """Metadados simples para permitir filtros no Gemini File Search."""
+    metadata = [
+        {"key": "nome", "string_value": nome[:500]},
+        {"key": "tipo_mime", "string_value": tipo_mime},
+        {"key": "origem", "string_value": origem},
+    ]
+    if task_id:
+        metadata.append({"key": "task_id", "string_value": task_id})
+    if acervo_id:
+        metadata.append({"key": "acervo_id", "string_value": acervo_id})
+    clean_tags = [str(tag).strip() for tag in (tags or [])[:20] if str(tag).strip()]
+    if clean_tags:
+        metadata.append({"key": "primary_tag", "string_value": clean_tags[0][:100]})
+    for idx, tag_value in enumerate(clean_tags, 1):
+        metadata.append({"key": f"tag_{idx:02d}", "string_value": tag_value[:100]})
+    return metadata
+
+
+def _index_file_search_document(
+    db,
+    api_key: str,
+    file_bytes: bytes,
+    nome: str,
+    tipo_mime: str,
+    origem: str,
+    tags: list,
+    task_id: Optional[str] = None,
+    acervo_id: Optional[str] = None,
+) -> Optional[dict]:
+    """
+    Indexa o arquivo bruto no Gemini File Search.
+
+    Esta camada é opcional: qualquer falha vira log e o RAG Firestore continua
+    sendo a fonte principal.
+    """
+    store_name = _get_or_create_file_search_store(db, api_key)
+    if not store_name:
+        return None
+
+    client = _gemini_client(api_key)
+    metadata = _build_file_search_metadata(
+        nome, tipo_mime, origem, tags, task_id=task_id, acervo_id=acervo_id
+    )
+    suffix = "." + (nome.rsplit(".", 1)[-1] if "." in nome else "bin")
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(file_bytes)
+            temp_path = tmp.name
+
+        try:
+            operation = client.file_search_stores.upload_to_file_search_store(
+                file=temp_path,
+                file_search_store_name=store_name,
+                config={"display_name": nome, "custom_metadata": metadata},
+            )
+        except Exception as metadata_exc:
+            print(f"[KG FileSearch] Upload com metadados falhou; tentando sem metadados: {metadata_exc}")
+            operation = client.file_search_stores.upload_to_file_search_store(
+                file=temp_path,
+                file_search_store_name=store_name,
+                config={"display_name": nome},
+            )
+
+        start = time.monotonic()
+        while not getattr(operation, "done", False):
+            if time.monotonic() - start > FILE_SEARCH_WAIT_SECONDS:
+                print(f"[KG FileSearch] Upload ainda pendente apos timeout: {nome}")
+                break
+            time.sleep(5)
+            operation = client.operations.get(operation)
+
+        response = _plain_genai_value(getattr(operation, "response", None))
+        document_name = response.get("name") if isinstance(response, dict) else None
+        payload = {
+            "store_name": store_name,
+            "document_name": document_name,
+            "operation_name": getattr(operation, "name", None),
+            "status": "concluido" if getattr(operation, "done", False) else "pendente",
+            "metadata": metadata,
+            "indexed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        print(f"[KG FileSearch] Documento enviado: {nome} ({payload['status']})")
+        return payload
+    except Exception as exc:
+        print(f"[KG FileSearch] Falha ao indexar {nome}: {exc}")
+        return None
+    finally:
+        if temp_path:
+            try:
+                import os
+                os.remove(temp_path)
+            except Exception:
+                pass
 
 
 def _assign_acervo_tags(
@@ -1097,19 +1307,26 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
             tags = (snap.to_dict() or {}).get("kg_tags", []) if snap.exists else []
         except Exception:
             pass
+        file_search_payload = _index_file_search_document(
+            db, api_key, file_bytes, nome, tipo_mime, "tarefa", tags, task_id=task_id
+        )
         if emb:
             _write_to_indice_artefatos(
                 db, nome, url, tipo_mime, resumo, emb, tags, "tarefa",
-                task_id=task_id, texto_bruto=texto_cap,
+                task_id=task_id, texto_bruto=texto_cap, file_search=file_search_payload,
             )
     else:  # acervo
         existing_tags = _fetch_tag_vocabulary(db)
         tags = _assign_acervo_tags(db, api_key, nome, texto_cap, existing_tags)
-        _update_acervo_doc(db, acervo_id, status_final, resumo, tags, emb)
+        file_search_payload = _index_file_search_document(
+            db, api_key, file_bytes, nome, tipo_mime, "acervo", tags, acervo_id=acervo_id
+        )
+        extra_update = {"file_search": file_search_payload} if file_search_payload else None
+        _update_acervo_doc(db, acervo_id, status_final, resumo, tags, emb, extra=extra_update)
         if emb:
             _write_to_indice_artefatos(
                 db, nome, url, tipo_mime, resumo, emb, tags, "acervo",
-                acervo_id=acervo_id, texto_bruto=texto_cap,
+                acervo_id=acervo_id, texto_bruto=texto_cap, file_search=file_search_payload,
             )
         # Sincroniza novas tags no vocabulário centralizado
         if tags:
@@ -1830,6 +2047,7 @@ def _search_artefatos(
             "origem": ad.get("origem", ""),
             "task_id": ad.get("task_id", ""),
             "acervo_id": ad.get("acervo_id", ""),
+            "file_search": ad.get("file_search"),
             "score": 20.0,
         }
 
@@ -1877,6 +2095,7 @@ def _search_artefatos(
             "origem": ad.get("origem", ""),
             "task_id": ad.get("task_id", ""),
             "acervo_id": ad.get("acervo_id", ""),
+            "file_search": ad.get("file_search"),
             "score": lexical_score,
         }
 
@@ -1940,6 +2159,109 @@ Resposta:"""
     except Exception as exc:
         print(f"[smart_search_kg] Falha na síntese: {exc}")
         return ""
+
+
+def _extract_file_search_citations(response) -> list[dict]:
+    """Extrai citações, páginas e metadados do grounding_metadata do File Search."""
+    grounding = getattr(response, "grounding_metadata", None)
+    if not grounding:
+        candidates = getattr(response, "candidates", None) or []
+        if candidates:
+            grounding = getattr(candidates[0], "grounding_metadata", None)
+    chunks = getattr(grounding, "grounding_chunks", None) if grounding else None
+    citations: list[dict] = []
+    for idx, chunk in enumerate(chunks or [], 1):
+        ctx = getattr(chunk, "retrieved_context", None)
+        if not ctx:
+            continue
+        custom_metadata = []
+        for item in getattr(ctx, "custom_metadata", None) or []:
+            item_plain = _plain_genai_value(item)
+            if isinstance(item_plain, dict):
+                custom_metadata.append(item_plain)
+        citations.append({
+            "index": idx,
+            "title": getattr(ctx, "title", "") or "",
+            "uri": getattr(ctx, "uri", "") or "",
+            "text": (getattr(ctx, "text", "") or "")[:1200],
+            "page_number": getattr(ctx, "page_number", None),
+            "media_id": getattr(ctx, "media_id", None),
+            "file_search_store": getattr(ctx, "file_search_store", "") or "",
+            "custom_metadata": custom_metadata,
+        })
+    return citations
+
+
+def _build_file_search_metadata_filter(tags_set: set[str], tipo_filter: str) -> str:
+    """Monta um filtro conservador de metadados para o File Search."""
+    parts: list[str] = []
+    if tags_set:
+        tag = sorted(tags_set)[0].replace('"', '\\"')
+        parts.append(f'primary_tag = "{tag}"')
+    return " AND ".join(parts)
+
+
+def _build_file_search_synthesis(
+    query: str,
+    api_key: str,
+    tags_set: set[str],
+    tipo_filter: str,
+) -> Optional[dict]:
+    """
+    Consulta o Gemini File Search gerenciado para uma síntese com citações/páginas.
+
+    Fallback silencioso: se o store ainda não existe ou a API falha, a síntese
+    local baseada no Firestore segue funcionando.
+    """
+    try:
+        db = _get_db()
+        store_doc = db.collection("system").document("file_search").get()
+        store_name = (store_doc.to_dict() or {}).get("store_name") if store_doc.exists else None
+        if not store_name:
+            return None
+
+        from google.genai import types
+
+        metadata_filter = _build_file_search_metadata_filter(tags_set, tipo_filter)
+        file_search_args: dict = {"file_search_store_names": [store_name]}
+        if metadata_filter:
+            file_search_args["metadata_filter"] = metadata_filter
+
+        prompt = f"""Voce e o motor de respostas do Hermes. Responda a pergunta do usuario usando somente os documentos recuperados pelo File Search.
+
+Pergunta: {query}
+
+Regras:
+1. Seja direto, tecnico e objetivo.
+2. Cite as fontes no texto quando a informacao vier de documento.
+3. Se os documentos nao cobrirem a pergunta, diga isso explicitamente.
+4. Nao invente numeros, datas, status ou obrigacoes."""
+
+        client = _gemini_client(api_key)
+        response = client.models.generate_content(
+            model=FILE_SEARCH_QUERY_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                tools=[
+                    types.Tool(
+                        file_search=types.FileSearch(**file_search_args)
+                    )
+                ]
+            ),
+        )
+        answer = (getattr(response, "text", "") or "").strip()
+        citations = _extract_file_search_citations(response)
+        if not answer and not citations:
+            return None
+        return {
+            "synthesis": answer,
+            "citations": citations,
+            "store_name": store_name,
+            "metadata_filter": metadata_filter,
+        }
+    except Exception as exc:
+        print(f"[smart_search_kg] File Search indisponivel: {exc}")
+        return None
 
 
 @https_fn.on_call(
@@ -2041,8 +2363,16 @@ def smart_search_kg(req: https_fn.CallableRequest):
 
     # ── Passo 3: Síntese condicional ──────────────────────────────────────────
     synthesis = ""
+    file_search_payload = None
     if intent == "SINTESE_PROFUNDA" and merged:
-        synthesis = _build_synthesis(query, merged, api_key)
+        if tipo_filter in ("all", "artefato"):
+            file_search_payload = _build_file_search_synthesis(
+                query, api_key, tags_set, tipo_filter
+            )
+        if file_search_payload and file_search_payload.get("synthesis"):
+            synthesis = file_search_payload["synthesis"]
+        else:
+            synthesis = _build_synthesis(query, merged, api_key)
 
     response: dict = {
         "intent": intent,
@@ -2050,6 +2380,8 @@ def smart_search_kg(req: https_fn.CallableRequest):
     }
     if synthesis:
         response["synthesis"] = synthesis
+    if file_search_payload:
+        response["file_search"] = file_search_payload
 
     return response
 

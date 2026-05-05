@@ -30,11 +30,39 @@ export interface KnowledgeResult {
     task_ids?: string[];
     acervo_id?: string;
     n_tasks?: number;
+    file_search?: {
+        store_name: string;
+        document_name?: string | null;
+        operation_name?: string | null;
+        status: 'concluido' | 'pendente';
+        indexed_at?: string;
+    };
+}
+
+export interface FileSearchCitation {
+    index: number;
+    title?: string;
+    uri?: string;
+    text?: string;
+    page_number?: number;
+    media_id?: string;
+    file_search_store?: string;
+    custom_metadata?: Array<{
+        key?: string;
+        string_value?: string;
+        numeric_value?: number;
+    }>;
 }
 
 export interface SmartSearchResponse {
     intent: KnowledgeIntent;
     synthesis?: string;
+    file_search?: {
+        synthesis?: string;
+        citations: FileSearchCitation[];
+        store_name?: string;
+        metadata_filter?: string;
+    };
     results: KnowledgeResult[];
 }
 

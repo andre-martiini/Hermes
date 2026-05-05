@@ -124,6 +124,7 @@ export interface AcervoGlobal {
     tags: string[];
     status_indexacao: 'pendente' | 'concluido' | 'falha_acesso' | 'falha_limite_tamanho' | 'ignorado_mime';
     indexed_at: string;
+    file_search?: GeminiFileSearchIndex;
 }
 
 /** Documento da coleção indice_artefatos — índice vetorial unificado (tarefas + acervo). */
@@ -138,6 +139,20 @@ export interface IndiceArtefato {
     task_id?: string;
     acervo_id?: string;
     indexed_at: string;
+    file_search?: GeminiFileSearchIndex;
+}
+
+export interface GeminiFileSearchIndex {
+    store_name: string;
+    document_name?: string | null;
+    operation_name?: string | null;
+    status: 'concluido' | 'pendente';
+    metadata?: Array<{
+        key: string;
+        string_value?: string;
+        numeric_value?: number;
+    }>;
+    indexed_at?: string;
 }
 
 export interface AtividadeRealizada {
