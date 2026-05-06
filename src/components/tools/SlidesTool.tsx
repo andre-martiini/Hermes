@@ -42,6 +42,7 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
     try { return JSON.parse(localStorage.getItem(SLIDES_HISTORY_KEY) || '[]'); } catch { return []; }
   });
   const [jobs, setJobs] = useState<any[]>([]);
+  const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
 
   useEffect(() => onAuthStateChanged(auth, setUser), []);
 
@@ -129,6 +130,30 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
       showToast("ApresentaÃ§ão gerada com sucesso!", "success");
     } catch (err) { console.error(err); showToast("Erro ao gerar slides.", "error"); }
     finally { setIsGenerating(false); }
+  };
+
+  const handleCancelJob = async (jobId: string) => {
+    setCancellingJobId(jobId);
+    try {
+      const cancelJobFn = httpsCallable(functions, 'cancelSlideJob');
+      await cancelJobFn({ jobId });
+      showToast("Job cancelado.", "info");
+    } catch (e) {
+      console.error(e);
+      showToast("Erro ao cancelar o job.", "error");
+    } finally {
+      setCancellingJobId(null);
+    }
+  };
+
+  const getElapsed = (timestamp: any): string => {
+    if (!timestamp) return '';
+    const ts = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    const diffMs = Date.now() - ts.getTime();
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return 'agora mesmo';
+    if (mins === 1) return 'há 1 min';
+    return `há ${mins} min`;
   };
 
   const handleDispatchJob = async () => {
@@ -283,16 +308,36 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
                       <div>
                         <p className="text-sm font-black text-slate-900">{job.tema ? job.tema.slice(0, 40) + '...' : 'Apresentação'}</p>
                         <p className="text-[10px] font-bold text-slate-400 mt-0.5">
-                          {job.status === 'processing' ? 'Processando...' : job.status === 'completed' ? 'Concluído' : 'Erro'} • {job.totalSlides} slides
+                          {job.status === 'processing'
+                            ? `Processando... ${getElapsed(job.timestamp)}`
+                            : job.status === 'completed' ? 'Concluído'
+                            : job.error_msg === 'Cancelado pelo usuário.' ? 'Cancelado'
+                            : 'Erro'} • {job.totalSlides} slides
                         </p>
                       </div>
                     </div>
-                    {job.driveLink && (
-                      <a href={job.driveLink} target="_blank" rel="noopener noreferrer" className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-colors flex items-center gap-2">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                        Abrir no Drive
-                      </a>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {job.status === 'processing' && (
+                        <button
+                          onClick={() => handleCancelJob(job.id)}
+                          disabled={cancellingJobId === job.id}
+                          className="px-3 py-2 bg-rose-50 text-rose-500 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-rose-100 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                          title="Cancelar job travado"
+                        >
+                          {cancellingJobId === job.id
+                            ? <div className="w-3 h-3 border-2 border-rose-400 border-t-transparent rounded-full animate-spin" />
+                            : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                          }
+                          Cancelar
+                        </button>
+                      )}
+                      {job.driveLink && (
+                        <a href={job.driveLink} target="_blank" rel="noopener noreferrer" className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-colors flex items-center gap-2">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                          Abrir no Drive
+                        </a>
+                      )}
+                    </div>
                   </div>
                   {job.status === 'processing' && (
                     <div className="flex gap-1 mt-2">

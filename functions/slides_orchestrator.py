@@ -136,11 +136,28 @@ def slideExecutorWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedDa
 
     try:
         def publish_finalizer_if_ready():
-            job_doc = job_ref.get()
-            statuses = job_doc.get("slides_status") or []
-            all_terminal = all(s["status"] in {"completed", "error"} for s in statuses)
+            """
+            Uses a Firestore transaction with a 'finalizer_dispatched' flag to ensure
+            the finalizer is triggered exactly once, even under concurrent workers.
+            """
+            should_dispatch = False
 
-            if not all_terminal:
+            @firestore.transactional
+            def _check_and_mark(transaction, ref):
+                nonlocal should_dispatch
+                snap = ref.get(transaction=transaction)
+                if not snap.exists:
+                    return
+                if snap.get("finalizer_dispatched"):
+                    return
+                statuses = snap.get("slides_status") or []
+                if all(s["status"] in {"completed", "error"} for s in statuses):
+                    transaction.update(ref, {"finalizer_dispatched": True})
+                    should_dispatch = True
+
+            _check_and_mark(db.transaction(), job_ref)
+
+            if not should_dispatch:
                 return
 
             from google.cloud import pubsub_v1
@@ -340,3 +357,64 @@ def slideFinalizeWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedDa
             n_type="success",
             link=web_view_link
         )
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+)
+def cancelSlideJob(req: https_fn.CallableRequest):
+    """
+    Cancels a processing slide job, marking all non-terminal slides as error.
+    """
+    uid = req.auth.uid if req.auth else None
+    if not uid:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
+            message="Usuário não autenticado."
+        )
+
+    job_id = (req.data or {}).get('jobId')
+    if not job_id:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="jobId é obrigatório."
+        )
+
+    from main import get_db
+    db = get_db()
+    job_ref = db.collection('slide_jobs').document(job_id)
+    job_doc = job_ref.get()
+
+    if not job_doc.exists:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.NOT_FOUND,
+            message="Job não encontrado."
+        )
+
+    job = job_doc.to_dict()
+
+    if job.get('userId') != uid:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.PERMISSION_DENIED,
+            message="Sem permissão para cancelar este job."
+        )
+
+    if job.get('status') != 'processing':
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+            message="Apenas jobs em processamento podem ser cancelados."
+        )
+
+    updated_statuses = [
+        s if s['status'] in {'completed', 'error'} else {**s, 'status': 'error'}
+        for s in (job.get('slides_status') or [])
+    ]
+
+    job_ref.update({
+        'slides_status': updated_statuses,
+        'status': 'error',
+        'error_msg': 'Cancelado pelo usuário.',
+        'finalizer_dispatched': True,
+        'cancelledAt': firestore.SERVER_TIMESTAMP
+    })
+
+    return {'success': True}
