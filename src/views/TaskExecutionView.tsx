@@ -272,7 +272,20 @@ export const TaskExecutionView = ({
         if (data.status === 'COMPLETED' || data.status === 'FAILED' || data.status === 'CANCELLED') {
           setIsDeepResearching(false);
           if (data.status === 'COMPLETED') {
-            showToast('Pesquisa Profunda concluída! Verifique o acervo global.', 'success');
+            const links = [
+              data.html_link ? `HTML: ${data.html_link}` : null,
+              data.pdf_link && data.pdf_link !== 'N/A' ? `PDF: ${data.pdf_link}` : null,
+            ].filter(Boolean).join('\n');
+            const assistantMsg: ChatMessage = {
+              role: 'assistant',
+              content: `Pesquisa profunda concluída e salva no acervo global.${links ? `\n\n${links}` : ''}`,
+            };
+            setChatMessages(prev => {
+              const updated = [...prev, assistantMsg];
+              onSave(task.id, { chat_history: updated });
+              return updated;
+            });
+            showToast('Pesquisa Profunda concluída e salva no acervo global.', 'success');
           } else if (data.status === 'CANCELLED') {
             showToast('Pesquisa Profunda cancelada.', 'info');
           } else {
@@ -288,7 +301,7 @@ export const TaskExecutionView = ({
       unsub();
       clearTimeout(fallbackTimer);
     };
-  }, [pendingDeepResearchId, showToast]);
+  }, [pendingDeepResearchId, showToast, onSave, task.id]);
 
   useEffect(() => {
     setChatMessages(currentTaskData.chat_history || []);

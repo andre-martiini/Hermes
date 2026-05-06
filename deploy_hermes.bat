@@ -70,6 +70,9 @@ if %ERRORLEVEL% NEQ 0 (
 )
 echo.
 echo       OK - telegramWebhook, on_telegram_inbound e on_telegram_tool_dispatch atualizados
+echo       Observacao: Deep Research salva HTML mesmo sem PDF.
+echo       Para habilitar PDF, configure PUPPETEER_INTERNAL_SECRET nas functions Python e Node
+echo       e publique tambem: firebase deploy --only functions:node --project gestao-hermes
 echo.
 
 REM -------------------------------------------------------

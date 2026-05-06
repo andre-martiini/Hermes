@@ -85,6 +85,8 @@ SYNC_LOCK_STALE_SECONDS = 15 * 60
 MAX_SYNC_PASSES = 3
 COPILOT_FUNCTION_TIMEOUT_SEC = 540
 COPILOT_SOFT_DEADLINE_SEC = 510
+COPILOT_MODEL_TIMEOUT_MS = 90000
+COPILOT_TOOL_TIMEOUT_SEC = 60
 
 # ---------------------------------------------------------------------------
 # In-process Firestore document cache (TTL = 60 s per Cloud Function instance)
@@ -9161,6 +9163,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             model=model_id,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction + _correcao_hint,
+                http_options=types.HttpOptions(timeout=COPILOT_MODEL_TIMEOUT_MS),
                 tools=[
                     buscar_e_analisar_email,
                     consultar_historico_acoes,
@@ -9573,8 +9576,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 function_response_parts.append(types.Part(text="\nAVISO DE PERFORMANCE: Você já realizou 3 rodadas de consultas sequenciais. Para evitar latência excessiva, consolide TODAS as buscas restantes em um único lote (batch) nesta rodada ou emita uma resposta parcial informando que está compilando os dados."))
             break_loop = False
             # Paralelismo de Execução de Ferramentas: processa múltiplas ferramentas simultaneamente em uma única rodada
-            from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
-            _fn_results = [None] * len(fcs)
+            from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor, wait as _futures_wait
             
             def _execute_tool(idx, fc):
                 fn = _function_map.get(fc.name)
@@ -9597,11 +9599,28 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 })
                 return (res, tool_invocation_data_local)
 
-            with _ThreadPoolExecutor(max_workers=min(len(fcs), 8)) as _executor:
+            _executor = _ThreadPoolExecutor(max_workers=min(len(fcs), 8))
+            try:
                 _futures = [_executor.submit(_execute_tool, i, fc) for i, fc in enumerate(fcs)]
+                _tool_wait_sec = min(COPILOT_TOOL_TIMEOUT_SEC, max(5.0, _copilot_remaining_sec() - 75))
+                _done_futures, _pending_futures = _futures_wait(_futures, timeout=_tool_wait_sec)
+                if _pending_futures:
+                    for _pending in _pending_futures:
+                        _pending.cancel()
+                    deadline_fallback_text = (
+                        "Uma das consultas internas demorou demais e eu interrompi o processamento "
+                        "antes que a conversa ficasse travada. Tente pedir primeiro uma lista objetiva "
+                        "dos itens pendentes e, em seguida, solicite a proposta completa."
+                    )
+                    _perf_mark(perf_state, "web.tool_timeout")
+
                 for _i, _future in enumerate(_futures):
-                    result, tool_invocation_data_local = _future.result()
                     _fc = fcs[_i]
+                    if _future not in _done_futures:
+                        result = f"Timeout ao executar {getattr(_fc, 'name', 'ferramenta')}: limite de {COPILOT_TOOL_TIMEOUT_SEC}s excedido."
+                        tool_invocation_data_local = None
+                    else:
+                        result, tool_invocation_data_local = _future.result()
                     
                     if tool_invocation_data_local:
                         tool_invocation_data = tool_invocation_data_local
@@ -9653,8 +9672,13 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                             response={"result": _result_str}
                         )
                     )
+            finally:
+                _executor.shutdown(wait=False, cancel_futures=True)
 
             if break_loop:
+                break
+
+            if deadline_fallback_text:
                 break
 
             if _copilot_remaining_sec() < 75:
@@ -11063,6 +11087,11 @@ def deep_research_worker(event: firestore_fn.Event[firestore_fn.DocumentSnapshot
             raise Exception("Chave de API do Gemini não configurada.")
 
         client = genai.Client(api_key=api_key)
+        grounding_tool = types.Tool(google_search=types.GoogleSearch())
+        grounded_config = types.GenerateContentConfig(
+            temperature=0.7,
+            tools=[grounding_tool],
+        )
 
         # Iterative Loop Control
         DEPTH_CAP = 3
@@ -11079,14 +11108,22 @@ def deep_research_worker(event: firestore_fn.Event[firestore_fn.DocumentSnapshot
                  print("[DeepResearch] Pesquisa cancelada pelo usuário.")
                  return
 
-            prompt = f"Você é o agente Hermes focado em Pesquisa Profunda. Pesquise intensamente sobre: '{topic}'. Iteração {i+1} de {DEPTH_CAP}."
+            prompt = f"""Você é o agente Hermes focado em Pesquisa Profunda com consulta à web.
+Pesquise sobre: "{topic}".
+Iteração {i+1} de {DEPTH_CAP}.
+
+Requisitos:
+- Use a Pesquisa Google quando ela ajudar a confirmar fatos, datas, normas, pessoas, empresas ou eventos recentes.
+- Destaque incertezas e conflitos entre fontes.
+- Inclua links/fontes citadas no texto sempre que a ferramenta retornar evidências.
+"""
             if accumulated_context:
                 prompt += f"\n\nBaseando-se no que já foi levantado:\n{accumulated_context[:3000]}\n\nExpanda a pesquisa com novos fatos, aprofunde as nuances."
 
             response = client.models.generate_content(
                 model='gemini-3.1-pro-preview',
                 contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.7),
+                config=grounded_config,
             )
             last_response = response.text
             accumulated_context += f"\n\n---\n\n{response.text}"
@@ -11095,7 +11132,7 @@ def deep_research_worker(event: firestore_fn.Event[firestore_fn.DocumentSnapshot
         # Final Format HTML
         if check_cancelled(): return
 
-        html_prompt = "Você é o agente Hermes. Formate a pesquisa final sobre o tópico a seguir em HTML limpo, profissional, sem markdown backticks (`html `), pronto para renderização ou conversão para PDF. Mantenha os detalhes valiosos e inclua um pequeno resumo executivo (1 parágrafo) no início."
+        html_prompt = "Você é o agente Hermes. Formate a pesquisa final sobre o tópico a seguir em HTML limpo, profissional, sem markdown backticks (`html `), pronto para renderização ou conversão para PDF. Mantenha os detalhes valiosos, preserve links/fontes citadas e inclua um pequeno resumo executivo (1 parágrafo) no início."
         html_prompt += f"\n\nConteúdo Final Pesquisado:\n{accumulated_context}"
 
         final_html_response = client.models.generate_content(
@@ -11115,29 +11152,41 @@ def deep_research_worker(event: firestore_fn.Event[firestore_fn.DocumentSnapshot
         # Generate PDF (Call Node.js Endpoint)
         if check_cancelled(): return
 
-        puppeteer_secret = os.environ.get('PUPPETEER_INTERNAL_SECRET', 'dummy_secret')
-        project_id = os.environ.get('GCP_PROJECT', 'hermes') # Adjust for actual deployment
+        puppeteer_secret = os.environ.get('PUPPETEER_INTERNAL_SECRET')
+        project_id = (
+            os.environ.get('GCLOUD_PROJECT')
+            or os.environ.get('GCP_PROJECT')
+            or os.environ.get('GOOGLE_CLOUD_PROJECT')
+            or 'gestao-hermes'
+        )
 
         # Emulando chamada local para o microserviço HTTP.
         # Num ambiente produtivo Cloud Run, usaríamos a URL nativa do Cloud Functions (process.env.PUPPETEER_URL).
         # Assumindo aqui uma chamada REST base.
         pdf_buffer = b''
-        try:
-            # We assume node endpoint is deployed and reachable.
-            # Se a URL não estiver definida (ex: local), vamos fazer o mock ou erro controlado.
-            node_url = os.environ.get('PUPPETEER_SERVICE_URL', f'https://us-central1-{project_id}.cloudfunctions.net/generatePdfFromHtml')
-            pdf_res = requests.post(
-                node_url,
-                json={'html': final_html},
-                headers={'Authorization': f'Bearer {puppeteer_secret}'},
-                timeout=60
-            )
-            if pdf_res.status_code == 200:
-                pdf_buffer = pdf_res.content
-            else:
-                print(f"[DeepResearch] Fallback: falha ao gerar PDF, HTTP {pdf_res.status_code}")
-        except Exception as pdf_err:
-             print(f"[DeepResearch] Puppeteer Node unreachable: {pdf_err}")
+        pdf_status = 'skipped_missing_secret'
+        if not puppeteer_secret:
+            print("[DeepResearch] PUPPETEER_INTERNAL_SECRET ausente; pulando PDF e salvando HTML.")
+        else:
+            try:
+                # We assume node endpoint is deployed and reachable.
+                # Se a URL não estiver definida (ex: local), vamos fazer o mock ou erro controlado.
+                node_url = os.environ.get('PUPPETEER_SERVICE_URL', f'https://us-central1-{project_id}.cloudfunctions.net/generatePdfFromHtml')
+                pdf_res = requests.post(
+                    node_url,
+                    json={'html': final_html},
+                    headers={'Authorization': f'Bearer {puppeteer_secret}'},
+                    timeout=60
+                )
+                if pdf_res.status_code == 200:
+                    pdf_buffer = pdf_res.content
+                    pdf_status = 'generated'
+                else:
+                    pdf_status = f'http_{pdf_res.status_code}'
+                    print(f"[DeepResearch] Fallback: falha ao gerar PDF, HTTP {pdf_res.status_code}")
+            except Exception as pdf_err:
+                 pdf_status = 'unreachable'
+                 print(f"[DeepResearch] Puppeteer Node unreachable: {pdf_err}")
 
 
         # Upload to Drive
@@ -11172,9 +11221,21 @@ def deep_research_worker(event: firestore_fn.Event[firestore_fn.DocumentSnapshot
         uploaded_html = drive_service.files().create(body=html_metadata, media_body=media_html, fields='id, webViewLink').execute()
         html_link = uploaded_html.get('webViewLink')
 
+        clean_text = re.sub(r"<[^>]+>", " ", final_html)
+        clean_text = re.sub(r"\s+", " ", clean_text).strip()
+        tags = ["deep_research", "pesquisa_profunda"]
+        try:
+            emb = get_embedding(
+                f"Deep Research: {topic}\n\nResumo: {resumo_executivo}\n\n{clean_text[:7000]}",
+                api_key=api_key,
+            )
+        except Exception as emb_err:
+            print(f"[DeepResearch] Falha ao gerar embedding do resultado: {emb_err}")
+            emb = []
+
         # Acervo Global (Gravação Enxuta)
-        acervo_ref = db.collection('conhecimento_mestre').document()
-        acervo_ref.set({
+        legacy_ref = db.collection('conhecimento_mestre').document()
+        legacy_ref.set({
              'titulo': f"Deep Research: {topic}",
              'data_criacao': firestore.SERVER_TIMESTAMP,
              'solicitante': requester_email,
@@ -11184,14 +11245,52 @@ def deep_research_worker(event: firestore_fn.Event[firestore_fn.DocumentSnapshot
              'origem': 'deep_research_max'
         })
 
+        acervo_ref = db.collection('acervo_global').document()
+        acervo_ref.set({
+             'nome': f"Deep Research: {topic}",
+             'titulo': f"Deep Research: {topic}",
+             'url': html_link,
+             'link_html': html_link,
+             'link_pdf': pdf_link,
+             'tipo_mime': 'text/html',
+             'origem': 'deep_research_max',
+             'status_indexacao': 'concluido',
+             'resumo_semantico': resumo_executivo,
+             'tags': tags,
+             'embedding': emb,
+             'texto_bruto': clean_text[:60000],
+             'solicitante': requester_email,
+             'data_criacao': firestore.SERVER_TIMESTAMP,
+             'indexed_at': firestore.SERVER_TIMESTAMP,
+        })
+
+        if emb:
+            db.collection('indice_artefatos').document().set({
+                'nome': f"Deep Research: {topic}",
+                'url': html_link,
+                'tipo_mime': 'text/html',
+                'resumo_semantico': resumo_executivo,
+                'embedding': emb,
+                'tags': tags,
+                'origem': 'deep_research_max',
+                'acervo_id': acervo_ref.id,
+                'texto_bruto': clean_text[:60000],
+                'indexed_at': firestore.SERVER_TIMESTAMP,
+            })
+
         # Success Status
         task_ref.update({
             'status': 'COMPLETED',
             'completed_at': firestore.SERVER_TIMESTAMP,
-            'result_links': [pdf_link, html_link]
+            'result_links': [pdf_link, html_link],
+            'html_link': html_link,
+            'pdf_link': pdf_link,
+            'pdf_status': pdf_status,
+            'acervo_id': acervo_ref.id,
+            'legacy_kg_id': legacy_ref.id,
         })
 
-        send_telegram_notification(f"✅ Pesquisa concluída: {topic}\nResumo: {resumo_executivo[:100]}...\nAcesse PDF: {pdf_link}")
+        send_telegram_notification(f"✅ Pesquisa concluída: {topic}\nResumo: {resumo_executivo[:100]}...\nAcesse HTML: {html_link}")
 
     except Exception as e:
         error_msg = str(e)

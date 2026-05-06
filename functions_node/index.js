@@ -537,6 +537,11 @@ exports.generatePdfFromHtml = functions.runWith({
         return res.status(405).json({ error: 'Método não permitido. Utilize POST.' });
     }
 
+    if (!process.env.PUPPETEER_INTERNAL_SECRET) {
+        console.error('PUPPETEER_INTERNAL_SECRET não configurado.');
+        return res.status(503).json({ error: 'Serviço de PDF não configurado.' });
+    }
+
     // Trava de segurança atômica via Header
     const authHeader = req.headers['authorization'] || '';
     if (!authHeader.startsWith('Bearer ') || authHeader.split(' ')[1] !== process.env.PUPPETEER_INTERNAL_SECRET) {

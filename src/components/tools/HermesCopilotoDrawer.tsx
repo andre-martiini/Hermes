@@ -14,7 +14,8 @@ import { CollapsibleContainer } from '../ui/UIComponents';
 
 // URL do endpoint HTTP de upload (Node.js Functions)
 const UPLOAD_ENDPOINT = 'https://us-central1-gestao-hermes.cloudfunctions.net/uploadFileForCopiloto';
-const COPILOTO_CALLABLE_TIMEOUT_MS = 540000;
+const COPILOTO_CALLABLE_TIMEOUT_MS = 240000;
+const COPILOTO_CLIENT_TIMEOUT_MESSAGE = 'O copiloto demorou demais para responder e a chamada foi encerrada no navegador. Tente dividir o pedido em partes menores ou pedir primeiro um levantamento dos itens pendentes.';
 const COPILOTO_SUPPORTED_FILE_EXTENSIONS = [
     '.pdf',
     '.doc',
@@ -39,6 +40,20 @@ const COPILOTO_SUPPORTED_FILE_EXTENSIONS = [
 const COPILOTO_FILE_ACCEPT = COPILOTO_SUPPORTED_FILE_EXTENSIONS.join(',');
 const COPILOTO_SUPPORTED_FORMATS_LABEL = 'PDF, DOC/DOCX, XLS/XLSX, CSV, TXT, JSON, XML, EML, Markdown, HTML, PPTX e imagens';
 const LARGE_PASTE_THRESHOLD = 1500;
+
+const withClientTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<T>((_, reject) => {
+                timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+            })
+        ]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+};
 
 const isCopilotoFileSupported = (file: File) => {
     const fileName = file.name.toLowerCase();
@@ -1339,7 +1354,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 ? `[CONTEXTO COLADO]\n${pasteToSend.text}\n[/CONTEXTO]\n\n`
                 : '';
 
-            const response = await askCopiloto({
+            const response = await withClientTimeout(askCopiloto({
                 sessionId: sId,
                 prompt: contextPrefix + pastePrefix + (text.trim() || (hasFile || hasPaste ? '' : text)),
                 taskId: taskId || null,
@@ -1347,7 +1362,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 driveFileId: driveFileId || null,
                 driveFileName: driveFileName || null,
                 routingIndex: getRoutingIndex()
-            });
+            }), COPILOTO_CALLABLE_TIMEOUT_MS, COPILOTO_CLIENT_TIMEOUT_MESSAGE);
 
             const data = response.data as any;
 
