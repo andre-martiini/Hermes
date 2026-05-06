@@ -359,7 +359,7 @@ def slideFinalizeWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedDa
         )
 
 @https_fn.on_call(
-    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
 )
 def cancelSlideJob(req: https_fn.CallableRequest):
     """

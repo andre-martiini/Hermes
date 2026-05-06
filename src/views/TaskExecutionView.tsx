@@ -442,6 +442,7 @@ export const TaskExecutionView = ({
   const workspaceRef = useRef<HTMLDivElement>(null!);
   const mobileHeaderRef = useRef<HTMLElement>(null!);
   const lastMobileScrollTopRef = useRef(0);
+  const headerToggleCooldownRef = useRef(false);
 
   const isBreakActive = false;
 
@@ -517,7 +518,11 @@ export const TaskExecutionView = ({
 
     const previousScrollTop = lastMobileScrollTopRef.current;
     const delta = scrollTop - previousScrollTop;
+    // Always update position so delta is correct after cooldown ends
     lastMobileScrollTopRef.current = Math.max(0, scrollTop);
+
+    // Block toggles during CSS transition (300ms) to prevent layout-shift feedback loop
+    if (headerToggleCooldownRef.current) return;
 
     if (scrollTop <= 12) {
       setIsMobileHeaderHidden(false);
@@ -525,11 +530,15 @@ export const TaskExecutionView = ({
     }
 
     if (delta > 6) {
+      headerToggleCooldownRef.current = true;
+      setTimeout(() => { headerToggleCooldownRef.current = false; }, 350);
       setIsMobileHeaderHidden(true);
       return;
     }
 
     if (delta < -6) {
+      headerToggleCooldownRef.current = true;
+      setTimeout(() => { headerToggleCooldownRef.current = false; }, 350);
       setIsMobileHeaderHidden(false);
     }
   };

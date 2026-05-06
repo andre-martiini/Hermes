@@ -86,7 +86,7 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
   }, [initialDraftId]);
 
   const saveToHistory = (data: any, draft: string, existingId?: string | null) => {
-    const title = data?.slides?.[0]?.titulo || 'ApresentaÃ§ão';
+    const title = data?.slides?.[0]?.titulo || 'ção';
     const entry: SlideHistoryEntry = {
       id: existingId || `slides_${Date.now()}`,
       title,
@@ -127,7 +127,7 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
       }
       setPresentation(data);
       setCurrentHistoryId(saveToHistory(data, rascunho));
-      showToast("ApresentaÃ§ão gerada com sucesso!", "success");
+      showToast("ção gerada com sucesso!", "success");
     } catch (err) { console.error(err); showToast("Erro ao gerar slides.", "error"); }
     finally { setIsGenerating(false); }
   };
@@ -356,7 +356,7 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
           {history.length === 0 ? (
             <div className="py-24 flex flex-col items-center justify-center text-slate-300 space-y-4">
               <svg className="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              <p className="font-black uppercase tracking-widest text-sm">Nenhuma apresentaÃ§ão salva ainda</p>
+              <p className="font-black uppercase tracking-widest text-sm">Nenhuma ção salva ainda</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -426,7 +426,7 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
                   <input type="number" min="1" max="20" className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 text-slate-800 font-black outline-none focus:ring-4 focus:ring-orange-100 transition-all" value={qtdSlides} onChange={e => setQtdSlides(parseInt(e.target.value))} />
                 </div>
                 <button onClick={handleGenerate} disabled={isGenerating} className={`flex-[2] h-14 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-3 shadow-xl transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:grayscale ${isGenerating ? 'animate-pulse' : ''}`}>
-                  {isGenerating ? (<><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>Processando...</>) : (<><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>Gerar ApresentaÃ§ão</>)}
+                  {isGenerating ? (<><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>Processando...</>) : (<><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>Gerar ção</>)}
                 </button>
               </div>
             </div>
@@ -464,8 +464,8 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
               <div className="h-full flex flex-col items-center justify-center space-y-6 text-slate-200">
                 <svg className="w-24 h-24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
                 <div className="text-center space-y-3">
-                  <p className="font-bold">Nenhuma apresentaÃ§ão gerada.<br /><span className="text-sm font-medium opacity-60">Seus slides aparecerão aqui.</span></p>
-                  {history.length > 0 && <button onClick={() => setView('history')} className="text-[10px] font-black uppercase tracking-widest text-orange-400 hover:text-orange-500 transition-colors">Ver {history.length} apresentaÃ§ão{history.length > 1 ? 'ões' : ''} salva{history.length > 1 ? 's' : ''} â†’</button>}
+                  <p className="font-bold">Nenhuma ção gerada.<br /><span className="text-sm font-medium opacity-60">Seus slides aparecerão aqui.</span></p>
+                  {history.length > 0 && <button onClick={() => setView('history')} className="text-[10px] font-black uppercase tracking-widest text-orange-400 hover:text-orange-500 transition-colors">Ver {history.length} ção{history.length > 1 ? 'ões' : ''} salva{history.length > 1 ? 's' : ''} â†’</button>}
                 </div>
               </div>
             )}

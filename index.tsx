@@ -25,6 +25,7 @@ import { getToken, onMessage } from 'firebase/messaging';
 import { httpsCallable } from 'firebase/functions';
 import FinanceView from './FinanceView';
 import DashboardView from './DashboardView';
+import { MobileShortcutsView } from './src/views/MobileShortcutsView';
 import KnowledgeView from './KnowledgeView';
 import ProjectsView from './ProjectsView';
 import RAGBasesView from './src/views/RAGBasesView';
@@ -1285,6 +1286,7 @@ const App: React.FC = () => {
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isCopilotoOpen, setIsCopilotoOpen] = useState(false);
+  const [copilotoAutoStartMic, setCopilotoAutoStartMic] = useState(false);
   const [isQuickNoteModalOpen, setIsQuickNoteModalOpen] = useState(false);
   const [hasAutoExpanded, setHasAutoExpanded] = useState(false);
 
@@ -5697,23 +5699,39 @@ const App: React.FC = () => {
               {/* Painel de Estatísticas e Filtros - APENAS NA VISÃO GERAL */}
               <main className={viewMode === 'dashboard' ? '' : 'mb-20'}>
                 {viewMode === 'dashboard' ? (
-                  <DashboardView
-                    tarefas={tarefas}
-                    isDark={isDarkTheme}
-                    financeTransactions={financeTransactions}
-                    financeSettings={financeSettings}
-                    fixedBills={fixedBills}
-                    incomeEntries={incomeEntries}
-                    healthWeights={healthWeights}
-                    healthDailyHabits={healthDailyHabits}
-                    healthSettings={healthSettings}
-                    unidades={unidades}
-                    sistemasDetalhes={sistemasDetalhes}
-                    workItems={workItems}
-                    currentMonth={currentMonth}
-                    currentYear={currentYear}
-                    onNavigate={handleDashboardNavigate}
-                    onOpenBacklog={handleCopyBacklog}
+                  <>
+                    {/* Mobile: Atalhos Inteligentes */}
+                    <div className="sm:hidden">
+                      <MobileShortcutsView
+                        isDark={isDarkTheme}
+                        onOpenCopilotoText={() => { setCopilotoAutoStartMic(false); setIsCopilotoOpen(true); }}
+                        onOpenCopilotoAudio={() => { setCopilotoAutoStartMic(true); setIsCopilotoOpen(true); }}
+                        onOpenTranscription={() => setIsTranscriptionAIModalOpen(true)}
+                        onOpenActions={() => { setActiveModule('acoes'); setViewMode('gallery'); }}
+                        onOpenShopping={() => setIsShoppingAIModalOpen(true)}
+                      />
+                    </div>
+                    {/* Desktop: Dashboard completo */}
+                    <div className="hidden sm:block">
+                      <DashboardView
+                        tarefas={tarefas}
+                        isDark={isDarkTheme}
+                        financeTransactions={financeTransactions}
+                        financeSettings={financeSettings}
+                        fixedBills={fixedBills}
+                        incomeEntries={incomeEntries}
+                        healthWeights={healthWeights}
+                        healthDailyHabits={healthDailyHabits}
+                        healthSettings={healthSettings}
+                        unidades={unidades}
+                        sistemasDetalhes={sistemasDetalhes}
+                        workItems={workItems}
+                        currentMonth={currentMonth}
+                        currentYear={currentYear}
+                        onNavigate={handleDashboardNavigate}
+                        onOpenBacklog={handleCopyBacklog}
+                      />
+                    </div>
                   />
                 ) : viewMode === 'gallery' ? (
                   <>
@@ -8407,7 +8425,8 @@ const App: React.FC = () => {
 
         <HermesCopilotoDrawer
           isOpen={isCopilotoOpen}
-          onClose={() => setIsCopilotoOpen(false)}
+          onClose={() => { setIsCopilotoOpen(false); setCopilotoAutoStartMic(false); }}
+          autoStartMic={copilotoAutoStartMic}
           isDark={isDarkTheme}
           taskId={selectedTask?.id || selectedWorkItem?.id}
           systemId={selectedSystemId || (selectedTask as any)?.sistema_id || selectedWorkItem?.sistema_id}

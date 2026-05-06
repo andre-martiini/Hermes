@@ -10888,6 +10888,7 @@ def salvarRelatorioNoDrive(req: https_fn.CallableRequest):
 # ==============================================================================
 from slides_orchestrator import (
     iniciarJobSlides,
+    cancelSlideJob,
     slideStrategistWorker,
     slideExecutorWorker,
     slideFinalizeWorker

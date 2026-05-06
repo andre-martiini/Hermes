@@ -360,13 +360,14 @@ interface HermesCopilotoDrawerProps {
     activeDocument?: { url: string; nome: string; tipo: 'link' | 'file' | 'image'; driveFileId?: string } | null;
     isTemporary?: boolean;
     sessionId?: string | null;
+    autoStartMic?: boolean;
 }
 
 type UploadPhase = 'idle' | 'uploading' | 'processing';
 const MOBILE_BREAKPOINT = 768;
 
 export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
-    isOpen, onClose, taskId, systemId, isDark = false, variant = 'drawer', userId, onOpenTask, onOpenTool, activeDocument, isTemporary, sessionId
+    isOpen, onClose, taskId, systemId, isDark = false, variant = 'drawer', userId, onOpenTask, onOpenTool, activeDocument, isTemporary, sessionId, autoStartMic = false
 }) => {
     const [sessions, setSessions] = useState<Session[]>([]);
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -662,6 +663,14 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             }
         }
     }, [isOpen, taskId, sessions, currentSessionId, sessionId]);
+
+    // Auto-start mic when opened via audio shortcut
+    useEffect(() => {
+        if (isOpen && autoStartMic) {
+            const timer = setTimeout(() => startRecording(), 400);
+            return () => clearTimeout(timer);
+        }
+    }, [isOpen, autoStartMic]);
 
     // Load Messages for current session
     useEffect(() => {
@@ -2645,7 +2654,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); if (mention.filtered[mention.selectedIndex]) selectMention(mention.filtered[mention.selectedIndex]); return; }
                                             if (e.key === 'Escape') { setMention(prev => ({ ...prev, visible: false })); return; }
                                         }
-                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                        if (e.key === 'Enter' && !e.shiftKey && window.innerWidth >= 640) {
                                             e.preventDefault();
                                             if (!currentSessionId) {
                                                 handleCreateSession(input);

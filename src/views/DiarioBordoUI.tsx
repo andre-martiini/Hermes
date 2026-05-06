@@ -338,7 +338,8 @@ export const DiarioBordoUI = ({
               value={newFollowUp}
               onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setNewFollowUp(e.target.value)}
               onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+                const isMobileDevice = window.innerWidth < 640;
+                if (e.key === 'Enter' && !e.shiftKey && !isMobileDevice) {
                   e.preventDefault();
                   handleAddFollowUp();
                 }
@@ -482,6 +483,9 @@ export const DiarioBordoUI = ({
         {/* Helper text */}
         <p className={`hidden md:block text-[11px] mt-1.5 px-2 ${isTimerRunning ? 'text-white/20' : 'text-slate-400'}`}>
           Enter para enviar · Shift+Enter para nova linha
+        </p>
+        <p className={`md:hidden text-[11px] mt-1.5 px-2 ${isTimerRunning ? 'text-white/20' : 'text-slate-400'}`}>
+          Enter para nova linha · Botão para enviar
         </p>
       </div>
     </div>
