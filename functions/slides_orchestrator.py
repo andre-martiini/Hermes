@@ -6,12 +6,47 @@ import os
 import tempfile
 import sys
 from pathlib import Path
+from datetime import datetime, timezone
 from google import genai
 
 # Import ppt-master tools
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'ppt_master'))
 from finalize_svg import crop_images_in_svg, embed_icons_in_file, fix_image_aspect_in_svg
 from svg_finalize.embed_icons import DEFAULT_ICONS_DIR
+
+
+def _get_slides_bucket():
+    from firebase_admin import storage
+
+    project_id = os.environ.get("GCLOUD_PROJECT") or os.environ.get("GCP_PROJECT") or "gestao-hermes"
+    candidates = [
+        os.environ.get("SLIDES_STORAGE_BUCKET"),
+        os.environ.get("FIREBASE_STORAGE_BUCKET"),
+        f"{project_id}-slides-us-central1",
+        f"{project_id}.firebasestorage.app",
+        f"{project_id}.appspot.com",
+    ]
+
+    checked = []
+    for bucket_name in [name for name in candidates if name]:
+        bucket = storage.bucket(bucket_name)
+        checked.append(bucket_name)
+        if bucket.exists():
+            return bucket
+
+    raise RuntimeError(
+        "Nenhum bucket de Storage disponível para slides. "
+        f"Buckets testados: {', '.join(checked)}"
+    )
+
+
+def _short_error(exc: Exception, max_len: int = 500) -> str:
+    message = str(exc).strip() or exc.__class__.__name__
+    return message[:max_len]
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 @https_fn.on_call(
     cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
@@ -116,7 +151,10 @@ def slideStrategistWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
 
 @pubsub_fn.on_message_published(
     topic="slide-executor",
-    max_instances=5 # Limite para evitar 429 da API
+    max_instances=3,
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=300,
+    concurrency=1,
 )
 def slideExecutorWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedData]):
     """
@@ -141,23 +179,38 @@ def slideExecutorWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedDa
             the finalizer is triggered exactly once, even under concurrent workers.
             """
             should_dispatch = False
+            should_mark_error = False
 
             @firestore.transactional
             def _check_and_mark(transaction, ref):
-                nonlocal should_dispatch
+                nonlocal should_dispatch, should_mark_error
                 snap = ref.get(transaction=transaction)
                 if not snap.exists:
                     return
-                if snap.get("finalizer_dispatched"):
+                data = snap.to_dict() or {}
+                if data.get("finalizer_dispatched") or data.get("status") != "processing":
                     return
-                statuses = snap.get("slides_status") or []
-                if all(s["status"] in {"completed", "error"} for s in statuses):
+
+                statuses = data.get("slides_status") or []
+                if not statuses or not all(s.get("status") in {"completed", "error"} for s in statuses):
+                    return
+
+                if any(s.get("status") == "error" for s in statuses):
+                    transaction.update(ref, {
+                        "status": "error",
+                        "error_msg": "Falha ao gerar um ou mais slides. Veja os detalhes por slide.",
+                        "completedAt": firestore.SERVER_TIMESTAMP,
+                    })
+                    should_mark_error = True
+                    return
+
+                if all(s.get("status") == "completed" for s in statuses):
                     transaction.update(ref, {"finalizer_dispatched": True})
                     should_dispatch = True
 
             _check_and_mark(db.transaction(), job_ref)
 
-            if not should_dispatch:
+            if should_mark_error or not should_dispatch:
                 return
 
             from google.cloud import pubsub_v1
@@ -169,16 +222,34 @@ def slideExecutorWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedDa
 
         # Atualiza status individual para processing
         def update_status(status_str):
+            updated = False
+
             @firestore.transactional
             def _txn(transaction, ref):
+                nonlocal updated
                 snap = ref.get(transaction=transaction)
                 if not snap.exists: return
-                statuses = snap.get("slides_status")
-                statuses[slide_index]["status"] = status_str
+                data = snap.to_dict() or {}
+                if data.get("status") != "processing":
+                    return
+                statuses = data.get("slides_status") or []
+                if slide_index >= len(statuses):
+                    raise IndexError(f"Slide index out of range: {slide_index}")
+                if statuses[slide_index].get("status") in {"completed", "error"}:
+                    return
+                statuses[slide_index] = {
+                    **statuses[slide_index],
+                    "status": status_str,
+                    "updatedAt": _now_iso(),
+                }
                 transaction.update(ref, {"slides_status": statuses})
+                updated = True
             _txn(db.transaction(), job_ref)
+            return updated
 
-        update_status("processing")
+        if not update_status("processing"):
+            print(f"Skipping slide {slide_index} for {job_id}: job is no longer processing.")
+            return
 
         keys_doc = db.collection('system').document('api_keys').get()
         gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
@@ -206,8 +277,7 @@ def slideExecutorWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedDa
         svg_content = response.text.replace("```svg", "").replace("```xml", "").replace("```", "").strip()
 
         # Salvar SVG no Storage
-        from firebase_admin import storage
-        bucket = storage.bucket()
+        bucket = _get_slides_bucket()
         blob_path = f"slides/{job_id}/slide_{slide_index:03d}.svg"
         blob = bucket.blob(blob_path)
         blob.upload_from_string(svg_content, content_type="image/svg+xml")
@@ -222,8 +292,18 @@ def slideExecutorWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedDa
         def _err_txn(transaction, ref):
             snap = ref.get(transaction=transaction)
             if not snap.exists: return
-            statuses = snap.get("slides_status")
-            statuses[slide_index]["status"] = "error"
+            data = snap.to_dict() or {}
+            if data.get("status") != "processing":
+                return
+            statuses = data.get("slides_status") or []
+            if slide_index >= len(statuses):
+                raise IndexError(f"Slide index out of range: {slide_index}")
+            statuses[slide_index] = {
+                **statuses[slide_index],
+                "status": "error",
+                "error_msg": _short_error(e),
+                "updatedAt": _now_iso(),
+            }
             transaction.update(ref, {"slides_status": statuses})
         _err_txn(db.transaction(), job_ref)
         publish_finalizer_if_ready()
@@ -250,12 +330,23 @@ def slideFinalizeWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedDa
     if not job_doc.exists: return
 
     job = job_doc.to_dict()
+    if job.get("status") != "processing":
+        print(f"Skipping finalizer for {job_id}: status={job.get('status')}")
+        return
+
+    statuses = job.get("slides_status") or []
+    if not statuses or any(s.get("status") != "completed" for s in statuses):
+        job_ref.update({
+            "status": "error",
+            "error_msg": "Finalização abortada: nem todos os slides foram concluídos com sucesso."
+        })
+        return
+
     user_email = job.get("userEmail")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # 1. Download SVGs
-        from firebase_admin import storage
-        bucket = storage.bucket()
+        bucket = _get_slides_bucket()
         blobs = bucket.list_blobs(prefix=f"slides/{job_id}/")
 
         svg_output_dir = os.path.join(tmpdir, "svg_output")
@@ -301,6 +392,10 @@ def slideFinalizeWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedDa
         try:
             pptx_path = os.path.join(tmpdir, "exports", f"{job_id}.pptx")
             svg_files = sorted(Path(svg_final_dir).glob("*.svg"))
+            if len(svg_files) != len(statuses):
+                raise RuntimeError(
+                    f"Quantidade de SVGs inválida: {len(svg_files)} gerados para {len(statuses)} slides."
+                )
             build_ok = create_pptx_with_native_svg(
                 svg_files=svg_files,
                 output_path=Path(pptx_path),
