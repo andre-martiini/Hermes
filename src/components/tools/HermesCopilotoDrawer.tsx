@@ -14,8 +14,6 @@ import { CollapsibleContainer } from '../ui/UIComponents';
 
 // URL do endpoint HTTP de upload (Node.js Functions)
 const UPLOAD_ENDPOINT = 'https://us-central1-gestao-hermes.cloudfunctions.net/uploadFileForCopiloto';
-const COPILOTO_CALLABLE_TIMEOUT_MS = 240000;
-const COPILOTO_CLIENT_TIMEOUT_MESSAGE = 'O copiloto demorou demais para responder e a chamada foi encerrada no navegador. Tente dividir o pedido em partes menores ou pedir primeiro um levantamento dos itens pendentes.';
 const COPILOTO_SUPPORTED_FILE_EXTENSIONS = [
     '.pdf',
     '.doc',
@@ -40,20 +38,6 @@ const COPILOTO_SUPPORTED_FILE_EXTENSIONS = [
 const COPILOTO_FILE_ACCEPT = COPILOTO_SUPPORTED_FILE_EXTENSIONS.join(',');
 const COPILOTO_SUPPORTED_FORMATS_LABEL = 'PDF, DOC/DOCX, XLS/XLSX, CSV, TXT, JSON, XML, EML, Markdown, HTML, PPTX e imagens';
 const LARGE_PASTE_THRESHOLD = 1500;
-
-const withClientTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    try {
-        return await Promise.race([
-            promise,
-            new Promise<T>((_, reject) => {
-                timer = setTimeout(() => reject(new Error(message)), timeoutMs);
-            })
-        ]);
-    } finally {
-        if (timer) clearTimeout(timer);
-    }
-};
 
 const isCopilotoFileSupported = (file: File) => {
     const fileName = file.name.toLowerCase();
@@ -347,6 +331,14 @@ interface Session {
     isTemporary?: boolean;
 }
 
+interface CopilotoJob {
+    id: string;
+    status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+    sessionId: string;
+    taskId?: string | null;
+    error?: string;
+}
+
 interface HermesCopilotoDrawerProps {
     isOpen: boolean;
     onClose: () => void;
@@ -372,6 +364,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const [sessions, setSessions] = useState<Session[]>([]);
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
     const [messages, setMessages] = useState<Message[]>([]);
+    const [sessionJobs, setSessionJobs] = useState<CopilotoJob[]>([]);
+    const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
     const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -505,7 +499,9 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     // ── Gravação de áudio por microfone ───────────────────────────────────────
     const [isRecording, setIsRecording] = useState(false);
     const [isProcessingMic, setIsProcessingMic] = useState(false);
-    const isBlocked = isLoading || uploadPhase !== 'idle' || isTranscribing || isProcessingMic;
+    const activeJob = sessionJobs.find(job => job.status === 'PENDING' || job.status === 'RUNNING') || null;
+    const isBackendProcessing = Boolean(activeJob);
+    const isBlocked = isLoading || isBackendProcessing || uploadPhase !== 'idle' || isTranscribing || isProcessingMic;
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
     const micStreamRef = useRef<MediaStream | null>(null);
@@ -689,6 +685,34 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             (snapshot) => {
                 const msgList = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Message[];
                 setMessages(msgList);
+            },
+            handleFirestoreListenerError
+        );
+    }, [currentSessionId]);
+
+    useEffect(() => {
+        if (!currentSessionId) {
+            setSessionJobs([]);
+            return;
+        }
+
+        const q = query(
+            collection(db, 'copiloto_jobs'),
+            where('sessionId', '==', currentSessionId),
+            limit(20)
+        );
+
+        return onSnapshot(
+            q,
+            (snapshot) => {
+                const jobs = snapshot.docs
+                    .map(d => ({ id: d.id, ...d.data() }) as CopilotoJob)
+                    .sort((a: any, b: any) => {
+                        const aTime = a.created_at?.toMillis?.() ?? 0;
+                        const bTime = b.created_at?.toMillis?.() ?? 0;
+                        return bTime - aTime;
+                    });
+                setSessionJobs(jobs);
             },
             handleFirestoreListenerError
         );
@@ -1257,6 +1281,23 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         }
     };
 
+    const handleCancelActiveJob = async () => {
+        if (!activeJob || cancellingJobId) return;
+        setCancellingJobId(activeJob.id);
+        try {
+            const cancelJob = httpsCallable(functions, 'cancelCopilotoJob');
+            await cancelJob({ jobId: activeJob.id });
+            setFooterError(null);
+        } catch (err: any) {
+            setFooterError(err?.message || 'Erro ao cancelar processamento.');
+        } finally {
+            setCancellingJobId(null);
+            setIsLoading(false);
+            setUploadPhase('idle');
+            abortProgress();
+        }
+    };
+
     useEffect(() => {
         return () => {
             if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop();
@@ -1352,8 +1393,9 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 timestamp: Timestamp.now()
             });
 
-            // 2. Chama a Cloud Function
-            const askCopiloto = httpsCallable(functions, 'askCopilotoHermes', { timeout: COPILOTO_CALLABLE_TIMEOUT_MS });
+            // 2. Enfileira a Cloud Function. O worker salva a resposta no Firestore
+            // mesmo se o app for fechado ou minimizado.
+            const enqueueCopiloto = httpsCallable(functions, 'enqueueCopilotoJob');
 
             const contextPrefix = activeDocument
                 ? `[CONTEXTO: Visualizando ${activeDocument.tipo} "${activeDocument.nome}" em Tela Cheia]\nLocal: ${activeDocument.url}${activeDocument.driveFileId ? `\nID para leitura profunda: ${activeDocument.driveFileId}\nPara ler o arquivo e responder dúvidas técnicas ou realizar cálculos, utilize a ferramenta 'ler_documento_na_integra' com este ID.` : ''}\n\n`
@@ -1363,7 +1405,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 ? `[CONTEXTO COLADO]\n${pasteToSend.text}\n[/CONTEXTO]\n\n`
                 : '';
 
-            const response = await withClientTimeout(askCopiloto({
+            await enqueueCopiloto({
                 sessionId: sId,
                 prompt: contextPrefix + pastePrefix + (text.trim() || (hasFile || hasPaste ? '' : text)),
                 taskId: taskId || null,
@@ -1371,14 +1413,12 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 driveFileId: driveFileId || null,
                 driveFileName: driveFileName || null,
                 routingIndex: getRoutingIndex()
-            }), COPILOTO_CALLABLE_TIMEOUT_MS, COPILOTO_CLIENT_TIMEOUT_MESSAGE);
-
-            const data = response.data as any;
+            });
 
             // 3. Atualiza título da sessão se for a primeira mensagem
             if (messages.length === 0 && !sessionId) {
                 await touchCopilotoSession(sId, {
-                    title: data.suggestedTitle || userMessageContent.slice(0, 40) + '...',
+                    title: userMessageContent.slice(0, 40) + '...',
                     lastMessageAt: Timestamp.now()
                 });
             } else {
@@ -1546,6 +1586,13 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         uploading: 'Enviando arquivo seguro para o servidor...',
         processing: 'Extraindo contexto e atualizando Acervo...'
     };
+    const processingLabel = uploadPhase !== 'idle'
+        ? uploadPhaseLabel[uploadPhase]
+        : activeJob?.status === 'PENDING'
+            ? 'Processamento enfileirado no backend...'
+            : activeJob?.status === 'RUNNING'
+                ? 'Hermes esta processando em segundo plano...'
+                : '';
 
     const isEmbedded = variant === 'embedded';
     const shouldAutoCloseOnNavigate = !isEmbedded;
@@ -1727,7 +1774,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 {/* Chat Area */}
                 <div className="flex-1 min-h-0 flex flex-col min-w-0 overflow-hidden">
                     <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-6" style={{ scrollbarWidth: 'thin' }}>
-                        {messages.length === 0 && !isLoading && (
+                        {messages.length === 0 && !isLoading && !isBackendProcessing && (
                             <div className="h-full flex flex-col items-center justify-center text-center gap-5">
                                 <div className={`w-20 h-20 rounded-[2.5rem] flex items-center justify-center border ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-400'}`}>
                                     <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
@@ -2499,22 +2546,27 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         <span className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" />
                                         <span className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
                                         <span className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
-                                        {uploadPhase !== 'idle' && (
+                                        {processingLabel && (
                                             <span className="text-[10px] font-bold text-slate-500 ml-2">
-                                                {uploadPhaseLabel[uploadPhase]}
+                                                {processingLabel}
                                             </span>
                                         )}
                                     </div>
                                     <button
                                         onClick={() => {
+                                            if (activeJob) {
+                                                void handleCancelActiveJob();
+                                                return;
+                                            }
                                             setIsLoading(false);
                                             setUploadPhase('idle');
                                             setProgressWidth(0);
                                         }}
+                                        disabled={Boolean(activeJob && cancellingJobId === activeJob.id)}
                                         className="mt-1 self-start px-2.5 py-1 rounded-lg bg-white/50 hover:bg-white text-[9px] font-black uppercase tracking-widest text-slate-400 hover:text-red-500 transition-all flex items-center gap-1 shadow-sm"
                                     >
                                         <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-                                        Cancelar
+                                        {activeJob && cancellingJobId === activeJob.id ? 'Cancelando...' : 'Cancelar'}
                                     </button>
                                     {/* Barra de progresso — visível apenas nas fases de upload/processamento */}
                                     {uploadPhase !== 'idle' && (

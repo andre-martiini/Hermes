@@ -1313,6 +1313,7 @@ const App: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isCopilotoOpen, setIsCopilotoOpen] = useState(false);
   const [copilotoAutoStartMic, setCopilotoAutoStartMic] = useState(false);
+  const [copilotoSessionFromUrl, setCopilotoSessionFromUrl] = useState<string | null>(null);
   const [isQuickNoteModalOpen, setIsQuickNoteModalOpen] = useState(false);
   const [hasAutoExpanded, setHasAutoExpanded] = useState(false);
 
@@ -2184,6 +2185,13 @@ const App: React.FC = () => {
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const taskId = urlParams.get('task');
+    const copilotoSession = urlParams.get('copilotoSession');
+    if (copilotoSession) {
+      setCopilotoSessionFromUrl(copilotoSession);
+      setIsCopilotoOpen(true);
+      setCopilotoAutoStartMic(false);
+      window.setTimeout(() => setCopilotoSessionFromUrl(null), 500);
+    }
     if (taskId) {
       const loadTask = async () => {
         // Tenta achar na lista local primeiro
@@ -2221,6 +2229,8 @@ const App: React.FC = () => {
         const timer = setTimeout(loadTask, 2000);
         return () => clearTimeout(timer);
       }
+    } else if (copilotoSession) {
+      window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, [tarefas.length > 0]);
 
@@ -8454,11 +8464,12 @@ const App: React.FC = () => {
 
         <HermesCopilotoDrawer
           isOpen={isCopilotoOpen}
-          onClose={() => { setIsCopilotoOpen(false); setCopilotoAutoStartMic(false); }}
+          onClose={() => { setIsCopilotoOpen(false); setCopilotoAutoStartMic(false); setCopilotoSessionFromUrl(null); }}
           autoStartMic={copilotoAutoStartMic}
           isDark={isDarkTheme}
           taskId={selectedTask?.id || selectedWorkItem?.id}
           systemId={selectedSystemId || (selectedTask as any)?.sistema_id || selectedWorkItem?.sistema_id}
+          sessionId={copilotoSessionFromUrl}
           userId={user?.uid || ''}
           onOpenTask={async (id) => {
             const task = tarefas.find(t => t.id === id);
