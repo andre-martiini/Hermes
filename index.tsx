@@ -660,13 +660,14 @@ interface ShoppingAIConfirmItem {
 }
 
 const ShoppingAIModal = ({
-  isOpen, onClose, catalogItems, onConfirmItems, onViewList
+  isOpen, onClose, catalogItems, onConfirmItems, onViewList, plannedCount
 }: {
   isOpen: boolean;
   onClose: () => void;
   catalogItems: ShoppingItem[];
   onConfirmItems: (items: ShoppingAIConfirmItem[]) => void;
   onViewList: () => void;
+  plannedCount: number;
 }) => {
   const [step, setStep] = useState<'input' | 'processing' | 'validation'>('input');
   const [textInput, setTextInput] = useState('');
@@ -1029,6 +1030,31 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
                   O Hermes vai buscar os itens no seu catálogo usando IA. "Ricota" pode corresponder a "Queijo Ricota", "Bombril" a "Palha de Aço", etc.
                 </p>
               </div>
+
+              <button
+                onClick={onViewList}
+                className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl border-2 border-slate-100 dark:border-slate-800 hover:border-emerald-300 dark:hover:border-emerald-700 bg-white dark:bg-slate-900 transition-all group"
+              >
+                <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                </div>
+                <div className="flex-1 text-left">
+                  <p className="text-[11px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">Ver lista completa</p>
+                  <p className={`text-[10px] font-bold mt-0.5 ${plannedCount > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
+                    {plannedCount > 0 ? `${plannedCount} ${plannedCount === 1 ? 'item na lista' : 'itens na lista'}` : 'Nenhum item na lista ainda'}
+                  </p>
+                </div>
+                {plannedCount > 0 && (
+                  <span className="bg-emerald-500 text-white text-xs font-black rounded-full min-w-[1.5rem] h-6 px-1.5 flex items-center justify-center flex-shrink-0">
+                    {plannedCount}
+                  </span>
+                )}
+                <svg className="w-4 h-4 text-slate-300 dark:text-slate-600 group-hover:text-emerald-500 transition-colors flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
             </>
           )}
 
@@ -8405,7 +8431,10 @@ const App: React.FC = () => {
               onClose={() => setIsShoppingAIModalOpen(false)}
               catalogItems={shoppingItems}
               onConfirmItems={handleShoppingAIConfirm}
+              plannedCount={shoppingItems.filter(i => i.isPlanned).length}
               onViewList={() => {
+                setActiveModule('acoes');
+                setViewMode('ferramentas');
                 setActiveFerramenta('shopping');
                 setIsShoppingAIModalOpen(false);
               }}

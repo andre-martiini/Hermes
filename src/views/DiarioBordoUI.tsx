@@ -42,8 +42,46 @@ export const DiarioBordoUI = ({
   notifications = [], handleProcessAudio, onFocusFile
 }: DiarioBordoUIProps) => {
   const [showEmojiPicker, setShowEmojiPicker] = React.useState(false);
+  const [showFormattingMenu, setShowFormattingMenu] = React.useState(false);
   const [isDragActive, setIsDragActive] = React.useState(false);
   const dragCounterRef = React.useRef(0);
+
+  const getDiaryInput = React.useCallback(() => document.getElementById('diary-input') as HTMLTextAreaElement | null, []);
+
+  const insertIntoDiaryInput = React.useCallback((insertText: string) => {
+    const input = getDiaryInput();
+    const start = input?.selectionStart ?? newFollowUp.length;
+    const end = input?.selectionEnd ?? newFollowUp.length;
+    const nextValue = newFollowUp.slice(0, start) + insertText + newFollowUp.slice(end);
+    setNewFollowUp(nextValue);
+    requestAnimationFrame(() => {
+      const nextInput = getDiaryInput();
+      nextInput?.focus();
+      const caret = start + insertText.length;
+      nextInput?.setSelectionRange(caret, caret);
+    });
+  }, [getDiaryInput, newFollowUp, setNewFollowUp]);
+
+  const applyDiaryFormatting = React.useCallback((symbol: string) => {
+    const input = getDiaryInput();
+    const start = input?.selectionStart ?? newFollowUp.length;
+    const end = input?.selectionEnd ?? newFollowUp.length;
+    const selected = newFollowUp.slice(start, end);
+    const wrapped = selected ? `${symbol}${selected}${symbol}` : `${symbol}${symbol}`;
+    const nextValue = newFollowUp.slice(0, start) + wrapped + newFollowUp.slice(end);
+
+    setNewFollowUp(nextValue);
+    setShowFormattingMenu(false);
+    requestAnimationFrame(() => {
+      const nextInput = getDiaryInput();
+      nextInput?.focus();
+      if (selected) {
+        nextInput?.setSelectionRange(start, start + wrapped.length);
+        return;
+      }
+      nextInput?.setSelectionRange(start + symbol.length, start + symbol.length);
+    });
+  }, [getDiaryInput, newFollowUp, setNewFollowUp]);
 
   const processDroppedFiles = React.useCallback((files: File[]) => {
     if (files.length === 0) return;
@@ -328,13 +366,176 @@ export const DiarioBordoUI = ({
 
       {/* ── Área de Input Compacta ── */}
       <div className="shrink-0 pt-1 px-2 md:px-6 pb-2 md:pb-6">
+        <div className={`relative flex items-end gap-1 rounded-none md:rounded-[26px] border px-2 py-2 shadow-sm transition-all ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10 focus-within:border-blue-500' : 'bg-white border-slate-200 focus-within:border-blue-500'}`}>
+          <div className="relative shrink-0">
+            <button
+              onClick={() => {
+                setShowAttachMenu(!showAttachMenu);
+                setShowFormattingMenu(false);
+                setShowEmojiPicker(false);
+              }}
+              className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${isTimerRunning ? 'text-white/55 hover:bg-white/10 hover:text-white/85' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'}`}
+              title="Anexar"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 5v14m-7-7h14" /></svg>
+            </button>
+            {showAttachMenu && (
+              <div className={`absolute bottom-11 left-0 w-48 rounded-none md:rounded-xl border shadow-xl overflow-hidden animate-in zoom-in-95 origin-bottom-left z-[100] ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-200'}`}>
+                <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleFileUploadInput} />
+                <button onClick={() => fileInputRef.current?.click()} className={`w-full text-left px-4 py-3 text-xs font-bold flex items-center gap-2 ${isTimerRunning ? 'text-white/80 hover:bg-white/10' : 'text-slate-700 hover:bg-slate-50'}`}>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                  Carregar Arquivo
+                </button>
+                <button onClick={() => { setModalConfig({ type: 'link', isOpen: true }); setShowAttachMenu(false); }} className={`w-full text-left px-4 py-3 text-xs font-bold flex items-center gap-2 ${isTimerRunning ? 'text-white/80 hover:bg-white/10' : 'text-slate-700 hover:bg-slate-50'}`}>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                  Inserir Link
+                </button>
+                <button onClick={() => { setModalConfig({ type: 'contact', isOpen: true }); setShowAttachMenu(false); }} className={`w-full text-left px-4 py-3 text-xs font-bold flex items-center gap-2 ${isTimerRunning ? 'text-white/80 hover:bg-white/10' : 'text-slate-700 hover:bg-slate-50'}`}>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
+                  Inserir Contato
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="relative shrink-0">
+            <button
+              onClick={() => {
+                setShowFormattingMenu(!showFormattingMenu);
+                setShowAttachMenu(false);
+                setShowEmojiPicker(false);
+              }}
+              className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${isTimerRunning ? 'text-white/55 hover:bg-white/10 hover:text-white/85' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'}`}
+              title="Formatação e emoji"
+              aria-expanded={showFormattingMenu}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M4 7h16M8 7v10m8-10v10M6 17h4m4 0h4" />
+              </svg>
+            </button>
+            {showFormattingMenu && (
+              <div className={`absolute bottom-11 left-0 z-[100] w-44 rounded-2xl border p-1.5 shadow-2xl ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-200'}`}>
+                {[
+                  { label: 'Negrito', mark: '*', icon: 'B', className: 'font-black' },
+                  { label: 'Itálico', mark: '_', icon: 'I', className: 'italic' },
+                  { label: 'Riscado', mark: '~', icon: 'S', className: 'line-through' },
+                  { label: 'Código', mark: '`', icon: '</>', className: 'font-mono text-[10px]' },
+                ].map(item => (
+                  <button
+                    key={item.mark}
+                    onClick={() => applyDiaryFormatting(item.mark)}
+                    className={`w-full flex items-center gap-3 rounded-xl px-3 py-2 text-left text-xs font-bold transition-colors ${isTimerRunning ? 'text-white/80 hover:bg-white/10' : 'text-slate-700 hover:bg-slate-50'}`}
+                  >
+                    <span className={`flex h-6 w-6 items-center justify-center rounded-lg ${isTimerRunning ? 'bg-white/10 text-white/70' : 'bg-slate-100 text-slate-500'} ${item.className}`}>{item.icon}</span>
+                    {item.label}
+                  </button>
+                ))}
+                <div className={`my-1 h-px ${isTimerRunning ? 'bg-white/10' : 'bg-slate-100'}`} />
+                <button
+                  onClick={() => {
+                    setShowEmojiPicker(true);
+                    setShowFormattingMenu(false);
+                  }}
+                  className={`w-full flex items-center gap-3 rounded-xl px-3 py-2 text-left text-xs font-bold transition-colors ${isTimerRunning ? 'text-white/80 hover:bg-white/10' : 'text-slate-700 hover:bg-slate-50'}`}
+                >
+                  <span className={`flex h-6 w-6 items-center justify-center rounded-lg ${isTimerRunning ? 'bg-white/10 text-white/70' : 'bg-slate-100 text-slate-500'}`}>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  </span>
+                  Emoji
+                </button>
+              </div>
+            )}
+            {showEmojiPicker && (
+              <div className="absolute bottom-11 left-0 z-[100] shadow-2xl rounded-xl">
+                <EmojiPicker
+                  onEmojiClick={(emojiData) => {
+                    insertIntoDiaryInput(emojiData.emoji);
+                    setShowEmojiPicker(false);
+                  }}
+                  theme={isTimerRunning ? 'dark' as any : 'light' as any}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="relative flex-1 min-w-0">
+            <AutoExpandingTextarea
+              id="diary-input"
+              value={newFollowUp}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setNewFollowUp(e.target.value)}
+              onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+                const isMobileDevice = window.innerWidth < 640;
+                if (e.key === 'Enter' && !e.shiftKey && !isMobileDevice) {
+                  e.preventDefault();
+                  handleAddFollowUp();
+                }
+              }}
+              onPaste={(e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+                const pastedText = e.clipboardData.getData('text');
+                if (pastedText && /\[\d{2}:\d{2}, \d{2}\/\d{2}\/\d{4}\]/.test(pastedText)) {
+                  e.preventDefault();
+                  const cleaned = pastedText.replace(/\[\d{2}:\d{2}, \d{2}\/\d{2}\/\d{4}\][^:]+:\s*/g, '').trim();
+                  setNewFollowUp(newFollowUp ? newFollowUp + '\n' + cleaned : cleaned);
+                  return;
+                }
+
+                if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+                  e.preventDefault();
+                  try {
+                    processDroppedFiles(Array.from(e.clipboardData.files));
+                  } catch (err) {
+                    console.error('Erro ao processar ficheiros:', err);
+                  }
+                }
+              }}
+              placeholder="Registrar no diário..."
+              rows={1}
+              className={`w-full px-2 pt-2.5 pb-1.5 outline-none text-sm leading-5 font-medium transition-all min-h-9 max-h-[120px] overflow-y-auto resize-none border-0 ${isTimerRunning
+                ? 'bg-transparent text-white placeholder:text-white/20'
+                : 'bg-transparent text-slate-800 placeholder:text-slate-400'
+                }`}
+            />
+          </div>
+
+          {newFollowUp.trim() && !isRecording ? (
+            <button
+              onClick={handleAddFollowUp}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white shadow-md shadow-blue-600/30 transition-all hover:bg-blue-500 active:scale-95"
+              title="Enviar (Enter)"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              onClick={isRecording ? stopRecording : startRecording}
+              disabled={isProcessingTranscription}
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all active:scale-95 ${isRecording
+                ? 'bg-rose-500 text-white animate-pulse shadow-rose-500/30'
+                : isTimerRunning
+                  ? 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white'
+                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
+                } disabled:opacity-40`}
+              title={isRecording ? 'Parar Gravação' : 'Gravar Áudio'}
+            >
+              {isProcessingTranscription ? (
+                <div className="w-4 h-4 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin"></div>
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 10v2a7 7 0 01-14 0v-2m14 0h2m-16 0H3m9 10v3m-3 0h6" /></svg>
+              )}
+            </button>
+          )}
+        </div>
+
         {/* Container principal do input - Agora com fundo branco e borda suave */}
-        <div className={`rounded-none md:rounded-2xl border shadow-sm transition-all ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-200'}`}>
+        {false && (
+        <div className={`hidden rounded-none md:rounded-2xl border shadow-sm transition-all ${isTimerRunning ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-slate-200'}`}>
 
           {/* Campo de texto */}
           <div className="px-3 pt-3 pb-1">
             <AutoExpandingTextarea
-              id="diary-input"
+              id="diary-input-legacy"
               value={newFollowUp}
               onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setNewFollowUp(e.target.value)}
               onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -479,6 +680,7 @@ export const DiarioBordoUI = ({
             </div>
           </div>
         </div>
+        )}
 
         {/* Helper text */}
         <p className={`hidden md:block text-[11px] mt-1.5 px-2 ${isTimerRunning ? 'text-white/20' : 'text-slate-400'}`}>

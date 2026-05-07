@@ -575,8 +575,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         const handleResize = () => {
             if (textareaRef.current) {
                 textareaRef.current.style.height = 'auto';
-                const minH = isFocused ? 120 : 50;
-                const maxH = 220;
+                const minH = 36;
+                const maxH = 176;
                 const scrollH = textareaRef.current.scrollHeight;
                 textareaRef.current.style.height = `${Math.max(minH, Math.min(scrollH, maxH))}px`;
                 textareaRef.current.style.overflowY = scrollH > maxH ? 'auto' : 'hidden';
@@ -2587,7 +2587,11 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                             </div>
                         )}
 
-                        <div className="relative z-20 flex items-end">
+                        <div className={`relative z-20 flex items-end gap-1 rounded-[26px] border px-2 py-2 shadow-sm transition-all ${
+                            isDark
+                                ? 'border-white/10 bg-white/5 focus-within:border-blue-500'
+                                : 'border-slate-200 bg-white focus-within:border-blue-500'
+                        }`}>
                             {/* Input de arquivo oculto */}
                             <input
                                 ref={fileInputRef}
@@ -2597,8 +2601,101 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                 onChange={handleFileSelect}
                             />
 
-                            {/* Textarea com botão de clipe embutido */}
-                            <div className="relative flex-1">
+                            {/* Botão + (anexar) */}
+                            <button
+                                onClick={() => !isBlocked && fileInputRef.current?.click()}
+                                disabled={isBlocked}
+                                title="Anexar arquivo"
+                                className={`flex h-9 w-9 items-center justify-center rounded-full transition-all flex-shrink-0 ${
+                                    (attachedFile || pastedContext)
+                                        ? 'bg-blue-500/10 text-blue-500'
+                                        : isDark
+                                            ? 'text-white/55 hover:bg-white/10 hover:text-white/85'
+                                            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'
+                                } disabled:opacity-30 disabled:cursor-not-allowed`}
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 5v14m-7-7h14" />
+                                </svg>
+                            </button>
+
+                            {/* Botão de atalhos */}
+                            <div className="relative flex-shrink-0" ref={toolMenuRef}>
+                                <button
+                                    onClick={() => setShowToolMenu(prev => !prev)}
+                                    disabled={isBlocked}
+                                    aria-label="Ações Rápidas"
+                                    aria-expanded={showToolMenu}
+                                    title="Atalhos de ferramentas"
+                                    className={`flex h-9 w-9 items-center justify-center rounded-full transition-all ${isDark ? 'text-white/55 hover:bg-white/10 hover:text-white/85' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'} disabled:opacity-30 disabled:cursor-not-allowed`}
+                                >
+                                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <circle cx="5" cy="5" r="1.8" />
+                                        <circle cx="12" cy="5" r="1.8" />
+                                        <circle cx="19" cy="5" r="1.8" />
+                                        <circle cx="5" cy="12" r="1.8" />
+                                        <circle cx="12" cy="12" r="1.8" />
+                                        <circle cx="19" cy="12" r="1.8" />
+                                        <circle cx="5" cy="19" r="1.8" />
+                                        <circle cx="12" cy="19" r="1.8" />
+                                        <circle cx="19" cy="19" r="1.8" />
+                                    </svg>
+                                </button>
+                                {showToolMenu && (
+                                    <div className={`absolute bottom-full left-0 mb-2 z-[80] min-w-[280px] max-w-[min(22rem,calc(100vw-2rem))] max-h-[min(28rem,calc(100vh-14rem))] overflow-y-auto overflow-x-hidden rounded-2xl border shadow-2xl ${isDark ? 'border-white/10 bg-[#101827]' : 'border-slate-200 bg-white'}`}>
+                                        <div className={`sticky top-0 z-10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'border-b border-white/10 bg-[#101827] text-white/40' : 'border-b border-slate-100 bg-white text-slate-400'}`}>
+                                            Ferramentas Interativas
+                                        </div>
+                                        <div className="p-2">
+                                            {toolsRegistry.map(tool => (
+                                                <button
+                                                    key={tool.id}
+                                                    onClick={() => insertToolShortcut(tool.ui_metadata.tag)}
+                                                    className={`w-full rounded-xl px-3 py-2 text-left transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-50'}`}
+                                                >
+                                                    <div className="flex items-center justify-between gap-3">
+                                                        <span className={`text-[11px] font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{tool.ui_metadata.title}</span>
+                                                        <span className={`text-[9px] font-mono ${isDark ? 'text-blue-300' : 'text-blue-600'}`}>{tool.ui_metadata.tag}</span>
+                                                    </div>
+                                                    <p className={`mt-1 text-[10px] leading-relaxed ${isDark ? 'text-white/50' : 'text-slate-500'}`}>{tool.ui_metadata.description}</p>
+                                                </button>
+                                            ))}
+                                        </div>
+                                        <div className={`sticky top-0 z-10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'border-t border-white/10 bg-[#101827] text-white/40' : 'border-t border-slate-100 bg-white text-slate-400'}`}>
+                                            Capacidades de IA
+                                        </div>
+                                        <div className="p-2 pb-3">
+                                            {([
+                                                { key: 'pesquisar_internet', label: 'Pesquisar na Internet', desc: 'Busca informações em tempo real na web.' },
+                                                { key: 'ler_pagina_web', label: 'Ler Página Web', desc: 'Extrai e resume o conteúdo de um URL.' },
+                                                { key: 'buscar_arquivos_acervo', label: 'Buscar no Acervo', desc: 'Localiza documentos e arquivos do sistema.' },
+                                                { key: 'consultar_historico_acoes', label: 'Consultar Histórico', desc: 'Recupera o grafo de execução de ações.' },
+                                                { key: 'consultar_financas_v2', label: 'Consultar Finanças', desc: 'Acesse balanços, metas e extratos financeiros internos.' },
+                                                { key: 'registrar_item_financeiro_v2', label: 'Registrar Item Financeiro', desc: 'Adiciona novas rendas ou despesas ao sistema.' },
+                                                { key: 'criar_acao_no_sistema', label: 'Criar Ação', desc: 'Cria uma nova ação diretamente no sistema.' },
+                                                { key: 'registrar_no_diario', label: 'Registrar no Diário', desc: 'Adiciona uma entrada no diário de bordo.' },
+                                                { key: 'gerar_relatorio', label: 'Gerar Relatório', desc: 'Compila um relatório estruturado.' },
+                                                { key: 'consultar_agenda', label: 'Consultar Agenda', desc: 'Verifica compromissos e eventos do calendário.' },
+                                                { key: 'encontrar_slot_livre', label: 'Encontrar Slot Livre', desc: 'Sugere horários disponíveis na agenda.' },
+                                                { key: 'buscar_e_analisar_email', label: 'Analisar E-mail', desc: 'Busca e analisa e-mails relevantes.' },
+                                                { key: 'salvar_memoria_global', label: 'Salvar Memória', desc: 'Persiste informações na memória global.' },
+                                                { key: 'gerar_rascunho_formulario', label: 'Gerar Formulário', desc: 'Cria rascunho de formulário estruturado.' },
+                                            ] as { key: string; label: string; desc: string }[]).map(cap => (
+                                                <div
+                                                    key={cap.key}
+                                                    className={`rounded-xl px-3 py-2 ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}
+                                                >
+                                                    <span className={`text-[11px] font-black ${isDark ? 'text-white/80' : 'text-slate-700'}`}>{cap.label}</span>
+                                                    <p className={`mt-0.5 text-[10px] leading-relaxed ${isDark ? 'text-white/40' : 'text-slate-400'}`}>{cap.desc}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Textarea */}
+                            <div className="relative flex-1 min-w-0">
                                 {/* Mention popup */}
                                 {mention.visible && (
                                     <div className="absolute bottom-full left-0 mb-2 w-full max-h-52 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl z-50">
@@ -2624,6 +2721,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                 )}
                                 <textarea
                                     ref={textareaRef}
+                                    rows={1}
                                     value={input}
                                     onChange={e => {
                                         const val = e.target.value;
@@ -2664,176 +2762,51 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         }
                                     }}
                                     placeholder={isRecording ? '🎙 Gravando… clique no microfone para parar' : isProcessingMic ? 'Transcrevendo áudio...' : isTranscribing ? 'Transcrevendo áudio...' : attachedFile ? 'Pergunte sobre o arquivo ou envie sem texto…' : pastedContext ? 'Pergunte sobre o contexto ou envie sem texto…' : 'Estrategize com Hermes…'}
-                                    className={`w-full px-4 pt-3.5 pb-11 rounded-2xl text-sm font-medium outline-none border resize-none ${isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/20 focus:border-blue-500' : 'bg-slate-50 border-slate-200 text-slate-700 placeholder:text-slate-400 focus:border-blue-500'} transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed`}
+                                    className={`w-full px-2 pt-2.5 pb-1.5 text-sm leading-5 font-medium outline-none border-0 resize-none bg-transparent ${isDark ? 'text-white placeholder:text-white/20' : 'text-slate-700 placeholder:text-slate-400'} transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed`}
                                 />
-                                <div
-                                    aria-hidden="true"
-                                    className={`pointer-events-none absolute inset-x-1.5 bottom-1.5 z-[1] h-12 rounded-b-[15px] bg-gradient-to-t ${isDark
-                                        ? 'from-[#0f172acc] via-[#0f172abf] to-transparent'
-                                        : 'from-white/95 via-white/85 to-transparent'
-                                        }`}
-                                />
-                                <div className="absolute inset-x-2.5 bottom-2.5 z-10 flex items-center justify-end">
-                                    <div className="pointer-events-auto flex items-center gap-2">
-                                        <button
-                                            onClick={() => !isBlocked && fileInputRef.current?.click()}
-                                            disabled={isBlocked}
-                                            title="Anexar arquivo"
-                                            className={`flex h-6 w-6 items-center justify-center rounded-full transition-all ${(attachedFile || pastedContext)
-                                                ? 'bg-blue-500/10 text-blue-500'
-                                                : isDark
-                                                    ? 'bg-white/5 text-white/30 hover:bg-white/10 hover:text-white/70'
-                                                    : 'bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-500'
-                                                } disabled:opacity-30 disabled:cursor-not-allowed`}
-                                        >
-                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                                            </svg>
-                                        </button>
-                                        <div className="relative" ref={toolMenuRef}>
-                                            <button
-                                                onClick={() => setShowToolMenu(prev => !prev)}
-                                                disabled={isBlocked}
-                                                aria-label="Ações Rápidas"
-                                                aria-expanded={showToolMenu}
-                                                title="Atalhos de ferramentas"
-                                                className={`flex h-6 w-6 items-center justify-center rounded-full transition-all ${isDark ? 'bg-white/5 text-white/30 hover:bg-white/10 hover:text-white/70' : 'bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-500'} disabled:opacity-30 disabled:cursor-not-allowed`}
-                                            >
-                                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                                    <circle cx="5" cy="5" r="1.8" />
-                                                    <circle cx="12" cy="5" r="1.8" />
-                                                    <circle cx="19" cy="5" r="1.8" />
-                                                    <circle cx="5" cy="12" r="1.8" />
-                                                    <circle cx="12" cy="12" r="1.8" />
-                                                    <circle cx="19" cy="12" r="1.8" />
-                                                    <circle cx="5" cy="19" r="1.8" />
-                                                    <circle cx="12" cy="19" r="1.8" />
-                                                    <circle cx="19" cy="19" r="1.8" />
-                                                </svg>
-                                            </button>
-                                            {showToolMenu && (
-                                                <div className={`absolute bottom-full right-0 mb-2 z-[80] min-w-[280px] max-w-[min(22rem,calc(100vw-2rem))] max-h-[min(28rem,calc(100vh-14rem))] overflow-y-auto overflow-x-hidden rounded-2xl border shadow-2xl ${isDark ? 'border-white/10 bg-[#101827]' : 'border-slate-200 bg-white'}`}>
-                                                    {/* Ferramentas interativas (UI) */}
-                                                    <div className={`sticky top-0 z-10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'border-b border-white/10 bg-[#101827] text-white/40' : 'border-b border-slate-100 bg-white text-slate-400'}`}>
-                                                        Ferramentas Interativas
-                                                    </div>
-                                                    <div className="p-2">
-                                                        {toolsRegistry.map(tool => (
-                                                            <button
-                                                                key={tool.id}
-                                                                onClick={() => insertToolShortcut(tool.ui_metadata.tag)}
-                                                                className={`w-full rounded-xl px-3 py-2 text-left transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-50'}`}
-                                                            >
-                                                                <div className="flex items-center justify-between gap-3">
-                                                                    <span className={`text-[11px] font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{tool.ui_metadata.title}</span>
-                                                                    <span className={`text-[9px] font-mono ${isDark ? 'text-blue-300' : 'text-blue-600'}`}>{tool.ui_metadata.tag}</span>
-                                                                </div>
-                                                                <p className={`mt-1 text-[10px] leading-relaxed ${isDark ? 'text-white/50' : 'text-slate-500'}`}>{tool.ui_metadata.description}</p>
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                    {/* Capacidades de IA (backend automático) */}
-                                                    <div className={`sticky top-0 z-10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'border-t border-white/10 bg-[#101827] text-white/40' : 'border-t border-slate-100 bg-white text-slate-400'}`}>
-                                                        Capacidades de IA
-                                                    </div>
-                                                    <div className="p-2 pb-3">
-                                                        {([
-                                                            { key: 'pesquisar_internet', label: 'Pesquisar na Internet', desc: 'Busca informações em tempo real na web.' },
-                                                            { key: 'ler_pagina_web', label: 'Ler Página Web', desc: 'Extrai e resume o conteúdo de um URL.' },
-                                                            { key: 'buscar_arquivos_acervo', label: 'Buscar no Acervo', desc: 'Localiza documentos e arquivos do sistema.' },
-                                                            { key: 'consultar_historico_acoes', label: 'Consultar Histórico', desc: 'Recupera o grafo de execução de ações.' },
-                                                            { key: 'consultar_financas_v2', label: 'Consultar Finanças', desc: 'Acesse balanços, metas e extratos financeiros internos.' },
-                                                            { key: 'registrar_item_financeiro_v2', label: 'Registrar Item Financeiro', desc: 'Adiciona novas rendas ou despesas ao sistema.' },
-                                                            { key: 'criar_acao_no_sistema', label: 'Criar Ação', desc: 'Cria uma nova ação diretamente no sistema.' },
-                                                            { key: 'registrar_no_diario', label: 'Registrar no Diário', desc: 'Adiciona uma entrada no diário de bordo.' },
-                                                            { key: 'gerar_relatorio', label: 'Gerar Relatório', desc: 'Compila um relatório estruturado.' },
-                                                            { key: 'consultar_agenda', label: 'Consultar Agenda', desc: 'Verifica compromissos e eventos do calendário.' },
-                                                            { key: 'encontrar_slot_livre', label: 'Encontrar Slot Livre', desc: 'Sugere horários disponíveis na agenda.' },
-                                                            { key: 'buscar_e_analisar_email', label: 'Analisar E-mail', desc: 'Busca e analisa e-mails relevantes.' },
-                                                            { key: 'salvar_memoria_global', label: 'Salvar Memória', desc: 'Persiste informações na memória global.' },
-                                                            { key: 'gerar_rascunho_formulario', label: 'Gerar Formulário', desc: 'Cria rascunho de formulário estruturado.' },
-                                                        ] as { key: string; label: string; desc: string }[]).map(cap => (
-                                                            <div
-                                                                key={cap.key}
-                                                                className={`rounded-xl px-3 py-2 ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}
-                                                            >
-                                                                <span className={`text-[11px] font-black ${isDark ? 'text-white/80' : 'text-slate-700'}`}>{cap.label}</span>
-                                                                <p className={`mt-0.5 text-[10px] leading-relaxed ${isDark ? 'text-white/40' : 'text-slate-400'}`}>{cap.desc}</p>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                        <button
-                                            onClick={() => isRecording ? stopRecording() : startRecording()}
-                                            disabled={isBlocked && !isRecording}
-                                            title={isRecording ? 'Parar gravação' : 'Gravar Áudio'}
-                                            className={`flex h-6 w-6 items-center justify-center rounded-full transition-all active:scale-90 shadow-sm ${isRecording
-                                                ? 'bg-red-500 text-white animate-pulse hover:bg-red-600'
-                                                : isDark
-                                                    ? 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white disabled:opacity-30'
-                                                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700 disabled:opacity-30'
-                                                } disabled:cursor-not-allowed`}
-                                        >
-                                            {isProcessingMic ? (
-                                                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
-                                            ) : (
-                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 10v2a7 7 0 01-14 0v-2m14 0h2m-16 0H3m9 10v3m-3 0h6" />
-                                                </svg>
-                                            )}
-                                        </button>
-                                        <button
-                                            onClick={() => {
-                                                if (!currentSessionId) {
-                                                    handleCreateSession(input);
-                                                } else {
-                                                    sendMessage(input);
-                                                }
-                                            }}
-                                            disabled={isBlocked || (!input.trim() && !attachedFile && !pastedContext)}
-                                            className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 disabled:opacity-40 transition-all"
-                                        >
-                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                                        </button>
-                                    </div>
-                                </div>
                             </div>
-                            <button
-                                onClick={() => isRecording ? stopRecording() : startRecording()}
-                                disabled={isBlocked && !isRecording}
-                                title={isRecording ? 'Parar gravação' : 'Gravar Áudio'}
-                                className={`absolute right-8 bottom-2.5 z-10 hidden h-6 w-6 items-center justify-center rounded-full transition-all active:scale-90 shadow-sm ${isRecording
-                                    ? 'bg-red-500 text-white animate-pulse hover:bg-red-600'
-                                    : isDark
-                                        ? 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white disabled:opacity-30'
-                                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700 disabled:opacity-30'
-                                    } disabled:cursor-not-allowed`}
-                            >
-                                {isProcessingMic ? (
-                                    <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
-                                ) : (
-                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 10v2a7 7 0 01-14 0v-2m14 0h2m-16 0H3m9 10v3m-3 0h6" />
+
+                            {/* Botão direito: microfone (campo vazio) ou enviar (com texto) */}
+                            {(input.trim() || attachedFile || pastedContext) && !isRecording ? (
+                                <button
+                                    onClick={() => {
+                                        if (!currentSessionId) {
+                                            handleCreateSession(input);
+                                        } else {
+                                            sendMessage(input);
+                                        }
+                                    }}
+                                    disabled={isBlocked}
+                                    title="Enviar"
+                                    className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 disabled:opacity-40 transition-all active:scale-95 flex-shrink-0"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                                     </svg>
-                                )}
-                            </button>
-                            <button
-                                onClick={() => {
-                                    if (!currentSessionId) {
-                                        handleCreateSession(input);
-                                    } else {
-                                        sendMessage(input);
-                                    }
-                                }}
-                                disabled={isBlocked || (!input.trim() && !attachedFile && !pastedContext)}
-                                className="absolute right-0 bottom-2.5 z-10 hidden h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 disabled:opacity-40 transition-all"
-                            >
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                            </button>
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={() => isRecording ? stopRecording() : startRecording()}
+                                    disabled={isBlocked && !isRecording}
+                                    title={isRecording ? 'Parar gravação' : 'Gravar Áudio'}
+                                    className={`flex h-9 w-9 items-center justify-center rounded-full transition-all active:scale-95 flex-shrink-0 ${
+                                        isRecording
+                                            ? 'bg-red-500 text-white animate-pulse hover:bg-red-600'
+                                            : isDark
+                                                ? 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white'
+                                                : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
+                                    } disabled:opacity-30 disabled:cursor-not-allowed`}
+                                >
+                                    {isProcessingMic ? (
+                                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                                    ) : (
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 10v2a7 7 0 01-14 0v-2m14 0h2m-16 0H3m9 10v3m-3 0h6" />
+                                        </svg>
+                                    )}
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>
