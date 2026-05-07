@@ -7023,28 +7023,11 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
     drive_file_id = data.get('driveFileId')
     drive_file_name = (data.get('driveFileName') or 'documento').strip()
     routing_index = data.get('routingIndex') or []
-    copiloto_job_id = data.get('copilotoJobId')
     user_uid = req.auth.uid if req.auth else None
 
     def _copilot_remaining_sec() -> float:
         elapsed = time.monotonic() - request_start_monotonic
         return max(0.0, COPILOT_SOFT_DEADLINE_SEC - elapsed)
-
-    def _raise_if_copiloto_job_cancelled(db_ref=None):
-        if not copiloto_job_id:
-            return
-        try:
-            _db = db_ref or get_db()
-            job_doc = _db.collection('copiloto_jobs').document(str(copiloto_job_id)).get()
-            if job_doc.exists and (job_doc.to_dict() or {}).get('status') == 'CANCELLED':
-                raise https_fn.HttpsError(
-                    code=https_fn.FunctionsErrorCode.CANCELLED,
-                    message="Processamento do Copiloto cancelado pelo usuario."
-                )
-        except https_fn.HttpsError:
-            raise
-        except Exception as cancel_check_err:
-            print(f"[CopilotoJob] Falha ao verificar cancelamento {copiloto_job_id}: {cancel_check_err}")
 
     # Ingestão muda: arquivo sem texto → prompt padrão de catalogação
     if not prompt and drive_file_id:
@@ -7070,7 +7053,6 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 message="Chave Gemini não configurada."
             )
 
-        _raise_if_copiloto_job_cancelled(db)
         client = genai.Client(api_key=gemini_key)
         copilot_core = _get_copilot_core(db)
         copilot_soul = _get_copilot_soul(db)
@@ -9570,12 +9552,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         report_data = None
         tool_invocation_data = None
         deadline_fallback_text = None
-        _raise_if_copiloto_job_cancelled(db)
         response = chat.send_message(final_prompt)
         _perf_mark(perf_state, "web.first_model_response")
         _max_iter = 10
         for _round in range(_max_iter):
-            _raise_if_copiloto_job_cancelled(db)
             if _copilot_remaining_sec() < 75:
                 deadline_fallback_text = (
                     "A consulta chegou perto do limite seguro de processamento. "
@@ -9832,7 +9812,6 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 print(f"Erro ao extrair diagnóstico: {e}")
 
         # Salva a resposta do assistente no Firestore para o histórico
-        _raise_if_copiloto_job_cancelled(db)
         if session_id:
             try:
                 db.collection('sessoes_copiloto').document(session_id).collection('mensagens').add({
@@ -9884,8 +9863,6 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         }
 
     except Exception as e:
-        if isinstance(e, https_fn.HttpsError):
-            raise e
         print(f"Erro em askCopilotoHermes: {e}")
         _perf_log("web.askCopiloto.error", perf_state, {"session_id": session_id, "task_id": task_id, "error": str(e)})
         import traceback
@@ -9893,284 +9870,6 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.INTERNAL,
             message=str(e)
-        )
-
-
-class _InternalCopilotoAuth:
-    def __init__(self, uid: str | None, token: dict | None = None):
-        self.uid = uid
-        self.token = token or {}
-
-
-class _InternalCopilotoRequest:
-    def __init__(self, data: dict, uid: str | None, token: dict | None = None):
-        self.data = data
-        self.auth = _InternalCopilotoAuth(uid, token) if uid else None
-
-
-def _build_copiloto_app_link(task_id: str | None, session_id: str | None) -> str:
-    from urllib.parse import urlencode
-
-    base_url = (
-        os.environ.get("HERMES_APP_URL")
-        or os.environ.get("APP_BASE_URL")
-        or "https://gestao-hermes.web.app"
-    ).rstrip("/")
-    params = {}
-    if task_id:
-        params["task"] = task_id
-    if session_id:
-        params["copilotoSession"] = session_id
-    return f"{base_url}/?{urlencode(params)}" if params else base_url
-
-
-@https_fn.on_call(
-    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
-    memory=options.MemoryOption.MB_256,
-    timeout_sec=30
-)
-def enqueueCopilotoJob(req: https_fn.CallableRequest):
-    """Enfileira uma mensagem do Copiloto para processamento em background."""
-    try:
-        uid = req.auth.uid if req.auth else None
-        if not uid:
-            raise https_fn.HttpsError(
-                code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
-                message="Usuario nao autenticado."
-            )
-
-        data = req.data or {}
-        session_id = (data.get("sessionId") or "").strip()
-        prompt = (data.get("prompt") or "").strip()
-        drive_file_id = data.get("driveFileId")
-
-        if not session_id:
-            raise https_fn.HttpsError(
-                code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
-                message="sessionId e obrigatorio."
-            )
-        if not prompt and not drive_file_id:
-            raise https_fn.HttpsError(
-                code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
-                message="Prompt ou arquivo e obrigatorio."
-            )
-
-        db = get_db()
-        session_ref = db.collection("sessoes_copiloto").document(session_id)
-        session_doc = session_ref.get()
-        if session_doc.exists:
-            session_data = session_doc.to_dict() or {}
-            if session_data.get("userId") and session_data.get("userId") != uid:
-                raise https_fn.HttpsError(
-                    code=https_fn.FunctionsErrorCode.PERMISSION_DENIED,
-                    message="Voce nao tem permissao para usar esta sessao."
-                )
-
-        telegram_chat_id = _resolve_telegram_chat_id_for_uid(db, uid)
-        requester_email = ((req.auth.token or {}).get("email") if req.auth else None) or data.get("requesterEmail") or "unknown"
-        job_ref = db.collection("copiloto_jobs").document()
-        job_ref.set({
-            "status": "PENDING",
-            "sessionId": session_id,
-            "taskId": data.get("taskId") or None,
-            "systemId": data.get("systemId") or None,
-            "prompt": prompt,
-            "driveFileId": drive_file_id or None,
-            "driveFileName": data.get("driveFileName") or None,
-            "routingIndex": data.get("routingIndex") or [],
-            "created_by_uid": uid,
-            "requester_email": requester_email,
-            "telegram_chat_id": telegram_chat_id,
-            "created_at": firestore.SERVER_TIMESTAMP,
-            "updated_at": firestore.SERVER_TIMESTAMP,
-        })
-        session_ref.set({
-            "activeJobId": job_ref.id,
-            "activeJobStatus": "PENDING",
-            "lastMessageAt": firestore.SERVER_TIMESTAMP,
-        }, merge=True)
-        return {"jobId": job_ref.id, "status": "PENDING"}
-    except Exception as e:
-        if isinstance(e, https_fn.HttpsError):
-            raise e
-        raise https_fn.HttpsError(
-            code=https_fn.FunctionsErrorCode.INTERNAL,
-            message=str(e)
-        )
-
-
-@https_fn.on_call(
-    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
-    memory=options.MemoryOption.MB_256,
-    timeout_sec=30
-)
-def cancelCopilotoJob(req: https_fn.CallableRequest):
-    """Marca um job do Copiloto como cancelado."""
-    try:
-        uid = req.auth.uid if req.auth else None
-        if not uid:
-            raise https_fn.HttpsError(
-                code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
-                message="Usuario nao autenticado."
-            )
-
-        job_id = ((req.data or {}).get("jobId") or "").strip()
-        if not job_id:
-            raise https_fn.HttpsError(
-                code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
-                message="jobId e obrigatorio."
-            )
-
-        db = get_db()
-        job_ref = db.collection("copiloto_jobs").document(job_id)
-        job_doc = job_ref.get()
-        if not job_doc.exists:
-            raise https_fn.HttpsError(
-                code=https_fn.FunctionsErrorCode.NOT_FOUND,
-                message="Job nao encontrado."
-            )
-        job_data = job_doc.to_dict() or {}
-        if job_data.get("created_by_uid") and job_data.get("created_by_uid") != uid:
-            raise https_fn.HttpsError(
-                code=https_fn.FunctionsErrorCode.PERMISSION_DENIED,
-                message="Voce nao tem permissao para cancelar este processamento."
-            )
-
-        job_ref.update({
-            "status": "CANCELLED",
-            "cancelled_at": firestore.SERVER_TIMESTAMP,
-            "updated_at": firestore.SERVER_TIMESTAMP,
-        })
-        session_id = job_data.get("sessionId")
-        if session_id:
-            db.collection("sessoes_copiloto").document(session_id).set({
-                "activeJobId": firestore.DELETE_FIELD,
-                "activeJobStatus": firestore.DELETE_FIELD,
-                "lastJobCancelledAt": firestore.SERVER_TIMESTAMP,
-            }, merge=True)
-        return {"jobId": job_id, "status": "CANCELLED"}
-    except Exception as e:
-        if isinstance(e, https_fn.HttpsError):
-            raise e
-        raise https_fn.HttpsError(
-            code=https_fn.FunctionsErrorCode.INTERNAL,
-            message=str(e)
-        )
-
-
-@firestore_fn.on_document_created(
-    document="copiloto_jobs/{jobId}",
-    memory=options.MemoryOption.GB_2,
-    timeout_sec=COPILOT_FUNCTION_TIMEOUT_SEC
-)
-def copiloto_job_worker(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]):
-    """Processa mensagens do Copiloto em background, independente do app aberto."""
-    if not event.data:
-        return
-
-    db = get_db()
-    job_id = event.params.get("jobId")
-    job_ref = db.collection("copiloto_jobs").document(job_id)
-    job_data = event.data.to_dict() or {}
-    session_id = job_data.get("sessionId")
-    task_id = job_data.get("taskId")
-    uid = job_data.get("created_by_uid")
-    telegram_chat_id = job_data.get("telegram_chat_id")
-
-    def _job_is_cancelled() -> bool:
-        snap = job_ref.get()
-        return snap.exists and (snap.to_dict() or {}).get("status") == "CANCELLED"
-
-    def _mark_session_done(payload: dict):
-        if not session_id:
-            return
-        session_ref = db.collection("sessoes_copiloto").document(session_id)
-        session_ref.set({
-            "activeJobId": firestore.DELETE_FIELD,
-            "activeJobStatus": firestore.DELETE_FIELD,
-            **payload,
-            "lastMessageAt": firestore.SERVER_TIMESTAMP,
-        }, merge=True)
-
-    try:
-        if _job_is_cancelled():
-            return
-
-        job_ref.update({
-            "status": "RUNNING",
-            "started_at": firestore.SERVER_TIMESTAMP,
-            "updated_at": firestore.SERVER_TIMESTAMP,
-        })
-        if session_id:
-            db.collection("sessoes_copiloto").document(session_id).set({
-                "activeJobId": job_id,
-                "activeJobStatus": "RUNNING",
-                "lastJobStartedAt": firestore.SERVER_TIMESTAMP,
-            }, merge=True)
-
-        internal_req = _InternalCopilotoRequest(
-            {
-                "sessionId": session_id,
-                "prompt": job_data.get("prompt") or "",
-                "taskId": task_id or None,
-                "systemId": job_data.get("systemId") or None,
-                "driveFileId": job_data.get("driveFileId") or None,
-                "driveFileName": job_data.get("driveFileName") or None,
-                "routingIndex": job_data.get("routingIndex") or [],
-                "copilotoJobId": job_id,
-            },
-            uid,
-            {"email": job_data.get("requester_email") or "unknown"},
-        )
-        result = askCopilotoHermes(internal_req)
-
-        if _job_is_cancelled():
-            _mark_session_done({"lastJobCancelledAt": firestore.SERVER_TIMESTAMP})
-            return
-
-        job_ref.update({
-            "status": "COMPLETED",
-            "completed_at": firestore.SERVER_TIMESTAMP,
-            "updated_at": firestore.SERVER_TIMESTAMP,
-        })
-        session_updates = {"lastJobCompletedAt": firestore.SERVER_TIMESTAMP}
-        suggested_title = result.get("suggestedTitle") if isinstance(result, dict) else None
-        if suggested_title:
-            session_updates["title"] = suggested_title
-        _mark_session_done(session_updates)
-
-        app_link = _build_copiloto_app_link(task_id, session_id)
-        _send_telegram_message_raw(
-            db,
-            telegram_chat_id,
-            "Processamento realizado. O Copiloto Hermes concluiu sua demanda.\n"
-            f"Clique para acessar: {app_link}"
-        )
-    except Exception as e:
-        if _job_is_cancelled():
-            _mark_session_done({"lastJobCancelledAt": firestore.SERVER_TIMESTAMP})
-            return
-        error_msg = str(e)
-        print(f"[CopilotoJob] Falha no job {job_id}: {error_msg}")
-        job_ref.update({
-            "status": "FAILED",
-            "error": error_msg,
-            "failed_at": firestore.SERVER_TIMESTAMP,
-            "updated_at": firestore.SERVER_TIMESTAMP,
-        })
-        if session_id:
-            db.collection("sessoes_copiloto").document(session_id).collection("mensagens").add({
-                "role": "assistant",
-                "content": f"Falha ao processar em segundo plano: {error_msg}",
-                "timestamp": firestore.SERVER_TIMESTAMP,
-            })
-        _mark_session_done({"lastJobFailedAt": firestore.SERVER_TIMESTAMP})
-        app_link = _build_copiloto_app_link(task_id, session_id)
-        _send_telegram_message_raw(
-            db,
-            telegram_chat_id,
-            "O processamento do Copiloto Hermes falhou.\n"
-            f"Erro: {error_msg[:180]}\nAcesse: {app_link}"
         )
 
 @https_fn.on_call(
