@@ -5732,7 +5732,7 @@ const App: React.FC = () => {
                         onOpenBacklog={handleCopyBacklog}
                       />
                     </div>
-                  />
+                  </>
                 ) : viewMode === 'gallery' ? (
                   <>
                     {/* Mobile Search Bar */}
