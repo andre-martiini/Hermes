@@ -40,6 +40,8 @@ _MAX_TTS_TRANSCRIPT_CHARS = 1500
 # ---------------------------------------------------------------------------
 _DOC_CACHE: dict = {}
 _DOC_CACHE_TTL = 60
+_ACTION_SNAPSHOT_CACHE: dict = {}
+_ACTION_SNAPSHOT_CACHE_TTL = 45
 
 def _cached_doc_get(db, collection: str, document: str):
     key = f"{collection}/{document}"
@@ -81,6 +83,8 @@ def _perf_log(prefix: str, perf_state: dict, extra: dict | None = None):
     }
     if perf_state.get("tool_calls"):
         payload["tool_calls"] = perf_state["tool_calls"]
+    if perf_state.get("tool_rounds"):
+        payload["tool_rounds"] = perf_state["tool_rounds"]
     if extra:
         payload.update(extra)
     try:
@@ -887,6 +891,18 @@ def _fetch_acao_snapshot(db, task_id: str) -> dict | None:
         return None
 
 
+def _cached_acao_snapshot(db, task_id: str) -> dict | None:
+    now = time.monotonic()
+    cached = _ACTION_SNAPSHOT_CACHE.get(task_id)
+    if cached and (now - cached[0]) < _ACTION_SNAPSHOT_CACHE_TTL:
+        return cached[1]
+
+    snapshot = _fetch_acao_snapshot(db, task_id)
+    if snapshot:
+        _ACTION_SNAPSHOT_CACHE[task_id] = (now, snapshot)
+    return snapshot
+
+
 def _search_actions_for_context(db, query: str) -> list:
     """Busca tarefas usando buscar_tarefas e retorna até 5 resultados para seleção."""
     from tools.busca_grafo import buscar_tarefas
@@ -1004,7 +1020,7 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
     elif data.startswith("lock:"):
         task_id = data[len("lock:"):]
         _answer_callback_query(token, query_id, "Carregando contexto...")
-        snapshot = _fetch_acao_snapshot(db, task_id)
+        snapshot = _cached_acao_snapshot(db, task_id)
         if not snapshot:
             _send_telegram_session_message(
                 db,
@@ -1366,6 +1382,7 @@ def _build_system_instruction_guarded_v2(
         "10. LINKS E ARQUIVOS: nunca crie hiperlinks, texto-ancora ou URLs que nao aparecam literalmente no contexto, em uma ferramenta ou em um DRIVE_FILE_ID real. Se o usuario pedir links e eles nao estiverem disponiveis, diga que nao encontrou.\n"
         "11. PESQUISA DE ACOES: se o usuario pedir para pesquisar/localizar uma acao ou tarefa, use consultar_historico_acoes primeiro. Nao substitua resultado ausente por acervo, email ou internet, salvo se o usuario pedir explicitamente essa ampliacao.\n"
         "12. ACESSO FINANCEIRO: para qualquer dado sobre rendas, contas, metas ou balanco interno, use consultar_financas_v2. Para novos registros, use obrigatoriamente propor_lancamento_financeiro para que o usuário receba os botões de confirmação. Detalhe os valores com precisao absoluta conforme retornado pelo sistema.\n"
+        "13. EFICIENCIA: quando precisar de varias consultas independentes, solicite todas na mesma rodada de ferramentas. Evite rodadas sequenciais se uma unica rodada paralela resolver. Nunca chame mais de uma ferramenta de escrita/registro no mesmo turno; proponha uma confirmacao por vez.\n"
     )
 
     if not acao_snapshot:
@@ -1726,11 +1743,63 @@ def _run_gemini_turn(
     perf_state: dict | None = None,
 ) -> str:
     """Runs a full Gemini multi-turn exchange and returns the final text response."""
+    from concurrent.futures import ThreadPoolExecutor
     from google import genai
     from google.genai import types
 
     client = genai.Client(api_key=gemini_key)
     model_id = "gemini-3-flash-preview"
+    read_only_parallel_tools = {
+        "consultar_historico_acoes",
+        "buscar_arquivos_acervo",
+        "pesquisar_internet",
+        "ler_pagina_web",
+        "consultar_agenda",
+        "encontrar_slot_livre",
+        "consultar_financas_v2",
+        "buscar_e_analisar_email",
+    }
+
+    def _is_parallel_safe_tool(tool_name: str) -> bool:
+        return tool_name in read_only_parallel_tools
+
+    def _execute_tool_call(fc, *, parallel: bool = False):
+        fn = function_map.get(fc.name)
+        tool_start_ms = _perf_now_ms()
+        if fn is None:
+            result_text = f"Ferramenta '{fc.name}' não encontrada."
+        else:
+            try:
+                kwargs = dict(fc.args or {})
+                result = fn(**kwargs)
+                result_text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+            except Exception as tool_err:
+                result_text = f"Erro ao executar {fc.name}: {tool_err}"
+        if perf_state is not None:
+            perf_state.setdefault("tool_calls", []).append({
+                "name": fc.name,
+                "duration_ms": max(0, _perf_now_ms() - tool_start_ms),
+                "parallel": parallel,
+            })
+        return types.Part.from_function_response(
+            name=fc.name,
+            response={"result": result_text},
+        )
+
+    def _tool_call_groups(func_calls: list) -> list[list]:
+        groups = []
+        current_read_group = []
+        for fc in func_calls:
+            if _is_parallel_safe_tool(fc.name):
+                current_read_group.append(fc)
+                continue
+            if current_read_group:
+                groups.append(current_read_group)
+                current_read_group = []
+            groups.append([fc])
+        if current_read_group:
+            groups.append(current_read_group)
+        return groups
 
     chat = client.chats.create(
         model=model_id,
@@ -1769,30 +1838,25 @@ def _run_gemini_turn(
 
         # Executa todas as tool calls e coleta resultados
         tool_results = []
-        for fc in func_calls:
-            fn = function_map.get(fc.name)
-            tool_start_ms = _perf_now_ms()
-            if fn is None:
-                result_text = f"Ferramenta '{fc.name}' não encontrada."
-            else:
-                try:
-                    kwargs = dict(fc.args or {})
-                    result = fn(**kwargs)
-                    result_text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
-                except Exception as tool_err:
-                    result_text = f"Erro ao executar {fc.name}: {tool_err}"
-            if perf_state is not None:
-                perf_state.setdefault("tool_calls", []).append({
-                    "name": fc.name,
-                    "duration_ms": max(0, _perf_now_ms() - tool_start_ms),
-                })
-            tool_results.append(
-                types.Part.from_function_response(
-                    name=fc.name,
-                    response={"result": result_text},
-                )
-            )
+        for group in _tool_call_groups(func_calls):
+            if len(group) == 1:
+                tool_results.append(_execute_tool_call(group[0], parallel=False))
+                continue
 
+            max_workers = min(len(group), 6)
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [executor.submit(_execute_tool_call, fc, parallel=True) for fc in group]
+                for future in futures:
+                    tool_results.append(future.result())
+
+        if perf_state is not None:
+            parallel_count = sum(1 for fc in func_calls if _is_parallel_safe_tool(fc.name))
+            serial_count = len(func_calls) - parallel_count
+            perf_state.setdefault("tool_rounds", []).append({
+                "total_calls": len(func_calls),
+                "parallel_safe_calls": parallel_count,
+                "serialized_calls": serial_count,
+            })
         response = chat.send_message(tool_results)
         if perf_state is not None:
             _perf_mark(perf_state, "telegram.tool_roundtrip")
@@ -1885,7 +1949,7 @@ def _process_telegram_message(db, data: dict):
         results = _search_actions_for_context(db, action_search_context_query)
         selected = _select_context_result(action_search_context_query, results)
         if selected:
-            snapshot = _fetch_acao_snapshot(db, selected["id"])
+            snapshot = _cached_acao_snapshot(db, selected["id"])
             if not snapshot:
                 _send_contextual_response(
                     db,
@@ -1952,7 +2016,7 @@ def _process_telegram_message(db, data: dict):
         results = _search_actions_for_context(db, natural_context_query)
         selected = _select_context_result(natural_context_query, results)
         if selected:
-            snapshot = _fetch_acao_snapshot(db, selected["id"])
+            snapshot = _cached_acao_snapshot(db, selected["id"])
             if not snapshot:
                 _send_contextual_response(
                     db,
@@ -2066,11 +2130,12 @@ def _process_telegram_message(db, data: dict):
     # When locked to an action, pull its data snapshot for LLM injection
     acao_snapshot = session.get("acao_context_snapshot") if contexto_ativo == "acao" else None
     if contexto_ativo == "acao" and request_acao_id:
-        fresh_snapshot = _fetch_acao_snapshot(db, request_acao_id)
+        fresh_snapshot = _cached_acao_snapshot(db, request_acao_id)
         if fresh_snapshot:
             acao_snapshot = fresh_snapshot
             session["acao_context_snapshot"] = fresh_snapshot
             session["acao_titulo"] = fresh_snapshot.get("titulo") or session.get("acao_titulo")
+        _perf_mark(perf_state, "telegram.action_snapshot")
     system_instruction = _build_system_instruction_guarded_v2(copilot_core, copilot_soul, contexto_ativo, acao_snapshot)
 
     # --- Restore history (trimmed) — isolated buffer when action-locked ---
