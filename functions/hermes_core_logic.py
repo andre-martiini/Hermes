@@ -3007,22 +3007,14 @@ def _process_telegram_message(db, data: dict):
         file_bytes = _load_telegram_media_bytes(media_bytes_b64, media_storage_path)
         if not file_bytes:
             user_parts.append(types.Part(text="[Arquivo recebido mas o conteudo nao foi encontrado]"))
-            file_bytes = None
-        if not file_bytes:
-            pass
         else:
             fname = file_info.get("file_name") or f"upload_{_uuid.uuid4().hex[:8]}"
             mime = file_info.get("mime_type", "application/octet-stream")
-            try:
-                pub_url = _upload_to_storage(file_bytes, fname, mime, chat_id)
-                file_context_text = (
-                    f"[Arquivo recebido]: {fname} ({mime})\n"
-                    f"URL: {pub_url}\n"
-                    "Analise este arquivo, identifique o que ele mostra e sugira como ele se relaciona ao contexto atual."
-                )
-            except Exception as up_err:
-                file_context_text = f"[Arquivo recebido: {fname}] (falha no upload: {up_err})"
-            user_parts.append(types.Part(text=file_context_text))
+            user_parts.append(types.Part.from_bytes(data=file_bytes, mime_type=mime))
+            user_parts.append(types.Part(text=(
+                f"[Arquivo recebido]: {fname} ({mime})\n"
+                "Analise este arquivo, identifique o que ele mostra e sugira como ele se relaciona ao contexto atual."
+            )))
             _perf_mark(perf_state, "telegram.file_upload")
 
     # Text

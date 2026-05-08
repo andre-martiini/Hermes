@@ -16,7 +16,8 @@
       "Bash(git -C \"C:/Users/T-GAMER/Documents/gestao-Hermes\" worktree remove --force \".claude/worktrees/fervent-chandrasekhar\")",
       "Bash(git -C \"C:/Users/T-GAMER/Documents/gestao-Hermes\" worktree remove --force \".claude/worktrees/laughing-cartwright\")",
       "Bash(git -C \"C:/Users/T-GAMER/Documents/gestao-Hermes\" worktree remove --force \".claude/worktrees/sweet-khorana\")",
-      "Bash(git -C \"C:/Users/T-GAMER/Documents/gestao-Hermes\" worktree prune)"
+      "Bash(git -C \"C:/Users/T-GAMER/Documents/gestao-Hermes\" worktree prune)",
+      "Bash(python -c \"from google.genai import types; help\\(types.Part.from_bytes\\)\")"
     ]
   }
 }
