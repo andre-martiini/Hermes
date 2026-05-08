@@ -236,7 +236,46 @@ def _format_web_copilot_text_for_telegram(text: str) -> str:
     safe = re.sub(r"__(.+?)__", r"<b>\1</b>", safe, flags=re.DOTALL)
     safe = re.sub(r"\*(.+?)\*", r"<i>\1</i>", safe, flags=re.DOTALL)
     safe = re.sub(r"\[(.*?)\]\((task:[^)]+)\)", r"\1 (\2)", safe)
+    safe = re.sub(r"\[(.*?)\]\((tool:diagnosis:[^)]+)\)", r"\1 (\2)", safe)
     return safe.strip()
+
+
+def _call_web_callable(
+    *,
+    function_name: str,
+    data: dict,
+    user_uid: str | None = None,
+    timeout: int = 480,
+) -> dict:
+    project_id = (
+        os.environ.get("GCLOUD_PROJECT")
+        or os.environ.get("GCP_PROJECT")
+        or os.environ.get("GOOGLE_CLOUD_PROJECT")
+        or "gestao-hermes"
+    )
+    region = os.environ.get("FUNCTION_REGION") or os.environ.get("GOOGLE_CLOUD_REGION") or "us-central1"
+    env_key = re.sub(r"[^A-Z0-9]+", "_", function_name.upper()) + "_URL"
+    legacy_env_key = "ASK_COPILOTO_HERMES_URL" if function_name == "askCopilotoHermes" else None
+    url = (
+        (os.environ.get(legacy_env_key) if legacy_env_key else None)
+        or os.environ.get(env_key)
+        or f"https://{region}-{project_id}.cloudfunctions.net/{function_name}"
+    )
+
+    payload = {"data": data}
+    headers = {"Content-Type": "application/json"}
+    if user_uid:
+        headers["X-Hermes-User-Uid"] = user_uid
+
+    resp = _requests.post(url, json=payload, headers=headers, timeout=timeout)
+    if not resp.ok:
+        raise RuntimeError(f"{function_name} HTTP {resp.status_code}: {resp.text[:300]}")
+
+    response_data = resp.json()
+    if response_data.get("error"):
+        raise RuntimeError(json.dumps(response_data["error"], ensure_ascii=False))
+    result = response_data.get("result", response_data)
+    return result if isinstance(result, dict) else {"result": str(result or "")}
 
 
 def _run_web_copilot_engine(
@@ -247,37 +286,187 @@ def _run_web_copilot_engine(
     system_id: str | None = None,
     user_uid: str | None = None,
 ) -> dict:
-    project_id = (
-        os.environ.get("GCLOUD_PROJECT")
-        or os.environ.get("GCP_PROJECT")
-        or os.environ.get("GOOGLE_CLOUD_PROJECT")
-        or "gestao-hermes"
-    )
-    region = os.environ.get("FUNCTION_REGION") or os.environ.get("GOOGLE_CLOUD_REGION") or "us-central1"
-    url = os.environ.get("ASK_COPILOTO_HERMES_URL") or f"https://{region}-{project_id}.cloudfunctions.net/askCopilotoHermes"
-
-    payload = {
-        "data": {
+    return _call_web_callable(
+        function_name="askCopilotoHermes",
+        data={
             "prompt": prompt,
             "sessionId": session_id,
             "taskId": task_id,
             "systemId": system_id,
             "routingIndex": [],
-        }
-    }
-    headers = {"Content-Type": "application/json"}
-    if user_uid:
-        headers["X-Hermes-User-Uid"] = user_uid
+        },
+        user_uid=user_uid,
+        timeout=480,
+    )
 
-    resp = _requests.post(url, json=payload, headers=headers, timeout=480)
-    if not resp.ok:
-        raise RuntimeError(f"askCopilotoHermes HTTP {resp.status_code}: {resp.text[:300]}")
 
-    data = resp.json()
-    if data.get("error"):
-        raise RuntimeError(json.dumps(data["error"], ensure_ascii=False))
-    result = data.get("result", data)
-    return result if isinstance(result, dict) else {"result": str(result or "")}
+def _extract_task_ids_from_text(text: str) -> list[str]:
+    seen = set()
+    task_ids = []
+    for match in re.finditer(r"\btask:([a-zA-Z0-9_-]{8,})", text or ""):
+        task_id = match.group(1).strip()
+        if task_id not in seen:
+            seen.add(task_id)
+            task_ids.append(task_id)
+    return task_ids
+
+
+def _find_latest_copilot_card_message_id(db, session_id: str | None, field_name: str) -> str | None:
+    if not session_id:
+        return None
+    try:
+        docs = (
+            db.collection("sessoes_copiloto").document(session_id)
+            .collection("mensagens")
+            .order_by("timestamp", direction=firestore.Query.DESCENDING)
+            .limit(12)
+            .get()
+        )
+        for doc in docs:
+            data = doc.to_dict() or {}
+            if data.get(field_name):
+                return doc.id
+    except Exception as exc:
+        print(f"[TelegramCards] Falha ao localizar card {field_name}: {exc}")
+    return None
+
+
+def _set_latest_copilot_card_status(db, session_id: str | None, field_name: str, status: str):
+    message_id = _find_latest_copilot_card_message_id(db, session_id, field_name)
+    if not message_id:
+        return
+    try:
+        db.collection("sessoes_copiloto").document(session_id).collection("mensagens").document(message_id).update({
+            f"{field_name}.status": status,
+            f"{field_name}.status_ui": status,
+        })
+    except Exception as exc:
+        print(f"[TelegramCards] Falha ao atualizar status {field_name}: {exc}")
+
+
+def _summarize_pending_edit(pending_edit: dict) -> str:
+    titulo = html.escape(str(pending_edit.get("titulo") or pending_edit.get("task_id") or "acao"))
+    lines = ["", "<b>Card de edicao pendente</b>", f"Acao: {titulo}"]
+    alteracoes = pending_edit.get("alteracoes") or {}
+    for campo, change in list(alteracoes.items())[:5]:
+        change = change if isinstance(change, dict) else {}
+        original = html.escape(str(change.get("original") or "-"))
+        novo = html.escape(str(change.get("novo") or change.get("novo_raw") or "-"))
+        lines.append(f"- {html.escape(str(campo))}: {original} -> {novo}")
+    if len(alteracoes) > 5:
+        lines.append(f"- mais {len(alteracoes) - 5} alteracao(oes)")
+    lines.append("No Telegram, use os botoes abaixo para confirmar ou cancelar.")
+    return "\n".join(lines)
+
+
+def _summarize_pending_batch_reschedule(batch_reschedule: dict) -> str:
+    items = batch_reschedule.get("items") or []
+    lines = ["", "<b>Card de reagendamento em lote</b>", f"Acoes afetadas: {len(items)}"]
+    justificativa = batch_reschedule.get("justificativa")
+    if justificativa:
+        lines.append(f"Motivo: {html.escape(str(justificativa)[:300])}")
+    for item in items[:6]:
+        titulo = html.escape(str(item.get("titulo") or item.get("task_id") or "acao"))
+        original = html.escape(str(item.get("data_limite_original") or "-"))
+        nova = html.escape(str(item.get("nova_data_limite") or "-"))
+        lines.append(f"- {titulo}: {original} -> {nova}")
+    if len(items) > 6:
+        lines.append(f"- mais {len(items) - 6} acao(oes)")
+    lines.append("No Telegram, use os botoes abaixo para confirmar ou cancelar.")
+    return "\n".join(lines)
+
+
+def _summarize_proposed_diagnosis(diagnosis: dict) -> str:
+    mode = diagnosis.get("mode") or "repo"
+    lines = ["", "<b>Card de diagnostico de codigo</b>"]
+    if mode == "snippet":
+        lines.append(f"Modo: snippet")
+        if diagnosis.get("fileName"):
+            lines.append(f"Arquivo: {html.escape(str(diagnosis.get('fileName')))}")
+    else:
+        lines.append("Modo: repositorio")
+        if diagnosis.get("sistemaId"):
+            lines.append(f"Sistema: {html.escape(str(diagnosis.get('sistemaId')))}")
+    if diagnosis.get("descricaoProblema"):
+        lines.append(f"Pedido: {html.escape(str(diagnosis.get('descricaoProblema'))[:500])}")
+    lines.append("No Telegram, use os botoes abaixo para iniciar ou cancelar.")
+    return "\n".join(lines)
+
+
+def _summarize_memory_conflict(conflict: dict) -> str:
+    lines = [
+        "",
+        "<b>Card de conflito de memoria</b>",
+        "O Hermes encontrou duas memorias parecidas e precisa de uma decisao.",
+    ]
+    if conflict.get("existing_text"):
+        lines.append(f"Atual: {html.escape(str(conflict.get('existing_text'))[:300])}")
+    if conflict.get("proposed_text"):
+        lines.append(f"Nova: {html.escape(str(conflict.get('proposed_text'))[:300])}")
+    return "\n".join(lines)
+
+
+def _build_web_copilot_telegram_adaptation(session: dict, delegated: dict, delegated_text: str) -> tuple[str, list | None]:
+    rows = []
+    extra_lines = []
+    pending_cards = session.setdefault("pending_web_cards", {})
+
+    pending_edit = delegated.get("pendingEdit")
+    if isinstance(pending_edit, dict) and pending_edit.get("status", "pending") == "pending":
+        pending_cards["edit"] = pending_edit
+        extra_lines.append(_summarize_pending_edit(pending_edit))
+        rows.append([
+            {"text": "Confirmar edicao", "callback_data": "webedit_confirm"},
+            {"text": "Cancelar", "callback_data": "webedit_cancel"},
+        ])
+
+    pending_batch = delegated.get("pendingBatchReschedule")
+    if isinstance(pending_batch, dict) and pending_batch.get("status", "pending") == "pending":
+        pending_cards["batch_reschedule"] = pending_batch
+        extra_lines.append(_summarize_pending_batch_reschedule(pending_batch))
+        rows.append([
+            {"text": "Confirmar tudo", "callback_data": "webbatch_confirm"},
+            {"text": "Cancelar", "callback_data": "webbatch_cancel"},
+        ])
+
+    diagnosis = delegated.get("proposedDiagnosis")
+    if isinstance(diagnosis, dict):
+        pending_cards["diagnosis"] = diagnosis
+        extra_lines.append(_summarize_proposed_diagnosis(diagnosis))
+        label = "Analisar snippet" if diagnosis.get("mode") == "snippet" else "Analisar repositorio"
+        rows.append([
+            {"text": label, "callback_data": "webdiag_confirm"},
+            {"text": "Cancelar", "callback_data": "webdiag_cancel"},
+        ])
+
+    memory_conflict = delegated.get("pendingMemoryConflict")
+    if isinstance(memory_conflict, dict):
+        pending_cards["memory_conflict"] = memory_conflict
+        extra_lines.append(_summarize_memory_conflict(memory_conflict))
+        rows.append([
+            {"text": "Manter antiga", "callback_data": "webmem_keep_old"},
+            {"text": "Manter nova", "callback_data": "webmem_keep_new"},
+        ])
+
+    tool_invocation = delegated.get("toolInvocation")
+    if isinstance(tool_invocation, dict):
+        tool_id = html.escape(str(tool_invocation.get("tool_id") or "ferramenta"))
+        extra_lines.append(
+            "\n<b>Ferramenta visual</b>\n"
+            f"O Copiloto acionou a ferramenta <code>{tool_id}</code>. "
+            "No Telegram ainda nao ha uma versao visual completa para esse componente; mantive o resultado textual acima."
+        )
+
+    linked_task_ids = _extract_task_ids_from_text(delegated_text)
+    for task_id in linked_task_ids[:3]:
+        callback_data = f"lock:{task_id}"
+        if len(callback_data) <= 64:
+            rows.append([{"text": f"Entrar no contexto {task_id[:8]}", "callback_data": callback_data}])
+
+    if pending_cards:
+        session["_pending_web_card_updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    return "\n".join(extra_lines), rows or None
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1284,6 +1473,33 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
         _persist_copilot_message(db, copilot_session_id, "user", user_label, source="telegram_callback")
         _persist_copilot_message(db, copilot_session_id, "assistant", assistant_text, source="telegram_callback")
 
+    def _pending_web_card(card_type: str) -> dict | None:
+        card = (session.get("pending_web_cards") or {}).get(card_type)
+        return card if isinstance(card, dict) else None
+
+    def _clear_pending_web_card(card_type: str):
+        cards = session.get("pending_web_cards") or {}
+        cards.pop(card_type, None)
+        if cards:
+            session["pending_web_cards"] = cards
+        else:
+            session.pop("pending_web_cards", None)
+
+    def _resolve_diagnosis_system_id(diagnosis: dict) -> str:
+        raw = str(diagnosis.get("sistemaId") or "").strip()
+        if raw and raw not in ("None", "null", "undefined"):
+            return raw
+        task_id = session.get("acao_id") or diagnosis.get("taskId")
+        if not task_id:
+            return ""
+        try:
+            task_doc = db.collection("tarefas").document(str(task_id)).get()
+            if task_doc.exists:
+                return str((task_doc.to_dict() or {}).get("sistema_id") or "").strip()
+        except Exception as exc:
+            print(f"[TelegramCards] Falha ao resolver sistema do diagnostico: {exc}")
+        return ""
+
     if data == "exit_context":
         acao_titulo = session.get("acao_titulo") or "anterior"
         response_text = f"✅ Saindo do contexto <b>{acao_titulo}</b>. Voltando ao modo geral."
@@ -1350,6 +1566,154 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
         response_text = "Ok, mantive o histórico atual."
         _persist_callback_turn("Botão: cancelar limpeza de histórico", response_text)
         _send_telegram_message(token, chat_id, response_text)
+
+    elif data == "webedit_confirm":
+        _answer_callback_query(token, query_id, "Aplicando edição...")
+        pending = _pending_web_card("edit")
+        if not pending:
+            response_text = "Não encontrei uma edição pendente para confirmar."
+            _persist_callback_turn("Botão: confirmar edição", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+            return https_fn.Response("OK", status=200)
+        try:
+            alteracoes = {}
+            for campo, change in (pending.get("alteracoes") or {}).items():
+                change = change if isinstance(change, dict) else {}
+                alteracoes[campo] = change.get("novo_raw") if "novo_raw" in change else change.get("novo")
+            message_id = _find_latest_copilot_card_message_id(db, copilot_session_id, "pendingEdit")
+            result = _call_web_callable(
+                function_name="confirmarEdicaoAcao",
+                data={
+                    "sessionId": copilot_session_id,
+                    "messageId": message_id,
+                    "taskId": pending.get("task_id"),
+                    "alteracoes": alteracoes,
+                    "snapshotTs": pending.get("snapshot_ts"),
+                },
+                user_uid=session.get("userId"),
+                timeout=60,
+            )
+            _clear_pending_web_card("edit")
+            _save_session(db, chat_id, session)
+            status = result.get("status") or "completed"
+            response_text = "Edição confirmada e aplicada no Hermes." if status == "completed" else (result.get("message") or f"Edição retornou status: {status}")
+            _persist_callback_turn("Botão: confirmar edição", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+        except Exception as exc:
+            response_text = f"Erro ao confirmar edição: {exc}"
+            _persist_callback_turn("Botão: confirmar edição", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+
+    elif data == "webedit_cancel":
+        _answer_callback_query(token, query_id, "Edição cancelada.")
+        _clear_pending_web_card("edit")
+        _set_latest_copilot_card_status(db, copilot_session_id, "pendingEdit", "cancelled")
+        _save_session(db, chat_id, session)
+        response_text = "Edição cancelada. Nada foi alterado."
+        _persist_callback_turn("Botão: cancelar edição", response_text)
+        _send_telegram_message(token, chat_id, response_text)
+
+    elif data == "webbatch_confirm":
+        _answer_callback_query(token, query_id, "Reagendando...")
+        pending = _pending_web_card("batch_reschedule")
+        if not pending:
+            response_text = "Não encontrei um reagendamento em lote pendente para confirmar."
+            _persist_callback_turn("Botão: confirmar reagendamento em lote", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+            return https_fn.Response("OK", status=200)
+        try:
+            message_id = _find_latest_copilot_card_message_id(db, copilot_session_id, "pendingBatchReschedule")
+            result = _call_web_callable(
+                function_name="confirmarReagendamentoEmLote",
+                data={
+                    "sessionId": copilot_session_id,
+                    "messageId": message_id,
+                    "items": pending.get("items") or [],
+                    "justificativa": pending.get("justificativa") or "Reagendamento em lote via Telegram.",
+                },
+                user_uid=session.get("userId"),
+                timeout=60,
+            )
+            _clear_pending_web_card("batch_reschedule")
+            _save_session(db, chat_id, session)
+            response_text = f"Reagendamento confirmado. Ações atualizadas: {result.get('count', 0)}."
+            _persist_callback_turn("Botão: confirmar reagendamento em lote", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+        except Exception as exc:
+            response_text = f"Erro ao confirmar reagendamento: {exc}"
+            _persist_callback_turn("Botão: confirmar reagendamento em lote", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+
+    elif data == "webbatch_cancel":
+        _answer_callback_query(token, query_id, "Reagendamento cancelado.")
+        _clear_pending_web_card("batch_reschedule")
+        _set_latest_copilot_card_status(db, copilot_session_id, "pendingBatchReschedule", "cancelled")
+        _save_session(db, chat_id, session)
+        response_text = "Reagendamento em lote cancelado. Nada foi alterado."
+        _persist_callback_turn("Botão: cancelar reagendamento em lote", response_text)
+        _send_telegram_message(token, chat_id, response_text)
+
+    elif data == "webdiag_confirm":
+        _answer_callback_query(token, query_id, "Iniciando diagnóstico...")
+        try:
+            job_id = f"card_{chat_id}_{int(time.time() * 1000)}"
+            db.collection("telegram_inbound").document(job_id).set({
+                "chat_id": chat_id,
+                "callback_action": "webdiag_confirm",
+                "callback_query_id": query_id,
+                "from_user": callback_query.get("from") or {},
+                "received_at": firestore.SERVER_TIMESTAMP,
+                "processed": False,
+            })
+            response_text = "Diagnóstico iniciado. Isso pode levar alguns minutos."
+            _persist_callback_turn("Botão: iniciar diagnóstico", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+        except Exception as exc:
+            response_text = f"Erro ao iniciar diagnóstico: {exc}"
+            _persist_callback_turn("Botão: iniciar diagnóstico", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+
+    elif data == "webdiag_cancel":
+        _answer_callback_query(token, query_id, "Diagnóstico cancelado.")
+        _clear_pending_web_card("diagnosis")
+        _save_session(db, chat_id, session)
+        response_text = "Diagnóstico cancelado. Nada foi iniciado."
+        _persist_callback_turn("Botão: cancelar diagnóstico", response_text)
+        _send_telegram_message(token, chat_id, response_text)
+
+    elif data in ("webmem_keep_old", "webmem_keep_new"):
+        decision = "manter_existente" if data == "webmem_keep_old" else "substituir_pelo_novo"
+        _answer_callback_query(token, query_id, "Resolvendo memória...")
+        conflict = _pending_web_card("memory_conflict")
+        if not conflict:
+            response_text = "Não encontrei um conflito de memória pendente."
+            _persist_callback_turn("Botão: resolver conflito de memória", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+            return https_fn.Response("OK", status=200)
+        try:
+            message_id = _find_latest_copilot_card_message_id(db, copilot_session_id, "pendingMemoryConflict")
+            result = _call_web_callable(
+                function_name="confirmarConflitoMemoria",
+                data={
+                    "sessionId": copilot_session_id,
+                    "messageId": message_id,
+                    "memoriaId": conflict.get("memoria_id") or conflict.get("memory_id") or conflict.get("id"),
+                    "decisao": decision,
+                    "fatoAtualizado": conflict.get("proposed_text") or "",
+                    "categoria": conflict.get("categoria") or "fato_isolado",
+                },
+                user_uid=session.get("userId"),
+                timeout=60,
+            )
+            _clear_pending_web_card("memory_conflict")
+            _save_session(db, chat_id, session)
+            response_text = f"Conflito de memória resolvido: {result.get('decision', decision)}."
+            _persist_callback_turn("Botão: resolver conflito de memória", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+        except Exception as exc:
+            response_text = f"Erro ao resolver conflito de memória: {exc}"
+            _persist_callback_turn("Botão: resolver conflito de memória", response_text)
+            _send_telegram_message(token, chat_id, response_text)
 
     elif data == "confirm_acao":
         _answer_callback_query(token, query_id, "Processando registro...")
@@ -2192,6 +2556,91 @@ def _run_gemini_turn(
 # Main processing logic
 # ---------------------------------------------------------------------------
 
+def _process_telegram_card_job(db, data: dict):
+    """Processes long-running Telegram card callbacks from the async worker."""
+    action = data.get("callback_action")
+    chat_id = str(data.get("chat_id") or "")
+    if not chat_id:
+        return
+
+    token = _get_telegram_token(db)
+    session = _get_session(db, chat_id)
+    copilot_session_id = _ensure_copilot_session(
+        db,
+        chat_id,
+        session,
+        first_text=f"[Card Telegram] {action}",
+        from_user=data.get("from_user") or {},
+    )
+
+    def _persist_callback_turn(user_label: str, assistant_text: str):
+        _persist_copilot_message(db, copilot_session_id, "user", user_label, source="telegram_callback")
+        _persist_copilot_message(db, copilot_session_id, "assistant", assistant_text, source="telegram_callback")
+
+    if action != "webdiag_confirm":
+        _send_telegram_message(token, chat_id, f"Acao de card nao reconhecida: {html.escape(str(action))}")
+        return
+
+    diagnosis = (session.get("pending_web_cards") or {}).get("diagnosis")
+    if not isinstance(diagnosis, dict):
+        response_text = "Nao encontrei um diagnostico pendente para iniciar."
+        _persist_callback_turn("Botao: iniciar diagnostico", response_text)
+        _send_telegram_message(token, chat_id, response_text)
+        return
+
+    def _resolve_system_id() -> str:
+        raw = str(diagnosis.get("sistemaId") or "").strip()
+        if raw and raw not in ("None", "null", "undefined"):
+            return raw
+        task_id = session.get("acao_id") or diagnosis.get("taskId")
+        if not task_id:
+            return ""
+        try:
+            task_doc = db.collection("tarefas").document(str(task_id)).get()
+            if task_doc.exists:
+                return str((task_doc.to_dict() or {}).get("sistema_id") or "").strip()
+        except Exception as exc:
+            print(f"[TelegramCards] Falha ao resolver sistema do diagnostico: {exc}")
+        return ""
+
+    try:
+        mode = diagnosis.get("mode") or "repo"
+        payload = {
+            "sessionId": copilot_session_id,
+            "mode": mode,
+            "descricaoProblema": diagnosis.get("descricaoProblema") or "",
+            "taskId": session.get("acao_id") or None,
+            "bridgeChannel": "telegram",
+        }
+        if mode == "snippet":
+            payload["codeSnippet"] = diagnosis.get("codeSnippet") or ""
+            payload["fileName"] = diagnosis.get("fileName") or "snippet"
+        else:
+            payload["sistemaId"] = _resolve_system_id()
+
+        result = _call_web_callable(
+            function_name="diagnosticar_codigo",
+            data=payload,
+            user_uid=session.get("userId"),
+            timeout=300,
+        )
+        diag_id = result.get("diagId") or result.get("diag_id") or ""
+        cards = session.get("pending_web_cards") or {}
+        cards.pop("diagnosis", None)
+        if cards:
+            session["pending_web_cards"] = cards
+        else:
+            session.pop("pending_web_cards", None)
+        _save_session(db, chat_id, session)
+        response_text = "Diagnostico concluido." + (f"\nAbrir no Hermes: tool:diagnosis:{diag_id}" if diag_id else "")
+        _persist_callback_turn("Botao: iniciar diagnostico", response_text)
+        _send_telegram_message(token, chat_id, response_text)
+    except Exception as exc:
+        response_text = f"Erro ao iniciar diagnostico: {exc}"
+        _persist_callback_turn("Botao: iniciar diagnostico", response_text)
+        _send_telegram_message(token, chat_id, response_text)
+
+
 def _process_telegram_message(db, data: dict):
     """Full processing pipeline for one incoming Telegram message."""
     from google.genai import types
@@ -2644,10 +3093,11 @@ def _process_telegram_message(db, data: dict):
             delegated_text = (delegated.get("result") or "").strip()
             if not delegated_text:
                 raise RuntimeError("Motor web nao retornou texto.")
-            if delegated.get("toolInvocation"):
-                raise RuntimeError("Motor web retornou uma ferramenta de UI ainda sem adaptador Telegram.")
 
             response_text = _format_web_copilot_text_for_telegram(delegated_text)
+            card_text, inline_keyboard = _build_web_copilot_telegram_adaptation(session, delegated, delegated_text)
+            if card_text:
+                response_text = f"{response_text}\n{card_text}"
             if processing_msg_id:
                 _delete_telegram_message(token, chat_id, processing_msg_id)
             user_turn = {"role": "user", "parts": [{"text": p.text} for p in user_parts if hasattr(p, "text") and p.text]}
@@ -2666,6 +3116,7 @@ def _process_telegram_message(db, data: dict):
                 response_mode=response_mode,
                 gemini_key=gemini_key,
                 voice_profile=voice_profile,
+                inline_keyboard=inline_keyboard,
                 perf_state=perf_state,
             )
             _perf_mark(perf_state, "telegram.web_copilot_response")
@@ -3508,7 +3959,10 @@ def on_telegram_inbound(event: Event[DocumentSnapshot]) -> None:
 
     try:
         db = _get_db()
-        _process_telegram_message(db, data)
+        if data.get("callback_action"):
+            _process_telegram_card_job(db, data)
+        else:
+            _process_telegram_message(db, data)
     except Exception as e:
         print(f"[on_telegram_inbound] Unhandled error: {e}")
         import traceback

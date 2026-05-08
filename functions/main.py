@@ -5859,14 +5859,24 @@ def diagnosticar_codigo(req: https_fn.CallableRequest):
     import json
     import re
 
+    data = req.data or {}
+    session_id = data.get('sessionId')
     uid = req.auth.uid if req.auth else None
+    if not uid and data.get('bridgeChannel') == 'telegram' and session_id:
+        try:
+            bridge_db = get_db()
+            session_doc = bridge_db.collection('sessoes_copiloto').document(session_id).get()
+            session_data = session_doc.to_dict() or {} if session_doc.exists else {}
+            if session_data.get('channel') == 'telegram':
+                uid = session_data.get('userId') or f"telegram:{session_data.get('telegramChatId') or session_id}"
+        except Exception as bridge_auth_err:
+            print(f"[diagnosticar_codigo] Falha no bridge auth Telegram: {bridge_auth_err}")
     if not uid:
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
             message="Autenticação necessária."
         )
 
-    session_id = req.data.get('sessionId')
     task_id = req.data.get('taskId')
     descricao_problema = req.data.get('descricaoProblema', '').strip()
     mode = req.data.get('mode', 'repo')  # 'repo' | 'snippet'
