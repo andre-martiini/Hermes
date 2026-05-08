@@ -214,28 +214,36 @@ def _run_web_copilot_engine(
     system_id: str | None = None,
     user_uid: str | None = None,
 ) -> dict:
-    class _Auth:
-        def __init__(self, uid: str):
-            self.uid = uid
+    project_id = (
+        os.environ.get("GCLOUD_PROJECT")
+        or os.environ.get("GCP_PROJECT")
+        or os.environ.get("GOOGLE_CLOUD_PROJECT")
+        or "gestao-hermes"
+    )
+    region = os.environ.get("FUNCTION_REGION") or os.environ.get("GOOGLE_CLOUD_REGION") or "us-central1"
+    url = os.environ.get("ASK_COPILOTO_HERMES_URL") or f"https://{region}-{project_id}.cloudfunctions.net/askCopilotoHermes"
 
-    class _Req:
-        def __init__(self, data: dict, uid: str | None):
-            self.data = data
-            self.auth = _Auth(uid) if uid else None
-
-    from main import askCopilotoHermes
-
-    req = _Req(
-        {
+    payload = {
+        "data": {
             "prompt": prompt,
             "sessionId": session_id,
             "taskId": task_id,
             "systemId": system_id,
             "routingIndex": [],
-        },
-        user_uid,
-    )
-    result = askCopilotoHermes(req)
+        }
+    }
+    headers = {"Content-Type": "application/json"}
+    if user_uid:
+        headers["X-Hermes-User-Uid"] = user_uid
+
+    resp = _requests.post(url, json=payload, headers=headers, timeout=480)
+    if not resp.ok:
+        raise RuntimeError(f"askCopilotoHermes HTTP {resp.status_code}: {resp.text[:300]}")
+
+    data = resp.json()
+    if data.get("error"):
+        raise RuntimeError(json.dumps(data["error"], ensure_ascii=False))
+    result = data.get("result", data)
     return result if isinstance(result, dict) else {"result": str(result or "")}
 
 # ---------------------------------------------------------------------------
