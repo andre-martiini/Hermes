@@ -1767,9 +1767,11 @@ def _run_gemini_turn(
         if not func_calls:
             break
 
-        # Executa todas as tool calls e coleta resultados
+        # Executa todas as tool calls e coleta resultados em paralelo
         tool_results = []
-        for fc in func_calls:
+        from concurrent.futures import ThreadPoolExecutor, wait as futures_wait
+
+        def _execute_tool(fc):
             fn = function_map.get(fc.name)
             tool_start_ms = _perf_now_ms()
             if fn is None:
@@ -1781,17 +1783,53 @@ def _run_gemini_turn(
                     result_text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
                 except Exception as tool_err:
                     result_text = f"Erro ao executar {fc.name}: {tool_err}"
+
+            perf_info = None
             if perf_state is not None:
-                perf_state.setdefault("tool_calls", []).append({
+                perf_info = {
                     "name": fc.name,
                     "duration_ms": max(0, _perf_now_ms() - tool_start_ms),
-                })
-            tool_results.append(
-                types.Part.from_function_response(
-                    name=fc.name,
-                    response={"result": result_text},
-                )
+                }
+
+            part = types.Part.from_function_response(
+                name=fc.name,
+                response={"result": result_text},
             )
+            return part, perf_info
+
+        executor = ThreadPoolExecutor(max_workers=min(len(func_calls), 8))
+        try:
+            futures = [executor.submit(_execute_tool, fc) for fc in func_calls]
+            done_futures, pending_futures = futures_wait(futures, timeout=115)
+
+            if pending_futures:
+                for pending in pending_futures:
+                    pending.cancel()
+
+            for i, future in enumerate(futures):
+                fc = func_calls[i]
+                if future in done_futures:
+                    try:
+                        part, perf_info = future.result()
+                        tool_results.append(part)
+                        if perf_info and perf_state is not None:
+                            perf_state.setdefault("tool_calls", []).append(perf_info)
+                    except Exception as e:
+                        tool_results.append(
+                            types.Part.from_function_response(
+                                name=fc.name,
+                                response={"result": f"Erro interno da thread: {e}"},
+                            )
+                        )
+                else:
+                    tool_results.append(
+                        types.Part.from_function_response(
+                            name=fc.name,
+                            response={"result": "Erro: timeout da ferramenta (excedeu 115s)."},
+                        )
+                    )
+        finally:
+            executor.shutdown(wait=False)
 
         response = chat.send_message(tool_results)
         if perf_state is not None:
