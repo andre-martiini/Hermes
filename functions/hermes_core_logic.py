@@ -42,6 +42,9 @@ _DOC_CACHE: dict = {}
 _DOC_CACHE_TTL = 60
 _ACTION_SNAPSHOT_CACHE: dict = {}
 _ACTION_SNAPSHOT_CACHE_TTL = 45
+_TELEGRAM_USER_CACHE: dict = {}
+_TELEGRAM_USER_CACHE_TTL = 300
+_COPILOT_SESSION_HISTORY_LIMIT = 12
 
 def _cached_doc_get(db, collection: str, document: str):
     key = f"{collection}/{document}"
@@ -52,6 +55,188 @@ def _cached_doc_get(db, collection: str, document: str):
     doc = db.collection(collection).document(document).get()
     _DOC_CACHE[key] = (now, doc)
     return doc
+
+
+def _safe_telegram_session_id(chat_id: str) -> str:
+    safe_chat_id = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(chat_id or "").strip())
+    return f"telegram_{safe_chat_id or 'unknown'}"
+
+
+def _resolve_user_id_for_telegram_chat(db, chat_id: str) -> str | None:
+    now = time.monotonic()
+    cached = _TELEGRAM_USER_CACHE.get(chat_id)
+    if cached and (now - cached[0]) < _TELEGRAM_USER_CACHE_TTL:
+        return cached[1]
+
+    user_id = None
+    try:
+        chat_candidates = [str(chat_id)]
+        try:
+            chat_candidates.append(int(chat_id))
+        except Exception:
+            pass
+        for field in ("telegram_chat_id", "telegramChatId", "chat_id", "telegram_id"):
+            for candidate in chat_candidates:
+                docs = (
+                    db.collection("usuarios")
+                    .where(field, "==", candidate)
+                    .limit(1)
+                    .get()
+                )
+                if docs:
+                    user_id = docs[0].id
+                    break
+            if user_id:
+                break
+    except Exception as exc:
+        print(f"[SessionBridge] Falha ao resolver usuario do Telegram chat_id={chat_id}: {exc}")
+
+    _TELEGRAM_USER_CACHE[chat_id] = (now, user_id)
+    return user_id
+
+
+def _ensure_copilot_session(db, chat_id: str, session: dict, first_text: str = "", from_user: dict | None = None) -> str:
+    session_id = session.get("copilot_session_id") or _safe_telegram_session_id(chat_id)
+    session["copilot_session_id"] = session_id
+
+    session_ref = db.collection("sessoes_copiloto").document(session_id)
+    user_id = session.get("userId") or _resolve_user_id_for_telegram_chat(db, chat_id)
+    if user_id:
+        session["userId"] = user_id
+
+    from_user = from_user or {}
+    try:
+        snap = session_ref.get()
+        base = {
+            "channel": "telegram",
+            "telegramChatId": str(chat_id),
+            "lastMessageAt": firestore.SERVER_TIMESTAMP,
+        }
+        if user_id:
+            base["userId"] = user_id
+        if from_user:
+            base["telegramUser"] = {
+                "id": from_user.get("id"),
+                "username": from_user.get("username"),
+                "first_name": from_user.get("first_name"),
+                "last_name": from_user.get("last_name"),
+            }
+        if not snap.exists:
+            title_seed = (first_text or "Conversa via Telegram").strip().replace("\n", " ")
+            base.update({
+                "title": (title_seed[:40] + "...") if len(title_seed) > 40 else title_seed,
+                "createdAt": firestore.SERVER_TIMESTAMP,
+                "taskId": session.get("acao_id") or None,
+                "systemId": None,
+            })
+        session_ref.set(base, merge=True)
+    except Exception as exc:
+        print(f"[SessionBridge] Falha ao garantir sessao do Copiloto {session_id}: {exc}")
+
+    return session_id
+
+
+def _persist_copilot_message(
+    db,
+    session_id: str | None,
+    role: str,
+    content: str,
+    *,
+    source: str = "telegram",
+    tools_used: list | None = None,
+    extra: dict | None = None,
+):
+    if not session_id or not content:
+        return
+    try:
+        payload = {
+            "role": role,
+            "content": content,
+            "source": source,
+            "timestamp": firestore.SERVER_TIMESTAMP,
+        }
+        if tools_used:
+            payload["toolsUsed"] = tools_used
+        if extra:
+            payload.update(extra)
+        db.collection("sessoes_copiloto").document(session_id).collection("mensagens").add(payload)
+        db.collection("sessoes_copiloto").document(session_id).set({
+            "lastMessageAt": firestore.SERVER_TIMESTAMP,
+            "channel": "telegram",
+        }, merge=True)
+    except Exception as exc:
+        print(f"[SessionBridge] Falha ao persistir mensagem na sessao {session_id}: {exc}")
+
+
+def _load_copilot_session_history(db, session_id: str | None, types, limit: int = _COPILOT_SESSION_HISTORY_LIMIT) -> list:
+    if not session_id:
+        return []
+    try:
+        msg_docs = (
+            db.collection("sessoes_copiloto").document(session_id)
+            .collection("mensagens")
+            .order_by("timestamp", direction=firestore.Query.DESCENDING)
+            .limit(limit)
+            .get()
+        )
+        history = []
+        for doc in reversed(list(msg_docs)):
+            data = doc.to_dict() or {}
+            content = (data.get("content") or "").strip()
+            if not content:
+                continue
+            role = data.get("role")
+            if role == "assistant":
+                role = "model"
+            if role not in ("user", "model"):
+                continue
+            history.append(types.Content(role=role, parts=[types.Part(text=content)]))
+        return history
+    except Exception as exc:
+        print(f"[SessionBridge] Falha ao carregar historico da sessao {session_id}: {exc}")
+        return []
+
+
+def _format_web_copilot_text_for_telegram(text: str) -> str:
+    safe = html.escape(text or "")
+    safe = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", safe, flags=re.DOTALL)
+    safe = re.sub(r"__(.+?)__", r"<b>\1</b>", safe, flags=re.DOTALL)
+    safe = re.sub(r"\*(.+?)\*", r"<i>\1</i>", safe, flags=re.DOTALL)
+    safe = re.sub(r"\[(.*?)\]\((task:[^)]+)\)", r"\1 (\2)", safe)
+    return safe.strip()
+
+
+def _run_web_copilot_engine(
+    *,
+    prompt: str,
+    session_id: str,
+    task_id: str | None = None,
+    system_id: str | None = None,
+    user_uid: str | None = None,
+) -> dict:
+    class _Auth:
+        def __init__(self, uid: str):
+            self.uid = uid
+
+    class _Req:
+        def __init__(self, data: dict, uid: str | None):
+            self.data = data
+            self.auth = _Auth(uid) if uid else None
+
+    from main import askCopilotoHermes
+
+    req = _Req(
+        {
+            "prompt": prompt,
+            "sessionId": session_id,
+            "taskId": task_id,
+            "systemId": system_id,
+            "routingIndex": [],
+        },
+        user_uid,
+    )
+    result = askCopilotoHermes(req)
+    return result if isinstance(result, dict) else {"result": str(result or "")}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -378,6 +563,17 @@ def _get_session(db, chat_id: str) -> dict:
 def _save_session(db, chat_id: str, session: dict):
     session["updated_at"] = firestore.SERVER_TIMESTAMP
     db.collection("telegram_sessions").document(chat_id).set(session)
+    copilot_session_id = session.get("copilot_session_id")
+    if copilot_session_id:
+        try:
+            db.collection("sessoes_copiloto").document(copilot_session_id).set({
+                "channel": "telegram",
+                "telegramChatId": str(chat_id),
+                "taskId": session.get("acao_id") or None,
+                "lastMessageAt": firestore.SERVER_TIMESTAMP,
+            }, merge=True)
+        except Exception as exc:
+            print(f"[SessionBridge] Falha ao sincronizar metadados da sessao {copilot_session_id}: {exc}")
 
 
 def _session_matches_processing_state(session: dict, contexto_ativo: str, acao_id: str | None) -> bool:
@@ -1002,9 +1198,22 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
         return https_fn.Response("OK", status=200)
 
     session = _get_session(db, chat_id)
+    copilot_session_id = _ensure_copilot_session(
+        db,
+        chat_id,
+        session,
+        first_text=f"[Botão Telegram] {data}",
+        from_user=callback_query.get("from") or {},
+    )
+    _save_session(db, chat_id, session)
+
+    def _persist_callback_turn(user_label: str, assistant_text: str):
+        _persist_copilot_message(db, copilot_session_id, "user", user_label, source="telegram_callback")
+        _persist_copilot_message(db, copilot_session_id, "assistant", assistant_text, source="telegram_callback")
 
     if data == "exit_context":
         acao_titulo = session.get("acao_titulo") or "anterior"
+        response_text = f"✅ Saindo do contexto <b>{acao_titulo}</b>. Voltando ao modo geral."
         _answer_callback_query(token, query_id, "Contexto liberado.")
         session["contexto_ativo"] = "geral"
         session["acao_id"] = None
@@ -1012,9 +1221,10 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
         session["acao_context_snapshot"] = None
         session["history_acao"] = []
         _save_session(db, chat_id, session)
+        _persist_callback_turn("Botão: Sair do Contexto", response_text)
         _send_telegram_message(
             token, chat_id,
-            f"✅ Saindo do contexto <b>{acao_titulo}</b>. Voltando ao modo geral."
+            response_text
         )
 
     elif data.startswith("lock:"):
@@ -1022,27 +1232,33 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
         _answer_callback_query(token, query_id, "Carregando contexto...")
         snapshot = _cached_acao_snapshot(db, task_id)
         if not snapshot:
+            response_text = f"⚠️ Ação <code>{task_id}</code> não encontrada."
+            _persist_callback_turn(f"Botão: entrar no contexto task:{task_id}", response_text)
             _send_telegram_session_message(
                 db,
                 token, chat_id,
-                f"⚠️ Ação <code>{task_id}</code> não encontrada."
+                response_text
             )
             return https_fn.Response("OK", status=200)
 
         titulo = snapshot.get("titulo", task_id)
+        response_text = (
+            f"🔒 <b>[Contexto: {titulo}]</b>\n\n"
+            f"Contexto trancado. Estou focado exclusivamente nesta ação.\n"
+            f"Histórico anterior isolado — nenhum ruído de conversas passadas.\n\n"
+            f"Use <i>Sair do Contexto</i> para retornar ao modo geral."
+        )
         session["contexto_ativo"] = "acao"
         session["acao_id"] = task_id
         session["acao_titulo"] = titulo
         session["acao_context_snapshot"] = snapshot
         session["history_acao"] = []
         _save_session(db, chat_id, session)
+        _persist_callback_turn(f"Botão: entrar no contexto task:{task_id}", response_text)
 
         _send_telegram_message_with_keyboard(
             token, chat_id,
-            f"🔒 <b>[Contexto: {titulo}]</b>\n\n"
-            f"Contexto trancado. Estou focado exclusivamente nesta ação.\n"
-            f"Histórico anterior isolado — nenhum ruído de conversas passadas.\n\n"
-            f"Use <i>Sair do Contexto</i> para retornar ao modo geral.",
+            response_text,
             _EXIT_KEYBOARD,
         )
 
@@ -1052,17 +1268,23 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
         session[hist_key] = []
         _save_session(db, chat_id, session)
         _answer_callback_query(token, query_id, "Histórico limpo!")
-        _send_telegram_message(token, chat_id, f"✅ Histórico do contexto <b>{ctx}</b> foi limpo. Podemos recomeçar!")
+        response_text = f"✅ Histórico do contexto <b>{ctx}</b> foi limpo. Podemos recomeçar!"
+        _persist_callback_turn("Botão: confirmar limpeza de histórico", response_text)
+        _send_telegram_message(token, chat_id, response_text)
 
     elif data == "reset_session_cancel":
         _answer_callback_query(token, query_id, "Ação cancelada.")
-        _send_telegram_message(token, chat_id, "Ok, mantive o histórico atual.")
+        response_text = "Ok, mantive o histórico atual."
+        _persist_callback_turn("Botão: cancelar limpeza de histórico", response_text)
+        _send_telegram_message(token, chat_id, response_text)
 
     elif data == "confirm_acao":
         _answer_callback_query(token, query_id, "Processando registro...")
         pending = session.get("pending_confirmations", {}).get("acao")
         if not pending:
-            _send_telegram_message(token, chat_id, "⚠️ Nenhuma ação pendente de confirmação encontrada ou o prazo expirou.")
+            response_text = "⚠️ Nenhuma ação pendente de confirmação encontrada ou o prazo expirou."
+            _persist_callback_turn("Botão: confirmar registro de ação", response_text)
+            _send_telegram_message(token, chat_id, response_text)
             return https_fn.Response("OK", status=200)
             
         # Executa a criação (lógica de criar_acao_no_sistema)
@@ -1111,10 +1333,14 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
             if session.get("_pending_confirm_type") == "acao":
                 session.pop("_pending_confirm_type", None)
             _save_session(db, chat_id, session)
-            
-            _send_telegram_message(token, chat_id, f"✅ <b>Ação registrada com sucesso!</b>\nID: <code>{task_id}</code>\nTítulo: {pending['titulo']}")
+
+            response_text = f"✅ <b>Ação registrada com sucesso!</b>\nID: <code>{task_id}</code>\nTítulo: {pending['titulo']}"
+            _persist_callback_turn("Botão: confirmar registro de ação", response_text)
+            _send_telegram_message(token, chat_id, response_text)
         except Exception as e:
-            _send_telegram_message(token, chat_id, f"❌ Erro ao registrar ação: {e}")
+            response_text = f"❌ Erro ao registrar ação: {e}"
+            _persist_callback_turn("Botão: confirmar registro de ação", response_text)
+            _send_telegram_message(token, chat_id, response_text)
 
     elif data == "cancel_acao":
         _answer_callback_query(token, query_id, "Cancelado.")
@@ -1122,13 +1348,17 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
         if session.get("_pending_confirm_type") == "acao":
             session.pop("_pending_confirm_type", None)
         _save_session(db, chat_id, session)
-        _send_telegram_message(token, chat_id, "❌ Registro de ação cancelado pelo usuário.")
+        response_text = "❌ Registro de ação cancelado pelo usuário."
+        _persist_callback_turn("Botão: cancelar registro de ação", response_text)
+        _send_telegram_message(token, chat_id, response_text)
 
     elif data == "confirm_financeiro":
         _answer_callback_query(token, query_id, "Processando lançamento...")
         pending = session.get("pending_confirmations", {}).get("financeiro")
         if not pending:
-            _send_telegram_message(token, chat_id, "⚠️ Nenhum lançamento financeiro pendente.")
+            response_text = "⚠️ Nenhum lançamento financeiro pendente."
+            _persist_callback_turn("Botão: confirmar lançamento financeiro", response_text)
+            _send_telegram_message(token, chat_id, response_text)
             return https_fn.Response("OK", status=200)
             
         try:
@@ -1139,10 +1369,14 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
             if session.get("_pending_confirm_type") == "financeiro":
                 session.pop("_pending_confirm_type", None)
             _save_session(db, chat_id, session)
-            
-            _send_telegram_message(token, chat_id, f"✅ <b>Lançamento financeiro realizado!</b>\n{res}")
+
+            response_text = f"✅ <b>Lançamento financeiro realizado!</b>\n{res}"
+            _persist_callback_turn("Botão: confirmar lançamento financeiro", response_text)
+            _send_telegram_message(token, chat_id, response_text)
         except Exception as e:
-            _send_telegram_message(token, chat_id, f"❌ Erro no financeiro: {e}")
+            response_text = f"❌ Erro no financeiro: {e}"
+            _persist_callback_turn("Botão: confirmar lançamento financeiro", response_text)
+            _send_telegram_message(token, chat_id, response_text)
 
     elif data == "cancel_financeiro":
         _answer_callback_query(token, query_id, "Cancelado.")
@@ -1150,7 +1384,9 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
         if session.get("_pending_confirm_type") == "financeiro":
             session.pop("_pending_confirm_type", None)
         _save_session(db, chat_id, session)
-        _send_telegram_message(token, chat_id, "❌ Lançamento financeiro descartado.")
+        response_text = "❌ Lançamento financeiro descartado."
+        _persist_callback_turn("Botão: cancelar lançamento financeiro", response_text)
+        _send_telegram_message(token, chat_id, response_text)
 
     else:
 
@@ -1907,6 +2143,34 @@ def _process_telegram_message(db, data: dict):
     if not gemini_key or not token:
         _send_telegram_session_message(db, token, chat_id, "⚠️ Configuração incompleta. Contate o administrador.", session=session)
         return
+    copilot_session_id = _ensure_copilot_session(
+        db,
+        chat_id,
+        session,
+        first_text=text,
+        from_user=data.get("from_user") or {},
+    )
+    _save_session(db, chat_id, session)
+
+    copilot_user_message_persisted = False
+
+    def _persist_turn_to_copilot(
+        user_content: str,
+        assistant_content: str,
+        *,
+        tools_used: list | None = None,
+        persist_user: bool = True,
+    ):
+        if persist_user:
+            _persist_copilot_message(db, copilot_session_id, "user", user_content, source="telegram")
+        _persist_copilot_message(
+            db,
+            copilot_session_id,
+            "assistant",
+            assistant_content,
+            source="telegram",
+            tools_used=tools_used,
+        )
 
     _perf_mark(perf_state, "telegram.bootstrap")
     response_mode, text = _extract_response_mode(text, session)
@@ -1919,12 +2183,16 @@ def _process_telegram_message(db, data: dict):
         query = text[len("/entrar"):].strip()
         results = _search_actions_for_context(db, query)
         if not results:
+            reply_text = (
+                f"Nenhuma ação encontrada para <i>{query}</i>." if query
+                else "Nenhuma ação cadastrada no sistema."
+            )
+            _persist_turn_to_copilot(text, reply_text, tools_used=["buscar_tarefas"])
             _send_telegram_session_message(
                 db,
                 token,
                 chat_id,
-                f"Nenhuma ação encontrada para <i>{query}</i>." if query
-                else "Nenhuma ação cadastrada no sistema.",
+                reply_text,
                 session=session,
             )
         else:
@@ -1932,6 +2200,7 @@ def _process_telegram_message(db, data: dict):
                 f"Resultados para <i>{query}</i>. Toque para entrar no contexto:" if query
                 else "Ações recentes. Toque para entrar no contexto:"
             )
+            _persist_turn_to_copilot(text, header, tools_used=["buscar_tarefas"])
             _send_telegram_session_message(
                 db,
                 token,
@@ -1951,11 +2220,13 @@ def _process_telegram_message(db, data: dict):
         if selected:
             snapshot = _cached_acao_snapshot(db, selected["id"])
             if not snapshot:
+                response_text = "Encontrei a acao, mas nao consegui carregar o snapshot real do contexto. Tente novamente em instantes."
+                _persist_turn_to_copilot(text, response_text, tools_used=["buscar_tarefas"])
                 _send_contextual_response(
                     db,
                     token,
                     chat_id,
-                    "Encontrei a acao, mas nao consegui carregar o snapshot real do contexto. Tente novamente em instantes.",
+                    response_text,
                     session=session,
                     response_mode=response_mode,
                     gemini_key=gemini_key,
@@ -1965,11 +2236,13 @@ def _process_telegram_message(db, data: dict):
                 return
             _lock_action_session(session, selected["id"], snapshot)
             _save_session(db, chat_id, session)
+            response_text = _format_context_locked_message(snapshot)
+            _persist_turn_to_copilot(text, response_text, tools_used=["buscar_tarefas"])
             _send_contextual_response(
                 db,
                 token,
                 chat_id,
-                _format_context_locked_message(snapshot),
+                response_text,
                 session=session,
                 response_mode=response_mode,
                 gemini_key=gemini_key,
@@ -1983,6 +2256,7 @@ def _process_telegram_message(db, data: dict):
                 f"Encontrei algumas acoes para <i>{html.escape(action_search_context_query)}</i>. "
                 "Toque na correta para eu travar o contexto real:"
             )
+            _persist_turn_to_copilot(text, header, tools_used=["buscar_tarefas"])
             _send_contextual_response(
                 db,
                 token,
@@ -1997,11 +2271,13 @@ def _process_telegram_message(db, data: dict):
             )
             return
 
+        response_text = f"Nenhuma acao encontrada para <i>{html.escape(action_search_context_query)}</i>. Nao ativei contexto sem uma acao real."
+        _persist_turn_to_copilot(text, response_text, tools_used=["buscar_tarefas"])
         _send_contextual_response(
             db,
             token,
             chat_id,
-            f"Nenhuma acao encontrada para <i>{html.escape(action_search_context_query)}</i>. Nao ativei contexto sem uma acao real.",
+            response_text,
             session=session,
             response_mode=response_mode,
             gemini_key=gemini_key,
@@ -2018,11 +2294,13 @@ def _process_telegram_message(db, data: dict):
         if selected:
             snapshot = _cached_acao_snapshot(db, selected["id"])
             if not snapshot:
+                response_text = "Encontrei a acao, mas nao consegui carregar o snapshot real do contexto. Tente novamente em instantes."
+                _persist_turn_to_copilot(text, response_text, tools_used=["buscar_tarefas"])
                 _send_contextual_response(
                     db,
                     token,
                     chat_id,
-                    "Encontrei a acao, mas nao consegui carregar o snapshot real do contexto. Tente novamente em instantes.",
+                    response_text,
                     session=session,
                     response_mode=response_mode,
                     gemini_key=gemini_key,
@@ -2032,11 +2310,13 @@ def _process_telegram_message(db, data: dict):
                 return
             _lock_action_session(session, selected["id"], snapshot)
             _save_session(db, chat_id, session)
+            response_text = _format_context_locked_message(snapshot)
+            _persist_turn_to_copilot(text, response_text, tools_used=["buscar_tarefas"])
             _send_contextual_response(
                 db,
                 token,
                 chat_id,
-                _format_context_locked_message(snapshot),
+                response_text,
                 session=session,
                 response_mode=response_mode,
                 gemini_key=gemini_key,
@@ -2050,6 +2330,7 @@ def _process_telegram_message(db, data: dict):
                 f"Encontrei mais de uma acao para <i>{html.escape(natural_context_query or 'sua busca')}</i>. "
                 "Toque na correta para eu travar o contexto real:"
             )
+            _persist_turn_to_copilot(text, header, tools_used=["buscar_tarefas"])
             _send_contextual_response(
                 db,
                 token,
@@ -2064,11 +2345,13 @@ def _process_telegram_message(db, data: dict):
             )
             return
 
+        response_text = f"Nenhuma acao encontrada para <i>{html.escape(natural_context_query or text)}</i>. Nao ativei contexto sem uma acao real."
+        _persist_turn_to_copilot(text, response_text, tools_used=["buscar_tarefas"])
         _send_contextual_response(
             db,
             token,
             chat_id,
-            f"Nenhuma acao encontrada para <i>{html.escape(natural_context_query or text)}</i>. Nao ativei contexto sem uma acao real.",
+            response_text,
             session=session,
             response_mode=response_mode,
             gemini_key=gemini_key,
@@ -2081,11 +2364,13 @@ def _process_telegram_message(db, data: dict):
     action_lookup_query = _extract_action_lookup_query(text)
     if action_lookup_query:
         results = _search_actions_for_context(db, action_lookup_query)
+        response_text = _format_action_lookup_results(action_lookup_query, results)
+        _persist_turn_to_copilot(text, response_text, tools_used=["buscar_tarefas"])
         _send_contextual_response(
             db,
             token,
             chat_id,
-            _format_action_lookup_results(action_lookup_query, results),
+            response_text,
             session=session,
             response_mode=response_mode,
             gemini_key=gemini_key,
@@ -2099,6 +2384,7 @@ def _process_telegram_message(db, data: dict):
         reply = _handle_command(text, session)
         if reply:
             _save_session(db, chat_id, session)
+            _persist_turn_to_copilot(text, reply)
             _send_telegram_session_message(db, token, chat_id, reply, session=session)
             return
         # Unknown command — fall through to Gemini
@@ -2106,9 +2392,11 @@ def _process_telegram_message(db, data: dict):
     # --- Natural-language reset request ---
     if _is_reset_request(text):
         ctx = session.get("contexto_ativo", "geral")
+        response_text = f"Você tem certeza que deseja limpar o histórico desta sessão (<b>{ctx}</b>)? Isto ajudará a evitar alucinações, mas eu esquecerei o que acabamos de conversar."
+        _persist_turn_to_copilot(text, response_text)
         _send_telegram_message_with_keyboard(
             token, chat_id,
-            f"Você tem certeza que deseja limpar o histórico desta sessão (<b>{ctx}</b>)? Isto ajudará a evitar alucinações, mas eu esquecerei o que acabamos de conversar.",
+            response_text,
             _RESET_CONFIRM_KEYBOARD,
         )
         return
@@ -2144,11 +2432,15 @@ def _process_telegram_message(db, data: dict):
     # Keep last N turns (each turn = user + model = 2 items)
     if len(raw_history) > _MAX_HISTORY_TURNS * 2:
         raw_history = raw_history[-((_MAX_HISTORY_TURNS * 2)):]
-    history = [
+    telegram_history = [
         types.Content(role=h["role"], parts=[types.Part(text=p["text"]) for p in h.get("parts", [])])
         for h in raw_history
         if h.get("role") and h.get("parts")
     ]
+    copilot_history = _load_copilot_session_history(db, copilot_session_id, types)
+    history = copilot_history or telegram_history
+    if copilot_history:
+        _perf_mark(perf_state, "telegram.copilot_history_load")
 
     # --- Resolve user message parts ---
     user_parts = []
@@ -2221,6 +2513,9 @@ def _process_telegram_message(db, data: dict):
     request_text_for_routing = " ".join(
         p.text for p in user_parts if hasattr(p, "text") and getattr(p, "text", "")
     )
+    user_content_for_copilot = "\n\n".join(
+        p.text for p in user_parts if hasattr(p, "text") and getattr(p, "text", "")
+    ).strip() or text or "[Mensagem sem conteúdo processável]"
     internal_hermes_request = _is_internal_hermes_request(request_text_for_routing)
     explicit_web_request = _is_explicit_web_request(request_text_for_routing)
 
@@ -2228,6 +2523,7 @@ def _process_telegram_message(db, data: dict):
     # the model inventing anchor text or Drive URLs when the user asks for files.
     if contexto_ativo == "acao" and acao_snapshot and _is_context_file_request(request_text_for_routing):
         response_text = _format_context_files_response(acao_snapshot, request_text_for_routing)
+        _persist_turn_to_copilot(user_content_for_copilot, response_text)
         user_turn = {"role": "user", "parts": [{"text": p.text} for p in user_parts if hasattr(p, "text") and p.text]}
         model_turn = {"role": "model", "parts": [{"text": response_text}]}
         new_history = raw_history + [user_turn, model_turn]
@@ -2252,6 +2548,69 @@ def _process_telegram_message(db, data: dict):
             {"chat_id": chat_id, "acao_id": request_acao_id},
         )
         return
+
+    if os.environ.get("TELEGRAM_USE_WEB_COPILOT", "1") != "0" and not file_info:
+        processing_msg_id = None
+        try:
+            _send_telegram_typing(token, chat_id)
+            processing_msg_id = _send_telegram_session_message(
+                db,
+                token,
+                chat_id,
+                "⏳ <i>Estou processando pelo Copiloto Hermes...</i>",
+                session=session,
+            )
+            _persist_copilot_message(db, copilot_session_id, "user", user_content_for_copilot, source="telegram")
+            copilot_user_message_persisted = True
+            delegated = _run_web_copilot_engine(
+                prompt=request_text_for_routing,
+                session_id=copilot_session_id,
+                task_id=request_acao_id,
+                user_uid=session.get("userId"),
+            )
+            delegated_text = (delegated.get("result") or "").strip()
+            if not delegated_text:
+                raise RuntimeError("Motor web nao retornou texto.")
+            if delegated.get("toolInvocation"):
+                raise RuntimeError("Motor web retornou uma ferramenta de UI ainda sem adaptador Telegram.")
+
+            response_text = _format_web_copilot_text_for_telegram(delegated_text)
+            if processing_msg_id:
+                _delete_telegram_message(token, chat_id, processing_msg_id)
+            user_turn = {"role": "user", "parts": [{"text": p.text} for p in user_parts if hasattr(p, "text") and p.text]}
+            model_turn = {"role": "model", "parts": [{"text": delegated_text}]}
+            new_history = raw_history + [user_turn, model_turn]
+            if len(new_history) > _MAX_HISTORY_TURNS * 2:
+                new_history = new_history[-(_MAX_HISTORY_TURNS * 2):]
+            session[hist_key] = new_history
+            _save_session(db, chat_id, session)
+            _send_contextual_response(
+                db,
+                token,
+                chat_id,
+                response_text,
+                session=session,
+                response_mode=response_mode,
+                gemini_key=gemini_key,
+                voice_profile=voice_profile,
+                perf_state=perf_state,
+            )
+            _perf_mark(perf_state, "telegram.web_copilot_response")
+            _perf_log(
+                "telegram.request.web_copilot_complete",
+                perf_state,
+                {
+                    "chat_id": chat_id,
+                    "copilot_session_id": copilot_session_id,
+                    "response_mode": response_mode,
+                },
+            )
+            return
+        except Exception as web_copilot_err:
+            if processing_msg_id:
+                _delete_telegram_message(token, chat_id, processing_msg_id)
+            print(f"[SessionBridge] Fallback para motor Telegram: {web_copilot_err}")
+            _perf_mark(perf_state, "telegram.web_copilot_fallback")
 
     # --- Memory context ---
     # Skips Firestore read for short/trivial messages (< 4 meaningful words)
@@ -2850,6 +3209,19 @@ def _process_telegram_message(db, data: dict):
     _send_telegram_session_message(db, token, chat_id, response_text, session=latest_session, inline_keyboard=inline_keyboard)
 
     _perf_mark(perf_state, "telegram.text_response")
+
+    tools_used = []
+    for call in perf_state.get("tool_calls", []):
+        name = call.get("name")
+        if name and name not in tools_used:
+            tools_used.append(name)
+    _persist_turn_to_copilot(
+        user_content_for_copilot,
+        response_text,
+        tools_used=tools_used,
+        persist_user=not copilot_user_message_persisted,
+    )
+    _perf_mark(perf_state, "telegram.copilot_history_persist")
 
     _save_session(db, chat_id, latest_session)
     _perf_mark(perf_state, "telegram.history_persist")
