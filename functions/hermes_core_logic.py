@@ -197,6 +197,39 @@ def _load_copilot_session_history(db, session_id: str | None, types, limit: int 
         return []
 
 
+def _get_hermes_storage_bucket():
+    project_id = (
+        os.environ.get("GCLOUD_PROJECT")
+        or os.environ.get("GCP_PROJECT")
+        or os.environ.get("GOOGLE_CLOUD_PROJECT")
+        or "gestao-hermes"
+    )
+    candidates = [
+        os.environ.get("TELEGRAM_MEDIA_BUCKET"),
+        os.environ.get("HERMES_STORAGE_BUCKET"),
+        os.environ.get("FIREBASE_STORAGE_BUCKET"),
+        f"{project_id}-telegram-media-us-central1",
+        f"{project_id}-slides-us-central1",
+        f"{project_id}.firebasestorage.app",
+        f"{project_id}.appspot.com",
+    ]
+
+    checked = []
+    for bucket_name in [name for name in candidates if name]:
+        bucket = storage.bucket(bucket_name)
+        checked.append(bucket_name)
+        try:
+            if bucket.exists():
+                return bucket
+        except Exception as exc:
+            print(f"[Storage] Falha ao verificar bucket {bucket_name}: {exc}")
+
+    raise RuntimeError(
+        "Nenhum bucket de Storage disponivel para midias do Telegram. "
+        f"Buckets testados: {', '.join(checked)}"
+    )
+
+
 def _format_web_copilot_text_for_telegram(text: str) -> str:
     safe = html.escape(text or "")
     safe = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", safe, flags=re.DOTALL)
@@ -1475,7 +1508,7 @@ def _transcribe_audio_bytes(audio_bytes: bytes, extension: str, db) -> str:
 
 def _upload_to_storage(file_bytes: bytes, file_name: str, mime_type: str, chat_id: str) -> str:
     """Uploads to Firebase Storage and returns the public URL (gs://)."""
-    bucket = storage.bucket()
+    bucket = _get_hermes_storage_bucket()
     path = f"telegram_uploads/{chat_id}/{file_name}"
     blob = bucket.blob(path)
     blob.upload_from_string(file_bytes, content_type=mime_type)
@@ -1494,7 +1527,7 @@ def _store_telegram_media(file_bytes: bytes, file_name: str, mime_type: str, cha
         return base64.b64encode(file_bytes).decode(), None
 
     safe_name = os.path.basename(file_name or f"upload_{int(time.time())}")
-    bucket = storage.bucket()
+    bucket = _get_hermes_storage_bucket()
     path = f"telegram_uploads/{chat_id}/{int(time.time())}_{safe_name}"
     blob = bucket.blob(path)
     blob.upload_from_string(file_bytes, content_type=mime_type)
@@ -1507,7 +1540,7 @@ def _load_telegram_media_bytes(media_bytes_b64: str | None, storage_path: str | 
 
         return base64.b64decode(media_bytes_b64)
     if storage_path:
-        bucket = storage.bucket()
+        bucket = _get_hermes_storage_bucket()
         blob = bucket.blob(storage_path)
         return blob.download_as_bytes()
     return None
@@ -3390,12 +3423,12 @@ def telegramWebhook(req: https_fn.Request) -> https_fn.Response:
                 "duration": audio.get("duration", 0),
             }
         except Exception as e:
-            print(f"[Webhook] Audio download error: {e}")
+            print(f"[Webhook] Audio media prepare error: {e}")
             _send_telegram_session_message(
                 db,
                 token,
                 chat_id,
-                f"⚠️ Não consegui baixar o áudio: {e}\nTente novamente ou envie o texto diretamente.",
+                f"⚠️ Não consegui preparar o áudio para processamento: {e}\nTente novamente ou envie o texto diretamente.",
             )
             return https_fn.Response("OK", status=200)
 
