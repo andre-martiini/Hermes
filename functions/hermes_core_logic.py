@@ -334,6 +334,20 @@ def _send_telegram_message(token: str, chat_id: str | int, text: str, parse_mode
     )
     if not resp.ok:
         print(f"[Telegram] sendMessage failed: {resp.status_code} {resp.text[:300]}")
+        if parse_mode:
+            plain_text = html.unescape(re.sub(r"<[^>]+>", "", text))
+            retry_resp = _requests.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": plain_text[:4096]},
+                timeout=30,
+            )
+            if not retry_resp.ok:
+                print(f"[Telegram] sendMessage plain fallback failed: {retry_resp.status_code} {retry_resp.text[:300]}")
+                return None
+            try:
+                return retry_resp.json().get("result", {}).get("message_id")
+            except Exception:
+                return None
         return None
     try:
         return resp.json().get("result", {}).get("message_id")
@@ -360,6 +374,24 @@ def _send_telegram_message_with_keyboard(
     )
     if not resp.ok:
         print(f"[Telegram] sendMessage+keyboard failed: {resp.status_code} {resp.text[:300]}")
+        if parse_mode:
+            plain_text = html.unescape(re.sub(r"<[^>]+>", "", text))
+            retry_resp = _requests.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": plain_text[:4096],
+                    "reply_markup": {"inline_keyboard": inline_keyboard},
+                },
+                timeout=30,
+            )
+            if not retry_resp.ok:
+                print(f"[Telegram] sendMessage+keyboard plain fallback failed: {retry_resp.status_code} {retry_resp.text[:300]}")
+                return None
+            try:
+                return retry_resp.json().get("result", {}).get("message_id")
+            except Exception:
+                return None
         return None
     try:
         return resp.json().get("result", {}).get("message_id")
@@ -1720,7 +1752,7 @@ def _is_internal_hermes_request(text: str) -> bool:
 def _extract_response_mode(text: str, session: dict) -> tuple[str, str]:
     raw_text = (text or "").strip()
     if not raw_text:
-        return session.get("response_mode", "texto"), raw_text
+        return "texto", raw_text
 
     lowered = _normalize_for_matching(raw_text)
     explicit_audio_markers = (
@@ -1755,7 +1787,7 @@ def _extract_response_mode(text: str, session: dict) -> tuple[str, str]:
         cleaned = re.sub(r"^/texto\b|#texto|\[texto\]", "", raw_text, flags=re.IGNORECASE).strip()
         return "texto", cleaned
 
-    return session.get("response_mode", "texto"), raw_text
+    return "texto", raw_text
 
 
 def _extract_voice_profile(text: str, default_voice: str = "masculina") -> tuple[str, str]:
