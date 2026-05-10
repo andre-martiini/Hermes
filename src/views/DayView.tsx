@@ -102,16 +102,16 @@ export const DayView = ({
 
   const sidebar = (
     <div className={`w-full md:w-80 h-full flex flex-col border-r ${isDark ? 'bg-[#020817] border-slate-800' : 'bg-white border-slate-200'}`}>
-      <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-        <h3 className={`text-xs font-black uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Ações Disponíveis</h3>
+      <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+        <h3 className={`text-[10px] font-black uppercase tracking-[0.2em] ${isDark ? 'text-slate-400' : 'text-slate-900'} font-mono`}>AGENDA</h3>
         <button
           onClick={() => {
             const titulo = prompt('Título da nova ação:');
             if (titulo) handleCreateTarefa(titulo);
           }}
-          className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all active:scale-95 shadow-lg shadow-blue-500/20"
+          className="px-3 py-1 bg-slate-900 text-white rounded-none hover:bg-blue-600 transition-all active:scale-95 text-[10px] font-bold font-mono"
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+          + AÇÃO
         </button>
       </div>
 
@@ -139,13 +139,13 @@ export const DayView = ({
         ))}
 
         {dayTasks.length === 0 && (
-          <div className={`py-12 text-center border-2 border-dashed rounded-[2rem] ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-            <p className={`${isDark ? 'text-slate-700' : 'text-slate-300'} text-[10px] font-black uppercase italic`}>Tudo alocado</p>
+          <div className={`py-12 text-center border-2 border-dashed rounded-none ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+            <p className={`${isDark ? 'text-slate-700' : 'text-slate-300'} text-[10px] font-black uppercase italic font-mono`}>Tudo alocado</p>
           </div>
         )}
       </div>
 
-      <p className="md:hidden mt-6 text-[8px] font-black text-blue-600 uppercase tracking-widest text-center">Toque para alocar agora</p>
+      <p className="md:hidden mt-6 text-[8px] font-black text-blue-600 uppercase tracking-widest text-center font-mono">Toque para alocar agora</p>
     </div>
   );
 

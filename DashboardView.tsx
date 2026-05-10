@@ -232,7 +232,6 @@ const DashboardView: React.FC<DashboardViewProps> = ({
             result.push({
                 dateStr: dStr,
                 dayNum: d.getDate(),
-                dayName: ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB'][d.getDay()],
                 monthName: ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'][d.getMonth()],
                 count,
                 isToday: i === 0
@@ -240,6 +239,12 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         }
         return result;
     }, [inProgressActions, todayStr]);
+
+    const distantFutureCount = useMemo(() => {
+        if (actionsByDay.length === 0) return 0;
+        const lastDate = actionsByDay[actionsByDay.length - 1].dateStr;
+        return inProgressActions.filter(t => t.data_limite && t.data_limite > lastDate).length;
+    }, [inProgressActions, actionsByDay]);
 
     const nextMilestones = useMemo(() => {
         return inProgressActions
@@ -259,6 +264,31 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
     const currentMonthTotalSpent = useMemo(() => currentMonthTransactions.reduce((acc, curr) => acc + curr.amount, 0), [currentMonthTransactions]);
     const availableBalance = currentBudget - currentMonthTotalSpent;
+
+    const financeChartData = useMemo(() => {
+        const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+        const monthName = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'][currentMonth];
+        const result = [];
+        
+        for (let d = 1; d <= daysInMonth; d++) {
+            const amount = currentMonthTransactions
+                .filter(t => {
+                    const transDate = new Date(t.date);
+                    // Use UTC or local comparison carefully. Here we assume t.date is ISO or local.
+                    return transDate.getDate() === d;
+                })
+                .reduce((acc, curr) => acc + curr.amount, 0);
+            
+            if (amount > 0) {
+                result.push({
+                    day: d,
+                    amount,
+                    monthName
+                });
+            }
+        }
+        return result;
+    }, [currentMonthTransactions, currentMonth, currentYear]);
 
     const dailySpending = useMemo(() => {
         const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
@@ -324,70 +354,48 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
                 {/* CARD: AÇÕES */}
                 <DashboardCard title="Ações" iconColor="bg-primary-tactile" onRedirect={() => onNavigate('gallery')} isDark={isDark}>
-                    <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-2 md:gap-3">
-                            <div className={`p-3 rounded-lcd border-t border-black/20 border-b border-white/50 flex flex-col justify-center ${isDark ? 'bg-slate-900' : 'bg-lcd-bg shadow-lcd-panel'}`}>
-                                <p className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-1 font-mono text-slate-600`}>Em Andamento</p>
-                                <div className="flex items-baseline gap-2">
-                                    <div className="text-2xl md:text-3xl font-black font-lcd text-on-surface">{inProgressActions.length}</div>
-                                    {overdueCount > 0 && (
-                                        <div className="text-[10px] md:text-xs font-black font-lcd text-rose-600">+{overdueCount} ATR</div>
-                                    )}
+                    <div className={`h-full flex flex-col gap-4 p-4 rounded-none border-4 ${isDark ? 'bg-[#FFB95F] border-black/20 shadow-[inset_0_4px_10px_rgba(0,0,0,0.2)]' : 'bg-[#FFB95F] border-black/10 shadow-[inset_0_4px_12px_rgba(0,0,0,0.15)]'}`}>
+                        <div className="flex items-center justify-between shrink-0">
+                            <p className="text-[10px] font-black uppercase tracking-[0.2em] font-mono text-amber-950/60">Carga Semanal (Hoje + 6D)</p>
+                            <div className="flex items-center gap-2 md:gap-3">
+                                <div className="flex items-center gap-1.5">
+                                    <span className="text-[10px] font-black uppercase font-mono text-amber-950">{inProgressActions.length} Total</span>
                                 </div>
-                            </div>
-                            <div className={`p-3 rounded-lcd border-t border-black/20 border-b border-white/50 flex flex-col justify-center ${isDark ? 'bg-slate-900' : 'bg-lcd-bg shadow-lcd-panel'}`}>
-                                <p className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-1 font-mono text-slate-600`}>Hoje/Amanhã</p>
-                                <div className="text-2xl md:text-3xl font-black font-lcd text-on-surface">{nextTwoDaysActions.length}</div>
-                            </div>
-                        </div>
-                        <div className="flex-1 min-h-0">
-                            <p className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-2 font-mono ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Carga Semanal (Hoje + 6D)</p>
-                            <div className="flex gap-1 h-14 md:h-16">
-                                {overdueCount > 0 && (
-                                    <div className={`flex-1 flex flex-col items-center justify-center border ${isDark ? 'bg-rose-950/20 border-rose-900/50 text-rose-500' : 'bg-rose-50 border-rose-200 text-rose-600'}`}>
-                                        <span className="text-[7px] font-black font-mono">ATR</span>
-                                        <div className="w-5 h-4 flex items-center justify-center font-lcd font-black text-sm md:text-lg">
-                                            {overdueCount}
-                                        </div>
+                                {distantFutureCount > 0 && (
+                                    <div className="px-2 py-0.5 bg-black/5 border border-black/10 flex items-center gap-1.5">
+                                        <span className="w-1.5 h-1.5 bg-amber-950/40"></span>
+                                        <span className="text-[10px] font-black uppercase font-mono text-amber-950/60">{distantFutureCount} Futuras</span>
                                     </div>
                                 )}
-                                {actionsByDay.map((day, i) => (
-                                    <div 
-                                        key={i} 
-                                        className={`flex-1 flex flex-col items-center justify-center border transition-all ${day.isToday 
-                                            ? (isDark ? 'bg-blue-900/30 border-blue-500 text-blue-400' : 'bg-blue-50 border-blue-600 text-blue-700 shadow-[inset_0_0_8px_rgba(37,99,235,0.1)]') 
-                                            : (isDark ? 'bg-slate-900/50 border-white/5 text-slate-500' : 'bg-lcd-bg border-border-grid text-slate-400')}`}
-                                    >
-                                        <span className="text-[7px] font-black font-mono leading-none mb-1">{day.dayName}</span>
-                                        <span className={`text-[9px] md:text-xs font-black font-lcd ${day.count > 0 ? (isDark ? 'text-white' : 'text-on-surface') : 'opacity-30'}`}>
-                                            {String(day.dayNum).padStart(2, '0')}/{day.monthName}
-                                        </span>
-                                        <div className={`mt-1 w-5 h-4 flex items-center justify-center rounded-none border text-[9px] font-black font-lcd ${day.count > 0 
-                                            ? (day.isToday 
-                                                ? (isDark ? 'bg-blue-500 text-white border-blue-400' : 'bg-blue-700 text-white border-blue-800 shadow-sm') 
-                                                : (isDark ? 'bg-slate-800 text-slate-300 border-white/10' : 'bg-slate-900 text-white border-slate-900')) 
-                                            : 'border-transparent text-transparent'}`}>
-                                            {day.count > 0 ? day.count : ''}
-                                        </div>
-                                    </div>
-                                ))}
                             </div>
                         </div>
-                        <div className="pt-2 border-t border-border-grid/50">
-                            <p className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-2 font-mono ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Próximos Marcos</p>
-                            <div className="space-y-1.5">
-                                {nextMilestones.map(t => (
-                                    <div key={t.id} className="flex items-center gap-2 group/ms">
-                                        <div className={`w-1 h-3 shrink-0 ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}></div>
-                                        <div className="flex-1 min-w-0">
-                                            <p className={`text-[9px] font-bold truncate ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{t.titulo}</p>
-                                        </div>
-                                        <span className={`text-[8px] font-black uppercase font-mono px-1 border border-transparent ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                                            {t.data_limite === todayStr ? 'HOJE' : t.data_limite === tomorrowStr ? 'AMANHÃ' : t.data_limite?.split('-').slice(1).reverse().join('/')}
+
+                        <div className="flex-1 flex items-end gap-1 md:gap-2 min-h-0 px-2 pb-2 relative">
+                            {actionsByDay.map((day, i) => {
+                                const maxCount = Math.max(...actionsByDay.map(d => d.count), 5);
+                                const heightPercent = (day.count / maxCount) * 100;
+                                
+                                return (
+                                    <div key={i} className="flex-1 flex flex-col items-center justify-end h-full">
+                                        <span className={`text-[13px] md:text-base font-black font-lcd mb-1 ${day.count > 0 ? 'text-amber-950' : 'text-amber-950/10'}`}>
+                                            {day.count}
                                         </span>
+                                        <div 
+                                            style={{ height: `${Math.max(heightPercent, day.count > 0 ? 8 : 0)}%` }}
+                                            className={`w-full transition-all duration-500 rounded-none ${day.isToday 
+                                                ? 'bg-amber-950 shadow-lg' 
+                                                : day.count > 0 
+                                                    ? 'bg-amber-950/30 hover:bg-amber-950/50'
+                                                    : 'bg-black/5'}`}
+                                        ></div>
+                                        <div className={`mt-3 flex flex-col items-center gap-0.5 ${day.isToday ? 'opacity-100' : 'opacity-50'}`}>
+                                            <span className="text-[10px] md:text-[11px] font-black font-mono leading-none whitespace-nowrap text-amber-950">
+                                                {String(day.dayNum).padStart(2, '0')}/{day.monthName}
+                                            </span>
+                                        </div>
                                     </div>
-                                ))}
-                            </div>
+                                );
+                            })}
                         </div>
                     </div>
                 </DashboardCard>
@@ -401,7 +409,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                     headerAction={
                         <button
                             onClick={(e) => { e.stopPropagation(); setIsFinanceVisible(!isFinanceVisible); }}
-                            className={`p-2 rounded-soft-touch transition-all shadow-soft-touch ${isDark ? 'text-slate-500 hover:bg-slate-800' : 'text-slate-400 hover:bg-emerald-50'}`}
+                            className={`p-2 rounded-none transition-all shadow-sm ${isDark ? 'text-slate-500 hover:bg-slate-800' : 'text-slate-400 hover:bg-emerald-50'}`}
                         >
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 {isFinanceVisible ? <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /> : <path d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18" />}
@@ -409,16 +417,54 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                         </button>
                     }
                 >
-                    <div className="space-y-4">
-                        <div className={`p-4 rounded-lcd border-t border-black/20 border-b border-white/50 ${isDark ? 'bg-slate-900' : 'bg-lcd-bg shadow-lcd-panel'}`}>
-                            <p className="text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-1 font-mono text-slate-600">Saldo Disponível</p>
-                            <div className="text-2xl md:text-3xl font-black font-lcd text-on-surface">
-                                {isFinanceVisible ? `R$ ${availableBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : <HiddenMoney />}
+                    <div className={`h-full flex flex-col gap-4 p-4 rounded-none border-4 ${isDark ? 'bg-[#4ADE80] border-black/20 shadow-[inset_0_4px_10px_rgba(0,0,0,0.2)]' : 'bg-[#4ADE80] border-black/10 shadow-[inset_0_4px_12px_rgba(0,0,0,0.15)]'}`}>
+                        <div className="flex items-center justify-between shrink-0">
+                            <div>
+                                <p className="text-[10px] font-black uppercase tracking-[0.2em] font-mono text-emerald-950/60">Consumo Mensal (Dias Ativos)</p>
+                                <div className="text-xl md:text-2xl font-black font-lcd text-emerald-950 mt-1">
+                                    {isFinanceVisible ? `R$ ${currentMonthTotalSpent.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}` : <HiddenMoney compact />}
+                                </div>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-[8px] font-black uppercase tracking-[0.2em] font-mono text-emerald-950/60">Disponível</p>
+                                <div className={`text-sm md:text-base font-black font-lcd ${availableBalance < 0 ? 'text-red-900' : 'text-emerald-950/80'}`}>
+                                    {isFinanceVisible ? `R$ ${availableBalance.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}` : '••••'}
+                                </div>
                             </div>
                         </div>
-                        <div className="flex-1">
-                            <p className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-2 font-mono ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Gastos Diários</p>
-                            {isFinanceVisible ? <BarChart data={dailySpending} color={isDark ? "#34d399" : "#10b981"} isDark={isDark} /> : <HiddenBarChart isDark={isDark} />}
+
+                        <div className="flex-1 flex items-end gap-1 md:gap-1.5 min-h-0 px-2 pb-2 relative overflow-x-auto scrollbar-hide">
+                            {isFinanceVisible ? (
+                                financeChartData.length > 0 ? (
+                                    financeChartData.map((item, i) => {
+                                        const maxAmount = Math.max(...financeChartData.map(d => d.amount), 1);
+                                        const heightPercent = (item.amount / maxAmount) * 100;
+                                        
+                                        return (
+                                            <div key={i} className="flex-1 min-w-[20px] flex flex-col items-center justify-end h-full group">
+                                                <div 
+                                                    style={{ height: `${Math.max(heightPercent, 5)}%` }}
+                                                    className="w-full bg-emerald-950/40 group-hover:bg-emerald-950 transition-all duration-300 rounded-none border-t border-emerald-950/20"
+                                                    title={`Dia ${item.day}: R$ ${item.amount.toFixed(2)}`}
+                                                ></div>
+                                                <div className="mt-2 flex flex-col items-center">
+                                                    <span className="text-[9px] font-black font-lcd text-emerald-950">
+                                                        {String(item.day).padStart(2, '0')}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                ) : (
+                                    <div className="flex-1 h-full flex items-center justify-center border-2 border-dashed border-emerald-950/10">
+                                        <span className="text-[10px] font-black uppercase font-mono text-emerald-950/30 italic">Sem registros</span>
+                                    </div>
+                                )
+                            ) : (
+                                <div className="flex-1 h-full flex items-center justify-center border-2 border-dashed border-emerald-950/10">
+                                    <span className="text-[10px] font-black uppercase font-mono text-emerald-950/30 italic">Dados Ocultos</span>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </DashboardCard>
@@ -426,12 +472,12 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                 {/* CARD: SAÚDE */}
                 <DashboardCard title="Saúde" iconColor="bg-rose-500" onRedirect={() => onNavigate('saude')} isDark={isDark}>
                     <div className="space-y-4">
-                        <div className="flex justify-between items-end">
-                            <div className={`p-3 rounded-lcd flex-1 mr-2 border-t border-black/20 border-b border-white/50 ${isDark ? 'bg-slate-900' : 'bg-lcd-bg shadow-lcd-panel'}`}>
+                        <div className="flex justify-between items-end gap-2">
+                            <div className={`p-3 rounded-none flex-1 border-t border-black/20 border-b border-white/50 ${isDark ? 'bg-slate-900' : 'bg-lcd-bg shadow-lcd-panel'}`}>
                                 <p className="text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-1 font-mono text-slate-600">Peso Atual</p>
                                 <div className="text-2xl font-black font-lcd text-on-surface">{currentWeight.toFixed(1)} <span className="text-xs opacity-50">kg</span></div>
                             </div>
-                            <div className={`p-3 rounded-lcd flex-1 border-t border-black/20 border-b border-white/50 ${isDark ? 'bg-slate-900' : 'bg-lcd-bg shadow-lcd-panel'}`}>
+                            <div className={`p-3 rounded-none flex-1 border-t border-black/20 border-b border-white/50 ${isDark ? 'bg-slate-900' : 'bg-lcd-bg shadow-lcd-panel'}`}>
                                 <p className="text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-1 font-mono text-slate-600">Variação</p>
                                 <div className={`text-2xl font-black font-lcd ${weightDelta > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                                     {weightDeltaPrefix}{weightDeltaAbs.toFixed(1)} <span className="text-xs opacity-50">kg</span>
@@ -457,7 +503,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                     <div className="space-y-4 flex flex-col h-full">
                         <div className="flex flex-wrap gap-2">
                             {systemsByPhase.map(([phase, count]) => (
-                                <div key={phase} className={`px-3 py-1.5 rounded-soft-touch border shadow-soft-touch flex items-center gap-2 transition-all ${isDark ? 'bg-slate-900 border-white/10' : 'bg-white border-border-grid'}`}>
+                                <div key={phase} className={`px-3 py-1.5 rounded-none border-2 shadow-soft-touch flex items-center gap-2 transition-all ${isDark ? 'bg-slate-900 border-white/10' : 'bg-white border-slate-900'}`}>
                                     <span className="text-[8px] font-black uppercase tracking-widest font-mono text-slate-400">{phase}</span>
                                     <span className="text-xs font-black font-lcd">{count}</span>
                                 </div>

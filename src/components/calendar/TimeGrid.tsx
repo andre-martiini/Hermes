@@ -312,11 +312,11 @@ export const TimeGrid = ({
     <div className={`flex flex-col h-full overflow-hidden border-t relative select-none ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-100'}`}>
       <div className="flex flex-1 overflow-hidden relative">
         <div className="flex-1 overflow-y-auto custom-scrollbar relative flex" ref={containerRef}>
-          <div className={`w-12 flex-shrink-0 border-r relative sticky left-0 z-20 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`} style={{ height: (CALENDAR_END_HOUR - CALENDAR_START_HOUR) * hourHeight }}>
+          <div className={`w-14 flex-shrink-0 border-r relative sticky left-0 z-20 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-border-grid'}`} style={{ height: (CALENDAR_END_HOUR - CALENDAR_START_HOUR) * hourHeight }}>
             {Array.from({ length: CALENDAR_END_HOUR - CALENDAR_START_HOUR + 1 }).map((_, i) => {
               const hour = i + CALENDAR_START_HOUR;
               return (
-                <div key={hour} className={`absolute right-2 text-[10px] font-mono ${isDark ? 'text-slate-600' : 'text-slate-300'}`} style={{ top: i * hourHeight - 6 }}>
+                <div key={hour} className={`absolute right-2 text-[10px] font-black font-mono tracking-tighter ${isDark ? 'text-slate-600' : 'text-slate-400'}`} style={{ top: i * hourHeight - 6 }}>
                   {hour.toString().padStart(2, '0')}:00
                 </div>
               );
@@ -348,7 +348,7 @@ export const TimeGrid = ({
 
                 {isToday && (currentTime.getHours() * 60 + currentTime.getMinutes() >= CALENDAR_START_MIN) && (currentTime.getHours() * 60 + currentTime.getMinutes() <= CALENDAR_END_MIN) && (
                   <div className="absolute left-0 right-0 border-t-2 border-red-500 z-20 pointer-events-none" style={{ top: ((currentTime.getHours() * 60 + currentTime.getMinutes() - CALENDAR_START_MIN) / 60) * hourHeight }}>
-                    <div className="absolute -left-1.5 -top-1.5 w-3 h-3 bg-red-500 rounded-full"></div>
+                    <div className="absolute -left-1.5 -top-1.5 w-3 h-3 bg-red-500 rounded-none"></div>
                   </div>
                 )}
 
@@ -366,7 +366,7 @@ export const TimeGrid = ({
                     return (
                       <div
                         key={event.id}
-                        className={`absolute rounded-lg border-l-4 p-1 shadow-sm overflow-hidden ${isDark ? 'bg-amber-900/20 border-amber-500 text-amber-200' : 'bg-amber-50/90 border-amber-500 text-slate-800'}`}
+                        className={`absolute rounded-none border-l-4 p-1 shadow-sm overflow-hidden font-mono uppercase tracking-tighter ${isDark ? 'bg-amber-900/20 border-amber-500 text-amber-200' : 'bg-amber-50/90 border-amber-500 text-slate-800'}`}
                         style={{ top, height: Math.max(20, height), left: `${left}%`, width: `${columnWidth}%`, zIndex: 5 }}
                         onMouseDown={e => e.stopPropagation()}
                         onTouchStart={e => e.stopPropagation()}
@@ -380,7 +380,7 @@ export const TimeGrid = ({
                   return (
                     <React.Fragment key={event.id}>
                       <div
-                        className={`absolute rounded-lg border p-1 shadow-sm group transition-all hover:z-30 cursor-grab active:cursor-grabbing
+                        className={`absolute rounded-none border p-1 shadow-sm group transition-all hover:z-30 cursor-grab active:cursor-grabbing
                              ${taskItem.area_tematica === 'CLC' ? isDark ? 'bg-blue-900/20 border-blue-800 text-blue-200' : 'bg-blue-50 border-blue-200 text-blue-800' :
                             taskItem.area_tematica === 'ASSISTÊNCIA' || taskItem.area_tematica === 'ASSISTÊNCIA ESTUDANTIL' ? isDark ? 'bg-purple-900/20 border-purple-800 text-purple-200' : 'bg-purple-50 border-purple-200 text-purple-800' :
                             taskItem.area_tematica === 'SAÚDE' || taskItem.area_tematica === 'SAUDE' ? isDark ? 'bg-rose-900/20 border-rose-800 text-rose-200' : 'bg-rose-50 border-rose-200 text-rose-800' :
@@ -434,7 +434,7 @@ export const TimeGrid = ({
                                 e.stopPropagation();
                                 onTaskUpdate(taskItem.id, { horario_inicio: null as any, horario_fim: null as any });
                               }}
-                              className={`p-1 rounded-lg transition-all shadow-sm scale-100 opacity-0 group-hover:opacity-100 ${isDark ? 'bg-slate-700 text-slate-200 hover:bg-slate-600' : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-100'}`}
+                              className={`p-1 rounded-none transition-all shadow-sm scale-100 opacity-0 group-hover:opacity-100 ${isDark ? 'bg-slate-700 text-slate-200 hover:bg-slate-600' : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-100'}`}
                               title="Devolver para ações disponíveis"
                             >
                               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -454,7 +454,7 @@ export const TimeGrid = ({
                         </div>
                         <div className="absolute bottom-1 left-1 flex items-center gap-1.5 overflow-hidden">
                           {taskItem.area_tematica && (
-                            <span className={`text-[7px] font-black uppercase px-1.5 py-0.5 rounded-sm ${isDark ? 'bg-white/10 text-slate-300' : 'bg-black/5 text-slate-600'}`}>
+                            <span className={`text-[7px] font-black uppercase px-1.5 py-0.5 rounded-none ${isDark ? 'bg-white/10 text-slate-300' : 'bg-black/5 text-slate-600'}`}>
                               {taskItem.area_tematica}
                             </span>
                           )}
@@ -474,7 +474,7 @@ export const TimeGrid = ({
                             setResizing({ id: event.id, type: 'top', startY: e.touches[0].clientY, currentY: e.touches[0].clientY, originalStartMin: startMin, originalEndMin: endMin });
                           }}
                         >
-                          <div className="w-8 h-1 bg-slate-300 rounded-full shadow-sm"></div>
+                          <div className="w-8 h-1 bg-slate-300 rounded-none shadow-sm"></div>
                         </div>
                         <div
                           className="resize-handle absolute -bottom-2 left-0 right-0 h-6 cursor-ns-resize z-20 flex items-center justify-center opacity-0 hover:opacity-100 active:opacity-100 transition-opacity"
@@ -490,7 +490,7 @@ export const TimeGrid = ({
                             setResizing({ id: event.id, type: 'bottom', startY: e.touches[0].clientY, currentY: e.touches[0].clientY, originalStartMin: startMin, originalEndMin: endMin });
                           }}
                         >
-                          <div className="w-8 h-1 bg-slate-300 rounded-full shadow-sm"></div>
+                          <div className="w-8 h-1 bg-slate-300 rounded-none shadow-sm"></div>
                         </div>
                       </div>
                       {isResizing && resizing && (
@@ -511,7 +511,7 @@ export const TimeGrid = ({
 
                           return (
                             <div
-                              className="absolute rounded-lg border-2 border-dashed border-indigo-500 bg-indigo-50/50 p-1 z-50 pointer-events-none"
+                              className="absolute rounded-none border-2 border-dashed border-indigo-500 bg-indigo-50/50 p-1 z-50 pointer-events-none"
                               style={{ top: previewTop, height: Math.max(30, previewHeight), left: `${left}%`, width: `${columnWidth}%` }}
                             >
                               <div className="text-[9px] font-bold text-indigo-800">
@@ -554,7 +554,7 @@ export const TimeGrid = ({
 
               return (
                 <div
-                  className="absolute rounded-lg border-2 border-dashed border-blue-500 bg-blue-50/50 p-1 z-50 pointer-events-none"
+                  className="absolute rounded-none border-2 border-dashed border-blue-500 bg-blue-50/50 p-1 z-50 pointer-events-none"
                   style={{ top, left, width, height }}
                 >
                   <div className="text-[9px] font-bold text-blue-800">

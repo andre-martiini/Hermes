@@ -449,16 +449,16 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 let contextText = "Consultoria estratégica geral.";
                 if (taskId) {
                     // 1. Dados da Ação Principal
-                    const taskDoc = await getDoc(doc(db, 'acoes', taskId));
+                    const taskDoc = await getDoc(doc(db, 'tarefas', taskId));
                     const taskData = taskDoc.exists() ? taskDoc.data() : {};
                     
                     // 2. Plano de Ação (Sub-tarefas)
-                    const planSnap = await getDocs(query(collection(db, 'acoes', taskId, 'plano_acao'), orderBy('ordem', 'asc'), limit(10)));
-                    const planItems = planSnap.docs.map(d => `- [${d.data().status || 'pendente'}] ${d.data().titulo}`).join('\n');
+                    const planItemsArray = taskData.plano_acao || [];
+                    const planItems = planItemsArray.slice(0, 10).map((d: any) => `- [${d.completed ? 'concluído' : 'pendente'}] ${d.text}`).join('\n');
                     
                     // 3. Diário de Bordo (Histórico recente)
-                    const diarySnap = await getDocs(query(collection(db, 'acoes', taskId, 'follow_ups'), orderBy('timestamp', 'desc'), limit(5)));
-                    const diaryLogs = diarySnap.docs.map(d => `- ${d.data().texto}`).reverse().join('\n');
+                    const diaryLogsArray = taskData.acompanhamento || [];
+                    const diaryLogs = diaryLogsArray.slice(-5).map((d: any) => `- ${d.nota}`).reverse().join('\n');
 
                     contextText = `
                         TAREFA: "${taskData.titulo || 'Sem título'}"
@@ -473,20 +473,22 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                     `;
                 }
 
-                const prompt = `Você é o Copiloto Hermes. Analise o progresso real desta tarefa.
-                Regra de Negócio Crucial: A data principal da tarefa é apenas a Data Agendada para trabalhar nela. O Prazo Final (Deadline) real, se houver, será explícito no texto abaixo ou no diário de bordo. Não confunda intenção de trabalho com deadline.
+                const prompt = `Você é o Copiloto Hermes (uma IA assistente). Analise o progresso desta tarefa.
                 
                 DADOS DA OPERAÇÃO:
                 ${contextText}
                 
                 SUA MISSÃO:
-                Gere um ÚNICO comando ou pergunta estratégica que o usuário deve fazer a você para destravar o próximo passo ou resolver um gargalo detectado.
-                Fale especificamente sobre itens do plano ou registros do diário, se houver.
+                O usuário vai clicar em um botão para lhe enviar um prompt. Você deve escrever ESSE PROMPT que o usuário vai te enviar.
+                Este prompt deve ser um pedido de ajuda acionável que uma IA possa de fato realizar (ex: gerar rascunhos, criar checklists, analisar dados, listar riscos, pesquisar, estruturar ideias).
+                Se a tarefa depender de ação física ou externa do usuário, o prompt deve pedir para você prepará-lo, guiá-lo ou revisar o que ele precisa fazer.
+                Use os dados do plano ou diário (se houver) para deixar o prompt 100% contextualizado e focado no próximo passo real da tarefa.
                 
                 Regras:
                 - Máximo 18 palavras.
-                - Tom de comando direto e técnico.
-                - Responda apenas o prompt.`;
+                - Escrito na 1ª pessoa do singular (o usuário falando com a IA, ex: "Crie um roteiro para...", "Me ajude a estruturar...", "Analise os riscos de...").
+                - Tom direto, técnico e focado em execução.
+                - Responda apenas o texto do prompt, sem aspas.`;
 
                 const fn = httpsCallable(functions, 'askTaskAssistant');
                 const res = await fn({ 

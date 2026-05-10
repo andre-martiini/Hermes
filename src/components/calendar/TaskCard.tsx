@@ -71,7 +71,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
             }}
             onDragOver={onDragOver}
             onDrop={onDrop}
-            className={`group relative p-2 rounded-soft-touch border text-[10px] font-bold cursor-pointer transition-all active:scale-95 ${isMenuOpen ? 'z-50 shadow-xl' : 'z-10 shadow-soft-touch'} pointer-events-auto ${areaStyles} ${className}`}
+            className={`group relative p-2 rounded-none border text-[10px] font-bold cursor-pointer transition-all active:scale-95 ${isMenuOpen ? 'z-50 shadow-xl' : 'z-10 shadow-soft-touch'} pointer-events-auto ${areaStyles} ${className}`}
         >
             <div className="flex justify-between items-start gap-2 mb-1">
                 <div className="line-clamp-6 leading-tight flex-1 pr-6 font-semibold">{task.titulo}</div>

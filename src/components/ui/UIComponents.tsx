@@ -202,6 +202,20 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
   const statusValue = normalizeStatus(task.status);
   const isCompleted = statusValue === 'concluido';
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [isEditingDateTime, setIsEditingDateTime] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsEditingDateTime(false);
+      }
+    };
+    if (isEditingDateTime) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isEditingDateTime]);
 
   const formatDateShort = (dateStr: string) => {
     if (!dateStr || dateStr === '-' || dateStr === 'Sem Data') return '-';
@@ -229,6 +243,14 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
 
   const dateDisplay = formatDateShort(task.data_limite);
 
+  const handleQuickDate = (type: 'today' | 'tomorrow') => {
+    const d = new Date();
+    if (type === 'tomorrow') d.setDate(d.getDate() + 1);
+    const dStr = d.toISOString().split('T')[0];
+    onUpdateTask?.(task.id, { data_limite: dStr, data_inicio: dStr });
+    setIsEditingDateTime(false);
+  };
+
   return (
     <div
       onClick={onClick}
@@ -238,9 +260,24 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
         e.dataTransfer.setData('task-id', task.id);
         e.dataTransfer.effectAllowed = 'move';
       }}
-      className={`group w-full px-4 md:px-6 py-5 md:py-4 border-b transition-all flex flex-col sm:flex-row sm:items-start gap-4 md:gap-6 animate-in cursor-pointer relative ${isDark ? 'border-white/10 hover:bg-white/[0.03]' : 'border-border-grid hover:bg-slate-50/70'} ${isCompleted ? 'opacity-60 grayscale-[0.35]' : ''} ${highlighted ? (isDark ? 'bg-white/10 border-l-2 border-l-accent-tactile' : 'bg-surface-container border-l-2 border-l-primary-tactile') : 'bg-transparent'}`}
+      className={`group w-full px-4 md:px-6 py-5 md:py-4 border-b transition-all flex flex-col sm:flex-row sm:items-start gap-4 md:gap-6 animate-in cursor-pointer relative ${isEditingDateTime ? 'z-[100]' : 'z-auto'} ${isDark ? 'border-white/10 hover:bg-white/[0.03]' : 'border-border-grid hover:bg-slate-50/70'} ${isCompleted ? 'opacity-60 grayscale-[0.35]' : ''} ${highlighted ? (isDark ? 'bg-white/10 border-l-2 border-l-accent-tactile' : 'bg-surface-container border-l-2 border-l-primary-tactile') : 'bg-transparent'}`}
     >
-      <div className="flex items-center gap-4 flex-1 min-w-0">
+      <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-0">
+        <div className="flex flex-col gap-0.5 text-slate-300 group-hover:text-slate-400 cursor-grab active:cursor-grabbing transition-colors shrink-0">
+          <div className="flex gap-0.5">
+            <div className="w-0.5 h-0.5 bg-current rounded-full"></div>
+            <div className="w-0.5 h-0.5 bg-current rounded-full"></div>
+          </div>
+          <div className="flex gap-0.5">
+            <div className="w-0.5 h-0.5 bg-current rounded-full"></div>
+            <div className="w-0.5 h-0.5 bg-current rounded-full"></div>
+          </div>
+          <div className="flex gap-0.5">
+            <div className="w-0.5 h-0.5 bg-current rounded-full"></div>
+            <div className="w-0.5 h-0.5 bg-current rounded-full"></div>
+          </div>
+        </div>
+
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -273,9 +310,64 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
           )}
         </div>
 
-        <div className={`flex items-center gap-1.5 font-black uppercase text-[9px] md:text-[10px] tracking-widest min-w-[65px] font-mono transition-all ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-          <svg className="w-3 h-3 md:w-3.5 md:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-          <span>{dateDisplay} {task.horario_inicio ? `• ${task.horario_inicio}` : ''}</span>
+        <div className="relative" ref={menuRef}>
+          <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsEditingDateTime(!isEditingDateTime);
+            }}
+            className={`flex items-center gap-1.5 font-black uppercase text-[9px] md:text-[10px] tracking-widest min-w-[65px] font-mono transition-all px-2 py-1 -mx-2 -my-1 border border-transparent hover:border-primary-tactile/30 hover:bg-primary-tactile/5 hover:text-primary-tactile ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+          >
+            <svg className="w-3 h-3 md:w-3.5 md:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+            <span>{dateDisplay} {task.horario_inicio ? `• ${task.horario_inicio}` : ''}</span>
+          </button>
+
+          {isEditingDateTime && (
+            <div className="absolute top-full right-0 mt-2 p-4 bg-white border border-border-grid shadow-xl z-50 flex flex-col gap-3 min-w-[200px] animate-in fade-in zoom-in-95 duration-200">
+              <div className="space-y-1">
+                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest font-mono">Reagendar Prazo</p>
+                <input 
+                  type="date"
+                  value={task.data_limite || ''}
+                  onChange={(e) => {
+                    onUpdateTask?.(task.id, { data_limite: e.target.value, data_inicio: e.target.value });
+                  }}
+                  className="w-full bg-slate-50 border border-border-grid px-2 py-1.5 text-[10px] font-black font-mono focus:ring-1 focus:ring-primary-tactile outline-none"
+                />
+              </div>
+              <div className="space-y-1">
+                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest font-mono">Horário</p>
+                <input 
+                  type="time"
+                  value={task.horario_inicio || ''}
+                  onChange={(e) => {
+                    onUpdateTask?.(task.id, { horario_inicio: e.target.value });
+                  }}
+                  className="w-full bg-slate-50 border border-border-grid px-2 py-1.5 text-[10px] font-black font-mono focus:ring-1 focus:ring-primary-tactile outline-none"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handleQuickDate('today'); }}
+                  className="py-2 bg-slate-100 hover:bg-slate-200 text-[8px] font-black uppercase tracking-widest font-mono transition-colors"
+                >
+                  Hoje
+                </button>
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handleQuickDate('tomorrow'); }}
+                  className="py-2 bg-slate-100 hover:bg-slate-200 text-[8px] font-black uppercase tracking-widest font-mono transition-colors"
+                >
+                  Amanhã
+                </button>
+              </div>
+              <button 
+                onClick={(e) => { e.stopPropagation(); setIsEditingDateTime(false); }}
+                className="w-full bg-slate-900 text-white py-2 text-[8px] font-black uppercase tracking-widest font-mono hover:bg-slate-800 transition-colors"
+              >
+                Concluir
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

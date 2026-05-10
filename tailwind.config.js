@@ -24,7 +24,7 @@ export default {
       fontFamily: {
         serif: ['JetBrains Mono', 'monospace'],
         mono: ['JetBrains Mono', 'monospace'],
-        lcd: ['Space Mono', 'monospace'],
+        lcd: ['DSEG7Classic', 'Space Mono', 'monospace'],
       },
       boxShadow: {
         'soft-touch': 'inset 2px 2px 4px rgba(0,0,0,0.05), inset -2px -2px 4px rgba(255,255,255,0.8)',

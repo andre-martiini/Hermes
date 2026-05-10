@@ -210,27 +210,27 @@ export const CalendarView = ({
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
             </button>
           </div>
-          <div className={`flex flex-col md:border-l ${isDark ? 'text-slate-100 border-slate-700' : 'text-slate-700 border-slate-200'} md:pl-4 items-center md:items-start leading-tight truncate`}>
-            <span className={`text-[8px] font-bold uppercase tracking-[0.1em] md:tracking-[0.2em] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+          <div className={`flex flex-col md:border-l ${isDark ? 'text-slate-100 border-slate-700' : 'text-slate-700 border-slate-200'} md:pl-4 items-center md:items-start leading-tight truncate font-mono`}>
+            <span className={`text-[8px] font-black uppercase tracking-[0.2em] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
               {dateInfo.sub}
             </span>
-            <h3 className={`text-[10px] font-black uppercase tracking-tight md:tracking-[0.2em] ${isDark ? 'text-slate-100' : 'text-slate-700'} truncate max-w-full`}>
+            <h3 className={`text-[11px] font-black uppercase tracking-[0.1em] ${isDark ? 'text-slate-100' : 'text-slate-900'} truncate max-w-full`}>
               {dateInfo.main}
             </h3>
           </div>
 
           {viewMode === 'week' && (
-            <div className={`flex ${isDark ? 'bg-slate-800' : 'bg-slate-100'} p-0.5 rounded-lg shadow-inner shrink-0 scale-90 md:scale-100 ml-2`}>
+            <div className={`flex ${isDark ? 'bg-slate-800' : 'bg-slate-100'} p-0.5 rounded-none shadow-inner shrink-0 scale-90 md:scale-100 ml-2`}>
               <button
                 onClick={() => setWeekViewType('grid')}
-                className={`px-3 py-1.5 text-[8px] font-black uppercase rounded-md transition-all flex items-center gap-1.5 ${weekViewType === 'grid' ? isDark ? 'bg-slate-700 shadow-sm text-white border border-slate-600' : 'bg-white shadow-sm text-slate-900 border border-slate-200' : isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'}`}
+                className={`px-3 py-1.5 text-[8px] font-black uppercase rounded-none transition-all flex items-center gap-1.5 ${weekViewType === 'grid' ? isDark ? 'bg-slate-700 shadow-sm text-white border border-slate-600' : 'bg-white shadow-sm text-slate-900 border border-slate-200' : isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'}`}
               >
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 Grade
               </button>
               <button
                 onClick={() => setWeekViewType('cards')}
-                className={`px-3 py-1.5 text-[8px] font-black uppercase rounded-md transition-all flex items-center gap-1.5 ${weekViewType === 'cards' ? isDark ? 'bg-slate-700 shadow-sm text-white border border-slate-600' : 'bg-white shadow-sm text-slate-900 border border-slate-200' : isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'}`}
+                className={`px-3 py-1.5 text-[8px] font-black uppercase rounded-none transition-all flex items-center gap-1.5 ${weekViewType === 'cards' ? isDark ? 'bg-slate-700 shadow-sm text-white border border-slate-600' : 'bg-white shadow-sm text-slate-900 border border-slate-200' : isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'}`}
               >
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M4 6h16M4 12h16M4 18h16" /></svg>
                 Cards
@@ -265,14 +265,13 @@ export const CalendarView = ({
             </div>
             <span className={`text-[9px] font-black uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Concluídas</span>
           </div>
-
           {viewMode === 'day' && (
             <>
               <div
                 onClick={() => setShowStandby(!showStandby)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-xl transition-all cursor-pointer select-none active:scale-95 shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-750' : 'bg-slate-50 border-slate-100 hover:bg-slate-100'}`}
+                className={`flex items-center gap-2 px-3 py-2 rounded-none transition-all cursor-pointer select-none active:scale-95 shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-750' : 'bg-slate-50 border-slate-100 hover:bg-slate-100'}`}
               >
-                <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${showStandby ? 'bg-indigo-600 border-indigo-600' : isDark ? 'bg-slate-900 border-slate-600' : 'bg-white border-slate-300'}`}>
+                <div className={`w-4 h-4 rounded-none border flex items-center justify-center transition-colors ${showStandby ? 'bg-indigo-600 border-indigo-600' : isDark ? 'bg-slate-900 border-slate-600' : 'bg-white border-slate-300'}`}>
                   {showStandby && (
                     <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" />
@@ -284,9 +283,9 @@ export const CalendarView = ({
 
               <div
                 onClick={() => setShowPrevious(!showPrevious)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-xl transition-all cursor-pointer select-none active:scale-95 shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-750' : 'bg-slate-50 border-slate-100 hover:bg-slate-100'}`}
+                className={`flex items-center gap-2 px-3 py-2 rounded-none transition-all cursor-pointer select-none active:scale-95 shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-750' : 'bg-slate-50 border-slate-100 hover:bg-slate-100'}`}
               >
-                <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${showPrevious ? 'bg-rose-600 border-rose-600' : isDark ? 'bg-slate-900 border-slate-600' : 'bg-white border-slate-300'}`}>
+                <div className={`w-4 h-4 rounded-none border flex items-center justify-center transition-colors ${showPrevious ? 'bg-rose-600 border-rose-600' : isDark ? 'bg-slate-900 border-slate-600' : 'bg-white border-slate-300'}`}>
                   {showPrevious && (
                     <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" />
@@ -300,22 +299,22 @@ export const CalendarView = ({
         </div>
 
         {/* Seletor de Visualização à Direita */}
-        <div className={`flex ${isDark ? 'bg-slate-800' : 'bg-slate-200/80'} rounded-xl p-1 shadow-inner shrink-0 w-full md:w-auto`}>
+        <div className={`flex ${isDark ? 'bg-slate-800' : 'bg-slate-200/80'} rounded-none p-1 shadow-inner shrink-0 w-full md:w-auto`}>
           <button
             onClick={() => onViewModeChange('month')}
-            className={`flex-1 md:flex-none px-4 md:px-6 py-2 text-[9px] uppercase font-black rounded-lg transition-all ${viewMode === 'month' ? isDark ? 'bg-slate-600 text-white shadow-md' : 'bg-white shadow-md text-slate-900' : isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-500 hover:text-slate-700'}`}
+            className={`flex-1 md:flex-none px-4 md:px-6 py-2 text-[9px] uppercase font-black rounded-none transition-all ${viewMode === 'month' ? isDark ? 'bg-slate-600 text-white shadow-md' : 'bg-white shadow-md text-slate-900' : isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-500 hover:text-slate-700'}`}
           >
             Mês
           </button>
           <button
             onClick={() => onViewModeChange('week')}
-            className={`flex-1 md:flex-none px-4 md:px-6 py-2 text-[9px] uppercase font-black rounded-lg transition-all ${viewMode === 'week' ? isDark ? 'bg-slate-600 text-white shadow-md' : 'bg-white shadow-md text-slate-900' : isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-500 hover:text-slate-700'}`}
+            className={`flex-1 md:flex-none px-4 md:px-6 py-2 text-[9px] uppercase font-black rounded-none transition-all ${viewMode === 'week' ? isDark ? 'bg-slate-600 text-white shadow-md' : 'bg-white shadow-md text-slate-900' : isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-500 hover:text-slate-700'}`}
           >
             Semana
           </button>
           <button
             onClick={() => onViewModeChange('day')}
-            className={`flex-1 md:flex-none px-4 md:px-6 py-2 text-[9px] uppercase font-black rounded-lg transition-all ${viewMode === 'day' ? isDark ? 'bg-slate-600 text-white shadow-md' : 'bg-white shadow-md text-slate-900' : isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-500 hover:text-slate-700'}`}
+            className={`flex-1 md:flex-none px-4 md:px-6 py-2 text-[9px] uppercase font-black rounded-none transition-all ${viewMode === 'day' ? isDark ? 'bg-slate-600 text-white shadow-md' : 'bg-white shadow-md text-slate-900' : isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-500 hover:text-slate-700'}`}
           >
             Dia
           </button>
@@ -340,7 +339,7 @@ export const CalendarView = ({
         />
       ) : viewMode === 'week' ? (
         <div className="h-[600px] flex flex-col">
-          <div className={`flex border-b shrink-0 ${isDark ? 'border-slate-800 bg-slate-900/50' : 'border-slate-100 bg-slate-50'} ${weekViewType === 'grid' ? 'pl-12' : ''}`}>
+          <div className={`flex border-b-2 shrink-0 ${isDark ? 'border-border-grid bg-slate-950' : 'border-border-grid bg-slate-50'} ${weekViewType === 'grid' ? 'pl-12' : ''}`}>
             {days.map(d => {
               const dayStr = formatDateLocalISO(d);
               const isToday = formatDateLocalISO(new Date()) === dayStr;
@@ -348,16 +347,16 @@ export const CalendarView = ({
               return (
                 <div
                   key={d.toString()}
-                  className={`flex-1 py-2 flex flex-col items-center justify-center gap-1 cursor-pointer transition-all hover:bg-slate-400/5 active:scale-95`}
+                  className={`flex-1 py-3 flex flex-col items-center justify-center gap-1 cursor-pointer transition-all hover:bg-slate-400/5 active:scale-95 border-r border-border-grid last:border-r-0`}
                   onClick={() => {
                     onDateChange(d);
                     onViewModeChange('day');
                   }}
                 >
-                  <div className={`text-[9px] font-black uppercase tracking-tight ${isToday ? 'text-rose-600' : isWeekend ? isDark ? 'text-slate-700' : 'text-slate-300' : isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  <div className={`text-[8px] font-black uppercase tracking-widest font-mono ${isToday ? 'text-rose-600' : isWeekend ? isDark ? 'text-slate-700' : 'text-slate-300' : isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                     {new Intl.DateTimeFormat('pt-BR', { weekday: 'short' }).format(d).replace('.', '')}
                   </div>
-                  <div className={`w-7 h-7 flex items-center justify-center rounded-full text-[11px] font-black transition-all ${isToday ? 'bg-rose-500 text-white shadow-md' : isWeekend ? isDark ? 'text-slate-600' : 'text-slate-400' : isDark ? 'text-slate-400' : 'text-slate-700'}`}>
+                  <div className={`w-8 h-8 flex items-center justify-center rounded-none text-[12px] font-black font-mono transition-all ${isToday ? 'bg-slate-900 text-white shadow-md' : isWeekend ? isDark ? 'text-slate-600' : 'text-slate-400' : isDark ? 'text-slate-300' : 'text-slate-900'}`}>
                     {d.getDate()}
                   </div>
                 </div>
@@ -416,10 +415,10 @@ export const CalendarView = ({
                       {dayGoogleEvents.map(e => (
                         <div
                           key={e.id}
-                          className={`px-2 py-1 rounded-md border text-[8px] font-black truncate flex items-center gap-1.5 ${isDark ? 'bg-amber-900/20 border-amber-800/50 text-amber-500' : 'bg-amber-50 border-amber-100 text-amber-700'}`}
+                          className={`px-2 py-1.5 rounded-none border text-[8px] font-black truncate flex items-center gap-1.5 font-mono uppercase tracking-tighter ${isDark ? 'bg-amber-900/20 border-amber-800/50 text-amber-500' : 'bg-amber-50 border-amber-100 text-amber-700'}`}
                           title={e.titulo}
                         >
-                          <div className="w-1.5 h-1.5 bg-amber-500 rounded-full"></div>
+                          <div className="w-1 h-3 bg-amber-500 rounded-none"></div>
                           {e.titulo}
                         </div>
                       ))}
@@ -436,7 +435,7 @@ export const CalendarView = ({
                         />
                       ))}
                       {dayTasks.length === 0 && dayGoogleEvents.length === 0 && (
-                        <div className={`flex-1 flex items-center justify-center border-2 border-dashed rounded-2xl ${isDark ? 'border-slate-800' : 'border-slate-50'}`}>
+                        <div className={`flex-1 flex items-center justify-center border-2 border-dashed rounded-none ${isDark ? 'border-slate-800' : 'border-slate-50'}`}>
                           <span className={`text-[9px] font-black uppercase tracking-widest ${isDark ? 'text-slate-800' : 'text-slate-200'}`}>Vazio</span>
                         </div>
                       )}
@@ -449,9 +448,9 @@ export const CalendarView = ({
         </div>
       ) : (
         <>
-          <div className={`grid grid-cols-7 border-b ${isDark ? 'border-slate-800 bg-slate-900/50' : 'border-slate-100 bg-slate-50'}`}>
+          <div className={`grid grid-cols-7 border-b-2 ${isDark ? 'border-border-grid bg-slate-950' : 'border-border-grid bg-slate-50'}`}>
             {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((d, i) => (
-              <div key={d} className={`py-3 text-center text-[10px] font-black uppercase ${i === 0 || i === 6 ? 'text-slate-500' : 'text-slate-400'}`}>{d}</div>
+              <div key={d} className={`py-4 text-center text-[9px] font-black uppercase tracking-[0.2em] font-mono ${i === 0 || i === 6 ? 'text-slate-600' : 'text-slate-400'}`}>{d}</div>
             ))}
           </div>
 
@@ -489,21 +488,21 @@ export const CalendarView = ({
                     }
                   }}
                 >
-                  <div className="flex justify-between items-start pointer-events-none">
-                    <span className={`text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full ${isToday ? 'bg-rose-500 text-white' : !isCurrentMonth ? (isDark ? 'text-slate-700' : 'text-slate-300') : (isDark ? 'text-slate-400' : 'text-slate-700')}`}>
+                  <div className="flex justify-between items-start pointer-events-none mb-2">
+                    <span className={`text-[10px] font-black w-7 h-7 flex items-center justify-center rounded-none font-mono ${isToday ? 'bg-slate-900 text-white' : !isCurrentMonth ? (isDark ? 'text-slate-700' : 'text-slate-300') : (isDark ? 'text-slate-500' : 'text-slate-900')}`}>
                       {day.getDate()}
                     </span>
-                    {dayTasks.length > 0 && <span className={`text-[9px] font-black ${isDark ? 'text-slate-700' : 'text-slate-300'}`}>{dayTasks.length}</span>}
+                    {dayTasks.length > 0 && <span className={`text-[8px] font-black font-mono ${isDark ? 'text-slate-700' : 'text-slate-400'}`}>{dayTasks.length.toString().padStart(2, '0')}</span>}
                   </div>
 
                   <div className={`flex-1 flex flex-col gap-1 mt-1 overflow-y-auto max-h-[220px] scrollbar-hide pointer-events-none`}>
                     {dayGoogleEvents.map(e => (
                       <div
                         key={e.id}
-                        className={`px-2 py-0.5 rounded-md border text-[8px] font-black truncate flex items-center gap-1 ${isDark ? 'bg-amber-900/20 border-amber-800/50 text-amber-500' : 'bg-amber-50 border-amber-100 text-amber-700'}`}
+                        className={`px-2 py-1 rounded-none border text-[8px] font-black truncate flex items-center gap-1 font-mono uppercase tracking-tighter ${isDark ? 'bg-amber-900/10 border-amber-800/30 text-amber-500' : 'bg-amber-50 border-amber-100 text-amber-700'}`}
                         title={e.titulo}
                       >
-                        <div className="w-1.5 h-1.5 bg-amber-500 rounded-full"></div>
+                        <div className="w-1 h-3 bg-amber-500 rounded-none"></div>
                         {e.titulo}
                       </div>
                     ))}

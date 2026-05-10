@@ -15,24 +15,24 @@ export const HermesModal = ({ isOpen, title, message, type, onConfirm, onCancel,
 
   return (
     <div className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-slate-950/90 animate-in fade-in duration-300">
-      <div className="bg-white w-full max-w-sm rounded-none shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 border border-border-grid">
+      <div className="bg-white w-full max-w-sm rounded-none shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 border-2 border-slate-900">
         <div className="p-8 space-y-6">
           <div className="space-y-2">
-            <h3 className="text-xl font-black text-slate-900 tracking-tight font-mono">{title}</h3>
-            <p className="text-sm font-medium text-slate-500 leading-relaxed font-mono">{message}</p>
+            <h3 className="text-xl font-black text-slate-900 tracking-tight font-mono uppercase">{title}</h3>
+            <p className="text-xs font-bold text-slate-500 leading-relaxed font-mono">{message}</p>
           </div>
           <div className="flex gap-3">
             {type === 'confirm' && (
               <button
                 onClick={onCancel}
-                className="flex-1 py-4 rounded-none text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 transition-colors font-mono"
+                className="flex-1 py-4 rounded-none text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-100 transition-colors font-mono border border-border-grid"
               >
                 {cancelLabel || 'Cancelar'}
               </button>
             )}
             <button
               onClick={onConfirm}
-              className="flex-1 bg-slate-900 text-white py-4 rounded-none text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all active:scale-95 font-mono"
+              className="flex-1 bg-slate-900 text-white py-4 rounded-none text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-600 transition-all font-mono"
             >
               {confirmLabel || (type === 'alert' ? 'OK' : 'Confirmar')}
             </button>
@@ -96,14 +96,14 @@ export const SettingsModal = ({
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center p-0 md:p-4 bg-slate-950/90 animate-in fade-in duration-300">
-      <div className="bg-white w-full h-full md:h-auto md:max-w-2xl rounded-none shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh] border border-border-grid">
+      <div className="bg-white w-full h-full md:h-auto md:max-w-2xl rounded-none shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh] border-2 border-slate-900">
         <div className="p-8 border-b border-border-grid bg-slate-50 flex flex-col gap-6 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-2xl font-black text-slate-900 tracking-tight font-mono">Configurações</h3>
-              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest font-mono">Painel de Preferências</p>
+              <h3 className="text-2xl font-black text-slate-900 tracking-tight font-mono uppercase">Configurações</h3>
+              <p className="text-slate-400 text-[9px] font-black uppercase tracking-[0.2em] font-mono">Painel de Preferências :: System_Admin</p>
             </div>
-            <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-none transition-colors">
+            <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-none transition-colors border border-transparent hover:border-border-grid">
               <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           </div>
@@ -111,41 +111,41 @@ export const SettingsModal = ({
           <div className="flex bg-slate-200 p-1 rounded-none gap-1 border border-border-grid">
             <button
               onClick={() => setActiveTab('notifications')}
-              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'notifications' ? 'bg-white text-slate-900 border border-border-grid shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
+              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'notifications' ? 'bg-slate-900 text-white border border-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`}
               title="Notificações"
             >
               <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
             </button>
             <button
               onClick={() => setActiveTab('context')}
-              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'context' ? 'bg-white text-slate-900 border border-border-grid shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
+              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'context' ? 'bg-slate-900 text-white border border-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`}
               title="Contexto & Áreas"
             >
               <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>
             </button>
             <button
               onClick={() => setActiveTab('sistemas')}
-              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'sistemas' ? 'bg-white text-slate-900 border border-border-grid shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
+              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'sistemas' ? 'bg-slate-900 text-white border border-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`}
               title="Sistemas"
             >
               <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2-2v10a2 2 0 002 2z" /></svg>
             </button>
             <button
               onClick={() => setActiveTab('google')}
-              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'google' ? 'bg-white text-slate-900 border border-border-grid shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
+              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'google' ? 'bg-slate-900 text-white border border-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`}
               title="Google"
             >
               <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" /></svg>
             </button>
             <button
               onClick={() => setActiveTab('pomodoro')}
-              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'pomodoro' ? 'bg-white text-slate-900 border border-border-grid shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
+              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'pomodoro' ? 'bg-slate-900 text-white border border-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`}
               title="Pomodoro"
             >
               <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
             </button>
-          </div>
         </div>
+      </div>
 
         <div className="p-8 space-y-10 overflow-y-auto custom-scrollbar flex-1">
           {activeTab === 'notifications' ? (
@@ -826,13 +826,13 @@ export const SettingsModal = ({
         </div>
 
         <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-4 flex-shrink-0">
-          <button onClick={onClose} className="flex-1 px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all">Cancelar</button>
+          <button onClick={onClose} className="flex-1 px-8 py-4 rounded-none text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all font-mono border border-border-grid">Cancelar</button>
           <button
             onClick={() => {
               onSave(localSettings);
               onClose();
             }}
-            className="flex-1 bg-blue-600 text-white px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-all"
+            className="flex-1 bg-slate-900 text-white px-8 py-4 rounded-none text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-600 transition-all font-mono"
           >
             Salvar Alterações
           </button>
@@ -859,16 +859,16 @@ export const DailyHabitsModal = ({
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-0 md:p-4 bg-slate-950/90 animate-in fade-in duration-300">
-      <div className="bg-white w-full h-full md:h-auto md:max-w-md rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-        <div className="p-8 border-b border-slate-100 bg-amber-500/5 flex items-center justify-between">
+      <div className="bg-white w-full h-full md:h-auto md:max-w-md rounded-none shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 border-2 border-slate-900">
+        <div className="p-8 border-b border-border-grid bg-slate-50 flex items-center justify-between">
           <div>
-            <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3">
-              <span className="w-2 h-8 bg-amber-500 rounded-full"></span>
-              Hábitos de Hoje
+            <h3 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3 font-mono uppercase">
+              <span className="w-2 h-8 bg-amber-500 rounded-none"></span>
+              Hábitos Diários
             </h3>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Lembrete Diário</p>
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mt-1 font-mono">Status Check :: Daily_Sync</p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-none transition-colors border border-transparent hover:border-border-grid">
             <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
@@ -897,15 +897,15 @@ export const DailyHabitsModal = ({
               <button
                 key={habit.id}
                 onClick={() => handleHabitToggle(habit.id as keyof DailyHabits)}
-                className={`w-full flex items-center justify-between p-4 rounded-none md:rounded-2xl border-2 transition-all duration-300 ${isActive
+                className={`w-full flex items-center justify-between p-4 rounded-none border-2 transition-all duration-300 font-mono ${isActive
                   ? `${colors.bg} ${colors.border} shadow-sm`
                   : 'bg-white border-slate-100 hover:border-slate-200'
                   }`}
               >
-                <span className={`text-sm font-bold ${isActive ? colors.text : 'text-slate-600'}`}>
+                <span className={`text-[11px] font-black uppercase tracking-widest ${isActive ? colors.text : 'text-slate-600'}`}>
                   {habit.label}
                 </span>
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${isActive
+                <div className={`w-6 h-6 rounded-none flex items-center justify-center transition-all ${isActive
                   ? `${colors.dot} text-white scale-110`
                   : 'border-2 border-slate-200'
                   }`}>
@@ -918,12 +918,12 @@ export const DailyHabitsModal = ({
           })}
         </div>
 
-        <div className="p-8 bg-slate-50 border-t border-slate-100">
+        <div className="p-8 bg-slate-50 border-t border-border-grid">
           <button
             onClick={onClose}
-            className="w-full bg-slate-900 text-white px-8 py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all"
+            className="w-full bg-slate-900 text-white px-8 py-5 rounded-none text-[10px] font-black uppercase tracking-[0.2em] shadow-lg hover:bg-blue-600 transition-all font-mono"
           >
-            Concluir Registro
+            Concluir Registro e Sincronizar
           </button>
         </div>
       </div>
@@ -1185,7 +1185,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-4 bg-slate-950/90 animate-in fade-in duration-300">
-      <div className={`bg-white w-full h-auto max-h-[95vh] rounded-none shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col transition-all duration-500 border border-border-grid ${tipoAcao === 'deep' ? 'md:max-w-4xl' : 'md:max-w-md'}`}>
+      <div className={`bg-white w-full h-auto max-h-[95vh] rounded-none shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col transition-all duration-500 border-2 border-slate-900 ${tipoAcao === 'deep' ? 'md:max-w-4xl' : 'md:max-w-md'}`}>
         {/* Header with Type Selector */}
         <div className="p-4 border-b border-border-grid bg-slate-50 flex flex-col gap-4 flex-shrink-0">
           <div className="flex items-center justify-between">
@@ -1214,29 +1214,29 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
         <div className="p-4 space-y-4 overflow-y-auto custom-scrollbar flex-1">
           {/* Seção de Ingestão para Deep Work */}
           {tipoAcao === 'deep' && (
-            <div className="space-y-4 animate-in slide-in-from-top-4 duration-300 border-b border-border-grid pb-4">
+            <div className="space-y-4 animate-in slide-in-from-top-4 duration-300 border-b-2 border-border-grid pb-6">
               <div className="flex bg-slate-100 p-1 rounded-none gap-1 border border-border-grid">
                 {(['manual', 'audio'] as const).map((o) => (
                   <button
                     key={o}
                     onClick={() => setOrigemIngestao(o)}
-                    className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-none transition-all font-mono ${origemIngestao === o ? 'bg-white text-slate-900 border border-border-grid shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                    className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-none transition-all font-mono ${origemIngestao === o ? 'bg-slate-900 text-white border border-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
                   >
-                    {o === 'manual' ? 'Manual' : 'Áudio'}
+                    {o === 'manual' ? 'Modo Manual' : 'Captura de Áudio'}
                   </button>
                 ))}
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1 font-mono">Área Temática</label>
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1 font-mono">Área Temática :: Context</label>
                   <select
                     value={formData.area_tematica}
                     onChange={e => {
                       setFormData({ ...formData, area_tematica: e.target.value as Categoria });
                       setAutoClassified(true);
                     }}
-                    className="w-full bg-slate-100 border border-border-grid rounded-none px-4 py-2 text-xs font-bold text-slate-900 focus:ring-1 focus:ring-primary-tactile transition-all font-mono uppercase tracking-widest"
+                    className="w-full bg-slate-100 border border-border-grid rounded-none px-4 py-3 text-xs font-bold text-slate-900 focus:ring-1 focus:ring-slate-900 transition-all font-mono uppercase tracking-widest"
                   >
                     <option value="GERAL">Geral</option>
                     <option value="NÃO CLASSIFICADA">Não Classificada</option>
@@ -1248,35 +1248,35 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                 <div className="flex items-end gap-2">
                   <button
                     onClick={() => setIsExtraContextOpen(!isExtraContextOpen)}
-                    className={`h-9 flex-1 rounded-none text-[9px] font-black uppercase tracking-widest transition-all font-mono border ${isExtraContextOpen ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-100 text-slate-600 border-border-grid hover:bg-slate-200'}`}
+                    className={`h-11 flex-1 rounded-none text-[9px] font-black uppercase tracking-widest transition-all font-mono border-2 ${isExtraContextOpen ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-100 text-slate-600 border-border-grid hover:bg-slate-200'}`}
                   >
-                    Contexto Extra
+                    Contexto IA
                   </button>
                   <button
                     onClick={() => setIsTranscriptionSelectorOpen(!isTranscriptionSelectorOpen)}
-                    className={`h-9 flex-1 rounded-none text-[9px] font-black uppercase tracking-widest transition-all font-mono border ${isTranscriptionSelectorOpen ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-border-grid hover:bg-slate-100'}`}
+                    className={`h-11 flex-1 rounded-none text-[9px] font-black uppercase tracking-widest transition-all font-mono border-2 ${isTranscriptionSelectorOpen ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-border-grid hover:bg-slate-100'}`}
                   >
-                    Anexar Reunião
+                    Vincular Atas
                   </button>
                 </div>
               </div>
 
               {isTranscriptionSelectorOpen && (
-                <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100 space-y-3 animate-in slide-in-from-top-2">
+                <div className="p-6 bg-slate-900 rounded-none border border-slate-800 space-y-4 animate-in slide-in-from-top-2">
                   <div className="flex items-center justify-between">
-                    <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">Selecionar Transcrição</p>
-                    <button onClick={() => setIsTranscriptionSelectorOpen(false)} className="text-indigo-400 hover:text-indigo-600">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest font-mono">Selecionar Histórico de Transcrição</p>
+                    <button onClick={() => setIsTranscriptionSelectorOpen(false)} className="text-slate-500 hover:text-white">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                   </div>
                   <input
                     type="text"
-                    placeholder="Buscar por título da reunião..."
+                    placeholder="Buscar atas ou reuniões..."
                     value={transcriptionSearch}
                     onChange={e => setTranscriptionSearch(e.target.value)}
-                    className="w-full bg-white border border-indigo-100 rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-none px-4 py-3 text-xs font-bold text-white focus:ring-1 focus:ring-blue-500 outline-none font-mono"
                   />
-                  <div className="max-h-[150px] overflow-y-auto space-y-2 custom-scrollbar pr-1">
+                  <div className="max-h-[200px] overflow-y-auto space-y-2 custom-scrollbar pr-2">
                     {knowledgeItems
                       ?.filter(item =>
                         (item.area_tematica === 'REUNIÕES' || item.tipo_arquivo === 'transcription') &&
@@ -1292,24 +1292,20 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                             setTranscriptionSearch('');
                             if (!isExtraContextOpen) setIsExtraContextOpen(true);
                           }}
-                          className="w-full text-left p-3 bg-white border border-indigo-50 rounded-xl hover:border-indigo-300 hover:shadow-sm transition-all group"
+                          className="w-full text-left p-4 bg-slate-800 border border-slate-700 rounded-none hover:border-blue-500 transition-all group"
                         >
-                          <p className="text-[10px] font-bold text-slate-700 group-hover:text-indigo-600 transition-colors">{item.titulo}</p>
-                          <p className="text-[8px] text-slate-400 font-medium uppercase mt-1">{formatDate(item.data_criacao)}</p>
+                          <p className="text-[10px] font-black text-slate-300 group-hover:text-white transition-colors font-mono uppercase tracking-widest">{item.titulo}</p>
+                          <p className="text-[8px] text-slate-500 font-bold uppercase mt-1 font-mono">{formatDate(item.data_criacao)}</p>
                         </button>
                       ))}
-                    {knowledgeItems?.filter(item => (item.area_tematica === 'REUNIÕES' || item.tipo_arquivo === 'transcription')).length === 0 && (
-                      <p className="text-[10px] text-slate-400 italic text-center py-4">Nenhuma transcrição encontrada.</p>
-                    )}
                   </div>
                 </div>
               )}
 
               {isExtraContextOpen && (
-                <div className="space-y-2 animate-in slide-in-from-top-2">
-                  {/* Área de drop/upload */}
+                <div className="space-y-3 animate-in slide-in-from-top-2">
                   <div
-                    className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center cursor-pointer hover:border-slate-400 transition-colors"
+                    className="border-2 border-dashed border-border-grid rounded-none p-6 text-center cursor-pointer hover:border-slate-900 transition-colors bg-slate-50"
                     onClick={() => (document.getElementById('extra-ctx-file-input') as HTMLInputElement)?.click()}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => { e.preventDefault(); Array.from(e.dataTransfer.files).forEach(handleUploadExtraFile); }}
@@ -1322,26 +1318,24 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                       multiple
                       onChange={(e) => Array.from(e.target.files || []).forEach(handleUploadExtraFile)}
                     />
-                    <svg className="w-5 h-5 mx-auto text-slate-300 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-6 h-6 mx-auto text-slate-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                     </svg>
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">PDF, TXT ou MD — arraste ou clique</p>
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] font-mono">CARREGAR DOCUMENTAÇÃO TÉCNICA (PDF, TXT, MD)</p>
                   </div>
 
-                  {/* Lista de arquivos */}
                   {extraContextFiles.length > 0 && (
                     <div className="space-y-1">
                       {extraContextFiles.map(f => (
-                        <div key={f.id} className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2">
-                          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${f.status === 'ready' ? 'bg-emerald-400' : f.status === 'uploading' ? 'bg-amber-400 animate-pulse' : 'bg-rose-400'}`} />
-                          <span className="text-[10px] font-bold text-slate-700 flex-1 truncate">{f.name}</span>
-                          <span className="text-[9px] text-slate-400 flex-shrink-0">{f.status === 'uploading' ? 'Processando…' : f.status === 'ready' ? 'Pronto' : 'Erro'}</span>
+                        <div key={f.id} className="flex items-center gap-3 bg-slate-50 rounded-none px-4 py-3 border border-border-grid">
+                          <span className={`w-2 h-2 rounded-none flex-shrink-0 ${f.status === 'ready' ? 'bg-emerald-500' : f.status === 'uploading' ? 'bg-amber-500 animate-pulse' : 'bg-rose-500'}`} />
+                          <span className="text-[10px] font-black text-slate-700 flex-1 truncate font-mono uppercase">{f.name}</span>
                           {f.status !== 'uploading' && (
                             <button
                               onClick={() => setExtraContextFiles(prev => prev.filter(x => x.id !== f.id))}
-                              className="text-slate-300 hover:text-rose-400 transition-colors"
+                              className="text-slate-400 hover:text-rose-600 transition-colors"
                             >
-                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
                             </button>
                           )}
                         </div>
@@ -1349,76 +1343,44 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                     </div>
                   )}
 
-                  {/* Vincular Reunião */}
-                  {reunioes.length > 0 && (
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Vincular Reunião</label>
-                      <select
-                        value={selectedReuniao?.firestoreId || ''}
-                        onChange={e => {
-                          const found = reunioes.find(r => r.firestoreId === e.target.value) || null;
-                          setSelectedReuniao(found);
-                        }}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[10px] font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 transition-all"
-                      >
-                        <option value="">Nenhuma reunião</option>
-                        {reunioes.map(r => (
-                          <option key={r.firestoreId} value={r.firestoreId || ''}>
-                            {r.titulo} — {new Date(r.startedAt).toLocaleDateString('pt-BR')}
-                          </option>
-                        ))}
-                      </select>
-                      {selectedReuniao && (
-                        <p className="text-[9px] text-emerald-600 font-bold pl-1">
-                          ✓ {selectedReuniao.transcriptCount} falas da reunião serão usadas como contexto
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Textarea para texto livre */}
                   <textarea
                     value={extraContext}
                     onChange={e => setExtraContext(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs font-medium text-slate-700 min-h-[50px] resize-none"
-                    placeholder="Ou cole aqui texto adicional de contexto..."
+                    className="w-full bg-slate-50 border border-border-grid rounded-none px-4 py-4 text-xs font-bold text-slate-700 min-h-[80px] resize-none font-mono focus:ring-1 focus:ring-slate-900 outline-none"
+                    placeholder="Instruções adicionais ou contexto específico para a IA..."
                   />
                 </div>
               )}
 
-              {/* Área de Processamento Dinâmico */}
               {origemIngestao !== 'manual' && (
-                <div className="space-y-3 p-3 bg-slate-50 rounded-2xl border border-slate-100">
-                  <>
-                    <div className="flex flex-col items-center justify-center gap-4 py-4">
-                      <button
-                        onClick={handleAudioToggle}
-                        disabled={isTranscribing}
-                        className={`w-16 h-16 rounded-full flex items-center justify-center transition-all disabled:opacity-60 ${isRecording ? 'bg-rose-500 scale-110 shadow-lg shadow-rose-200 animate-pulse' : isTranscribing ? 'bg-blue-100 text-blue-500' : 'bg-white text-slate-400 border border-slate-200 hover:border-slate-400'}`}
-                      >
-                        {isTranscribing ? (
-                          <svg className="w-7 h-7 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                        ) : isRecording ? (
-                          <svg className="w-7 h-7 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
-                        ) : (
-                          <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-                        )}
-                      </button>
-                      <div className="text-center">
-                        <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest">
-                          {isTranscribing ? 'Transcrevendo...' : isRecording ? 'Gravando — clique para parar' : 'Clique para gravar'}
-                        </p>
-                        {inputText && <p className="text-[9px] font-medium text-slate-500 mt-1 max-w-[200px] truncate">{inputText}</p>}
-                      </div>
+                <div className="space-y-4 p-6 bg-slate-900 rounded-none border border-slate-800">
+                  <div className="flex flex-col items-center justify-center gap-6 py-4">
+                    <button
+                      onClick={handleAudioToggle}
+                      disabled={isTranscribing}
+                      className={`w-20 h-20 rounded-none flex items-center justify-center transition-all disabled:opacity-60 border-2 ${isRecording ? 'bg-rose-600 border-rose-500 scale-105 shadow-lg animate-pulse' : isTranscribing ? 'bg-slate-800 border-blue-500' : 'bg-slate-800 border-slate-700 text-slate-500 hover:border-white hover:text-white'}`}
+                    >
+                      {isTranscribing ? (
+                        <svg className="w-8 h-8 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                      ) : isRecording ? (
+                        <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
+                      ) : (
+                        <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                      )}
+                    </button>
+                    <div className="text-center">
+                      <p className="text-[11px] font-black text-white uppercase tracking-[0.3em] font-mono">
+                        {isTranscribing ? 'TRANSCREVENDO FLUXO...' : isRecording ? 'CAPTURA ATIVA' : 'INICIAR CAPTURA'}
+                      </p>
                     </div>
+                  </div>
                   <button
                     onClick={handleGenerateWithIA}
                     disabled={isGenerating || !inputText.trim()}
-                    className={`w-full py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isGenerating ? 'bg-slate-100 text-slate-400' : 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md hover:opacity-90'}`}
+                    className={`w-full py-5 rounded-none text-[11px] font-black uppercase tracking-[0.2em] transition-all border-2 ${isGenerating ? 'bg-slate-800 border-slate-700 text-slate-500' : 'bg-white text-slate-900 border-white hover:bg-transparent hover:text-white shadow-xl'} font-mono`}
                   >
-                    {isGenerating ? '✨ Processando Inteligência...' : '✨ Gerar Demanda com IA'}
+                    {isGenerating ? 'ANALISANDO COM STITCH CORE...' : 'GERAR ESTRUTURA COM IA'}
                   </button>
-                  </>
                 </div>
               )}
             </div>
@@ -1579,8 +1541,8 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
         </div>
 
         {/* Footer Actions */}
-        <div className="p-4 bg-slate-50 border-t border-slate-100 flex gap-3 flex-shrink-0">
-          <button onClick={onClose} className="flex-1 px-4 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all border border-slate-200">Cancelar</button>
+        <div className="p-6 bg-slate-50 border-t border-border-grid flex gap-4 flex-shrink-0">
+          <button onClick={onClose} className="flex-1 px-8 py-4 rounded-none text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 hover:bg-slate-200 transition-all border border-border-grid font-mono">Cancelar</button>
           <button
             onClick={() => {
               if (!formData.titulo || (!formData.data_limite && formData.status !== 'stand-by')) {
@@ -1609,7 +1571,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
               });
               onClose();
             }}
-            className={`flex-1 ${tipoAcao === 'fast' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-purple-600 hover:bg-purple-700'} text-white px-4 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg transition-all`}
+            className={`flex-1 ${tipoAcao === 'fast' ? 'bg-slate-900 hover:bg-blue-600' : 'bg-slate-900 hover:bg-purple-600'} text-white px-8 py-4 rounded-none text-[10px] font-black uppercase tracking-[0.2em] shadow-lg transition-all font-mono`}
           >
             {tipoAcao === 'fast' ? 'Criar Fast Action' : 'Iniciar Deep Work'}
           </button>
@@ -1659,25 +1621,25 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-4 bg-slate-950/90 animate-in fade-in duration-300">
-      <div className="bg-white w-full h-auto max-h-[95vh] md:max-w-md flex flex-col rounded-2xl md:rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-        <div className="p-4 border-b border-slate-100 bg-slate-50 flex flex-col gap-4 flex-shrink-0">
+      <div className="bg-white w-full h-auto max-h-[95vh] md:max-w-md flex flex-col rounded-none shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 border-2 border-slate-900">
+        <div className="p-4 border-b border-border-grid bg-slate-50 flex flex-col gap-4 flex-shrink-0">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-black text-slate-900 tracking-tight">Editar Ação</h3>
-            <button onClick={onClose} className="p-1.5 hover:bg-slate-200 rounded-full transition-colors">
+            <h3 className="text-lg font-black text-slate-900 tracking-tight font-mono uppercase">Editar Ação</h3>
+            <button onClick={onClose} className="p-1.5 hover:bg-slate-200 rounded-none transition-colors border border-transparent hover:border-border-grid">
               <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           </div>
 
-          <div className="flex bg-slate-200 p-1 rounded-xl">
+          <div className="flex bg-slate-200 p-1 rounded-none border border-border-grid">
             <button
               onClick={() => setTipoAcao('fast')}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${tipoAcao === 'fast' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 text-[10px] font-black uppercase tracking-widest rounded-none transition-all font-mono ${tipoAcao === 'fast' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
             >
               Fast Track
             </button>
             <button
               onClick={() => setTipoAcao('deep')}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${tipoAcao === 'deep' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 text-[10px] font-black uppercase tracking-widest rounded-none transition-all font-mono ${tipoAcao === 'deep' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
             >
               Deep Work
             </button>
@@ -1838,7 +1800,7 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
           </div>
         </div>
 
-        <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-col md:flex-row gap-2 flex-shrink-0">
+        <div className="p-6 bg-slate-50 border-t border-border-grid flex flex-col md:flex-row gap-3 flex-shrink-0">
           <button
             onClick={() => {
               if (!formData.titulo || (!formData.data_limite && formData.status !== 'stand-by')) {
@@ -1854,12 +1816,12 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
               });
               onClose();
             }}
-            className={`w-full md:flex-1 ${tipoAcao === 'fast' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-purple-600 hover:bg-purple-700'} text-white px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg transition-all order-1 md:order-2`}
+            className={`w-full md:flex-1 ${tipoAcao === 'fast' ? 'bg-slate-900 hover:bg-blue-600' : 'bg-slate-900 hover:bg-purple-600'} text-white px-8 py-4 rounded-none text-[10px] font-black uppercase tracking-[0.2em] shadow-lg transition-all order-1 md:order-2 font-mono`}
           >
             Salvar Alterações
           </button>
 
-          <div className="flex gap-2 order-2">
+          <div className="flex gap-3 order-2">
             <button
               onClick={() => {
                 showConfirm("Confirmar Exclusão", "Deseja realmente excluir esta tarefa?", () => {
@@ -1867,13 +1829,13 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
                   onClose();
                 });
               }}
-              className="flex-1 md:flex-none px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all border flex items-center justify-center gap-2 text-rose-600 hover:bg-rose-50 border-rose-100"
+              className="flex-1 md:flex-none px-6 py-4 rounded-none text-[10px] font-black uppercase tracking-widest transition-all border flex items-center justify-center gap-2 text-rose-600 hover:bg-rose-50 border-rose-100 font-mono"
             >
               Excluir
             </button>
             <button
               onClick={onClose}
-              className="flex-1 md:px-6 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all border border-slate-200"
+              className="flex-1 md:px-8 py-4 rounded-none text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all border border-border-grid font-mono"
             >
               Cancelar
             </button>

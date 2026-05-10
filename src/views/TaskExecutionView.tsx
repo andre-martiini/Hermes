@@ -1442,18 +1442,16 @@ export const TaskExecutionView = ({
                     setIsEditingTitle(false);
                   }
                 }}
-                className={`w-full bg-transparent border-b border-blue-500/50 outline-none text-[1.125rem] font-black leading-tight tracking-tight break-words font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}
+                className={`w-full bg-transparent border-b border-blue-500/50 outline-none text-xl font-black leading-tight tracking-tight break-words font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}
                 autoFocus
               />
             ) : (
               <h1
                 onClick={() => setIsEditingTitle(true)}
-                className={`text-[1.125rem] font-black leading-tight tracking-tight break-words cursor-pointer hover:text-blue-600 transition-colors font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}
+                className={`text-xl font-black leading-tight tracking-tight break-words cursor-pointer hover:text-blue-600 transition-colors font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}
                 title="Clique para alterar o título"
               >
-                <span className={isDark ? "bg-yellow-400/20 px-1" : "bg-yellow-200/60 px-1"}>
-                  {currentTaskData.titulo}
-                </span>
+                {currentTaskData.titulo}
               </h1>
             )}
           </div>
@@ -1537,18 +1535,16 @@ export const TaskExecutionView = ({
                     setIsEditingTitle(false);
                   }
                 }}
-                className={`w-full bg-transparent border-b border-blue-500/50 outline-none text-xl md:text-2xl font-black tracking-tight leading-tight break-words font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}
+                className={`w-full bg-transparent border-b border-blue-500/50 outline-none text-xl md:text-3xl font-black tracking-tight leading-tight break-words font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}
                 autoFocus
               />
             ) : (
               <h1
                 onClick={() => setIsEditingTitle(true)}
-                className={`text-xl md:text-2xl font-black tracking-tight leading-tight break-words whitespace-normal cursor-pointer hover:text-blue-600 transition-colors font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}
+                className={`text-xl md:text-3xl font-black tracking-tight leading-tight break-words whitespace-normal cursor-pointer hover:text-blue-600 transition-colors font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}
                 title="Clique para alterar o título"
               >
-                <span className={isDark ? "bg-yellow-400/20 px-1" : "bg-yellow-200/60 px-1"}>
-                  {currentTaskData.titulo}
-                </span>
+                {currentTaskData.titulo}
               </h1>
             )}
           </div>
@@ -2342,7 +2338,7 @@ export const TaskExecutionView = ({
       ══════════════════════════════════════════════════════════ */}
       {showDeepResearchModal && (
         <div className="fixed inset-0 z-[340] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className={`w-full max-w-lg rounded-3xl shadow-2xl border p-6 ${isDark ? 'bg-[#10131d] border-white/10 text-white' : 'bg-white border-border-grid text-slate-900'}`}>
+          <div className={`w-full max-w-lg rounded-none shadow-2xl border-2 p-8 ${isDark ? 'bg-[#0a0a0a] border-white/20 text-white' : 'bg-white border-slate-900 text-slate-900'}`}>
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h3 className="text-base font-black tracking-tight">Iniciar Pesquisa Profunda</h3>
@@ -2527,7 +2523,7 @@ export const TaskExecutionView = ({
       ══════════════════════════════════════════════════════════ */}
       {modalConfig.isOpen && (
         <div className="fixed inset-0 z-[300] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className={`w-full ${modalConfig.type === 'edit_diary' ? 'max-w-4xl max-h-[90vh]' : 'max-w-md'} p-6 rounded-3xl shadow-2xl overflow-hidden ${isDark ? 'bg-[#1A1A2E] text-white border border-white/10' : 'bg-white text-slate-900'}`}>
+          <div className={`w-full ${modalConfig.type === 'edit_diary' ? 'max-w-4xl max-h-[90vh]' : 'max-w-md'} p-8 rounded-none shadow-2xl overflow-hidden border-2 ${isDark ? 'bg-[#0a0a0a] text-white border-white/20' : 'bg-white text-slate-900 border-slate-900'}`}>
             <h3 className="text-base font-black mb-4 tracking-tighter">
               {modalConfig.type === 'confirm_delete' ? 'Excluir Registro'
                 : modalConfig.type === 'reminder' ? 'Agendar Lembrete'
