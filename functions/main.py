@@ -11509,7 +11509,7 @@ from daily_reset_job import daily_wip_reset_and_degradation
 @https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=60)
 def gerarResumoFinanceiro(req: https_fn.CallableRequest):
     """
-    Gera um parágrafo curto de diagnóstico de saúde financeira a partir de um snapshot compacto.
+    Gera um diagnóstico estruturado de saúde financeira a partir de um snapshot compacto.
     Projetado para ser chamado apenas quando os dados financeiros mudam (fingerprint diferente).
     """
     from google import genai
@@ -11532,13 +11532,34 @@ def gerarResumoFinanceiro(req: https_fn.CallableRequest):
         )
 
     import json
+    import re
     snapshot_text = json.dumps(snapshot, ensure_ascii=False, indent=2)
 
-    prompt = f"""Você é um consultor financeiro pessoal. Analise o snapshot financeiro abaixo e escreva um diagnóstico de saúde financeira em 3 a 5 frases curtas e diretas em português.
+    prompt = f"""Você é um consultor financeiro pessoal. Analise o snapshot financeiro abaixo e gere um diagnóstico de saúde financeira em português.
 
-Seja específico com os números. Destaque o ponto mais crítico primeiro. Se há algo positivo notável, mencione. Termine com uma recomendação prática e concreta para o mês atual.
+Regras obrigatórias:
+- Responda somente JSON válido, sem markdown, sem títulos externos e sem emojis.
+- Não crie tarefas, registros, transações, metas ou qualquer ação dentro do sistema.
+- O campo "actionProposal" deve ser apenas uma proposta textual para o usuário avaliar.
+- Seja específico com os números mais relevantes.
+- Destaque o risco principal primeiro, mas também reconheça um ponto positivo se houver.
 
-Não use listas, markdown, títulos nem emojis — apenas parágrafos corridos.
+Formato exato:
+{{
+  "status": "critical" | "attention" | "stable" | "strong",
+  "score": 0,
+  "title": "frase curta com o diagnóstico central",
+  "summary": "síntese em 1 ou 2 frases curtas",
+  "mainRisk": "principal risco com números",
+  "positivePoint": "ponto positivo real, ou cautela se não houver",
+  "actionProposal": "proposta prática para o mês, sem executar nada"
+}}
+
+Critérios gerais:
+- "critical": gasto muito acima da renda/orçamento, fluxo negativo severo, contas pendentes relevantes ou reserva ameaçada.
+- "attention": há desequilíbrio, pendências ou progresso baixo, mas não é colapso imediato.
+- "stable": receitas, gastos e obrigações estão sob controle.
+- "strong": sobra consistente, reserva saudável e metas avançando.
 
 SNAPSHOT:
 {snapshot_text}"""
@@ -11553,8 +11574,31 @@ SNAPSHOT:
                 max_output_tokens=300
             )
         )
-        summary = (response.text or "").strip()
-        return {"summary": summary}
+        raw_text = (response.text or "").strip()
+        clean_text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text, flags=re.IGNORECASE).strip()
+        analysis = json.loads(clean_text)
+
+        allowed_status = {"critical", "attention", "stable", "strong"}
+        status = analysis.get("status")
+        if status not in allowed_status:
+            status = "attention"
+
+        score = analysis.get("score")
+        try:
+            score = max(0, min(100, int(score)))
+        except Exception:
+            score = None
+
+        normalized = {
+            "status": status,
+            "score": score,
+            "title": str(analysis.get("title") or "Diagnóstico financeiro").strip(),
+            "summary": str(analysis.get("summary") or "").strip(),
+            "mainRisk": str(analysis.get("mainRisk") or "").strip(),
+            "positivePoint": str(analysis.get("positivePoint") or "").strip(),
+            "actionProposal": str(analysis.get("actionProposal") or "").strip(),
+        }
+        return {"analysis": normalized, "summary": normalized["summary"]}
     except Exception as e:
         print(f"Erro ao gerar resumo financeiro: {e}")
         raise https_fn.HttpsError(

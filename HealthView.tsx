@@ -984,7 +984,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                     </div>
 
                     {/* Section: Telemetry & Records */}
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-10">
+                    <div className="flex flex-col gap-12">
                         
                         {/* Gráfico de Peso Technical */}
                         <div className="bg-surface p-8 border border-border-grid rounded-none relative overflow-hidden h-full flex flex-col">
