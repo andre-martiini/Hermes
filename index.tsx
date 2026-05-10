@@ -13,6 +13,7 @@ import {
   ShoppingItem, Projeto, SlideHistoryEntry, BaseConhecimento, TipoAcao, Servico, Toast
 } from './types';
 import HealthView from './HealthView';
+import { GoogleHealthService } from './GoogleHealthService';
 import { MeetingTranscriptionTool } from './src/components/tools/MeetingTranscriptionTool';
 import { STATUS_COLORS, PROJECT_COLORS, SLIDES_HISTORY_KEY } from './constants';
 import { db, functions, getFirebaseMessaging, auth, googleProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from './firebase';
@@ -2503,6 +2504,7 @@ const App: React.FC = () => {
     setIsTerminalOpen(true);
     setIsSyncing(true);
     showToast("Iniciando Sincronização Profunda...", "info");
+    // 1. Deep System Sync (requested via Bot)
     try {
       await setDoc(doc(db, 'system', 'sync'), {
         status: 'requested',
@@ -2511,9 +2513,31 @@ const App: React.FC = () => {
       });
     } catch (e) {
       console.error(e);
-      showToast("Erro ao solicitar sincronização.", "error");
-      setIsSyncing(false);
+      showToast("Erro ao solicitar sincronização profunda.", "error");
     }
+
+    // 2. Client-side Health Sync
+    try {
+      const today = new Date();
+      const todayStr = formatDateLocalISO(today);
+      
+      const telemetry = await GoogleHealthService.getDailyTelemetry(today);
+      const weightData = await GoogleHealthService.getWeight(today);
+
+      if (Object.keys(telemetry).length > 0) {
+        await handleSaveExerciseLog(todayStr, telemetry);
+      }
+      if (weightData?.weight) {
+        await handleAddHealthWeight(weightData.weight, todayStr);
+      }
+      
+      showToast("Saúde sincronizada com sucesso!", "success");
+    } catch (healthError) {
+      console.warn("Health sync skipped or failed:", healthError);
+      // We don't show a toast error here because it might be a user cancellation of the popup
+    }
+
+    setIsSyncing(false);
   };
   const normalizeTaskTitle = (value?: string) => {
     if (typeof value !== 'string') return value;
@@ -3958,7 +3982,7 @@ const App: React.FC = () => {
   const handleUpdateHealthHabits = async (date: string, habits: Partial<DailyHabits>) => {
     await setDoc(doc(db, 'health_daily_habits', date), habits, { merge: true });
   };
-  const handleSaveExerciseLog = async (date: string, data: Partial<Pick<ExerciseLog, 'pushups' | 'pullups' | 'walk'>>) => {
+  const handleSaveExerciseLog = async (date: string, data: Partial<ExerciseLog>) => {
     // Save the log
     await setDoc(doc(db, 'health_exercise_logs', date), data, { merge: true });
     // Auto-mark workout habit

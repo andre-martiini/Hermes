@@ -320,7 +320,18 @@ export interface ExerciseLog {
     id: string; // date string (YYYY-MM-DD)
     pushups?: { done: number; goal: number };
     pullups?: { done: number; goal: number; phase: PullupPhase };
-    walk?: { done: number }; // minutes
+    walk?: { done: number; distance?: number; steps?: number }; // minutes, meters, steps
+    calories?: number;
+    activeMinutes?: number;
+    heartRate?: {
+        avg: number;
+        max: number;
+    };
+    sleep?: {
+        totalMinutes: number;
+        deepMinutes?: number;
+        remMinutes?: number;
+    };
 }
 
 export interface ExerciseSettings {
