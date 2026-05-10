@@ -4,7 +4,7 @@ import { functions } from '../../firebase';
 import { httpsCallable } from 'firebase/functions';
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
-  wipLimit: 5,
+
   notifications: {
     enablePush: true,
     habitsReminder: {

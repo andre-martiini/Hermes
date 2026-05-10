@@ -197,16 +197,16 @@ export const CalendarView = ({
   }, [currentDate, viewMode]);
 
   return (
-    <div className={`${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'} rounded-none md:rounded-[2rem] border overflow-hidden shadow-sm animate-in fade-in`}>
-      <div className={`p-3 md:p-6 border-b ${isDark ? 'border-slate-800' : 'border-slate-100'} flex flex-col md:flex-row items-center justify-between gap-4 md:gap-6`}>
+    <div className={`${isDark ? 'bg-slate-900 border-border-grid' : 'bg-white border-border-grid'} rounded-none border overflow-hidden shadow-sm animate-in fade-in`}>
+      <div className={`p-3 md:p-6 border-b ${isDark ? 'border-border-grid' : 'border-border-grid'} flex flex-col md:flex-row items-center justify-between gap-4 md:gap-6`}>
         {/* Navegação e Data à Esquerda */}
         <div className="flex flex-col md:flex-row items-center gap-3 md:gap-4 w-full md:w-auto">
-          <div className={`flex items-center gap-1 ${isDark ? 'bg-slate-800' : 'bg-slate-100'} p-1 rounded-xl shadow-inner shrink-0`}>
-            <button onClick={prevPeriod} className={`p-2 rounded-lg transition-all ${isDark ? 'hover:bg-slate-700 text-slate-500 hover:text-slate-300' : 'hover:bg-white text-slate-400 hover:text-slate-600'} hover:shadow-sm`}>
+          <div className={`flex items-center gap-1 ${isDark ? 'bg-slate-800' : 'bg-slate-50'} p-1 rounded-none border border-border-grid shrink-0`}>
+            <button onClick={prevPeriod} className={`p-2 rounded-none transition-all ${isDark ? 'hover:bg-slate-700 text-slate-500 hover:text-slate-300' : 'hover:bg-white text-slate-400 hover:text-slate-600'} hover:shadow-sm`}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
             </button>
-            <button onClick={() => onDateChange(new Date())} className={`px-3 md:px-4 py-2 text-[9px] font-black uppercase rounded-lg shadow-sm transition-all active:scale-95 ${isDark ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-white text-slate-900 hover:bg-slate-50'}`}>Hoje</button>
-            <button onClick={nextPeriod} className={`p-2 rounded-lg transition-all ${isDark ? 'hover:bg-slate-700 text-slate-500 hover:text-slate-300' : 'hover:bg-white text-slate-400 hover:text-slate-600'} hover:shadow-sm`}>
+            <button onClick={() => onDateChange(new Date())} className={`px-3 md:px-4 py-2 text-[9px] font-black uppercase rounded-none shadow-sm transition-all active:scale-95 font-mono ${isDark ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-white text-slate-900 border border-border-grid hover:bg-slate-50'}`}>Hoje</button>
+            <button onClick={nextPeriod} className={`p-2 rounded-none transition-all ${isDark ? 'hover:bg-slate-700 text-slate-500 hover:text-slate-300' : 'hover:bg-white text-slate-400 hover:text-slate-600'} hover:shadow-sm`}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
             </button>
           </div>
@@ -240,9 +240,9 @@ export const CalendarView = ({
 
           <div
             onClick={() => setShowAgenda(!showAgenda)}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl transition-all cursor-pointer select-none active:scale-95 shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-750' : 'bg-slate-50 border-slate-100 hover:bg-slate-100'}`}
+            className={`flex items-center gap-2 px-3 py-2 rounded-none transition-all cursor-pointer select-none active:scale-95 shadow-sm border font-mono ${isDark ? 'bg-slate-800 border-border-grid hover:bg-slate-750' : 'bg-slate-50 border-border-grid hover:bg-slate-100'}`}
           >
-            <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${showAgenda ? 'bg-amber-500 border-amber-500' : isDark ? 'bg-slate-900 border-slate-600' : 'bg-white border-slate-300'}`}>
+            <div className={`w-4 h-4 rounded-none border flex items-center justify-center transition-colors ${showAgenda ? 'bg-slate-900 border-slate-900' : isDark ? 'bg-slate-900 border-slate-600' : 'bg-white border-slate-300'}`}>
               {showAgenda && (
                 <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" />
@@ -254,9 +254,9 @@ export const CalendarView = ({
 
           <div
             onClick={() => setShowCompleted(!showCompleted)}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl transition-all cursor-pointer select-none active:scale-95 shadow-sm border ${isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-750' : 'bg-slate-50 border-slate-100 hover:bg-slate-100'}`}
+            className={`flex items-center gap-2 px-3 py-2 rounded-none transition-all cursor-pointer select-none active:scale-95 shadow-sm border font-mono ${isDark ? 'bg-slate-800 border-border-grid hover:bg-slate-750' : 'bg-slate-50 border-border-grid hover:bg-slate-100'}`}
           >
-            <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${showCompleted ? 'bg-emerald-600 border-emerald-600' : isDark ? 'bg-slate-900 border-slate-600' : 'bg-white border-slate-300'}`}>
+            <div className={`w-4 h-4 rounded-none border flex items-center justify-center transition-colors ${showCompleted ? 'bg-slate-900 border-slate-900' : isDark ? 'bg-slate-900 border-slate-600' : 'bg-white border-slate-300'}`}>
               {showCompleted && (
                 <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" />

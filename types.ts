@@ -60,6 +60,7 @@ export interface Tarefa {
     projeto: string;
     data_inicio: string;
     data_limite: string;
+    prazo_final?: string;
     status: Status;
     area_tematica: string;
     execution_lane?: 'avanco' | 'continuo' | 'aguardando_terceiro';
@@ -387,7 +388,6 @@ export interface CustomNotification {
 }
 
 export interface AppSettings {
-    wipLimit?: number; // Limite de Trabalho em Progresso
     googleDriveFolderId?: string;
     pomodoro?: {
         enabled: boolean;

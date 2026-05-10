@@ -431,6 +431,85 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
     const [creatingFormId, setCreatingFormId] = useState<string | null>(null);
 
+    const [suggestedPrompt, setSuggestedPrompt] = useState<string | null>(null);
+    const strategicSuggestions = [
+        "Analise riscos e pontos cegos desta operação.",
+        "Sugira o próximo passo lógico para esta tarefa.",
+        "Como otimizar os recursos alocados aqui?",
+        "Quais conflitos entre o manual e a execução você detecta?",
+        "Gere um resumo estratégico dos últimos avanços.",
+        "Crie um checklist de validação para esta entrega."
+    ];
+
+    useEffect(() => {
+        const generateContextualSuggestion = async () => {
+            if (messages.length > 0 || isLoading || !isOpen) return;
+            
+            try {
+                let contextText = "Consultoria estratégica geral.";
+                if (taskId) {
+                    // 1. Dados da Ação Principal
+                    const taskDoc = await getDoc(doc(db, 'acoes', taskId));
+                    const taskData = taskDoc.exists() ? taskDoc.data() : {};
+                    
+                    // 2. Plano de Ação (Sub-tarefas)
+                    const planSnap = await getDocs(query(collection(db, 'acoes', taskId, 'plano_acao'), orderBy('ordem', 'asc'), limit(10)));
+                    const planItems = planSnap.docs.map(d => `- [${d.data().status || 'pendente'}] ${d.data().titulo}`).join('\n');
+                    
+                    // 3. Diário de Bordo (Histórico recente)
+                    const diarySnap = await getDocs(query(collection(db, 'acoes', taskId, 'follow_ups'), orderBy('timestamp', 'desc'), limit(5)));
+                    const diaryLogs = diarySnap.docs.map(d => `- ${d.data().texto}`).reverse().join('\n');
+
+                    contextText = `
+                        TAREFA: "${taskData.titulo || 'Sem título'}"
+                        DATA AGENDADA PARA TRABALHO: ${taskData.data_limite || 'Não agendado'}
+                        PRAZO FINAL REAL: ${taskData.prazo_final || 'Não há prazo final estrito'}
+                        
+                        O QUE ESTÁ PLANEJADO (PLANO DE AÇÃO):
+                        ${planItems || 'Nenhum item definido no plano.'}
+                        
+                        O QUE JÁ FOI FEITO (DIÁRIO DE BORDO):
+                        ${diaryLogs || 'Nenhum registro no diário ainda.'}
+                    `;
+                }
+
+                const prompt = `Você é o Copiloto Hermes. Analise o progresso real desta tarefa.
+                Regra de Negócio Crucial: A data principal da tarefa é apenas a Data Agendada para trabalhar nela. O Prazo Final (Deadline) real, se houver, será explícito no texto abaixo ou no diário de bordo. Não confunda intenção de trabalho com deadline.
+                
+                DADOS DA OPERAÇÃO:
+                ${contextText}
+                
+                SUA MISSÃO:
+                Gere um ÚNICO comando ou pergunta estratégica que o usuário deve fazer a você para destravar o próximo passo ou resolver um gargalo detectado.
+                Fale especificamente sobre itens do plano ou registros do diário, se houver.
+                
+                Regras:
+                - Máximo 18 palavras.
+                - Tom de comando direto e técnico.
+                - Responda apenas o prompt.`;
+
+                const fn = httpsCallable(functions, 'askTaskAssistant');
+                const res = await fn({ 
+                    prompt, 
+                    area_tematica: systemId || 'GERAL',
+                    taskId: taskId || undefined
+                });
+                
+                const result = (res.data as any).result || '';
+                if (result) {
+                    setSuggestedPrompt(result.replace(/^["'“”]|["'“”]$/g, '').trim());
+                } else {
+                    setSuggestedPrompt("Analise o próximo passo do plano de ação.");
+                }
+            } catch (err) {
+                console.error("Erro ao gerar sugestão profunda:", err);
+                setSuggestedPrompt("Analise riscos e pontos cegos desta operação.");
+            }
+        };
+
+        generateContextualSuggestion();
+    }, [messages.length, isLoading, taskId, isOpen]);
+
     const handleFirestoreListenerError = (error: any) => {
         console.error('[Copiloto] Erro no listener do Firestore:', error);
         if (error?.code === 'permission-denied') {
@@ -1439,13 +1518,13 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     if (diagnosisModalOpen) {
         return (
             <div className="fixed inset-0 z-[700] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
-                <div className={`w-full max-w-4xl max-h-[92vh] overflow-hidden rounded-[2rem] shadow-2xl border ${isDark ? 'bg-[#0f0f1a] border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
-                    <div className={`flex items-center justify-between gap-4 px-6 py-4 border-b ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+                <div className={`w-full max-w-4xl max-h-[92vh] overflow-hidden rounded-none shadow-2xl border ${isDark ? 'bg-[#0f0f1a] border-border-grid text-white' : 'bg-white border-border-grid text-slate-900'}`}>
+                    <div className={`flex items-center justify-between gap-4 px-6 py-4 border-b ${isDark ? 'border-border-grid' : 'border-slate-100'}`}>
                         <div className="min-w-0">
                             <p className="text-[10px] font-black uppercase tracking-widest text-blue-500">Diagnóstico de Código</p>
                             <p className="text-sm font-black truncate">{activeDiagnosis?.descricaoProblema || (isLoadingDiagnosis ? 'Carregando diagnóstico...' : 'Diagnóstico')}</p>
                         </div>
-                        <button onClick={() => { setDiagnosisModalOpen(false); setActiveDiagnosis(null); }} className={`p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}>
+                        <button onClick={() => { setDiagnosisModalOpen(false); setActiveDiagnosis(null); }} className={`p-2 rounded-none transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}>
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
                             </svg>
@@ -1454,34 +1533,34 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                     <div className={`overflow-y-auto max-h-[calc(92vh-88px)] p-6 space-y-5 ${isDark ? 'bg-[#0f0f1a]' : 'bg-slate-50'}`}>
                         {isLoadingDiagnosis && (
                             <div className="flex items-center justify-center py-16">
-                                <div className="w-6 h-6 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin" />
+                                <div className="w-6 h-6 border-2 border-slate-300 border-t-blue-500 rounded-none animate-spin" />
                             </div>
                         )}
                         {!isLoadingDiagnosis && !activeDiagnosis && (
-                            <div className={`rounded-2xl border p-5 text-sm ${isDark ? 'border-white/10 bg-white/5 text-white/70' : 'border-slate-200 bg-white text-slate-500'}`}>
+                            <div className={`rounded-none border p-5 text-sm ${isDark ? 'border-border-grid bg-white/5 text-white/70' : 'border-border-grid bg-white text-slate-500'}`}>
                                 Não foi possível carregar este diagnóstico.
                             </div>
                         )}
                         {!isLoadingDiagnosis && activeDiagnosis && (
                             <>
-                                <div className={`rounded-2xl border p-4 ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-white'}`}>
+                                <div className={`rounded-none border p-4 ${isDark ? 'border-border-grid bg-white/5' : 'border-border-grid bg-white'}`}>
                                     <p className={`text-[10px] font-black uppercase tracking-widest mb-3 ${isDark ? 'text-white/50' : 'text-slate-400'}`}>Ações para IA</p>
                                     <div className="flex flex-wrap gap-2">
                                         <button
                                             onClick={() => handleDownloadDiagnosisMarkdown(activeDiagnosis)}
-                                            className={`px-3 py-2 rounded-xl text-[11px] font-black transition-all ${isDark ? 'bg-white/10 hover:bg-white/15 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
+                                            className={`px-3 py-2 rounded-none text-[11px] font-black transition-all ${isDark ? 'bg-white/10 hover:bg-white/15 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
                                         >
                                             Exportar Markdown
                                         </button>
                                         <button
                                             onClick={() => handleDownloadDiagnosisAiPackage(activeDiagnosis)}
-                                            className={`px-3 py-2 rounded-xl text-[11px] font-black transition-all ${isDark ? 'bg-blue-500/20 hover:bg-blue-500/30 text-blue-100' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
+                                            className={`px-3 py-2 rounded-none text-[11px] font-black transition-all ${isDark ? 'bg-blue-500/20 hover:bg-blue-500/30 text-blue-100' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
                                         >
                                             Exportar Pacote IA
                                         </button>
                                         <button
                                             onClick={() => handleCopyDiagnosisAiPackage(activeDiagnosis)}
-                                            className={`px-3 py-2 rounded-xl text-[11px] font-black transition-all ${isDark ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-100' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700'}`}
+                                            className={`px-3 py-2 rounded-none text-[11px] font-black transition-all ${isDark ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-100' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700'}`}
                                         >
                                             {diagnosisCopyDone ? 'Copiado!' : 'Copiar para IA'}
                                         </button>
@@ -1490,11 +1569,11 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         O pacote para IA inclui contexto e blocos <span className="font-mono">SEARCH/REPLACE</span> em formato pronto para colar em agentes de código.
                                     </p>
                                 </div>
-                                <div className={`rounded-2xl border p-5 ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-white'}`}>
+                                <div className={`rounded-none border p-5 ${isDark ? 'border-border-grid bg-white/5' : 'border-border-grid bg-white'}`}>
                                     <div className="flex flex-wrap items-center gap-2 mb-3">
-                                        {activeDiagnosis.sistemaId && <span className="text-[10px] font-black uppercase tracking-widest text-blue-600 bg-blue-50 px-2 py-1 rounded-full">{activeDiagnosis.sistemaId}</span>}
-                                        {activeDiagnosis.nomeRepositorio && <span className={`text-[10px] font-mono px-2 py-1 rounded-full ${isDark ? 'bg-white/10 text-white/70' : 'bg-slate-100 text-slate-500'}`}>{activeDiagnosis.nomeRepositorio}</span>}
-                                        {activeDiagnosis.arquivosAnalisados && <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full ${isDark ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-50 text-emerald-700'}`}>{activeDiagnosis.arquivosAnalisados.length} arquivo(s)</span>}
+                                        {activeDiagnosis.sistemaId && <span className="text-[10px] font-black uppercase tracking-widest text-blue-600 bg-blue-50 px-2 py-1 rounded-none">{activeDiagnosis.sistemaId}</span>}
+                                        {activeDiagnosis.nomeRepositorio && <span className={`text-[10px] font-mono px-2 py-1 rounded-none ${isDark ? 'bg-white/10 text-white/70' : 'bg-slate-100 text-slate-500'}`}>{activeDiagnosis.nomeRepositorio}</span>}
+                                        {activeDiagnosis.arquivosAnalisados && <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-none ${isDark ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-50 text-emerald-700'}`}>{activeDiagnosis.arquivosAnalisados.length} arquivo(s)</span>}
                                     </div>
                                     <p className={`text-[11px] font-black uppercase tracking-widest mb-2 ${isDark ? 'text-white/50' : 'text-slate-400'}`}>Diagnóstico</p>
                                     <p className={`text-sm leading-7 whitespace-pre-wrap ${isDark ? 'text-white/80' : 'text-slate-700'}`}>{activeDiagnosis.diagnostico}</p>
@@ -1502,19 +1581,19 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                 {activeDiagnosis.blocosSR && activeDiagnosis.blocosSR.length > 0 && (
                                     <div className="space-y-3">
                                         {activeDiagnosis.blocosSR.map((bloco, index) => (
-                                            <div key={`${activeDiagnosis.id}_${index}`} className={`rounded-2xl border overflow-hidden ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-white'}`}>
-                                                <div className={`px-4 py-3 border-b ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-100 bg-slate-50'}`}>
+                                            <div key={`${activeDiagnosis.id}_${index}`} className={`rounded-none border overflow-hidden ${isDark ? 'border-border-grid bg-white/5' : 'border-border-grid bg-white'}`}>
+                                                <div className={`px-4 py-3 border-b ${isDark ? 'border-border-grid bg-white/5' : 'border-slate-100 bg-slate-50'}`}>
                                                     <p className="text-[11px] font-black">{index + 1}. {bloco.descricao}</p>
                                                     <p className={`text-[10px] font-mono mt-1 ${isDark ? 'text-white/50' : 'text-slate-400'}`}>{bloco.arquivo}</p>
                                                 </div>
                                                 <div className="p-4 grid gap-4 md:grid-cols-2">
                                                     <div>
                                                         <p className="text-[10px] font-black uppercase tracking-widest text-rose-500 mb-2">Search</p>
-                                                        <pre className={`text-[11px] leading-6 overflow-x-auto rounded-xl p-3 ${isDark ? 'bg-rose-500/10 text-white/80' : 'bg-rose-50 text-slate-700'}`}>{bloco.search}</pre>
+                                                        <pre className={`text-[11px] leading-6 overflow-x-auto rounded-none p-3 ${isDark ? 'bg-rose-500/10 text-white/80' : 'bg-rose-50 text-slate-700'}`}>{bloco.search}</pre>
                                                     </div>
                                                     <div>
                                                         <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 mb-2">Replace</p>
-                                                        <pre className={`text-[11px] leading-6 overflow-x-auto rounded-xl p-3 ${isDark ? 'bg-emerald-500/10 text-white/80' : 'bg-emerald-50 text-slate-700'}`}>{bloco.replace}</pre>
+                                                        <pre className={`text-[11px] leading-6 overflow-x-auto rounded-none p-3 ${isDark ? 'bg-emerald-500/10 text-white/80' : 'bg-emerald-50 text-slate-700'}`}>{bloco.replace}</pre>
                                                     </div>
                                                 </div>
                                             </div>
@@ -1522,13 +1601,13 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                     </div>
                                 )}
                                 {activeDiagnosis.alertaImpacto && (
-                                    <div className={`rounded-2xl border p-4 ${isDark ? 'border-amber-400/20 bg-amber-500/10 text-amber-100' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+                                    <div className={`rounded-none border p-4 ${isDark ? 'border-amber-400/20 bg-amber-500/10 text-amber-100' : 'border-border-grid bg-amber-50 text-amber-800'}`}>
                                         <p className="text-[10px] font-black uppercase tracking-widest mb-2">Alerta de Impacto</p>
                                         <p className="text-sm leading-6">{activeDiagnosis.alertaImpacto}</p>
                                     </div>
                                 )}
                                 {activeDiagnosis.markdownContent && (
-                                    <div className={`rounded-2xl border p-5 ${isDark ? 'border-white/10 bg-white/5' : 'border-slate-200 bg-white'}`}>
+                                    <div className={`rounded-none border p-5 ${isDark ? 'border-border-grid bg-white/5' : 'border-border-grid bg-white'}`}>
                                         <p className={`text-[10px] font-black uppercase tracking-widest mb-3 ${isDark ? 'text-white/50' : 'text-slate-400'}`}>Relatório Completo</p>
                                         <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={(url) => url}>{activeDiagnosis.markdownContent}</ReactMarkdown>
                                     </div>
@@ -1551,8 +1630,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const shouldAutoCloseOnNavigate = !isEmbedded;
     const effectiveDrawerWidth = isEmbedded ? '100%' : isMobileViewport ? '100%' : `${drawerWidth}px`;
     const containerClassName = isEmbedded
-        ? `relative h-full min-h-0 flex flex-col break-words [overflow-wrap:anywhere] rounded-2xl border shadow-sm ${isDark ? 'bg-[#0f0f1a] text-white border-white/10' : 'bg-white text-slate-900 border-slate-200'}`
-        : `fixed inset-y-0 right-0 z-[500] shadow-2xl transition-transform duration-300 transform translate-x-0 flex flex-col break-words [overflow-wrap:anywhere] ${isDark ? 'bg-[#0f0f1a] text-white' : 'bg-white text-slate-900 border-l border-slate-200'}`;
+        ? `relative h-full min-h-0 flex flex-col break-words [overflow-wrap:anywhere] rounded-none ${isDark ? 'bg-[#0f1724] text-white' : 'bg-white text-slate-900'}`
+        : `fixed inset-y-0 right-0 z-[500] shadow-2xl transition-transform duration-300 transform translate-x-0 flex flex-col break-words [overflow-wrap:anywhere] ${isDark ? 'bg-[#0f0f1a] text-white' : 'bg-white text-slate-900 border-l border-border-grid'}`;
 
     return (
         <div
@@ -1570,7 +1649,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                     }`}>
                     <div className={`px-8 py-6 rounded-[2.5rem] text-center shadow-2xl ${isDark ? 'bg-slate-900/90 text-blue-200 border border-blue-400/30' : 'bg-white text-blue-700 border border-blue-100'
                         }`}>
-                        <div className="w-16 h-16 rounded-3xl bg-blue-500/10 flex items-center justify-center mx-auto mb-4">
+                        <div className="w-16 h-16 rounded-none bg-blue-500/10 flex items-center justify-center mx-auto mb-4">
                             <svg className="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                             </svg>
@@ -1588,66 +1667,46 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                     title="Arrastar para redimensionar"
                 >
                     <div className="absolute inset-y-0 left-0 w-full bg-transparent group-hover:bg-blue-400/30 transition-colors duration-150 rounded-l" />
-                    <div className="absolute top-1/2 -translate-y-1/2 left-0 w-1 h-10 rounded-full bg-slate-300 group-hover:bg-blue-400 transition-colors duration-150" />
+                    <div className="absolute top-1/2 -translate-y-1/2 left-0 w-1 h-10 rounded-none bg-slate-300 group-hover:bg-blue-400 transition-colors duration-150" />
                 </div>
             )}
 
-            {/* Header */}
-            <div className={`shrink-0 px-3 py-2 sm:p-5 flex items-center justify-between border-b ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
-                <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-                    {/* Ícone — oculto no mobile */}
-                    <div className="hidden sm:flex w-9 h-9 shrink-0 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 items-center justify-center text-white shadow-lg">
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                        </svg>
-                    </div>
-                    {/* Mobile: dot + título inline */}
-                    <div className="flex sm:hidden items-center gap-1.5 min-w-0">
-                        {taskId && <span className="w-1.5 h-1.5 shrink-0 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]" />}
-                        <span className={`text-xs font-black tracking-tight truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>Copiloto Hermes</span>
-                    </div>
-                    {/* Desktop: título + badge empilhados */}
-                    <div className="hidden sm:block">
-                        <h3 className="text-base font-black tracking-tight">Copiloto Hermes</h3>
+            {/* Header - Unified Style */}
+            <div className={`shrink-0 px-4 py-2 flex items-center justify-between border-b ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
+                <div className="flex items-center gap-2 min-w-0">
+                    <svg className={`w-4 h-4 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2 min-w-0">
+                        <span className={`text-[9px] font-black uppercase tracking-widest font-mono ${isDark ? 'text-white/40' : 'text-slate-400'}`}>Copiloto Hermes</span>
                         {taskId && (
-                            <div className="flex flex-col gap-0.5 mt-0.5">
-                                <div className="flex items-center gap-1.5">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
-                                    <span className="text-[9px] font-black text-emerald-500 uppercase tracking-tight">Contexto da Ação Ativo</span>
-                                </div>
-                                {activeDocument && (
-                                    <div className="flex items-center gap-1.5">
-                                        <span className={`w-1.5 h-1.5 rounded-full ${isTemporary ? 'bg-amber-500' : 'bg-blue-500'} animate-pulse`} />
-                                        <span className={`text-[9px] font-black ${isTemporary ? 'text-amber-500' : 'text-blue-500'} uppercase tracking-tight truncate max-w-[150px]`}>
-                                            {isTemporary ? `Análise Volátil: ${activeDocument.nome}` : `Foco: ${activeDocument.nome}`}
-                                        </span>
-                                    </div>
-                                )}
+                            <div className="flex items-center gap-1.5 shrink-0">
+                                <span className="hidden sm:inline text-[9px] text-slate-300 opacity-30">•</span>
+                                <span className="w-1 h-1 rounded-none bg-emerald-500 animate-pulse" />
+                                <span className="text-[8px] font-black text-emerald-500 uppercase tracking-tighter">Ativo</span>
                             </div>
                         )}
                     </div>
                 </div>
-                <div className="flex items-center gap-1 sm:gap-2">
+
+                <div className="flex items-center gap-1.5">
                     {!isTemporary && (
                         <button
                             onClick={() => handleCreateSession()}
-                            className={`p-1.5 sm:p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}
+                            className={`p-1.5 rounded-none transition-all ${isDark ? 'text-white/50 hover:bg-white/10 hover:text-white' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-900'}`}
                             title="Nova Conversa"
                         >
-                            <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
                         </button>
                     )}
-                    {!isTemporary && (
-                        <button onClick={() => setShowHistory(!showHistory)} className={`p-1.5 sm:p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}>
-                            <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        </button>
-                    )}
-                    <button onClick={onClose} className={`p-1.5 sm:p-2 rounded-xl transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}>
-                        {isEmbedded ? (
-                            <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
-                        ) : (
-                            <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
-                        )}
+                    <button
+                        onClick={onClose}
+                        className={`flex h-7 w-7 items-center justify-center rounded-none border transition-all ${isDark ? 'border-white/10 text-white/50 hover:bg-white/10 hover:text-white' : 'border-border-grid text-slate-500 hover:bg-slate-100 hover:text-slate-900'}`}
+                        title="Recolher copiloto"
+                    >
+                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 19l-7-7 7-7" />
+                        </svg>
                     </button>
                 </div>
             </div>
@@ -1655,10 +1714,10 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             <div className="flex-1 min-h-0 overflow-hidden flex relative">
                 {/* History Sidebar */}
                 {showHistory && (
-                    <div className={`absolute inset-0 z-10 flex flex-col ${isDark ? 'border-r border-white/10 bg-[#0b1220]' : 'border-r border-slate-200 bg-white'}`}>
-                        <div className={`p-4 flex items-center justify-between ${isDark ? 'border-b border-white/10 bg-[#0b1220] text-white/70' : 'border-b border-slate-100 bg-white text-slate-900'}`}>
+                    <div className={`absolute inset-0 z-10 flex flex-col ${isDark ? 'border-r border-border-grid bg-[#0b1220]' : 'border-r border-border-grid bg-white'}`}>
+                        <div className={`p-4 flex items-center justify-between ${isDark ? 'border-b border-border-grid bg-[#0b1220] text-white/70' : 'border-b border-slate-100 bg-white text-slate-900'}`}>
                             <span className="text-[10px] font-black uppercase tracking-widest">Histórico de Sessões</span>
-                            <button onClick={() => handleCreateSession()} className="text-[10px] bg-blue-600 text-white px-3 py-1.5 rounded-lg font-black uppercase tracking-widest">+ Nova</button>
+                            <button onClick={() => handleCreateSession()} className="text-[10px] bg-blue-600 text-white px-3 py-1.5 rounded-none font-black uppercase tracking-widest">+ Nova</button>
                         </div>
                         <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${isDark ? 'bg-[#0b1220]' : 'bg-white'}`}>
                             {/* Sessões da Ação Atual */}
@@ -1673,18 +1732,18 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         sessions.filter(s => s.taskId === taskId).map(s => (
                                             <div
                                                 key={s.id}
-                                                className={`group flex items-center gap-2 rounded-2xl border p-1.5 transition-all ${currentSessionId === s.id ? (isDark ? 'bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_15px_rgba(16,185,129,0.1)]' : 'bg-emerald-50 border-emerald-200 shadow-sm') : (isDark ? 'bg-white/5 border-white/10 hover:border-white/20' : 'bg-white border-slate-100 hover:border-slate-200')}`}
+                                                className={`group flex items-center gap-2 rounded-none border p-1.5 transition-all ${currentSessionId === s.id ? (isDark ? 'bg-emerald-500/10 border-emerald-400/30 shadow-[0_0_15px_rgba(16,185,129,0.1)]' : 'bg-emerald-50 border-border-grid shadow-sm') : (isDark ? 'bg-white/5 border-border-grid hover:border-white/20' : 'bg-white border-slate-100 hover:border-border-grid')}`}
                                             >
                                                 <button
                                                     onClick={() => { setCurrentSessionId(s.id); setShowHistory(false); }}
-                                                    className="min-w-0 flex-1 text-left rounded-xl px-2 py-1.5"
+                                                    className="min-w-0 flex-1 text-left rounded-none px-2 py-1.5"
                                                 >
                                                     <p className={`text-xs font-bold truncate ${isDark ? (currentSessionId === s.id ? 'text-emerald-300' : 'text-white') : (currentSessionId === s.id ? 'text-emerald-700' : 'text-slate-900')}`}>{s.title}</p>
                                                     <p className={`text-[9px] mt-0.5 ${isDark ? 'text-white/45' : 'text-slate-400'}`}>{s.lastMessageAt?.toDate()?.toLocaleDateString()} · {s.lastMessageAt?.toDate()?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
                                                 </button>
                                                 <button
                                                     onClick={() => void handleDeleteSession(s.id)}
-                                                    className={`shrink-0 opacity-0 group-hover:opacity-100 p-2 rounded-xl transition-all ${isDark ? 'hover:bg-red-500/20 text-red-400' : 'hover:bg-red-50 text-red-600'}`}
+                                                    className={`shrink-0 opacity-0 group-hover:opacity-100 p-2 rounded-none transition-all ${isDark ? 'hover:bg-red-500/20 text-red-400' : 'hover:bg-red-50 text-red-600'}`}
                                                 >
                                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16" /></svg>
                                                 </button>
@@ -1696,24 +1755,24 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                             {/* Outras Sessões */}
                             <div className="space-y-2 pt-2">
-                                <h4 className={`text-[9px] font-black uppercase tracking-[0.2em] px-2 mb-3 pb-1 border-b ${isDark ? 'text-slate-500 border-white/10' : 'text-slate-400 border-slate-100'}`}>
+                                <h4 className={`text-[9px] font-black uppercase tracking-[0.2em] px-2 mb-3 pb-1 border-b ${isDark ? 'text-slate-500 border-border-grid' : 'text-slate-400 border-slate-100'}`}>
                                     {taskId ? 'Outras Conversas' : 'Histórico Geral'}
                                 </h4>
                                 {sessions.filter(s => s.taskId !== taskId).map(s => (
                                     <div
                                         key={s.id}
-                                        className={`group flex items-center gap-2 rounded-2xl border p-1.5 transition-all ${currentSessionId === s.id ? (isDark ? 'bg-blue-500/15 border-blue-400/30' : 'bg-blue-50 border-blue-200') : (isDark ? 'bg-white/5 border-white/10 hover:border-white/20' : 'bg-white border-slate-100 hover:border-slate-200')}`}
+                                        className={`group flex items-center gap-2 rounded-none border p-1.5 transition-all ${currentSessionId === s.id ? (isDark ? 'bg-blue-500/15 border-blue-400/30' : 'bg-blue-50 border-border-grid') : (isDark ? 'bg-white/5 border-border-grid hover:border-white/20' : 'bg-white border-slate-100 hover:border-border-grid')}`}
                                     >
                                         <button
                                             onClick={() => { setCurrentSessionId(s.id); setShowHistory(false); }}
-                                            className="min-w-0 flex-1 text-left rounded-xl px-2 py-1.5"
+                                            className="min-w-0 flex-1 text-left rounded-none px-2 py-1.5"
                                         >
                                             <p className={`text-xs font-bold truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>{s.title}</p>
                                             <p className={`text-[9px] mt-0.5 ${isDark ? 'text-white/45' : 'text-slate-400'}`}>{s.lastMessageAt?.toDate()?.toLocaleDateString()}</p>
                                         </button>
                                         <button
                                             onClick={() => void handleDeleteSession(s.id)}
-                                            className={`shrink-0 opacity-0 group-hover:opacity-100 p-2 rounded-xl transition-all ${isDark ? 'hover:bg-red-500/20 text-red-400' : 'hover:bg-red-50 text-red-600'}`}
+                                            className={`shrink-0 opacity-0 group-hover:opacity-100 p-2 rounded-none transition-all ${isDark ? 'hover:bg-red-500/20 text-red-400' : 'hover:bg-red-50 text-red-600'}`}
                                         >
                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16" /></svg>
                                         </button>
@@ -1728,27 +1787,11 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 <div className="flex-1 min-h-0 flex flex-col min-w-0 overflow-hidden">
                     <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-6" style={{ scrollbarWidth: 'thin' }}>
                         {messages.length === 0 && !isLoading && (
-                            <div className="h-full flex flex-col items-center justify-center text-center gap-5">
-                                <div className={`w-20 h-20 rounded-[2.5rem] flex items-center justify-center border ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-400'}`}>
-                                    <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
-                                </div>
-                                <div>
-                                    <p className={`text-sm font-black uppercase tracking-widest ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Inicie uma consultoria</p>
-                                    <p className={`text-xs mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Conectando Grafo de Execução e Acervo Global</p>
-                                </div>
-                                <div className="flex flex-wrap gap-2 justify-center mt-4">
-                                    <button
-                                        onClick={() => handleCreateSession("Quais são os próximos passos estratégicos?")}
-                                        className={`px-4 py-2 rounded-xl text-[10px] font-bold transition-all ${isDark ? 'bg-slate-800 text-slate-100 border border-slate-700 hover:bg-slate-700' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
-                                    >
-                                        🚀 Próximos passos
-                                    </button>
-                                    <button
-                                        onClick={() => handleCreateSession("Analise conflitos entre o manual e a execução.")}
-                                        className={`px-4 py-2 rounded-xl text-[10px] font-bold transition-all ${isDark ? 'bg-slate-800 text-slate-100 border border-slate-700 hover:bg-slate-700' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
-                                    >
-                                        🔍 Conflitos Teoria/Prática
-                                    </button>
+                            <div className="h-full flex flex-col items-center justify-center pointer-events-none select-none">
+                                <div className={`${isDark ? 'text-white' : 'text-slate-900'} opacity-[0.05] animate-pulse-slow`}>
+                                    <svg className="w-48 h-48 sm:w-64 sm:h-64" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="0.8" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                                    </svg>
                                 </div>
                             </div>
                         )}
@@ -1758,7 +1801,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                             const messageTimestamp = formatMessageTimestamp(msg.timestamp);
                             return (
                                 <div key={messageKey} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                                    <div className={`group relative max-w-[90%] min-w-0 px-4 py-3 rounded-2xl text-xs font-medium leading-relaxed shadow-sm break-words [overflow-wrap:anywhere] [&_*]:max-w-full ${msg.role === 'user'
+                                    <div className={`group relative max-w-[90%] min-w-0 px-4 py-3 rounded-none text-xs font-medium leading-relaxed shadow-sm break-words [overflow-wrap:anywhere] [&_*]:max-w-full font-mono ${msg.role === 'user'
                                         ? isDark
                                             ? 'bg-blue-600 text-white rounded-br-none'
                                             : 'bg-blue-600 text-white rounded-br-none'
@@ -1796,7 +1839,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         {msg.toolsUsed && msg.toolsUsed.length > 0 && (
                                             <div className="mb-2.5">
                                                 <div className={`mb-1 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.75 3a.75.75 0 01.75.75V5a.75.75 0 01-1.5 0V3.75A.75.75 0 019.75 3zm4.5 0a.75.75 0 01.75.75V5a.75.75 0 01-1.5 0V3.75a.75.75 0 01.75-.75zM12 8.25A3.75 3.75 0 108.25 12 3.75 3.75 0 0012 8.25zm7.5 3a.75.75 0 010 1.5H18.25a.75.75 0 010-1.5zM5.75 12a.75.75 0 01-.75.75H3.75a.75.75 0 010-1.5H5a.75.75 0 01.75.75zm10.364 5.614a.75.75 0 011.06 0l.884.884a.75.75 0 11-1.06 1.06l-.884-.883a.75.75 0 010-1.061zm-9.288 0a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.883-.884a.75.75 0 011.061 0zm11.172-11.228a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.883-.884a.75.75 0 011.061 0zm-11.172 0l.884.884a.75.75 0 11-1.06 1.06l-.884-.883a.75.75 0 011.06-1.061zM9.75 19a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-1.25a.75.75 0 01.75-.75zm4.5 0a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-1.25a.75.75 0 01.75-.75z" /></svg>
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.75 3a.75.75 0 01.75.75V5a.75.75 0 01-1.5 0V3.75A.75.75 0 019.75 3zm4.5 0a.75.75 0 01.75.75V5a.75.75 0 01-1.5 0V3.75a.75.75 0 01.75-.75zM12 8.25A3.75 3.75 0 108.25 12 3.75 3.75 0 0012 8.25zm7.5 3a.75.75 0 010 1.5H18.25a.75.75 0 010-1.5zM5.75 12a.75.75 0 01-.75.75H3.75a.75.75 0 010-1.5H5a.75.75 0 01.75.75zm10.364 5.614a.75.75 0 011.06 0l.884.884a.75.75 0 11-1.06 1.06l-.884-.883a.75.75 0 010-1.061zm-9.288 0a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.883-.884a.75.75 0 011.061 0zm11.172-11.228a.75.75 0 010 1.06l-.884.884a.75.75 0 11-1.06-1.06l.883-.884a.75.75 0 011.061 0zm-11.172 0l.884.884a.75.75 0 11-1.06 1.06l-.884-.883a.75.75 0 011.06-1.061zM9.75 19a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-1.25a.75.75 0 01.75-.75zm4.5 0a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-1.25a.75.75 0 01.75-.75zm0 0" /></svg>
                                                     Ferramentas usadas
                                                 </div>
                                                 <div className="flex flex-wrap gap-1">
@@ -1806,13 +1849,13 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                         return (
                                                             <span
                                                                 key={tool}
-                                                                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.08em] border ${isWrite
+                                                                className={`inline-flex items-center gap-1 rounded-none px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.08em] border ${isWrite
                                                                     ? isDark
                                                                         ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20'
-                                                                        : 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                                                                        : 'text-emerald-700 bg-emerald-50 border-border-grid'
                                                                     : isDark
                                                                         ? 'text-slate-300 bg-slate-900 border-slate-700'
-                                                                        : 'text-slate-500 bg-white/90 border-slate-200'
+                                                                        : 'text-slate-500 bg-white/90 border-border-grid'
                                                                     }`}
                                                             >
                                                                 {isWrite ? (
@@ -1849,7 +1892,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                         }
                                                         return (
                                                             <pre
-                                                                className="max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] overflow-x-hidden rounded-xl"
+                                                                className="max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] overflow-x-hidden rounded-none"
                                                                 {...props}
                                                             >
                                                                 {children}
@@ -1898,7 +1941,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                                         onOpenTask?.(id);
                                                                         if (shouldAutoCloseOnNavigate) onClose?.();
                                                                     }}
-                                                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm group/btn ${isDark ? 'bg-blue-500/10 hover:bg-blue-600 hover:text-white text-blue-300 border-blue-400/30' : 'bg-white/10 hover:bg-blue-600 hover:text-white text-blue-400 border-blue-500/30'}`}
+                                                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-none border transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm group/btn ${isDark ? 'bg-blue-500/10 hover:bg-blue-600 hover:text-white text-blue-300 border-blue-400/30' : 'bg-white/10 hover:bg-blue-600 hover:text-white text-blue-400 border-blue-500/30'}`}
                                                                 >
                                                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
                                                                     <span className="group-hover/btn:underline">{props.children}</span>
@@ -1914,7 +1957,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                                         console.log("[HermesCopiloto] Link clicked:", href);
                                                                         onOpenTool?.('slides', draftId);
                                                                     }}
-                                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm"
+                                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-none transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm"
                                                                 >
                                                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" /></svg>
                                                                     {props.children}
@@ -1929,7 +1972,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                                         console.log("[HermesCopiloto] Link clicked:", href);
                                                                         handleOpenDiagnosis(diagId);
                                                                     }}
-                                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm"
+                                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-none transition-all font-black text-[10px] uppercase tracking-tighter mx-1 shadow-sm"
                                                                 >
                                                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
                                                                     {props.children}
@@ -1953,7 +1996,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         </CollapsibleContainer>
 
                                         {msg.toolInvocation && (
-                                            <div className={`mt-4 p-4 rounded-xl overflow-hidden ${isDark ? 'bg-slate-900 border border-slate-700' : 'bg-white/5 border border-white/10'}`}>
+                                            <div className={`mt-4 p-4 rounded-none overflow-hidden ${isDark ? 'bg-slate-900 border border-slate-700' : 'bg-white/5 border border-border-grid'}`}>
                                                 {(() => {
                                                     const tool = toolsRegistry.find(t => t.id === msg.toolInvocation!.tool_id);
                                                     if (!tool) return <div className="text-red-400 text-sm">Erro: Ferramenta {msg.toolInvocation!.tool_id} não encontrada no catálogo.</div>;
@@ -1969,10 +2012,10 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             const draftType = getDraftType(msg.content, i);
                                             if (!draftType) return null;
                                             return (
-                                                <div className={`mt-3 pt-3 border-t flex flex-wrap gap-2 ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                                                <div className={`mt-3 pt-3 border-t flex flex-wrap gap-2 ${isDark ? 'border-slate-700' : 'border-border-grid'}`}>
                                                     <button
                                                         onClick={() => handleQuickReply('Confirmo!')}
-                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-sm"
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-none bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-sm"
                                                     >
                                                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                                                         Confirmar
@@ -1982,14 +2025,14 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                             setInput('Prefiro ajustar: ');
                                                             setTimeout(() => textareaRef.current?.focus(), 50);
                                                         }}
-                                                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all shadow-sm ${isDark ? 'bg-slate-800 text-amber-300 border-amber-500/30 hover:bg-slate-700' : 'bg-white text-amber-700 border-amber-300 hover:bg-amber-50'}`}
+                                                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-none border text-[10px] font-black uppercase tracking-widest transition-all shadow-sm ${isDark ? 'bg-slate-800 text-amber-300 border-amber-500/30 hover:bg-slate-700' : 'bg-white text-amber-700 border-amber-300 hover:bg-amber-50'}`}
                                                     >
                                                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                                         Ajustar
                                                     </button>
                                                     <button
                                                         onClick={() => handleQuickReply('Cancelar, não quero prosseguir.')}
-                                                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all shadow-sm ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-slate-100' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-100 hover:text-slate-600'}`}
+                                                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-none border text-[10px] font-black uppercase tracking-widest transition-all shadow-sm ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-slate-100' : 'bg-white text-slate-400 border-border-grid hover:bg-slate-100 hover:text-slate-600'}`}
                                                     >
                                                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
                                                         Cancelar
@@ -2000,14 +2043,14 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                                         {/* Botão Abrir Relatório */}
                                         {msg.role === 'assistant' && msg.reportId && (
-                                            <div className={`mt-3 pt-3 border-t ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                                            <div className={`mt-3 pt-3 border-t ${isDark ? 'border-slate-700' : 'border-border-grid'}`}>
                                                 <button
                                                     onClick={() => handleOpenReport(msg.reportId!)}
                                                     disabled={isLoadingReport}
-                                                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                    className="inline-flex items-center gap-2 px-4 py-2 rounded-none bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm font-mono"
                                                 >
                                                     {isLoadingReport ? (
-                                                        <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                                        <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-none animate-spin" />
                                                     ) : (
                                                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -2019,7 +2062,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         )}
 
                                         {msg.proposedPlan && (
-                                            <div className={`mt-4 p-4 rounded-xl border shadow-sm ${isDark ? 'bg-slate-900 border-blue-500/20' : 'bg-white border-blue-200'}`}>
+                                            <div className={`mt-4 p-4 rounded-none border shadow-sm ${isDark ? 'bg-slate-900 border-border-grid' : 'bg-white border-border-grid'}`}>
                                                 <p className="text-[10px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-2 mb-3">
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
                                                     Proposta de Ajuste de Plano
@@ -2033,8 +2076,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                     ))}
                                                 </div>
                                                 <div className="flex gap-2">
-                                                    <button className="flex-1 bg-emerald-600 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all">Aceitar</button>
-                                                    <button className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>Recusar</button>
+                                                    <button className="flex-1 bg-emerald-600 text-white py-2 rounded-none text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all">Aceitar</button>
+                                                    <button className={`flex-1 py-2 rounded-none text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>Recusar</button>
                                                 </div>
                                             </div>
                                         )}
@@ -2047,7 +2090,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                                             if (pe.status === 'completed') {
                                                 return (
-                                                    <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                                                    <div className="mt-3 p-3 bg-emerald-50 border border-border-grid rounded-none">
                                                         <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700 flex items-center gap-1.5 mb-2">
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                                                             Edição confirmada
@@ -2069,7 +2112,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                                             if (pe.status === 'invalidated' || pe.status === 'error') {
                                                 return (
-                                                    <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl">
+                                                    <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-none">
                                                         <p className="text-[10px] font-black uppercase tracking-widest text-red-600 flex items-center gap-1.5 mb-1">
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
                                                             {pe.status === 'error' ? 'Erro na edição' : 'Edição bloqueada'}
@@ -2081,7 +2124,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                                             if (pe.status === 'cancelled') {
                                                 return (
-                                                    <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                                                    <div className="mt-3 p-3 bg-slate-50 border border-border-grid rounded-none">
                                                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
                                                             Edição cancelada
@@ -2092,7 +2135,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                                             // status === 'pending'
                                             return (
-                                                <div className="mt-3 p-3 bg-white border border-amber-200 rounded-xl shadow-sm">
+                                                <div className="mt-3 p-3 bg-white border border-border-grid rounded-none shadow-sm">
                                                     <p className="text-[10px] font-black uppercase tracking-widest text-amber-700 flex items-center gap-1.5 mb-2">
                                                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                                         Edição pendente
@@ -2111,10 +2154,10 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                         <button
                                                             onClick={() => handleConfirmEdit(mid, pe)}
                                                             disabled={isProcessing}
-                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-none bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
                                                         >
                                                             {isProcessing ? (
-                                                                <span className="w-2.5 h-2.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                                                <span className="w-2.5 h-2.5 border-2 border-white/40 border-t-white rounded-none animate-spin" />
                                                             ) : (
                                                                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                                                             )}
@@ -2123,7 +2166,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                         <button
                                                             onClick={() => handleCancelEdit(mid)}
                                                             disabled={isProcessing}
-                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-slate-400 border border-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-none bg-white text-slate-400 border border-border-grid text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
                                                         >
                                                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
                                                             Cancelar
@@ -2141,7 +2184,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                                             if (br.status === 'completed') {
                                                 return (
-                                                    <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                                                    <div className="mt-3 p-3 bg-emerald-50 border border-border-grid rounded-none">
                                                         <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700 flex items-center gap-1.5 mb-2">
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                                                             {br.items.length} ações reagendadas
@@ -2162,7 +2205,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                                             if (br.status === 'error') {
                                                 return (
-                                                    <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl">
+                                                    <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-none">
                                                         <p className="text-[10px] font-black uppercase tracking-widest text-red-600 flex items-center gap-1.5 mb-1">
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
                                                             Erro no reagendamento
@@ -2174,7 +2217,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                                             if (br.status === 'cancelled') {
                                                 return (
-                                                    <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                                                    <div className="mt-3 p-3 bg-slate-50 border border-border-grid rounded-none">
                                                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
                                                             Reagendamento cancelado
@@ -2185,7 +2228,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                                             // status === 'pending'
                                             return (
-                                                <div className="mt-3 p-3 bg-white border border-blue-200 rounded-xl shadow-sm">
+                                                <div className="mt-3 p-3 bg-white border border-border-grid rounded-none shadow-sm">
                                                     <p className="text-[10px] font-black uppercase tracking-widest text-blue-700 flex items-center gap-1.5 mb-1">
                                                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                                                         Reagendamento em lote — {br.items.length} ações
@@ -2206,10 +2249,10 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                         <button
                                                             onClick={() => handleConfirmBatchReschedule(mid, br)}
                                                             disabled={isProcessing}
-                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-none bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
                                                         >
                                                             {isProcessing ? (
-                                                                <span className="w-2.5 h-2.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                                                <span className="w-2.5 h-2.5 border-2 border-white/40 border-t-white rounded-none animate-spin" />
                                                             ) : (
                                                                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                                                             )}
@@ -2218,7 +2261,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                         <button
                                                             onClick={() => handleCancelBatchReschedule(mid)}
                                                             disabled={isProcessing}
-                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-slate-400 border border-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-none bg-white text-slate-400 border border-border-grid text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
                                                         >
                                                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
                                                             Cancelar
@@ -2235,7 +2278,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                                             if (conflict.status_ui === 'resolved') {
                                                 return (
-                                                    <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                                                    <div className="mt-3 p-3 bg-emerald-50 border border-border-grid rounded-none">
                                                         <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700 flex items-center gap-1.5 mb-2">
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                                                             Conflito resolvido
@@ -2249,7 +2292,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                                             if (conflict.status_ui === 'kept') {
                                                 return (
-                                                    <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                                                    <div className="mt-3 p-3 bg-slate-50 border border-border-grid rounded-none">
                                                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-1.5 mb-2">
                                                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                                                             Conflito encerrado
@@ -2262,7 +2305,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             }
 
                                             return (
-                                                <div className="mt-3 p-3 bg-white border border-violet-200 rounded-xl shadow-sm">
+                                                <div className="mt-3 p-3 bg-white border border-border-grid rounded-none shadow-sm">
                                                     <p className="text-[10px] font-black uppercase tracking-widest text-violet-700 flex items-center gap-1.5 mb-2">
                                                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
                                                         Conflito de Memória
@@ -2271,11 +2314,11 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                         O Hermes encontrou duas versões muito parecidas e precisa de uma decisão explícita.
                                                     </p>
                                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-                                                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                                        <div className="rounded-none border border-border-grid bg-slate-50 p-3">
                                                             <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">Versão Antiga</p>
                                                             <p className="text-[11px] text-slate-700 leading-relaxed whitespace-pre-wrap">{conflict.existing_text}</p>
                                                         </div>
-                                                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                                                        <div className="rounded-none border border-border-grid bg-emerald-50 p-3">
                                                             <p className="text-[9px] font-black uppercase tracking-widest text-emerald-700 mb-2">Versão Nova</p>
                                                             <p className="text-[11px] text-emerald-900 leading-relaxed whitespace-pre-wrap">{conflict.proposed_text}</p>
                                                         </div>
@@ -2284,17 +2327,17 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                         <button
                                                             onClick={() => handleResolveMemoryConflict(mid, conflict, 'manter_existente')}
                                                             disabled={isProcessing}
-                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-slate-700 border border-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-none bg-white text-slate-700 border border-border-grid text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
                                                         >
-                                                            {isProcessing ? <span className="w-2.5 h-2.5 border-2 border-slate-300 border-t-slate-700 rounded-full animate-spin" /> : null}
+                                                            {isProcessing ? <span className="w-2.5 h-2.5 border-2 border-slate-300 border-t-slate-700 rounded-none animate-spin" /> : null}
                                                             Manter Antiga
                                                         </button>
                                                         <button
                                                             onClick={() => handleResolveMemoryConflict(mid, conflict, 'substituir_pelo_novo')}
                                                             disabled={isProcessing}
-                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-none bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
                                                         >
-                                                            {isProcessing ? <span className="w-2.5 h-2.5 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : null}
+                                                            {isProcessing ? <span className="w-2.5 h-2.5 border-2 border-white/40 border-t-white rounded-none animate-spin" /> : null}
                                                             Manter Nova
                                                         </button>
                                                     </div>
@@ -2304,7 +2347,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                                         {/* Proposta de Diagnóstico de Código */}
                                         {msg.proposedDiagnosis && (
-                                            <div className="mt-4 p-4 bg-white rounded-xl border border-blue-200 shadow-sm">
+                                            <div className="mt-4 p-4 bg-white rounded-none border border-border-grid shadow-sm">
                                                 <p className="text-[10px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-2 mb-2">
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
                                                     Diagnóstico de Código
@@ -2327,7 +2370,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                     )}
                                                     <p className="text-[11px] text-slate-600 leading-relaxed">{msg.proposedDiagnosis.descricaoProblema}</p>
                                                     {msg.proposedDiagnosis.mode === 'snippet' && msg.proposedDiagnosis.codeSnippet && (
-                                                        <pre className="text-[9px] font-mono text-slate-500 bg-slate-50 border border-slate-200 rounded p-2 max-h-24 overflow-hidden relative">
+                                                        <pre className="text-[9px] font-mono text-slate-500 bg-slate-50 border border-border-grid rounded p-2 max-h-24 overflow-hidden relative">
                                                             {msg.proposedDiagnosis.codeSnippet.slice(0, 300)}
                                                             {msg.proposedDiagnosis.codeSnippet.length > 300 && (
                                                                 <span className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-slate-50 to-transparent block" />
@@ -2339,10 +2382,10 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                     <button
                                                         onClick={() => handleConfirmDiagnosis(msg.proposedDiagnosis!, msg.id)}
                                                         disabled={diagnosingId === msg.id}
-                                                        className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-1.5"
+                                                        className="flex-1 bg-blue-600 text-white py-2 rounded-none text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-1.5"
                                                     >
                                                         {diagnosingId === msg.id ? (
-                                                            <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                                            <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-none animate-spin" />
                                                         ) : (
                                                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                                                         )}
@@ -2350,7 +2393,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                     </button>
                                                     <button
                                                         onClick={() => { setInput(`Ajustar diagnóstico: `); setTimeout(() => textareaRef.current?.focus(), 50); }}
-                                                        className="flex-1 bg-slate-100 text-slate-500 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all flex items-center justify-center gap-1.5"
+                                                        className="flex-1 bg-slate-100 text-slate-500 py-2 rounded-none text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all flex items-center justify-center gap-1.5"
                                                     >
                                                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                                         Ajustar
@@ -2369,7 +2412,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             const isProcessing = creatingFormId === msg.id;
 
                                             return (
-                                                <div className="mt-4 p-4 bg-white rounded-xl border border-emerald-200 shadow-sm">
+                                                <div className="mt-4 p-4 bg-white rounded-none border border-border-grid shadow-sm">
                                                     <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 flex items-center gap-2 mb-1">
                                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
                                                         Rascunho de Formulário
@@ -2378,7 +2421,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                     {msg.proposedForm.descricao && <p className="text-[10px] text-slate-500 mb-3">{msg.proposedForm.descricao}</p>}
                                                     <div className="space-y-2 mb-4 max-h-52 overflow-y-auto pr-1">
                                                         {msg.proposedForm.perguntas.map((q, idx) => (
-                                                            <div key={idx} className="p-2 rounded-lg bg-emerald-50 border border-emerald-100">
+                                                            <div key={idx} className="p-2 rounded-none bg-emerald-50 border border-emerald-100">
                                                                 <div className="flex items-center gap-1.5 mb-1">
                                                                     <span className="text-[9px] font-black text-emerald-500 uppercase">{q.tipo.replace('_', ' ')}</span>
                                                                     {q.obrigatoria && <span className="text-[9px] text-red-500 font-bold">*</span>}
@@ -2404,10 +2447,10 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                             <button
                                                                 onClick={() => handleConfirmForm(msg.proposedForm!, msg.id)}
                                                                 disabled={isProcessing}
-                                                                className="flex-1 bg-emerald-600 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-1.5"
+                                                                className="flex-1 bg-emerald-600 text-white py-2 rounded-none text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-1.5"
                                                             >
                                                                 {isProcessing ? (
-                                                                    <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                                                    <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-none animate-spin" />
                                                                 ) : (
                                                                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                                                                 )}
@@ -2416,14 +2459,14 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                             <button
                                                                 onClick={() => { setInput('Ajustar formulário: '); setTimeout(() => textareaRef.current?.focus(), 50); }}
                                                                 disabled={isProcessing}
-                                                                className="flex-1 bg-slate-100 text-slate-500 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 disabled:opacity-50 transition-all flex items-center justify-center gap-1.5"
+                                                                className="flex-1 bg-slate-100 text-slate-500 py-2 rounded-none text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 disabled:opacity-50 transition-all flex items-center justify-center gap-1.5"
                                                             >
                                                                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                                                 Ajustar
                                                             </button>
                                                         </div>
                                                     ) : (
-                                                        <div className="text-center p-2 rounded-lg bg-slate-50 border border-slate-100">
+                                                        <div className="text-center p-2 rounded-none bg-slate-50 border border-slate-100">
                                                             <p className="text-[10px] font-bold text-slate-400">Esta versão foi superada por um rascunho mais recente.</p>
                                                         </div>
                                                     )}
@@ -2433,7 +2476,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                                         {/* Proposta de Apresentação de Slides */}
                                         {msg.proposedPresentation && (
-                                            <div className="mt-4 p-4 bg-white rounded-xl border border-violet-200 shadow-sm">
+                                            <div className="mt-4 p-4 bg-white rounded-none border border-border-grid shadow-sm">
                                                 <p className="text-[10px] font-black uppercase tracking-widest text-violet-600 flex items-center gap-2 mb-1">
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" /></svg>
                                                     Esqueleto da Apresentação
@@ -2441,7 +2484,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                 <p className="text-[11px] font-bold text-slate-700 mb-3 truncate">{msg.proposedPresentation.temaGeral}</p>
                                                 <div className="space-y-2 mb-4 max-h-52 overflow-y-auto pr-1">
                                                     {msg.proposedPresentation.slides.map((slide, idx) => (
-                                                        <div key={idx} className="p-2 rounded-lg bg-violet-50 border border-violet-100">
+                                                        <div key={idx} className="p-2 rounded-none bg-violet-50 border border-violet-100">
                                                             <div className="flex items-center gap-1.5 mb-1">
                                                                 <span className="text-[9px] font-black text-violet-400 uppercase">{slide.tipo_layout}</span>
                                                                 <span className="text-[9px] text-slate-400">#{slide.ordem}</span>
@@ -2463,14 +2506,14 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                 <div className="flex gap-2">
                                                     <button
                                                         onClick={() => handleConfirmPresentation(msg.proposedPresentation!)}
-                                                        className="flex-1 bg-violet-600 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-violet-700 transition-all flex items-center justify-center gap-1.5"
+                                                        className="flex-1 bg-violet-600 text-white py-2 rounded-none text-[10px] font-black uppercase tracking-widest hover:bg-violet-700 transition-all flex items-center justify-center gap-1.5"
                                                     >
                                                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                                                         Confirmar
                                                     </button>
                                                     <button
                                                         onClick={() => { setInput('Ajustar apresentação: '); setTimeout(() => textareaRef.current?.focus(), 50); }}
-                                                        className="flex-1 bg-slate-100 text-slate-500 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all flex items-center justify-center gap-1.5"
+                                                        className="flex-1 bg-slate-100 text-slate-500 py-2 rounded-none text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all flex items-center justify-center gap-1.5"
                                                     >
                                                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                                                         Ajustar
@@ -2494,11 +2537,11 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                         {/* Indicador de loading com mensagem de fase */}
                         {isBlocked && (
                             <div className="flex justify-start flex-col gap-2">
-                                <div className="px-4 py-3 rounded-2xl rounded-bl-none bg-slate-100 flex flex-col gap-2">
+                                <div className="px-4 py-3 rounded-none rounded-bl-none bg-slate-100 flex flex-col gap-2">
                                     <div className="flex gap-1.5 items-center">
-                                        <span className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" />
-                                        <span className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
-                                        <span className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+                                        <span className="w-2 h-2 bg-blue-600 rounded-none animate-bounce" />
+                                        <span className="w-2 h-2 bg-blue-600 rounded-none animate-bounce" style={{ animationDelay: '0.1s' }} />
+                                        <span className="w-2 h-2 bg-blue-600 rounded-none animate-bounce" style={{ animationDelay: '0.2s' }} />
                                         {uploadPhase !== 'idle' && (
                                             <span className="text-[10px] font-bold text-slate-500 ml-2">
                                                 {uploadPhaseLabel[uploadPhase]}
@@ -2511,16 +2554,16 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             setUploadPhase('idle');
                                             setProgressWidth(0);
                                         }}
-                                        className="mt-1 self-start px-2.5 py-1 rounded-lg bg-white/50 hover:bg-white text-[9px] font-black uppercase tracking-widest text-slate-400 hover:text-red-500 transition-all flex items-center gap-1 shadow-sm"
+                                        className="mt-1 self-start px-2.5 py-1 rounded-none bg-white/50 hover:bg-white text-[9px] font-black uppercase tracking-widest text-slate-400 hover:text-red-500 transition-all flex items-center gap-1 shadow-sm"
                                     >
                                         <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
                                         Cancelar
                                     </button>
                                     {/* Barra de progresso — visível apenas nas fases de upload/processamento */}
                                     {uploadPhase !== 'idle' && (
-                                        <div className="w-48 h-1 bg-slate-200 rounded-full overflow-hidden">
+                                        <div className="w-48 h-1 bg-slate-200 rounded-none overflow-hidden">
                                             <div
-                                                className="h-full bg-blue-500 rounded-full"
+                                                className="h-full bg-blue-500 rounded-none"
                                                 style={{
                                                     width: `${progressWidth}%`,
                                                     transition: progressTransition.current
@@ -2535,13 +2578,43 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                     </div>
 
                     {/* Footer Input */}
-                    <div
-                        className={`relative z-20 shrink-0 overflow-visible p-6 border-t ${isDark ? 'border-white/10' : 'border-slate-100'}`}
-                    >
+                    <div className={`shrink-0 border-t p-2 sm:p-4 relative ${isDark ? 'bg-[#0f1724] border-white/10' : 'bg-white border-slate-100'}`}>
+                        {/* Sugestão de Prompt Proativa - Posicionada no container externo para largura total */}
+                        {suggestedPrompt && !input.trim() && messages.length === 0 && (
+                            <div className="absolute bottom-full left-0 mb-4 w-full px-3 z-50">
+                                <button
+                                    onClick={() => {
+                                        if (!currentSessionId) {
+                                            handleCreateSession(suggestedPrompt);
+                                        } else {
+                                            sendMessage(suggestedPrompt);
+                                        }
+                                        setSuggestedPrompt(null);
+                                    }}
+                                    className={`w-full group flex items-center justify-between p-4 gap-4 rounded-none border transition-all text-left shadow-2xl ${isDark
+                                        ? 'bg-[#0f1724] border-blue-500/30 hover:bg-blue-500/10 hover:border-blue-500/50'
+                                        : 'bg-white border-blue-200 hover:bg-blue-50 hover:border-blue-300'
+                                        }`}
+                                >
+                                    <div className="flex-1 flex flex-col gap-1 min-w-0">
+                                        <div className="flex items-center gap-2">
+                                            <div className={`w-1 h-1 rounded-none ${isDark ? 'bg-blue-400' : 'bg-blue-600'} animate-pulse`} />
+                                            <span className={`text-[7px] font-black uppercase tracking-[0.2em] font-mono ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>Sugestão Estratégica IA</span>
+                                        </div>
+                                        <p className={`text-[11px] font-mono leading-relaxed ${isDark ? 'text-blue-100/70 group-hover:text-white' : 'text-slate-600 group-hover:text-blue-900'}`}>
+                                            {suggestedPrompt}
+                                        </p>
+                                    </div>
+                                    <svg className={`w-4 h-4 shrink-0 ${isDark ? 'text-blue-400/30' : 'text-blue-300'} group-hover:translate-x-1 transition-transform`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M14 5l7 7-7 7" />
+                                    </svg>
+                                </button>
+                            </div>
+                        )}
 
                         {/* Banner de erro inline */}
                         {footerError && (
-                            <div className="flex items-start gap-2 mb-3 px-3 py-2.5 rounded-xl text-xs font-semibold bg-red-50 text-red-700 border border-red-200">
+                            <div className="flex items-start gap-2 mb-3 px-3 py-2.5 rounded-none text-xs font-semibold bg-red-50 text-red-700 border border-red-200">
                                 <svg className="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
                                 </svg>
@@ -2560,7 +2633,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                         {/* Banner de transcrição de áudio */}
                         {isTranscribing && (
-                            <div className="flex items-center gap-2 mb-3 px-3 py-2.5 rounded-xl text-xs font-semibold bg-violet-50 text-violet-700 border border-violet-200">
+                            <div className="flex items-center gap-2 mb-3 px-3 py-2.5 rounded-none text-xs font-semibold bg-violet-50 text-violet-700 border border-border-grid">
                                 <svg className="w-4 h-4 shrink-0 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.343l-.707-.707" />
                                 </svg>
@@ -2570,7 +2643,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                         {/* Badge de arquivo anexado */}
                         {(attachedFile || pastedContext) && !isBlocked && (
-                            <div className={`flex items-center gap-2 mb-3 px-3 py-2 rounded-xl text-xs font-semibold ${isDark ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
+                            <div className={`flex items-center gap-2 mb-3 px-3 py-2 rounded-none text-xs font-semibold ${isDark ? 'bg-blue-900/40 text-blue-300' : 'bg-blue-50 text-blue-700 border border-border-grid'}`}>
                                 <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                                 </svg>
@@ -2587,10 +2660,10 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                             </div>
                         )}
 
-                        <div className={`relative z-20 flex items-end gap-1 rounded-[26px] border px-2 py-2 shadow-sm transition-all ${
+                        <div className={`relative z-20 flex items-end gap-1 rounded-none border px-2 py-2 shadow-sm transition-all ${
                             isDark
-                                ? 'border-white/10 bg-white/5 focus-within:border-blue-500'
-                                : 'border-slate-200 bg-white focus-within:border-blue-500'
+                                ? 'border-border-grid bg-[#0f0f1a] focus-within:border-blue-500'
+                                : 'border-border-grid bg-white focus-within:border-blue-500'
                         }`}>
                             {/* Input de arquivo oculto */}
                             <input
@@ -2606,7 +2679,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                 onClick={() => !isBlocked && fileInputRef.current?.click()}
                                 disabled={isBlocked}
                                 title="Anexar arquivo"
-                                className={`flex h-9 w-9 items-center justify-center rounded-full transition-all flex-shrink-0 ${
+                                className={`flex h-9 w-9 items-center justify-center rounded-none transition-all flex-shrink-0 ${
                                     (attachedFile || pastedContext)
                                         ? 'bg-blue-500/10 text-blue-500'
                                         : isDark
@@ -2627,7 +2700,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                     aria-label="Ações Rápidas"
                                     aria-expanded={showToolMenu}
                                     title="Atalhos de ferramentas"
-                                    className={`flex h-9 w-9 items-center justify-center rounded-full transition-all ${isDark ? 'text-white/55 hover:bg-white/10 hover:text-white/85' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'} disabled:opacity-30 disabled:cursor-not-allowed`}
+                                    className={`flex h-9 w-9 items-center justify-center rounded-none transition-all ${isDark ? 'text-white/55 hover:bg-white/10 hover:text-white/85' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'} disabled:opacity-30 disabled:cursor-not-allowed`}
                                 >
                                     <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                         <circle cx="5" cy="5" r="1.8" />
@@ -2642,8 +2715,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                     </svg>
                                 </button>
                                 {showToolMenu && (
-                                    <div className={`absolute bottom-full left-0 mb-2 z-[80] min-w-[280px] max-w-[min(22rem,calc(100vw-2rem))] max-h-[min(28rem,calc(100vh-14rem))] overflow-y-auto overflow-x-hidden rounded-2xl border shadow-2xl ${isDark ? 'border-white/10 bg-[#101827]' : 'border-slate-200 bg-white'}`}>
-                                        <div className={`sticky top-0 z-10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'border-b border-white/10 bg-[#101827] text-white/40' : 'border-b border-slate-100 bg-white text-slate-400'}`}>
+                                    <div className={`absolute bottom-full left-0 mb-2 z-[80] min-w-[280px] max-w-[min(22rem,calc(100vw-2rem))] max-h-[min(28rem,calc(100vh-14rem))] overflow-y-auto overflow-x-hidden rounded-none border shadow-2xl ${isDark ? 'border-border-grid bg-[#101827]' : 'border-border-grid bg-white'}`}>
+                                        <div className={`sticky top-0 z-10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'border-b border-border-grid bg-[#101827] text-white/40' : 'border-b border-slate-100 bg-white text-slate-400'}`}>
                                             Ferramentas Interativas
                                         </div>
                                         <div className="p-2">
@@ -2651,7 +2724,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                 <button
                                                     key={tool.id}
                                                     onClick={() => insertToolShortcut(tool.ui_metadata.tag)}
-                                                    className={`w-full rounded-xl px-3 py-2 text-left transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-50'}`}
+                                                    className={`w-full rounded-none px-3 py-2 text-left transition-all ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-50'}`}
                                                 >
                                                     <div className="flex items-center justify-between gap-3">
                                                         <span className={`text-[11px] font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>{tool.ui_metadata.title}</span>
@@ -2661,7 +2734,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                 </button>
                                             ))}
                                         </div>
-                                        <div className={`sticky top-0 z-10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'border-t border-white/10 bg-[#101827] text-white/40' : 'border-t border-slate-100 bg-white text-slate-400'}`}>
+                                        <div className={`sticky top-0 z-10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.2em] ${isDark ? 'border-t border-border-grid bg-[#101827] text-white/40' : 'border-t border-slate-100 bg-white text-slate-400'}`}>
                                             Capacidades de IA
                                         </div>
                                         <div className="p-2 pb-3">
@@ -2683,7 +2756,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             ] as { key: string; label: string; desc: string }[]).map(cap => (
                                                 <div
                                                     key={cap.key}
-                                                    className={`rounded-xl px-3 py-2 ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}
+                                                    className={`rounded-none px-3 py-2 ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}
                                                 >
                                                     <span className={`text-[11px] font-black ${isDark ? 'text-white/80' : 'text-slate-700'}`}>{cap.label}</span>
                                                     <p className={`mt-0.5 text-[10px] leading-relaxed ${isDark ? 'text-white/40' : 'text-slate-400'}`}>{cap.desc}</p>
@@ -2698,7 +2771,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                             <div className="relative flex-1 min-w-0">
                                 {/* Mention popup */}
                                 {mention.visible && (
-                                    <div className="absolute bottom-full left-0 mb-2 w-full max-h-52 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl z-50">
+                                    <div className="absolute bottom-full left-0 mb-2 w-full max-h-52 overflow-y-auto rounded-none border border-border-grid bg-white shadow-xl z-50">
                                         <div className="px-3 py-1.5 border-b border-slate-100 sticky top-0 bg-white">
                                             <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Referenciar do Diário de Bordo</span>
                                         </div>
@@ -2719,6 +2792,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                         ))}
                                     </div>
                                 )}
+
                                 <textarea
                                     ref={textareaRef}
                                     rows={1}
@@ -2761,8 +2835,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             }
                                         }
                                     }}
-                                    placeholder={isRecording ? '🎙 Gravando… clique no microfone para parar' : isProcessingMic ? 'Transcrevendo áudio...' : isTranscribing ? 'Transcrevendo áudio...' : attachedFile ? 'Pergunte sobre o arquivo ou envie sem texto…' : pastedContext ? 'Pergunte sobre o contexto ou envie sem texto…' : 'Estrategize com Hermes…'}
-                                    className={`w-full px-2 pt-2.5 pb-1.5 text-sm leading-5 font-medium outline-none border-0 resize-none bg-transparent ${isDark ? 'text-white placeholder:text-white/20' : 'text-slate-700 placeholder:text-slate-400'} transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed`}
+                                    placeholder={isRecording ? '🎙 Gravando… clique no microfone para parar' : isProcessingMic ? 'Transcrevendo áudio...' : isTranscribing ? 'Transcrevendo áudio...' : attachedFile ? 'Pergunte sobre o arquivo ou envie sem texto…' : pastedContext ? 'Pergunte sobre o contexto ou envie sem texto…' : 'Escreva Aqui'}
+                                    className={`w-full px-2 pt-2.5 pb-1.5 text-sm leading-5 font-mono font-medium outline-none border-0 resize-none bg-transparent ${isDark ? 'text-white placeholder:text-white/20' : 'text-slate-700 placeholder:text-slate-400'} transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed`}
                                 />
                             </div>
 
@@ -2778,7 +2852,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                     }}
                                     disabled={isBlocked}
                                     title="Enviar"
-                                    className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 disabled:opacity-40 transition-all active:scale-95 flex-shrink-0"
+                                    className="flex h-9 w-9 items-center justify-center rounded-none bg-blue-600 text-white shadow-lg hover:bg-blue-700 disabled:opacity-40 transition-all active:scale-95 flex-shrink-0"
                                 >
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
@@ -2789,7 +2863,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                     onClick={() => isRecording ? stopRecording() : startRecording()}
                                     disabled={isBlocked && !isRecording}
                                     title={isRecording ? 'Parar gravação' : 'Gravar Áudio'}
-                                    className={`flex h-9 w-9 items-center justify-center rounded-full transition-all active:scale-95 flex-shrink-0 ${
+                                    className={`flex h-9 w-9 items-center justify-center rounded-none transition-all active:scale-95 flex-shrink-0 ${
                                         isRecording
                                             ? 'bg-red-500 text-white animate-pulse hover:bg-red-600'
                                             : isDark

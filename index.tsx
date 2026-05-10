@@ -233,24 +233,24 @@ const QuickLogModal = ({ isOpen, onClose, onAddLog, unidades }: { isOpen: boolea
   };
 
   return (
-    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white w-full max-w-2xl rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95">
-        <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-950/90 animate-in fade-in">
+      <div className="bg-white w-full max-w-2xl rounded-none shadow-2xl overflow-hidden animate-in zoom-in-95 border border-border-grid">
+        <div className="p-8 border-b border-border-grid bg-slate-50 flex items-center justify-between">
           <div>
-            <h3 className="text-2xl font-black text-slate-900 tracking-tight">Log Rápido</h3>
-            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">Registro de Sistema</p>
+            <h3 className="text-2xl font-black text-slate-900 tracking-tight font-mono">Log Rápido</h3>
+            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1 font-mono">Registro de Sistema</p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-none transition-colors">
             <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
         <div className="p-8 space-y-6">
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Sistema</label>
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1 font-mono">Sistema</label>
             <select
               value={selectedSystem}
               onChange={(e) => setSelectedSystem(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-lg md:rounded-xl px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-violet-500"
+              className="w-full bg-slate-50 border border-border-grid rounded-none px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:ring-1 focus:ring-primary-tactile font-mono"
             >
               <option value="" disabled>Selecione um sistema</option>
               {systems.map(s => (
@@ -259,19 +259,19 @@ const QuickLogModal = ({ isOpen, onClose, onAddLog, unidades }: { isOpen: boolea
             </select>
           </div>
 
-          <div className="bg-slate-50 p-2 rounded-none md:rounded-2xl border-2 border-slate-100 flex items-center gap-4 focus-within:border-violet-500 transition-all">
+          <div className="bg-slate-50 p-2 rounded-none border border-border-grid flex items-center gap-4 focus-within:border-primary-tactile transition-all">
             <button
               onClick={isRecording ? stopRecording : startRecording}
               disabled={isProcessing}
-              className={`p-4 rounded-none md:rounded-xl transition-all flex-shrink-0 ${isRecording
+              className={`p-4 rounded-none transition-all flex-shrink-0 ${isRecording
                 ? 'bg-rose-600 text-white animate-pulse shadow-lg'
                 : isProcessing
                   ? 'bg-violet-100 text-violet-600 cursor-wait'
-                  : 'bg-white border border-slate-200 text-slate-400 hover:text-violet-600'
+                  : 'bg-white border border-border-grid text-slate-400 hover:text-violet-600'
                 }`}
             >
               {isProcessing ? (
-                <div className="w-5 h-5 border-2 border-violet-600 border-t-transparent rounded-full animate-spin"></div>
+                <div className="w-5 h-5 border-2 border-violet-600 border-t-transparent rounded-none animate-spin"></div>
               ) : isRecording ? (
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
               ) : (
@@ -283,7 +283,7 @@ const QuickLogModal = ({ isOpen, onClose, onAddLog, unidades }: { isOpen: boolea
               type="text"
               disabled={isRecording || isProcessing}
               placeholder={isRecording ? "Gravando..." : isProcessing ? "Processando..." : "Descreva o ajuste..."}
-              className="flex-1 bg-transparent border-none outline-none py-4 text-base font-bold text-slate-800 placeholder:text-slate-300"
+              className="flex-1 bg-transparent border-none outline-none py-4 text-base font-bold text-slate-800 placeholder:text-slate-300 font-mono"
               value={textInput}
               onChange={e => setTextInput(e.target.value)}
               onKeyDown={e => {
@@ -296,7 +296,7 @@ const QuickLogModal = ({ isOpen, onClose, onAddLog, unidades }: { isOpen: boolea
             />
           </div>
           <div className="flex gap-4">
-            <button onClick={onClose} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-none md:rounded-2xl transition-all">Cancelar</button>
+            <button onClick={onClose} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-none transition-all font-mono">Cancelar</button>
             <button
               onClick={() => {
                 if (textInput.trim() && selectedSystem) {
@@ -306,7 +306,7 @@ const QuickLogModal = ({ isOpen, onClose, onAddLog, unidades }: { isOpen: boolea
                 }
               }}
               disabled={!textInput.trim() || !selectedSystem}
-              className="flex-none w-16 md:w-auto md:flex-1 bg-slate-900 text-white py-4 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              className="flex-none w-16 md:w-auto md:flex-1 bg-slate-900 text-white py-4 rounded-none text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2 font-mono"
             >
               <svg className="w-5 h-5 md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
               <span className="hidden md:inline">Registrar Log</span>
@@ -524,14 +524,14 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
   }
 
   return (
-    <div className="fixed inset-0 z-[250] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-in fade-in p-4">
-      <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 md:zoom-in-95 my-auto">
-        <div className="px-5 py-4 md:px-6 md:py-5 border-b border-slate-100 bg-white flex items-center justify-between">
+    <div className="fixed inset-0 z-[250] flex items-center justify-center bg-slate-950/90 animate-in fade-in p-4">
+      <div className="bg-white w-full max-w-md rounded-none shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 md:zoom-in-95 my-auto border border-border-grid">
+        <div className="px-5 py-4 md:px-6 md:py-5 border-b border-border-grid bg-white flex items-center justify-between">
           <div>
-            <h3 className="text-lg md:text-xl font-black text-slate-900 tracking-tight">Transcrição IA</h3>
-            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">Áudio rápido com cópia automática</p>
+            <h3 className="text-lg md:text-xl font-black text-slate-900 tracking-tight font-mono">Transcrição IA</h3>
+            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1 font-mono">Áudio rápido com cópia automática</p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-none transition-colors">
             <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
@@ -542,26 +542,26 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
               onDragOver={e => { e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
               onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files.length) handleFileSelection(e.dataTransfer.files[0]); }}
-              className={`border-2 border-dashed rounded-[1.75rem] p-5 md:p-6 flex flex-col items-center justify-center text-center gap-4 transition-all min-h-[340px] md:min-h-0 ${dragOver ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-slate-50'}`}
+              className={`border border-dashed rounded-none p-5 md:p-6 flex flex-col items-center justify-center text-center gap-4 transition-all min-h-[340px] md:min-h-0 ${dragOver ? 'border-primary-tactile bg-amber-50' : 'border-border-grid bg-slate-50'}`}
             >
               {isProcessing ? (
                 <div className="flex flex-col items-center gap-4 py-8">
-                  <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-                  <p className="text-indigo-600 font-black uppercase tracking-widest text-[10px]">Processando e copiando...</p>
+                  <div className="w-12 h-12 border-4 border-primary-tactile border-t-transparent rounded-none animate-spin" />
+                  <p className="text-primary-tactile font-black uppercase tracking-widest text-[10px] font-mono">Processando e copiando...</p>
                 </div>
               ) : file ? (
                 <div className="space-y-4 py-2 w-full">
-                  <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
+                  <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-none flex items-center justify-center mx-auto border border-emerald-200">
                     <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
                   </div>
-                  <p className="text-sm font-black text-slate-900 truncate px-4">{file.name}</p>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Transcrição automática em andamento</p>
+                  <p className="text-sm font-black text-slate-900 truncate px-4 font-mono">{file.name}</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 font-mono">Transcrição automática em andamento</p>
                 </div>
               ) : (
                 <div className="py-4 w-full flex flex-col items-center justify-center gap-5 md:gap-4">
                   <button
                     onClick={isRecording ? stopRecording : startRecording}
-                    className={`mx-auto relative shadow-lg transition-all active:scale-95 w-[80vw] max-w-[320px] h-[16vw] max-h-[76px] min-h-[60px] rounded-[1.5rem] md:w-24 md:h-24 md:rounded-full ${isRecording ? 'bg-rose-700 text-white animate-pulse' : 'bg-rose-600 text-white hover:bg-rose-700'}`}
+                    className={`mx-auto relative shadow-lg transition-all active:scale-95 w-[80vw] max-w-[320px] h-[16vw] max-h-[76px] min-h-[60px] rounded-none md:w-24 md:h-24 ${isRecording ? 'bg-rose-700 text-white animate-pulse' : 'bg-rose-600 text-white hover:bg-rose-700'}`}
                   >
                     <span className="absolute inset-0 flex items-center justify-center">
                       {isRecording ? (
@@ -572,12 +572,12 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
                     </span>
                   </button>
                   <div className="space-y-1">
-                    <p className="font-black text-slate-900">{isRecording ? 'Toque novamente para encerrar' : 'Toque para gravar o áudio'}</p>
-                    <p className="text-slate-400 text-xs font-medium md:hidden">Use o botão central para iniciar a gravação.</p>
-                    <p className="text-slate-400 text-xs font-medium hidden md:block">Também funciona com colar, arrastar ou selecionar arquivo.</p>
+                    <p className="font-black text-slate-900 font-mono">{isRecording ? 'Toque novamente para encerrar' : 'Toque para gravar o áudio'}</p>
+                    <p className="text-slate-400 text-xs font-medium md:hidden font-mono">Use o botão central para iniciar a gravação.</p>
+                    <p className="text-slate-400 text-xs font-medium hidden md:block font-mono">Também funciona com colar, arrastar ou selecionar arquivo.</p>
                   </div>
                   <div className="mt-2 hidden md:block">
-                    <label htmlFor="mobile-transcription-upload" className="bg-white border border-slate-200 text-slate-700 px-4 py-3 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-sm hover:border-indigo-300 hover:text-indigo-600 transition-all cursor-pointer flex items-center gap-2 mx-auto w-fit">
+                    <label htmlFor="mobile-transcription-upload" className="bg-white border border-border-grid text-slate-700 px-4 py-3 rounded-none font-black uppercase tracking-widest text-[10px] shadow-sm hover:border-primary-tactile hover:text-primary-tactile transition-all cursor-pointer flex items-center gap-2 mx-auto w-fit font-mono">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
                       Selecionar Arquivo
                     </label>
@@ -599,12 +599,12 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
             </div>
           ) : (
             <div className="space-y-4 animate-in slide-in-from-bottom-4">
-              <div className="bg-emerald-50 px-4 py-3 rounded-[1.5rem] border border-emerald-100">
-                <label className="text-[10px] font-black text-emerald-600 uppercase tracking-widest block">Copiado automaticamente</label>
+              <div className="bg-emerald-50 px-4 py-3 rounded-none border border-emerald-100">
+                <label className="text-[10px] font-black text-emerald-600 uppercase tracking-widest block font-mono">Copiado automaticamente</label>
               </div>
-              <div className="bg-slate-50 p-4 md:p-5 rounded-[1.75rem] border border-slate-100 max-h-[280px] overflow-y-auto custom-scrollbar">
-                <label className="text-[10px] font-black text-indigo-500 uppercase tracking-widest block mb-2">Resultado Final</label>
-                <p className="text-slate-800 text-base font-bold leading-relaxed whitespace-pre-wrap">{transcription.refined}</p>
+              <div className="bg-slate-50 p-4 md:p-5 rounded-none border border-border-grid max-h-[280px] overflow-y-auto custom-scrollbar">
+                <label className="text-[10px] font-black text-primary-tactile uppercase tracking-widest block mb-2 font-mono">Resultado Final</label>
+                <p className="text-slate-800 text-base font-bold leading-relaxed whitespace-pre-wrap font-mono">{transcription.refined}</p>
               </div>
               <div className="flex gap-4">
                 <button
@@ -617,12 +617,12 @@ const TranscriptionAIModal = ({ isOpen, onClose, showToast }: { isOpen: boolean,
                       showToast("Não foi possível copiar a transcrição.", "error");
                     }
                   }}
-                  className="flex-1 bg-slate-900 text-white py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-indigo-600 transition-all flex items-center justify-center gap-2"
+                  className="flex-1 bg-slate-900 text-white py-3 rounded-none text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all flex items-center justify-center gap-2 font-mono"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                   Copiar Novamente
                 </button>
-                <button onClick={() => { setFile(null); setTranscription(null); }} className="px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-2xl transition-all">Novo</button>
+                <button onClick={() => { setFile(null); setTranscription(null); }} className="px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-none transition-all font-mono">Novo</button>
               </div>
             </div>
           )}
@@ -926,18 +926,18 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
       <div className="bg-white dark:bg-slate-950 w-full max-w-2xl h-full md:h-auto md:max-h-[92vh] rounded-none md:rounded-[2.5rem] shadow-[0_40px_80px_-20px_rgba(0,0,0,0.35)] dark:shadow-[0_40px_100px_-20px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden animate-in zoom-in-95 duration-300">
 
         {/* Header */}
-        <div className="p-7 md:p-8 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-br from-emerald-50/80 to-white dark:from-emerald-950/45 dark:to-slate-950 flex items-center gap-4 flex-shrink-0">
-          <div className="w-12 h-12 bg-emerald-600 dark:bg-emerald-500 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-200 dark:shadow-emerald-950/40 flex-shrink-0">
+        <div className="p-7 md:p-8 border-b border-border-grid bg-white flex items-center gap-4 flex-shrink-0">
+          <div className="w-12 h-12 bg-slate-900 rounded-none flex items-center justify-center shadow-lg flex-shrink-0">
             <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
           </div>
           <div className="flex-1 min-w-0">
-            <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">Assistente de Compras IA</h3>
-            <p className="text-emerald-600 dark:text-emerald-300 text-[10px] font-black uppercase tracking-[0.2em] mt-0.5">
+            <h3 className="text-xl font-black text-slate-900 tracking-tight font-mono uppercase">Assistente de Compras IA</h3>
+            <p className="text-primary-tactile text-[10px] font-black uppercase tracking-[0.2em] mt-0.5 font-mono">
               {step === 'input' ? 'Diga o que você quer comprar' : step === 'processing' ? 'Buscando no catálogo...' : 'Valide os itens identificados'}
             </p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-2xl transition-all flex-shrink-0">
-            <svg className="w-5 h-5 text-slate-400 dark:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-none transition-all flex-shrink-0">
+            <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
 
@@ -954,11 +954,11 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
                 </div>
               )}
 
-              <div className="bg-slate-50 dark:bg-slate-900 rounded-[2rem] border-2 border-slate-100 dark:border-slate-800 focus-within:border-emerald-400 dark:focus-within:border-emerald-500 transition-all shadow-inner overflow-hidden">
+              <div className="bg-slate-50 rounded-none border border-border-grid focus-within:border-primary-tactile transition-all shadow-inner overflow-hidden">
                 <div className="flex items-start gap-3 p-4">
                   <button
                     onClick={isRecording ? stopRecording : startRecording}
-                    className={`mt-1 w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all ${isRecording ? 'bg-rose-500 text-white animate-pulse shadow-lg shadow-rose-200 dark:shadow-rose-950/50' : 'bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-300 hover:border-emerald-200 dark:hover:border-emerald-700 hover:shadow-md'}`}
+                    className={`mt-1 w-12 h-12 rounded-none flex items-center justify-center flex-shrink-0 transition-all ${isRecording ? 'bg-rose-500 text-white animate-pulse shadow-lg' : 'bg-white border border-border-grid text-slate-400 hover:text-emerald-600 hover:border-emerald-200 hover:shadow-md'}`}
                     title={isRecording ? 'Parar gravação' : 'Gravar áudio'}
                   >
                     {isRecording
@@ -967,7 +967,7 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
                   </button>
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="mt-1 w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 transition-all bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-300 hover:border-emerald-200 dark:hover:border-emerald-700 hover:shadow-md"
+                    className="mt-1 w-12 h-12 rounded-none flex items-center justify-center flex-shrink-0 transition-all bg-white border border-border-grid text-slate-400 hover:text-emerald-600 hover:border-emerald-200 hover:shadow-md"
                     title="Carregar imagem"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-8h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
@@ -985,7 +985,7 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
                   />
                   <textarea
                     autoFocus
-                    className="flex-1 bg-transparent border-none outline-none py-3 text-base font-bold text-slate-800 dark:text-slate-100 placeholder:text-slate-300 dark:placeholder:text-slate-600 resize-none min-h-[120px]"
+                    className="flex-1 bg-transparent border-none outline-none py-3 text-base font-bold text-slate-800 placeholder:text-slate-300 resize-none min-h-[120px] font-mono"
                     placeholder={isRecording ? 'Gravando... Fale os itens que deseja comprar...' : 'Ex: "2 kg de arroz, 1 caixa de leite, ricota, sabão em pó e 3 iogurtes"'}
                     value={textInput}
                     disabled={isRecording}
@@ -997,26 +997,26 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
                   <div className="px-5 pb-4 flex items-center gap-2">
                     <div className="flex gap-0.5">
                       {[...Array(8)].map((_, i) => (
-                        <div key={i} className="w-1 bg-rose-500 rounded-full animate-pulse" style={{ height: `${8 + Math.random() * 16}px`, animationDelay: `${i * 100}ms` }} />
+                        <div key={i} className="w-1 bg-rose-500 rounded-none animate-pulse" style={{ height: `${8 + Math.random() * 16}px`, animationDelay: `${i * 100}ms` }} />
                       ))}
                     </div>
-                    <span className="text-rose-600 text-[11px] font-black uppercase tracking-widest">Gravando</span>
+                    <span className="text-rose-600 text-[11px] font-black uppercase tracking-widest font-mono">Gravando</span>
                   </div>
                 )}
                 {attachedImages.length > 0 && (
                   <div className="px-5 pb-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {attachedImages.map(image => (
-                      <div key={image.id} className="relative overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950">
+                      <div key={image.id} className="relative overflow-hidden rounded-none border border-border-grid bg-white">
                         <img src={image.previewUrl} alt={image.name} className="h-24 w-full object-cover" />
                         <button
                           onClick={() => removeImage(image.id)}
-                          className="absolute right-2 top-2 w-7 h-7 rounded-xl bg-slate-950/80 text-white flex items-center justify-center hover:bg-rose-500 transition-colors"
+                          className="absolute right-2 top-2 w-7 h-7 rounded-none bg-slate-950/80 text-white flex items-center justify-center hover:bg-rose-500 transition-colors"
                           title="Remover imagem"
                         >
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
                         </button>
                         <div className="px-3 py-2">
-                          <p className="truncate text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">{image.name}</p>
+                          <p className="truncate text-[10px] font-black uppercase tracking-widest text-slate-500 font-mono">{image.name}</p>
                         </div>
                       </div>
                     ))}
@@ -1033,25 +1033,25 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
 
               <button
                 onClick={onViewList}
-                className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl border-2 border-slate-100 dark:border-slate-800 hover:border-emerald-300 dark:hover:border-emerald-700 bg-white dark:bg-slate-900 transition-all group"
+                className="w-full flex items-center gap-4 px-5 py-4 rounded-none border border-border-grid hover:border-primary-tactile bg-white transition-all group"
               >
-                <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-5 h-5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="w-9 h-9 rounded-none bg-slate-50 flex items-center justify-center flex-shrink-0 border border-border-grid">
+                  <svg className="w-5 h-5 text-slate-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
                   </svg>
                 </div>
                 <div className="flex-1 text-left">
-                  <p className="text-[11px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">Ver lista completa</p>
-                  <p className={`text-[10px] font-bold mt-0.5 ${plannedCount > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
+                  <p className="text-[11px] font-black uppercase tracking-widest text-slate-700 font-mono">Ver lista completa</p>
+                  <p className={`text-[10px] font-bold mt-0.5 font-mono ${plannedCount > 0 ? 'text-primary-tactile' : 'text-slate-400'}`}>
                     {plannedCount > 0 ? `${plannedCount} ${plannedCount === 1 ? 'item na lista' : 'itens na lista'}` : 'Nenhum item na lista ainda'}
                   </p>
                 </div>
                 {plannedCount > 0 && (
-                  <span className="bg-emerald-500 text-white text-xs font-black rounded-full min-w-[1.5rem] h-6 px-1.5 flex items-center justify-center flex-shrink-0">
+                  <span className="bg-slate-900 text-white text-xs font-black rounded-none min-w-[1.5rem] h-6 px-1.5 flex items-center justify-center flex-shrink-0 font-mono">
                     {plannedCount}
                   </span>
                 )}
-                <svg className="w-4 h-4 text-slate-300 dark:text-slate-600 group-hover:text-emerald-500 transition-colors flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4 text-slate-300 group-hover:text-primary-tactile transition-colors flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
                 </svg>
               </button>
@@ -2506,8 +2506,8 @@ const App: React.FC = () => {
       await handleUpdateTarefa(task.id, {
         data_limite: todayStr,
         data_inicio: todayStr,
-        horario_inicio: null,
-        horario_fim: null
+        horario_inicio: undefined,
+        horario_fim: undefined
       }, true);
       showToast("Ação atualizada para hoje!", 'success');
     } catch (err) {
@@ -2836,42 +2836,7 @@ const App: React.FC = () => {
   const handleUpdateTarefa = async (id: string, updates: Partial<Tarefa>, suppressToast = false) => {
     const previousTask = tarefas.find(t => t.id === id);
 
-    // Bloqueio de WIP para raia de 'avanco'
-    const isWipConstrained = (t?: Tarefa, payload?: Partial<Tarefa>) => {
-      const lane = payload?.execution_lane ?? t?.execution_lane ?? 'avanco';
-      return lane === 'avanco';
-    };
 
-    const willBeSetToToday = () => {
-      const todayStr = formatDateLocalISO(new Date());
-      const hasDateLimit = Object.prototype.hasOwnProperty.call(updates, 'data_limite');
-      const hasDateStart = Object.prototype.hasOwnProperty.call(updates, 'data_inicio');
-      const singleDate = (updates.data_limite ?? updates.data_inicio ?? '') as string;
-      return (hasDateLimit || hasDateStart) && singleDate === todayStr;
-    };
-
-    if (willBeSetToToday() && previousTask && isWipConstrained(previousTask, updates)) {
-      const oldDate = previousTask.data_limite || previousTask.data_inicio;
-      const todayStr = formatDateLocalISO(new Date());
-      // Só contar se a data estiver REALMENTE mudando para hoje (e não já era hoje)
-      if (oldDate !== todayStr) {
-        // Contar WIP atual de 'avanco' agendado para hoje e em andamento
-        const wipCount = tarefas.filter(t => {
-          if (normalizeStatus(t.status) === 'concluido' || (t.status as string) === 'excluído') return false;
-          const tLane = t.execution_lane || 'avanco';
-          if (tLane !== 'avanco') return false;
-          const tDate = t.data_limite || t.data_inicio;
-          return tDate === todayStr && t.id !== id;
-        }).length;
-
-        const wipLimit = appSettings.wipLimit || 5;
-
-        if (wipCount >= wipLimit) {
-          showToast(`Limite de WIP (${wipLimit}) atingido! Conclua ou repactue tarefas de avanço.`, 'error');
-          return;
-        }
-      }
-    }
 
     try {
       const docRef = doc(db, 'tarefas', id);
@@ -3782,30 +3747,7 @@ const App: React.FC = () => {
   };
 
   const handleCreateTarefa = async (data: Partial<Tarefa>) => {
-    // Bloqueio de WIP
-    const todayStr = formatDateLocalISO(new Date());
-    const isWipConstrained = data.execution_lane === 'avanco' || !data.execution_lane;
-    const isToday = (data.data_limite === todayStr || data.data_inicio === todayStr);
 
-    if (isWipConstrained && isToday) {
-      const wipCount = tarefas.filter(t => {
-        if (normalizeStatus(t.status) === 'concluido' || (t.status as string) === 'excluído') return false;
-        const tLane = t.execution_lane || 'avanco';
-        if (tLane !== 'avanco') return false;
-        const tDate = t.data_limite || t.data_inicio;
-        return tDate === todayStr;
-      }).length;
-
-      const wipLimit = appSettings.wipLimit || 5;
-
-      if (wipCount >= wipLimit) {
-        showToast(`Limite de WIP (${wipLimit}) atingido! A tarefa será adicionada ao Backlog.`, 'warning');
-        data.data_limite = '';
-        data.data_inicio = '';
-        data.horario_inicio = undefined;
-        data.horario_fim = undefined;
-      }
-    }
 
     try {
       setLoading(true);
@@ -5127,18 +5069,18 @@ const App: React.FC = () => {
   }
 
   const isDarkTheme = themeMode === 'dark' || (themeMode === 'system' && prefersDark);
-  const appBgClass = isDarkTheme ? 'bg-[#0b1120] text-slate-100' : 'bg-[#f6f7fb] text-slate-900';
+  const appBgClass = isDarkTheme ? 'bg-[#191c1c] text-[#f0f1f0]' : 'bg-surface-container-low text-on-surface';
   const sidebarClass = isDarkTheme
-    ? 'bg-[#020817] text-slate-100 border-r border-white/10'
-    : 'bg-[#0f1720] text-white border-r border-white/5';
+    ? 'bg-[#191c1c] text-[#f0f1f0] border-r border-white/10'
+    : 'bg-surface-container-low text-on-surface border-r border-border-grid';
   const headerClass = isDarkTheme
-    ? 'bg-slate-950/80 border-slate-800/80'
-    : 'bg-white/78 border-slate-200/80';
-  const mutedTextClass = isDarkTheme ? 'text-slate-400' : 'text-slate-500';
-  const subtleBorderClass = isDarkTheme ? 'border-slate-800/80' : 'border-slate-200';
+    ? 'bg-[#191c1c]/95 border-white/10'
+    : 'bg-surface-container-low border-b border-border-grid';
+  const mutedTextClass = isDarkTheme ? 'text-slate-500' : 'text-slate-400';
+  const subtleBorderClass = isDarkTheme ? 'border-white/10' : 'border-border-grid';
   const inputSurfaceClass = isDarkTheme
-    ? 'bg-slate-900/80 border-slate-800 text-slate-100 placeholder:text-slate-500'
-    : 'bg-white/70 border-slate-200 text-slate-900 placeholder:text-slate-400';
+    ? 'bg-slate-900 border-white/10 text-white placeholder:text-slate-600'
+    : 'bg-white border-border-grid text-on-surface placeholder:text-slate-400';
 
   return (
     <>
@@ -5146,7 +5088,7 @@ const App: React.FC = () => {
 
         {/* Pop-up de Notificação */}
         {activePopup && (
-          <div className="fixed bottom-8 left-4 right-4 md:left-8 md:right-auto z-[200] max-w-sm ml-auto mr-auto md:ml-0 md:mr-0 bg-white rounded-none md:rounded-[2.5rem] shadow-[0_30px_60px_rgba(0,0,0,0.25)] border border-slate-100 overflow-hidden animate-in slide-in-from-bottom-12 duration-500">
+          <div className="fixed bottom-8 left-4 right-4 md:left-8 md:right-auto z-[200] max-w-sm ml-auto mr-auto md:ml-0 md:mr-0 bg-white rounded-none shadow-[0_30px_60px_rgba(0,0,0,0.25)] border border-border-grid overflow-hidden animate-in slide-in-from-bottom-12 duration-500">
             <div className={`h-2 w-full ${activePopup.type === 'success' ? 'bg-emerald-500' :
               activePopup.type === 'warning' ? 'bg-amber-500' :
                 activePopup.type === 'error' ? 'bg-rose-500' : 'bg-blue-600'
@@ -5165,7 +5107,7 @@ const App: React.FC = () => {
               <div className="mt-6 flex gap-3">
                 <button
                   onClick={() => setActivePopup(null)}
-                  className="flex-1 px-5 py-3 bg-slate-100 text-slate-500 rounded-lg md:rounded-xl text-[9px] font-black uppercase tracking-widest transition-all hover:bg-slate-200"
+                  className="flex-1 px-5 py-3 bg-slate-100 text-slate-500 rounded-none text-[9px] font-black uppercase tracking-widest transition-all hover:bg-slate-200"
                 >
                   Entendido
                 </button>
@@ -5175,7 +5117,7 @@ const App: React.FC = () => {
                       handleNotificationNavigate(activePopup.link!);
                       setActivePopup(null);
                     }}
-                    className="flex-1 px-5 py-3 bg-slate-900 text-white rounded-lg md:rounded-xl text-[9px] font-black uppercase tracking-widest transition-all hover:bg-slate-800 shadow-lg shadow-slate-200"
+                    className="flex-1 px-5 py-3 bg-slate-900 text-white rounded-none text-[9px] font-black uppercase tracking-widest transition-all hover:bg-slate-800 shadow-lg shadow-slate-200"
                   >
                     Ver Agora
                   </button>
@@ -5195,8 +5137,8 @@ const App: React.FC = () => {
               <img src="/logo.png" alt="Hermes" className={`${isSidebarRetracted ? 'w-12 h-12' : 'w-11 h-11'} object-contain`} />
               {!isSidebarRetracted && (
                 <div>
-                  <h1 className="text-xl font-black tracking-tight">HERMES</h1>
-                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-[0.22em] leading-none">Management System</p>
+                  <h1 className="text-xl font-black tracking-tight font-mono uppercase">Hermes</h1>
+
                 </div>
               )}
             </div>
@@ -5216,13 +5158,13 @@ const App: React.FC = () => {
                 <button
                   key={item.id}
                   onClick={item.onClick}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-200 group ${item.active ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white hover:bg-white/[0.03]'} ${isSidebarRetracted ? 'justify-center' : ''}`}
+                  className={`flex items-center gap-3 px-4 py-3 rounded-none border-b border-transparent transition-all duration-200 group ${item.active ? (isDarkTheme ? 'bg-white/10 text-white' : 'bg-primary-tactile/10 text-primary-tactile border-primary-tactile') : (isDarkTheme ? 'text-slate-400 hover:text-white hover:bg-white/[0.03]' : 'text-slate-500 hover:text-primary-tactile hover:bg-primary-tactile/5')} ${isSidebarRetracted ? 'justify-center' : ''}`}
                   title={isSidebarRetracted ? item.label : ''}
                 >
-                  <div className={`${item.active ? 'text-white' : 'group-hover:scale-105 transition-transform duration-200'}`}>
+                  <div className={`${item.active ? (isDarkTheme ? 'text-white' : 'text-primary-tactile') : 'group-hover:scale-105 transition-transform duration-200'}`}>
                     {item.icon}
                   </div>
-                  {!isSidebarRetracted && <span className="text-[11px] font-black uppercase tracking-widest">{item.label}</span>}
+                  {!isSidebarRetracted && <span className="text-[11px] font-black uppercase tracking-widest font-mono">{item.label}</span>}
                 </button>
               ))}
             </nav>
@@ -5290,17 +5232,13 @@ const App: React.FC = () => {
                   </>
                 )}
               </div>
-              {!isSidebarRetracted && (
-                <p className="text-center text-[8px] font-black text-slate-600 uppercase tracking-widest">
-                  Hermes v2.5.0 • 2024
-                </p>
-              )}
+
             </div>
           </div>
         </aside>
 
         {/* Conteúdo Principal */}
-        <div className="flex-1 flex flex-col relative min-h-screen">
+        <div className="flex-1 flex flex-col relative min-h-screen overflow-hidden">
           <>
             <header className={`sticky top-0 z-40 backdrop-blur-xl transition-colors ${headerClass} border-b`}>
               <div className="w-full px-4 md:px-8 py-3 md:py-4">
@@ -5373,27 +5311,27 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Opções de Sub-módulo para Mobile (Ações / PGC / Concluídas) */}
-                {(viewMode === 'gallery' || viewMode === 'pgc' || viewMode === 'concluidas') && activeModule === 'acoes' && (
-                  <div className={`flex md:hidden items-center gap-2 mt-3 pt-3 border-t animate-in slide-in-from-top-2 duration-300 ${subtleBorderClass}`}>
+                {/* Opções de Sub-módulo para Mobile (Ações / PGD / Concluídas) */}
+                {(viewMode === 'gallery' || viewMode === 'licitacoes' || viewMode === 'assistencia' || viewMode === 'pgc' || viewMode === 'concluidas') && activeModule === 'acoes' && (
+                  <div className="flex md:hidden items-center gap-1 mt-3 pt-3 border-t animate-in slide-in-from-top-2 duration-300 border-border-grid">
                     <button
                       onClick={() => {
                         setViewMode('gallery');
                         setSearchTerm('');
                       }}
-                      className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'gallery' ? 'bg-slate-900 text-white' : isDarkTheme ? 'bg-slate-900/70 text-slate-300' : 'bg-slate-100 text-slate-500 hover:bg-slate-200/70'}`}
+                      className={`flex-1 py-1.5 rounded-none text-xs font-black uppercase tracking-widest transition-all font-mono ${(viewMode === 'gallery' || viewMode === 'licitacoes' || viewMode === 'assistencia') ? 'bg-slate-900 text-white' : isDarkTheme ? 'text-slate-300 hover:bg-white/10' : 'text-slate-500 hover:bg-slate-200/50'}`}
                     >
                       Ações
                     </button>
                     <button
                       onClick={() => setViewMode('pgc')}
-                      className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pgc' ? 'bg-slate-900 text-white' : isDarkTheme ? 'bg-slate-900/70 text-slate-300' : 'bg-slate-100 text-slate-500 hover:bg-slate-200/70'}`}
+                      className={`flex-1 py-1.5 rounded-none text-xs font-black uppercase tracking-widest transition-all font-mono ${viewMode === 'pgc' ? 'bg-slate-900 text-white' : isDarkTheme ? 'text-slate-300 hover:bg-white/10' : 'text-slate-500 hover:bg-slate-200/50'}`}
                     >
                       PGD
                     </button>
                     <button
                       onClick={() => { setViewMode('concluidas'); setCompletedLimit(10); }}
-                      className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'concluidas' ? 'bg-emerald-600 text-white' : isDarkTheme ? 'bg-slate-900/70 text-slate-300' : 'bg-slate-100 text-slate-500 hover:bg-slate-200/70'}`}
+                      className={`flex-1 py-1.5 rounded-none text-xs font-black uppercase tracking-widest transition-all font-mono ${viewMode === 'concluidas' ? 'bg-slate-900 text-white' : isDarkTheme ? 'text-slate-300 hover:bg-white/10' : 'text-slate-500 hover:bg-slate-200/50'}`}
                     >
                       Concluídas
                     </button>
@@ -5467,7 +5405,7 @@ const App: React.FC = () => {
                         onClick={() => { setActiveModule('dashboard'); setViewMode('dashboard'); }}
                         className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
                       >
-                        <h1 className={`text-xl font-black tracking-tight uppercase ${isDarkTheme ? 'text-slate-100' : 'text-slate-900'}`}>
+                        <h1 className={`text-xl font-black tracking-tight uppercase font-mono ${isDarkTheme ? 'text-slate-100' : 'text-slate-900'}`}>
                           {viewMode === 'services' ? 'Serviços' :
                             viewMode === 'rag-bases' ? 'Bases RAG' :
                               viewMode === 'knowledge' ? 'Conhecimento' :
@@ -5480,46 +5418,26 @@ const App: React.FC = () => {
                         </h1>
                       </div>
                     </div>
-                    {viewMode === 'services' && (
-                      <div className="flex items-center gap-3 animate-in fade-in slide-in-from-left duration-500">
-                        <button
-                          onClick={handleExportModule}
-                          className={`p-2 border rounded-xl transition-all ${isDarkTheme ? 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800' : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}
-                          title="Exportar Markdown"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4v12" /></svg>
-                        </button>
-                      </div>
-                    )}
-                    {['finance', 'saude', 'gallery', 'sistemas-dev'].includes(viewMode) && (
-                      <div className="flex items-center gap-3 animate-in fade-in slide-in-from-left duration-500">
-                        <button
-                          onClick={handleExportModule}
-                          className={`p-2 border rounded-xl transition-all shadow-sm ${isDarkTheme ? 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800' : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}
-                          title="Exportar Markdown"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4v12" /></svg>
-                        </button>
-                      </div>
-                    )}
+
+
 
                     {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'services' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
-                      <nav className={`flex p-1 rounded-2xl border ${isDarkTheme ? 'bg-slate-900/80 border-slate-800' : 'bg-white/70 border-slate-200'}`}>
+                      <nav className={`flex gap-1`}>
                         <button
                           onClick={() => {
                             setViewMode('gallery');
                             setSearchTerm('');
                           }}
-                          className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'gallery' && !searchTerm ? isDarkTheme ? 'bg-slate-800 text-white' : 'bg-slate-900 text-white' : isDarkTheme ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                          className={`px-4 py-1.5 rounded-none text-[10px] font-black uppercase tracking-widest transition-all font-mono ${viewMode === 'gallery' && !searchTerm ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-200/50'}`}
                         >
                           Ações
                         </button>
-                        <button onClick={() => setViewMode('licitacoes')} className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'licitacoes' ? isDarkTheme ? 'bg-slate-800 text-white' : 'bg-slate-900 text-white' : isDarkTheme ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}>Licitações</button>
-                        <button onClick={() => setViewMode('assistencia')} className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'assistencia' ? isDarkTheme ? 'bg-slate-800 text-white' : 'bg-slate-900 text-white' : isDarkTheme ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}>Assistência</button>
-                        <button onClick={() => setViewMode('pgc')} className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pgc' ? 'bg-slate-900 text-white' : isDarkTheme ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}>PGD</button>
-                        <button onClick={() => { setViewMode('concluidas'); setCompletedLimit(10); }} className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${viewMode === 'concluidas' ? 'bg-emerald-600 text-white' : isDarkTheme ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}>
+                        <button onClick={() => setViewMode('licitacoes')} className={`px-4 py-1.5 rounded-none text-[10px] font-black uppercase tracking-widest transition-all font-mono ${viewMode === 'licitacoes' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-200/50'}`}>Licitações</button>
+                        <button onClick={() => setViewMode('assistencia')} className={`px-4 py-1.5 rounded-none text-[10px] font-black uppercase tracking-widest transition-all font-mono ${viewMode === 'assistencia' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-200/50'}`}>Assistência</button>
+                        <button onClick={() => setViewMode('pgc')} className={`px-4 py-1.5 rounded-none text-[10px] font-black uppercase tracking-widest transition-all font-mono ${viewMode === 'pgc' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-200/50'}`}>PGD</button>
+                        <button onClick={() => { setViewMode('concluidas'); setCompletedLimit(10); }} className={`px-4 py-1.5 rounded-none text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 font-mono ${viewMode === 'concluidas' ? 'bg-emerald-600 text-white' : 'text-slate-500 hover:bg-slate-200/50'}`}>
                           Concluídas
-                          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${viewMode === 'concluidas' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-500'}`}>{stats.concluidas}</span>
+                          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-none ${viewMode === 'concluidas' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-500'}`}>{stats.concluidas}</span>
                         </button>
                       </nav>
                     )}
@@ -5551,18 +5469,18 @@ const App: React.FC = () => {
                   {/* Finance Controls */}
                   {viewMode === 'finance' && (
                     <div className="flex items-center gap-4">
-                      <div className={`flex p-1 rounded-lg border ${isDarkTheme ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
+                      <div className={`flex gap-1`}>
                         <button
                           onClick={() => setFinanceActiveTab('dashboard')}
-                          className={`px-4 py-1.5 text-[10px] uppercase font-black rounded-lg transition-all ${financeActiveTab === 'dashboard' ? (isDarkTheme ? 'bg-slate-800 shadow-sm text-white border border-slate-700' : 'bg-white shadow-sm text-slate-900 border border-slate-100') : 'text-slate-400 hover:text-slate-600'}`}
+                          className={`px-4 py-1.5 text-[10px] uppercase font-black rounded-none transition-all font-mono ${financeActiveTab === 'dashboard' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-emerald-600'}`}
                         >
                           Visão Geral
                         </button>
                         <button
                           onClick={() => setFinanceActiveTab('fixed')}
-                          className={`px-4 py-1.5 text-[10px] uppercase font-black rounded-lg transition-all ${financeActiveTab === 'fixed' ? (isDarkTheme ? 'bg-slate-800 shadow-sm text-white border border-slate-700' : 'bg-white shadow-sm text-slate-900 border border-slate-100') : 'text-slate-400 hover:text-slate-600'}`}
+                          className={`px-4 py-1.5 text-[10px] uppercase font-black rounded-none transition-all font-mono ${financeActiveTab === 'fixed' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-emerald-600'}`}
                         >
-                          Rendas e Obrigações
+                          Obrigações
                         </button>
                       </div>
 
@@ -5610,18 +5528,37 @@ const App: React.FC = () => {
                   {viewMode !== 'ferramentas' && viewMode !== 'sistemas-dev' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && (
                     <div className="flex items-center gap-4">
                       {activeModule !== 'dashboard' && (
-                        <div className={`hidden lg:flex items-center border rounded-2xl px-4 py-2 w-64 group focus-within:ring-2 focus-within:ring-blue-500 transition-all ${inputSurfaceClass}`}>
+                        <div className={`hidden lg:flex items-center border rounded-none px-4 py-2 w-64 group focus-within:ring-1 focus-within:ring-primary-tactile transition-all ${inputSurfaceClass} border-border-grid`}>
                           <svg className={`w-4 h-4 mr-3 ${mutedTextClass}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                          <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none outline-none text-xs font-bold w-full" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                          <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none outline-none text-xs font-bold w-full font-mono" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                         </div>
                       )}
                       <button
                         onClick={() => setIsCreateModalOpen(true)}
-                        className="bg-slate-900 text-white px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-slate-800 transition-all active:scale-95"
+                        className="bg-slate-900 text-white px-5 py-2 rounded-none text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-slate-800 transition-all active:scale-95 font-mono"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
                         Criar Ação
                       </button>
+
+                      {searchTerm !== 'filter:unclassified' && (
+                        <div className={`h-11 p-1 rounded-none inline-flex border ${isDarkTheme ? 'bg-slate-800 border-slate-700' : 'bg-surface-container border-border-grid'}`}>
+                          <button
+                            onClick={() => setDashboardViewMode('list')}
+                            className={`px-3 md:px-4 py-1.5 rounded-none text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center font-mono ${dashboardViewMode === 'list' ? (isDarkTheme ? 'bg-slate-600 text-white' : 'bg-slate-900 text-white') : (isDarkTheme ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600')}`}
+                            title="Visualização em Lista"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
+                          </button>
+                          <button
+                            onClick={() => setDashboardViewMode('calendar')}
+                            className={`px-3 md:px-4 py-1.5 rounded-none text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center font-mono ${dashboardViewMode === 'calendar' ? (isDarkTheme ? 'bg-slate-600 text-white' : 'bg-slate-900 text-white') : (isDarkTheme ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600')}`}
+                            title="Visualização em Calendário"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2-2v12a2 2 0 002 2z" /></svg>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                   {/* Global Header Actions — Speed Dial */}
@@ -5681,7 +5618,7 @@ const App: React.FC = () => {
                           item.onClick();
                           setIsMobileMenuOpen(false);
                         }}
-                        className={`px-6 py-4 rounded-2xl text-sm font-black uppercase tracking-widest transition-all ${item.active ? 'bg-slate-900 text-white' : isDarkTheme ? 'bg-slate-900/70 text-slate-300' : 'bg-slate-50 text-slate-600'}`}
+                        className={`px-4 py-2.5 rounded-none text-xs font-black uppercase tracking-widest transition-all font-mono ${item.active ? 'bg-slate-900 text-white' : isDarkTheme ? 'text-slate-300 hover:bg-white/10' : 'text-slate-500 hover:bg-slate-200/50'}`}
                       >
                         {item.label}
                       </button>
@@ -5693,7 +5630,7 @@ const App: React.FC = () => {
                           handleSync();
                           setIsMobileMenuOpen(false);
                         }}
-                        className="px-4 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest bg-blue-50 text-blue-700 flex items-center justify-center gap-2"
+                        className="px-4 py-2.5 rounded-none text-xs font-black uppercase tracking-widest font-mono bg-blue-50 text-blue-700 hover:bg-blue-100 flex items-center justify-center gap-2 transition-colors"
                       >
                         <svg className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                         {isSyncing ? 'Sync...' : 'Sync'}
@@ -5703,14 +5640,14 @@ const App: React.FC = () => {
                           setIsSettingsModalOpen(true);
                           setIsMobileMenuOpen(false);
                         }}
-                        className="px-4 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest bg-slate-100 text-slate-600 flex items-center justify-center gap-2"
+                        className="px-4 py-2.5 rounded-none text-xs font-black uppercase tracking-widest font-mono bg-slate-100 text-slate-600 hover:bg-slate-200/50 flex items-center justify-center gap-2 transition-colors"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                         Config
                       </button>
                       <button
                         onClick={handleLogout}
-                        className="col-span-2 px-4 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest bg-rose-50 text-rose-600 flex items-center justify-center gap-2 mt-2"
+                        className="col-span-2 px-4 py-2.5 rounded-none text-xs font-black uppercase tracking-widest font-mono bg-rose-50 text-rose-600 hover:bg-rose-100 flex items-center justify-center gap-2 mt-2 transition-colors"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
                         Sair da Conta
@@ -5763,12 +5700,12 @@ const App: React.FC = () => {
                   <>
                     {/* Mobile Search Bar */}
                     <div className="lg:hidden px-4 mb-6">
-                      <div className="flex items-center bg-white border border-slate-200 rounded-2xl px-4 py-3 shadow-sm focus-within:ring-2 focus-within:ring-blue-500 transition-all">
-                        <svg className="w-5 h-5 text-slate-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                      <div className={`flex items-center border rounded-none px-4 py-3 shadow-none focus-within:ring-1 focus-within:ring-primary-tactile transition-all ${isDarkTheme ? 'bg-slate-800 border-slate-700' : 'bg-white border-border-grid'}`}>
+                        <svg className={`w-5 h-5 mr-3 ${mutedTextClass}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                         <input
                           type="text"
                           placeholder="Pesquisar ações..."
-                          className="bg-transparent border-none outline-none text-sm font-bold text-slate-900 w-full placeholder:text-slate-400"
+                          className="bg-transparent border-none outline-none text-sm font-bold w-full font-mono"
                           value={searchTerm === 'filter:unclassified' ? '' : searchTerm}
                           onChange={(e) => setSearchTerm(e.target.value)}
                         />
@@ -5780,53 +5717,12 @@ const App: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="flex flex-col md:flex-row items-center justify-between mb-8 gap-4 px-4 md:px-0">
+                    <div className="flex flex-col md:flex-row items-center justify-between mb-4 gap-4 px-4 md:px-0">
                       {/* Linha de Filtros e Ações Globais */}
                       <div className="flex items-center justify-between w-full gap-2">
-                        {/* Lado Esquerdo: Filtro de Área */}
-                        <div className="relative group flex-shrink-1 min-w-0 max-w-[140px] md:max-w-none md:min-w-[180px]">
-                          <select
-                            value={areaFilter}
-                            onChange={(e) => setAreaFilter(e.target.value)}
-                            className={`h-11 w-full appearance-none pl-3 md:pl-4 pr-8 md:pr-10 rounded-xl border text-[10px] font-black uppercase tracking-tight md:tracking-widest outline-none focus:ring-2 shadow-sm transition-all cursor-pointer truncate ${isDarkTheme ? 'bg-slate-800 border-slate-700 text-slate-100 focus:ring-slate-600 hover:border-slate-600' : 'bg-white border-slate-200 text-slate-700 focus:ring-slate-900 hover:border-slate-300'}`}
-                          >
-                            <option value="TODAS">TODAS</option>
-                            <option value="CLC">CLC</option>
-                            <option value="ASSISTÊNCIA">ASSISTÊNCIA</option>
-                            <option value="GERAL">GERAL</option>
-                            <option value="FINANCEIRO">FINANCEIRO</option>
-                            <option value="NÃO CLASSIFICADA">PENDENTES</option>
-                            {unidades.filter(u => !['CLC', 'ASSISTÊNCIA', 'ASSISTÊNCIA ESTUDANTIL'].includes(u.nome.toUpperCase())).map(u => (
-                              <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
-                            ))}
-                          </select>
-                          <div className={`absolute inset-y-0 right-0 flex items-center px-2 md:px-3 pointer-events-none ${isDarkTheme ? 'text-slate-500' : 'text-slate-400'}`}>
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
-                          </div>
-                        </div>
 
-                        {/* Lado Direito: Modos de Visualização e Organizar Dia */}
-                        <div className="flex items-center gap-1 md:gap-2 flex-shrink-0">
-                          {searchTerm !== 'filter:unclassified' && (
-                            <div className={`h-11 p-1 rounded-xl shadow-inner inline-flex border ${isDarkTheme ? 'bg-slate-800 border-slate-700' : 'bg-slate-100 border-slate-200'}`}>
-                              <button
-                                onClick={() => setDashboardViewMode('list')}
-                                className={`px-2 md:px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${dashboardViewMode === 'list' ? (isDarkTheme ? 'bg-slate-600 shadow-md text-white' : 'bg-white shadow-md text-slate-900') : (isDarkTheme ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600')}`}
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
-                                <span className="hidden lg:inline">Lista</span>
-                              </button>
-                              <button
-                                onClick={() => setDashboardViewMode('calendar')}
-                                className={`px-2 md:px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${dashboardViewMode === 'calendar' ? (isDarkTheme ? 'bg-slate-600 shadow-md text-white' : 'bg-white shadow-md text-slate-900') : (isDarkTheme ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600')}`}
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2-2v12a2 2 0 002 2z" /></svg>
-                                <span className="hidden lg:inline">Calendário</span>
-                              </button>
-                            </div>
-                          )}
 
-                        </div>
+
                       </div>
                     </div>
 
@@ -5849,7 +5745,7 @@ const App: React.FC = () => {
                       <>
                         {searchTerm === 'filter:unclassified' ? (
                           <div className={`animate-in border rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl ${isDarkTheme ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
-                            <div className={`p-8 border-b flex flex-col md:flex-row md:items-center justify-between gap-4 ${isDarkTheme ? 'border-slate-800 bg-slate-800/50' : 'border-slate-100 bg-slate-50/50'}`}>
+                            <div className={`p-8 border-b flex flex-col md:flex-row md:items-center justify-between gap-4 ${isDarkTheme ? 'border-slate-800 bg-slate-800/50' : 'border-slate-100 bg-slate-50'}`}>
                               <h3 className={`text-xl font-black tracking-tight flex items-center gap-3 ${isDarkTheme ? 'text-slate-100' : 'text-slate-900'}`}>
                                 <span className="w-2 h-8 bg-rose-600 rounded-full"></span>
                                 Organização Rápida
@@ -5950,7 +5846,7 @@ const App: React.FC = () => {
                                             </span>
                                           )}
                                           {task.sync_status === 'updated' && (
-                                            <span className="text-[7px] font-black px-1.5 py-0.5 rounded uppercase bg-gradient-to-r from-amber-400 to-orange-500 text-white shadow-sm">
+                                            <span className="text-[7px] font-black px-1.5 py-0.5 rounded-none uppercase bg-gradient-to-r from-amber-400 to-orange-500 text-white shadow-sm">
                                               Atualizada
                                             </span>
                                           )}
@@ -5962,30 +5858,29 @@ const App: React.FC = () => {
                               </div>
 
                               {filteredAndSortedTarefas.length === 0 && (
-                                <div className="py-20 text-center text-slate-300 font-black uppercase tracking-widest italic border-t border-slate-50">
+                                <div className="py-20 text-center text-slate-300 font-black uppercase tracking-widest italic border-t border-border-grid">
                                   Tudo classificado! Bom trabalho.
                                 </div>
                               )}
                             </div>
                           </div>
-
                         ) : (
                           <div className="animate-in">
                             {Object.keys(tarefasAgrupadas).length > 0 ? (
                               Object.entries(tarefasAgrupadas).map(([label, tasks]: [string, Tarefa[]]) => (
                                 <div
                                   key={label}
-                                  className={`border-b last:border-b-0 transition-colors ${subtleBorderClass}`}
+                                  className={`mb-3 border transition-colors rounded-none overflow-hidden ${isDarkTheme ? 'bg-slate-900/40 border-slate-800' : 'bg-white border-border-grid'}`}
                                   onDragOver={(e) => {
                                     e.preventDefault();
-                                    e.currentTarget.style.backgroundColor = isDarkTheme ? 'rgba(30, 41, 59, 0.65)' : 'rgba(241, 245, 249, 0.9)';
+                                    e.currentTarget.style.borderColor = '#835500';
                                   }}
                                   onDragLeave={(e) => {
-                                    e.currentTarget.style.backgroundColor = '';
+                                    e.currentTarget.style.borderColor = '';
                                   }}
                                   onDrop={(e) => {
                                     e.preventDefault();
-                                    e.currentTarget.style.backgroundColor = '';
+                                    e.currentTarget.style.borderColor = '';
                                     const taskId = e.dataTransfer.getData('task-id');
                                     if (taskId) {
                                       if (label === 'Ações em Stand-by') {
@@ -6001,11 +5896,11 @@ const App: React.FC = () => {
                                 >
                                   <button
                                     onClick={() => toggleSection(label)}
-                                    className={`w-full px-2 md:px-0 py-3 bg-transparent flex items-center justify-between transition-colors group ${isDarkTheme ? 'hover:bg-white/[0.02]' : 'hover:bg-slate-50/80'}`}
+                                    className={`w-full px-4 py-3 bg-transparent flex items-center justify-between transition-colors group ${isDarkTheme ? 'hover:bg-white/[0.02]' : 'hover:bg-slate-50'}`}
                                   >
                                     <div className="flex items-center gap-3">
-                                      <span className={`text-xs font-black uppercase tracking-[0.22em] ${isDarkTheme ? 'text-slate-300' : 'text-slate-500'}`}>{label}</span>
-                                      <span className={`text-[10px] font-bold ${isDarkTheme ? 'text-slate-500' : 'text-slate-300'}`}>({tasks.length})</span>
+                                      <span className={`text-xs font-black uppercase tracking-[0.22em] font-mono ${isDarkTheme ? 'text-slate-300' : 'text-slate-500'}`}>{label}</span>
+                                      <span className={`text-[10px] font-bold font-mono ${isDarkTheme ? 'text-slate-500' : 'text-slate-300'}`}>({tasks.length})</span>
                                     </div>
                                     <svg className={`w-4 h-4 transition-transform duration-300 ${effectiveExpandedSections.includes(label) ? 'rotate-180' : ''} ${isDarkTheme ? 'text-slate-500' : 'text-slate-300'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
@@ -6013,7 +5908,7 @@ const App: React.FC = () => {
                                   </button>
 
                                   {effectiveExpandedSections.includes(label) && (
-                                    <div className="animate-in origin-top">
+                                    <div className="animate-in origin-top border-t border-border-grid">
                                       {label === "Concluídas" ? (
                                         <>
                                           {tasks.slice(0, completedLimit).map(task => (
@@ -6105,7 +6000,7 @@ const App: React.FC = () => {
                   </>
                 ) : viewMode === 'concluidas' ? (
                   <div className={`actions-completed-view animate-in border border-slate-200 rounded-none md:rounded-[2rem] overflow-hidden shadow-2xl bg-white ${isDarkTheme ? 'actions-view-dark' : ''}`}>
-                    <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                    <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <span className="w-2 h-6 bg-emerald-500 rounded-full"></span>
                         <span className="text-sm font-black text-slate-900 uppercase tracking-widest">Concluídas</span>
@@ -6171,7 +6066,7 @@ const App: React.FC = () => {
                             <h4 className="text-xs font-black uppercase tracking-[0.2em]">{sistema}</h4>
                             <span className="bg-white/20 px-3 py-1 rounded-full text-[10px] font-black">{tarefas.filter(t => t.area_tematica === 'SISTEMAS' && (t.sistema || 'OUTROS') === sistema).length}</span>
                           </div>
-                          <div className="p-6 space-y-4 flex-1 bg-slate-50/50">
+                          <div className="p-6 space-y-4 flex-1 bg-slate-50">
                             {tarefas.filter(t => t.area_tematica === 'SISTEMAS' && (t.sistema || 'OUTROS') === sistema).map(t => (
                               <div key={t.id} className="bg-white p-4 rounded-lg md:rounded-xl border border-slate-200 shadow-sm hover:border-amber-400 transition-all cursor-pointer" onClick={() => setSelectedTask(t)}>
                                 <div className={`text-[8px] font-black mb-1.5 uppercase ${STATUS_COLORS[normalizeStatus(t.status)] || ''} border-none p-0 bg-transparent`}>
@@ -6975,7 +6870,7 @@ const App: React.FC = () => {
                                                         ))}
                                                     </div>
                                                   ) : (
-                                                    <div className="text-center py-12 bg-slate-50/50 rounded-xl border-2 border-dashed border-slate-100">
+                                                    <div className="text-center py-12 bg-slate-50 rounded-xl border-2 border-dashed border-slate-100">
                                                       <p className="text-slate-300 font-black text-[10px] uppercase tracking-widest italic">Nenhuma acao vinculada</p>
                                                       <p className="text-[10px] text-slate-400 mt-2">Acoes com base RAG deste sistema aparecerao aqui.</p>
                                                     </div>
@@ -7051,7 +6946,7 @@ const App: React.FC = () => {
                                                       </div>
                                                     ))}
                                                     {systemWorkItems.filter(w => !w.concluido).length === 0 && (
-                                                      <div className="text-center py-12 bg-slate-50/50 rounded-none md:rounded-3xl border-2 border-dashed border-slate-100">
+                                                      <div className="text-center py-12 bg-slate-50 rounded-none md:rounded-3xl border-2 border-dashed border-slate-100">
                                                         <p className="text-slate-300 font-black text-[10px] uppercase tracking-widest italic">Nenhum log ativo</p>
                                                       </div>
                                                     )}
@@ -7525,7 +7420,7 @@ const App: React.FC = () => {
                     {pgcSubView === 'audit' && (
                       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6 h-[calc(100vh-180px)] pb-4">
                         <div className="lg:col-span-3 bg-white rounded-none md:rounded-[2rem] border border-slate-200 shadow-xl flex flex-col overflow-hidden h-full">
-                          <div className="p-4 md:p-6 border-b border-slate-100 flex-shrink-0 bg-slate-50/50">
+                          <div className="p-4 md:p-6 border-b border-slate-100 flex-shrink-0 bg-slate-50">
                             <div className="flex items-center justify-between">
                               <h4 className="text-sm font-black text-slate-900 tracking-tight">Pendentes</h4>
                               <span className="bg-slate-900 text-white text-[9px] font-black px-2 py-1 rounded-full">{pgcTasksAguardando.length}</span>
@@ -7652,7 +7547,7 @@ const App: React.FC = () => {
                                 {pgdStatus.volumeByDay.map((d) => {
                                   const widthPct = Math.round((d.volume / pgdStatus.maxVolume) * 100);
                                   return (
-                                    <div key={d.dayStr} className="border border-slate-200 rounded-xl p-2 bg-slate-50/50">
+                                    <div key={d.dayStr} className="border border-slate-200 rounded-xl p-2 bg-slate-50">
                                       <p className="text-[10px] font-black text-slate-600">{d.label}</p>
                                       <div className="mt-2 h-1.5 bg-slate-200 rounded-full overflow-hidden">
                                         <div
@@ -8021,6 +7916,13 @@ const App: React.FC = () => {
                 onSave={handleUpdateTarefa}
                 unidades={unidades}
                 onClose={() => setSelectedTask(null)}
+                onNavigate={(mode) => {
+                  setSelectedTask(null);
+                  setViewMode(mode);
+                  if (mode === 'gallery') setSearchTerm('');
+                  if (mode === 'concluidas') setCompletedLimit(10);
+                }}
+                viewMode={viewMode}
                 showToast={showToast}
                 notifications={notifications}
                 isSyncing={isSyncing}
@@ -8124,7 +8026,7 @@ const App: React.FC = () => {
 
         {
           isTerminalOpen && (
-            <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-300">
+            <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-950/90 animate-in fade-in duration-300">
               <div className="bg-[#0C0C0C] w-full max-w-2xl rounded-none md:rounded-[2rem] shadow-[0_0_100px_rgba(37,99,235,0.2)] border border-white/10 overflow-hidden flex flex-col h-[500px] animate-in zoom-in-95">
                 <div className="p-6 bg-white/5 border-b border-white/5 flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -8233,9 +8135,9 @@ const App: React.FC = () => {
 
         {
           isImportPlanOpen && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 animate-in fade-in duration-300">
               <div className="bg-white w-full max-w-2xl rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-                <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                <div className="p-8 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
                   <div>
                     <h3 className="text-2xl font-black text-slate-900 tracking-tight">Importar Plano Mensal</h3>
                     <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Cole o JSON do plano de trabalho abaixo</p>
@@ -8372,7 +8274,7 @@ const App: React.FC = () => {
 
         {
           isSystemSelectorOpen && (
-            <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-slate-950/90">
               <div className="bg-white w-full max-w-md rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95">
                 <div className="p-8 border-b border-slate-100 flex items-center justify-between">
                   <h3 className="text-xl font-black text-slate-900">Selecionar Sistema</h3>

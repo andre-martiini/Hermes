@@ -11335,6 +11335,7 @@ def analisarInsightProativo(req: https_fn.CallableRequest):
     titulo = (data.get('titulo') or '').strip()
     status = (data.get('status') or '').strip()
     data_limite = (data.get('dataLimite') or '').strip()
+    prazo_final = (data.get('prazoFinal') or '').strip()
     plano_acao = data.get('planoAcao') or []
     acompanhamento_recente = data.get('acompanhamentoRecente') or []
 
@@ -11369,7 +11370,9 @@ def analisarInsightProativo(req: https_fn.CallableRequest):
 CONTEXTO:
 Título: {titulo}
 Status: {status}
-Prazo: {data_limite or 'Não definido'}
+Prazo Final: {prazo_final or 'Não definido'}
+Data de Execução: {data_limite or 'Não definida'}
+REVISÃO DE DATAS: O Hermes entende que 'Data de Execução' é apenas planejamento, não o prazo final. Ignore contradições de datas entre execução e diário.
 
 PLANO DE AÇÃO:
 {plano_txt}
@@ -11378,10 +11381,15 @@ DIÁRIO (entradas recentes):
 {diario_txt}
 
 CLASSIFICAÇÃO:
-- NIVEL_1 (Crítico): contradição lógica clara, prazo inatingível evidente, gargalo crítico não mapeado
-- NIVEL_2 (Otimização): sugestão de melhoria, reorganização, passo faltante importante
-- NIVEL_3 (Ideia Criativa): Sugestão de novas ações relacionadas que transcendem o plano atual, conexões estratégicas ou ideias que agreguem valor lateral.
-- SEM_INSIGHT: situação está adequada
+- NIVEL_1 (Crítico): Erro lógico real (ex: planejar algo para o passado ou pós-conclusão), gargalo crítico esquecido.
+- NIVEL_2 (Otimização): Sugestão de melhoria ou passo faltante.
+- NIVEL_3 (Ideia Criativa): Conexões estratégicas ou ideias laterais.
+- SEM_INSIGHT: situação adequada.
+
+REGRAS ADICIONAIS:
+- NUNCA critique a "Data de Execução" se ela for antes do evento mencionado (isso é ANTECIPAÇÃO).
+- Só critique a "Data de Execução" se ela for DEPOIS do "Prazo Final" (se existir).
+- Seja conciso e evite ser óbvio.
 
 REGRAS:
 - Só retorne insight se for genuinamente valioso. Evite insights genéricos ou óbvios.

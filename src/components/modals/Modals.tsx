@@ -14,25 +14,25 @@ export const HermesModal = ({ isOpen, title, message, type, onConfirm, onCancel,
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+    <div className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-slate-950/90 animate-in fade-in duration-300">
+      <div className="bg-white w-full max-w-sm rounded-none shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 border border-border-grid">
         <div className="p-8 space-y-6">
           <div className="space-y-2">
-            <h3 className="text-xl font-black text-slate-900 tracking-tight">{title}</h3>
-            <p className="text-sm font-medium text-slate-500 leading-relaxed">{message}</p>
+            <h3 className="text-xl font-black text-slate-900 tracking-tight font-mono">{title}</h3>
+            <p className="text-sm font-medium text-slate-500 leading-relaxed font-mono">{message}</p>
           </div>
           <div className="flex gap-3">
             {type === 'confirm' && (
               <button
                 onClick={onCancel}
-                className="flex-1 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 transition-colors"
+                className="flex-1 py-4 rounded-none text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 transition-colors font-mono"
               >
                 {cancelLabel || 'Cancelar'}
               </button>
             )}
             <button
               onClick={onConfirm}
-              className="flex-1 bg-slate-900 text-white py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-slate-200 hover:bg-slate-800 transition-all active:scale-95"
+              className="flex-1 bg-slate-900 text-white py-4 rounded-none text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all active:scale-95 font-mono"
             >
               {confirmLabel || (type === 'alert' ? 'OK' : 'Confirmar')}
             </button>
@@ -95,51 +95,51 @@ export const SettingsModal = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-center justify-center p-0 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className="bg-white w-full h-full md:h-auto md:max-w-2xl rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh]">
-        <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex flex-col gap-6 flex-shrink-0">
+    <div className="fixed inset-0 z-[150] flex items-center justify-center p-0 md:p-4 bg-slate-950/90 animate-in fade-in duration-300">
+      <div className="bg-white w-full h-full md:h-auto md:max-w-2xl rounded-none shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh] border border-border-grid">
+        <div className="p-8 border-b border-border-grid bg-slate-50 flex flex-col gap-6 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-2xl font-black text-slate-900 tracking-tight">Configurações</h3>
-              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Painel de PreferÃªncias</p>
+              <h3 className="text-2xl font-black text-slate-900 tracking-tight font-mono">Configurações</h3>
+              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest font-mono">Painel de Preferências</p>
             </div>
-            <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+            <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-none transition-colors">
               <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           </div>
 
-          <div className="flex bg-slate-200/50 p-1 rounded-none md:rounded-2xl gap-1">
+          <div className="flex bg-slate-200 p-1 rounded-none gap-1 border border-border-grid">
             <button
               onClick={() => setActiveTab('notifications')}
-              className={`flex-1 py-4 rounded-lg md:rounded-xl flex items-center justify-center transition-all ${activeTab === 'notifications' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
+              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'notifications' ? 'bg-white text-slate-900 border border-border-grid shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
               title="Notificações"
             >
               <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
             </button>
             <button
               onClick={() => setActiveTab('context')}
-              className={`flex-1 py-4 rounded-lg md:rounded-xl flex items-center justify-center transition-all ${activeTab === 'context' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
-              title="Contexto & Ãreas"
+              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'context' ? 'bg-white text-slate-900 border border-border-grid shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
+              title="Contexto & Áreas"
             >
               <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>
             </button>
             <button
               onClick={() => setActiveTab('sistemas')}
-              className={`flex-1 py-4 rounded-lg md:rounded-xl flex items-center justify-center transition-all ${activeTab === 'sistemas' ? 'bg-white text-violet-600 shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
+              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'sistemas' ? 'bg-white text-slate-900 border border-border-grid shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
               title="Sistemas"
             >
-              <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+              <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2-2v10a2 2 0 002 2z" /></svg>
             </button>
             <button
               onClick={() => setActiveTab('google')}
-              className={`flex-1 py-4 rounded-lg md:rounded-xl flex items-center justify-center transition-all ${activeTab === 'google' ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
+              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'google' ? 'bg-white text-slate-900 border border-border-grid shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
               title="Google"
             >
               <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" /></svg>
             </button>
             <button
               onClick={() => setActiveTab('pomodoro')}
-              className={`flex-1 py-4 rounded-lg md:rounded-xl flex items-center justify-center transition-all ${activeTab === 'pomodoro' ? 'bg-white text-rose-600 shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
+              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'pomodoro' ? 'bg-white text-slate-900 border border-border-grid shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-white/50'}`}
               title="Pomodoro"
             >
               <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
@@ -150,33 +150,7 @@ export const SettingsModal = ({
         <div className="p-8 space-y-10 overflow-y-auto custom-scrollbar flex-1">
           {activeTab === 'notifications' ? (
             <>
-              {/* Priorização / Foco Section */}
-              <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500">
-                <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
-                  <span className="w-2 h-2 bg-indigo-500 rounded-full"></span>
-                  Priorização / Foco Diário
-                </h4>
 
-                <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-indigo-200 transition-all">
-                  <div className="flex-1">
-                    <p className="text-sm font-bold text-slate-900 mb-1">Limite de WIP (Trabalho em Progresso)</p>
-                    <p className="text-[11px] text-slate-500 font-medium">Quantidade máxima de tarefas de "Avanço" permitidas por dia.</p>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <input
-                      type="number"
-                      min="1"
-                      max="20"
-                      value={localSettings.wipLimit || 5}
-                      onChange={(e) => setLocalSettings({
-                        ...localSettings,
-                        wipLimit: parseInt(e.target.value, 10) || 5
-                      })}
-                      className="bg-white border-2 border-slate-200 rounded-xl px-4 py-2 text-sm font-black text-slate-700 w-24 text-center focus:outline-none focus:border-indigo-500 transition-colors"
-                    />
-                  </div>
-                </div>
-              </div>
 
               {/* Geral / SaÃºde Section */}
               <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500">
@@ -884,7 +858,7 @@ export const DailyHabitsModal = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-0 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-0 md:p-4 bg-slate-950/90 animate-in fade-in duration-300">
       <div className="bg-white w-full h-full md:h-auto md:max-w-md rounded-none md:rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
         <div className="p-8 border-b border-slate-100 bg-amber-500/5 flex items-center justify-between">
           <div>
@@ -1210,27 +1184,27 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className={`bg-white w-full h-auto max-h-[95vh] rounded-2xl md:rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col transition-all duration-500 ${tipoAcao === 'deep' ? 'md:max-w-4xl' : 'md:max-w-md'}`}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-4 bg-slate-950/90 animate-in fade-in duration-300">
+      <div className={`bg-white w-full h-auto max-h-[95vh] rounded-none shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col transition-all duration-500 border border-border-grid ${tipoAcao === 'deep' ? 'md:max-w-4xl' : 'md:max-w-md'}`}>
         {/* Header with Type Selector */}
-        <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col gap-4 flex-shrink-0">
+        <div className="p-4 border-b border-border-grid bg-slate-50 flex flex-col gap-4 flex-shrink-0">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-black text-slate-900 tracking-tight">Nova Ação</h3>
-            <button onClick={onClose} className="p-1.5 hover:bg-slate-200 rounded-full transition-colors">
+            <h3 className="text-lg font-black text-slate-900 tracking-tight font-mono uppercase">Nova Ação</h3>
+            <button onClick={onClose} className="p-1.5 hover:bg-slate-200 rounded-none transition-colors">
               <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           </div>
 
-          <div className="flex bg-slate-200/50 p-1 rounded-xl">
+          <div className="flex bg-slate-200 p-1 rounded-none border border-border-grid">
             <button
               onClick={() => setTipoAcao('fast')}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${tipoAcao === 'fast' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 text-[10px] font-black uppercase tracking-widest rounded-none transition-all font-mono ${tipoAcao === 'fast' ? 'bg-white text-slate-900 border border-border-grid shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
             >
               Fast Track
             </button>
             <button
               onClick={() => setTipoAcao('deep')}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${tipoAcao === 'deep' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 text-[10px] font-black uppercase tracking-widest rounded-none transition-all font-mono ${tipoAcao === 'deep' ? 'bg-white text-slate-900 border border-border-grid shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
             >
               Deep Work
             </button>
@@ -1240,13 +1214,13 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
         <div className="p-4 space-y-4 overflow-y-auto custom-scrollbar flex-1">
           {/* Seção de Ingestão para Deep Work */}
           {tipoAcao === 'deep' && (
-            <div className="space-y-4 animate-in slide-in-from-top-4 duration-300 border-b border-slate-100 pb-4">
-              <div className="flex bg-slate-100 p-1 rounded-xl gap-1">
+            <div className="space-y-4 animate-in slide-in-from-top-4 duration-300 border-b border-border-grid pb-4">
+              <div className="flex bg-slate-100 p-1 rounded-none gap-1 border border-border-grid">
                 {(['manual', 'audio'] as const).map((o) => (
                   <button
                     key={o}
                     onClick={() => setOrigemIngestao(o)}
-                    className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${origemIngestao === o ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                    className={`flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-none transition-all font-mono ${origemIngestao === o ? 'bg-white text-slate-900 border border-border-grid shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
                   >
                     {o === 'manual' ? 'Manual' : 'Áudio'}
                   </button>
@@ -1255,14 +1229,14 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Área Temática</label>
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1 font-mono">Área Temática</label>
                   <select
                     value={formData.area_tematica}
                     onChange={e => {
                       setFormData({ ...formData, area_tematica: e.target.value as Categoria });
                       setAutoClassified(true);
                     }}
-                    className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
+                    className="w-full bg-slate-100 border border-border-grid rounded-none px-4 py-2 text-xs font-bold text-slate-900 focus:ring-1 focus:ring-primary-tactile transition-all font-mono uppercase tracking-widest"
                   >
                     <option value="GERAL">Geral</option>
                     <option value="NÃO CLASSIFICADA">Não Classificada</option>
@@ -1274,13 +1248,13 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                 <div className="flex items-end gap-2">
                   <button
                     onClick={() => setIsExtraContextOpen(!isExtraContextOpen)}
-                    className={`h-9 flex-1 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${isExtraContextOpen ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                    className={`h-9 flex-1 rounded-none text-[9px] font-black uppercase tracking-widest transition-all font-mono border ${isExtraContextOpen ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-100 text-slate-600 border-border-grid hover:bg-slate-200'}`}
                   >
                     Contexto Extra
                   </button>
                   <button
                     onClick={() => setIsTranscriptionSelectorOpen(!isTranscriptionSelectorOpen)}
-                    className={`h-9 flex-1 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${isTranscriptionSelectorOpen ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'}`}
+                    className={`h-9 flex-1 rounded-none text-[9px] font-black uppercase tracking-widest transition-all font-mono border ${isTranscriptionSelectorOpen ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-border-grid hover:bg-slate-100'}`}
                   >
                     Anexar Reunião
                   </button>
@@ -1288,7 +1262,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
               </div>
 
               {isTranscriptionSelectorOpen && (
-                <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 space-y-3 animate-in slide-in-from-top-2">
+                <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100 space-y-3 animate-in slide-in-from-top-2">
                   <div className="flex items-center justify-between">
                     <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">Selecionar Transcrição</p>
                     <button onClick={() => setIsTranscriptionSelectorOpen(false)} className="text-indigo-400 hover:text-indigo-600">
@@ -1684,9 +1658,9 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 md:p-4 bg-slate-950/90 animate-in fade-in duration-300">
       <div className="bg-white w-full h-auto max-h-[95vh] md:max-w-md flex flex-col rounded-2xl md:rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-        <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col gap-4 flex-shrink-0">
+        <div className="p-4 border-b border-slate-100 bg-slate-50 flex flex-col gap-4 flex-shrink-0">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-black text-slate-900 tracking-tight">Editar Ação</h3>
             <button onClick={onClose} className="p-1.5 hover:bg-slate-200 rounded-full transition-colors">
@@ -1694,7 +1668,7 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
             </button>
           </div>
 
-          <div className="flex bg-slate-200/50 p-1 rounded-xl">
+          <div className="flex bg-slate-200 p-1 rounded-xl">
             <button
               onClick={() => setTipoAcao('fast')}
               className={`flex-1 flex items-center justify-center gap-2 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${tipoAcao === 'fast' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}

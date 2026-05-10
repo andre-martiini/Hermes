@@ -25,6 +25,7 @@ interface SpeedDialMenuProps {
   direction?: 'up' | 'down';
   triggerClassName?: string;
   triggerIconClassName?: string;
+  triggerLabel?: string;
   isDark?: boolean;
 }
 
@@ -37,6 +38,7 @@ export const SpeedDialMenu = ({
   direction = 'down',
   triggerClassName,
   triggerIconClassName,
+  triggerLabel,
   isDark = false
 }: SpeedDialMenuProps) => {
   const [open, setOpen] = useState(false);
@@ -196,14 +198,14 @@ export const SpeedDialMenu = ({
             }}
           >
             {/* Tooltip label */}
-            <span className="bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-lg whitespace-nowrap shadow-lg select-none pointer-events-none">
+            <span className="bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-soft-touch whitespace-nowrap shadow-soft-touch select-none pointer-events-none">
               {action.label}
             </span>
             {/* Icon button */}
             <button
               onClick={action.onClick}
               aria-label={action.label}
-              className={`relative border ${isDark ? 'bg-slate-900 border-slate-800 hover:bg-slate-800' : 'bg-white border-slate-200'} ${actionColor} p-2.5 rounded-xl shadow-md hover:shadow-lg hover:scale-110 active:scale-95 transition-all`}
+              className={`relative border ${isDark ? 'bg-slate-900 border-slate-800 hover:bg-slate-800' : 'bg-white border-border-grid'} ${actionColor} p-2.5 rounded-soft-touch shadow-soft-touch hover:shadow-xl hover:scale-110 active:scale-95 transition-all`}
             >
               {action.icon}
               {action.badge}
@@ -218,11 +220,10 @@ export const SpeedDialMenu = ({
       {/* Trigger button */}
       <button
         onClick={() => setOpen(prev => !prev)}
-        aria-label="Ações Rápidas"
+        aria-label={triggerLabel || "Ações Rápidas"}
         aria-expanded={open}
-        className={`relative p-2 rounded-xl shadow-sm transition-all duration-200 active:scale-95 ${open ? 'bg-slate-900 border border-slate-900 text-white shadow-lg scale-105' : isDark ? 'bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800 hover:text-white' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'} ${triggerClassName || ''}`}
+        className={`relative transition-all duration-200 active:scale-95 flex items-center justify-center gap-2 ${open ? 'bg-slate-900 border border-slate-900 text-white shadow-lg' : isDark ? 'bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800 hover:text-white' : 'bg-white border border-border-grid text-slate-700 hover:bg-slate-50 hover:border-slate-300'} ${triggerClassName || ''}`}
       >
-        {/* 3×3 grid dots = "more actions" */}
         <svg className={triggerIconClassName || 'w-5 h-5'} viewBox="0 0 24 24" fill="currentColor">
           <circle cx="5" cy="5" r="1.8" />
           <circle cx="12" cy="5" r="1.8" />
@@ -234,9 +235,16 @@ export const SpeedDialMenu = ({
           <circle cx="12" cy="19" r="1.8" />
           <circle cx="19" cy="19" r="1.8" />
         </svg>
+        
+        {triggerLabel && (
+          <span className="font-mono font-black uppercase tracking-[0.16em] text-[8px] whitespace-nowrap">
+            {triggerLabel}
+          </span>
+        )}
+
         {/* Urgent badge on trigger */}
         {hasUrgentBadge && !open && (
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 border border-white rounded-full" />
+          <span className={`absolute ${triggerLabel ? '-top-1 -right-1' : 'top-1.5 right-1.5'} w-2 h-2 bg-rose-500 border border-white rounded-full`} />
         )}
       </button>
 
