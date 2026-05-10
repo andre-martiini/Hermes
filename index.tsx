@@ -2520,21 +2520,35 @@ const App: React.FC = () => {
     try {
       const today = new Date();
       const todayStr = formatDateLocalISO(today);
+
+      // Helper to add logs to the visual terminal
+      const addTerminalLog = (msg: string) => {
+        setPgdTerminalLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [HEALTH] ${msg}`]);
+      };
+
+      addTerminalLog("Iniciando sincronização biométrica...");
       
       const telemetry = await GoogleHealthService.getDailyTelemetry(today);
       const weightData = await GoogleHealthService.getWeight(today);
 
       if (Object.keys(telemetry).length > 0) {
         await handleSaveExerciseLog(todayStr, telemetry);
+        addTerminalLog(`Telemetria capturada: ${telemetry.walk?.steps || 0} passos, ${telemetry.sleep?.totalMinutes || 0} min sono.`);
+      } else {
+        addTerminalLog("Nenhuma telemetria nova encontrada para hoje.");
       }
+
       if (weightData?.weight) {
         await handleAddHealthWeight(weightData.weight, todayStr);
+        addTerminalLog(`Peso sincronizado: ${weightData.weight}kg.`);
+      } else {
+        addTerminalLog("Nenhum registro de peso encontrado para hoje.");
       }
       
       showToast("Saúde sincronizada com sucesso!", "success");
-    } catch (healthError) {
+    } catch (healthError: any) {
       console.warn("Health sync skipped or failed:", healthError);
-      // We don't show a toast error here because it might be a user cancellation of the popup
+      setPgdTerminalLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [HEALTH] Erro: ${healthError.message || 'Falha na conexão'}`]);
     }
 
     setIsSyncing(false);

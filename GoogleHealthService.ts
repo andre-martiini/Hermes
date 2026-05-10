@@ -109,12 +109,12 @@ export class GoogleHealthService {
         const summary: Partial<ExerciseLog> = {};
 
         if (stepsData?.dataPoints) {
-            summary.walk = summary.walk || {};
+            summary.walk = summary.walk || { done: 0 };
             summary.walk.steps = stepsData.dataPoints.reduce((acc: number, p: any) => acc + parseInt(p.steps?.count || "0"), 0);
         }
 
         if (distanceData?.dataPoints) {
-            summary.walk = summary.walk || {};
+            summary.walk = summary.walk || { done: 0 };
             const totalMm = distanceData.dataPoints.reduce((acc: number, p: any) => acc + parseFloat(p.distance?.distanceMillimeters || "0"), 0);
             summary.walk.distance = totalMm / 1000000;
         }
@@ -128,7 +128,7 @@ export class GoogleHealthService {
                 const duration = p.exercise?.activeDuration || "0s";
                 return acc + parseInt(duration.replace('s', ''));
             }, 0);
-            summary.walk = summary.walk || {};
+            summary.walk = summary.walk || { done: 0 };
             summary.walk.done = Math.round(totalActiveSec / 60);
         }
 
