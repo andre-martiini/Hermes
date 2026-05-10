@@ -1967,7 +1967,7 @@ def _build_telegram_notification_message(notif: dict) -> str:
         lines.extend(["", f"{label}: {link}"])
     return "\n".join(lines)
 
-@firestore_fn.on_document_created(document="notificacoes/{notification_id}")
+@firestore_fn.on_document_created(document="notificacoes/{notification_id}", memory=options.MemoryOption.MB_512)
 
 def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapshot | None]):
 
@@ -2045,15 +2045,25 @@ def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapsh
 
         if response.failure_count > 0:
 
-            for idx, resp in enumerate(response.responses):
+            bad_tokens = [
+                tokens[idx] for idx, resp in enumerate(response.responses)
+                if not resp.success and resp.exception
+                and "registration-token-not-registered" in str(resp.exception).lower()
+            ]
 
-                if not resp.success:
+            if bad_tokens:
 
-                    if resp.exception and "registration-token-not-registered" in str(resp.exception).lower():
+                for i in range(0, len(bad_tokens), 500):
 
-                        bad_token = tokens[idx]
+                    batch = db.batch()
 
-                        db.collection('fcm_tokens').document(bad_token).delete()
+                    for token in bad_tokens[i:i + 500]:
+
+                        batch.delete(db.collection('fcm_tokens').document(token))
+
+                    batch.commit()
+
+                print(f"Removidos {len(bad_tokens)} tokens FCM inválidos.")
 
         updates['sent_to_push'] = True
 
@@ -2261,9 +2271,11 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
 
     # Busca tarefas com reminder_at definido e que ainda não foram marcadas como lembradas
 
+    now_iso = now.strftime('%Y-%m-%dT%H:%M:%S')
+
     tasks_with_reminders = db.collection('tarefas')\
-            .where('reminder_at', '<=', now.isoformat())\
             .where('reminder_sent', '==', False)\
+            .where('reminder_at', '<=', now_iso)\
             .stream()
 
 
