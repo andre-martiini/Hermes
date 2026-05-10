@@ -9,20 +9,16 @@ export default {
   theme: {
     extend: {
       colors: {
-        'surface': '#f3f4f3',
-        'surface-bright': '#fcf9f8',
-        'surface-container': '#edeeed',
-        'surface-container-low': '#f3f4f3',
-        'on-surface': '#191c1c',
-        'border-grid': '#dadada',
-        'primary-tactile': '#835500', // Operational Orange/Brown
-        'accent-tactile': '#0060ac',  // Cool Blue
-        'lcd-bg': '#d9dad9',          // Muted greenish-grey for LCD
-        'highlighter': '#E6FF00',    // For focus and highlights
-        'text-main': '#191c1c',
+        'surface': '#F9F8F6',         // Technical Paper
+        'on-surface': '#212121',      // Deep Ink
+        'primary-tactile': '#73A9E6', // Atmospheric Blue (Operational)
+        'accent-tactile': '#FF9D4D',  // Alert Orange
+        'highlighter': '#FDE68A',     // Highlighter Yellow
+        'border-grid': '#E5E7EB',     // Fine Grid Lines
+        'text-main': '#212121',
       },
       fontFamily: {
-        serif: ['JetBrains Mono', 'monospace'],
+        serif: ['Newsreader', 'serif'],
         mono: ['JetBrains Mono', 'monospace'],
         lcd: ['DSEG7Classic', 'Space Mono', 'monospace'],
       },
@@ -31,8 +27,8 @@ export default {
         'lcd-panel': 'inset 0 1px 3px rgba(0,0,0,0.2), 0 1px 0 rgba(255,255,255,0.5)',
       },
       borderRadius: {
-        'soft-touch': '24px', // For interactive elements
-        'lcd': '4px',         // For display panels
+        'soft-touch': '4px', // For interactive elements
+        'lcd': '2px',         // For display panels
         'none': '0px',        // For structural elements
       },
     },

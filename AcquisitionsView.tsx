@@ -4,6 +4,9 @@ import { httpsCallable } from 'firebase/functions';
 import { db, functions } from './firebase';
 import { ItemOrcamento, TransacaoProjeto, Cotacao } from './types';
 
+// Utility formatters
+const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
+
 interface AcquisitionsViewProps {
     projetoId: string;
 }
@@ -181,40 +184,52 @@ export const AcquisitionsView: React.FC<AcquisitionsViewProps> = ({ projetoId })
     });
 
     return (
-        <div className="p-6 space-y-8 animate-in fade-in duration-500">
-            {/* Tabs */}
-            <div className="flex gap-4 border-b border-slate-200">
-                <button
-                    onClick={() => setActiveTab('needs')}
-                    className={`pb-4 px-2 text-xs font-black uppercase tracking-widest border-b-2 transition-colors ${activeTab === 'needs' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
-                >
-                    Inventário de Necessidades
+        <div className="p-6 space-y-12 animate-in fade-in duration-500 bg-surface min-h-screen">
+            {/* Título de Seção Industrial */}
+            <div className="border-b-2 border-primary-tactile pb-4">
+                <h2 className="text-3xl font-serif italic text-on-surface">Acquisitions_Inventory</h2>
+                <div className="flex items-center gap-2 mt-2">
+                    <span className="text-[10px] font-mono font-bold text-primary-tactile uppercase tracking-widest">// PROJECT_ID: {projetoId}</span>
+                    <span className="w-1 h-1 rounded-full bg-primary-tactile"></span>
+                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">STATUS: SYSTEM_READY</span>
+                </div>
+            </div>
+
+            {/* Tabs Industriais */}
+            <div className="flex gap-1 bg-slate-100 p-1 rounded-none border border-border-grid">
+                    <button
+                        onClick={() => setActiveTab('needs')}
+                        className={`flex-1 py-3 px-4 text-[10px] font-mono font-bold uppercase tracking-[0.2em] transition-all ${activeTab === 'needs' ? 'bg-white text-on-surface border border-border-grid' : 'text-slate-400 hover:text-on-surface hover:bg-white/50'}`}
+                    >
+                    NEEDS_INVENTORY
                 </button>
-                <button
-                    onClick={() => setActiveTab('process')}
-                    className={`pb-4 px-2 text-xs font-black uppercase tracking-widest border-b-2 transition-colors ${activeTab === 'process' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
-                >
-                    Processar Nota Fiscal (IA)
+                    <button
+                        onClick={() => setActiveTab('process')}
+                        className={`flex-1 py-3 px-4 text-[10px] font-mono font-bold uppercase tracking-[0.2em] transition-all ${activeTab === 'process' ? 'bg-white text-on-surface border border-border-grid' : 'text-slate-400 hover:text-on-surface hover:bg-white/50'}`}
+                    >
+                    OCR_AI_PROCESSOR
                 </button>
             </div>
 
             {activeTab === 'needs' && (
-                <div className="bg-white rounded-[2rem] border border-slate-200 p-8 shadow-sm">
-                    <h3 className="text-xl font-black text-slate-800 mb-2">Falta Comprar</h3>
-                    <p className="text-slate-400 text-xs font-medium mb-6">Itens planejados pendentes de aquisição ou com saldo disponível.</p>
+                <div className="bg-surface rounded-none border border-border-grid p-0 shadow-none">
+                    <div className="p-6 border-b border-border-grid bg-slate-50/50">
+                        <h3 className="text-lg font-serif italic text-on-surface">Pending_Procurement</h3>
+                        <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest mt-1">LOG: PENDING_ACQUISITIONS_DETECTED_IN_ORCAMENTO</p>
+                    </div>
 
                     <div className="overflow-x-auto">
-                        <table className="w-full text-left">
-                            <thead className="bg-slate-50 border-b border-slate-100">
+                        <table className="w-full text-left border-collapse">
+                            <thead className="bg-slate-100 text-[10px] font-mono uppercase tracking-widest text-slate-500 border-b border-border-grid">
                                 <tr>
-                                    <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Item</th>
-                                    <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Orçado</th>
-                                    <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Executado</th>
-                                    <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Saldo</th>
-                                    <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Ações</th>
+                                    <th className="p-4 font-bold border-r border-border-grid">RESOURCE_ID</th>
+                                    <th className="p-4 font-bold border-r border-border-grid">BUDGET_EST</th>
+                                    <th className="p-4 font-bold border-r border-border-grid">EXECUTED_VAL</th>
+                                    <th className="p-4 font-bold border-r border-border-grid">BALANCE_REM</th>
+                                    <th className="p-4 font-bold">ACTION_ACK</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-100">
+                            <tbody className="divide-y divide-border-grid bg-white">
                                 {pendingItems.map(item => {
                                     const totalEst = item.quantidade * item.valor_unitario_estimado;
                                     const totalReal = transactions
@@ -223,32 +238,32 @@ export const AcquisitionsView: React.FC<AcquisitionsViewProps> = ({ projetoId })
                                     const balance = totalEst - totalReal;
 
                                     return (
-                                        <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                                            <td className="p-4">
-                                                <p className="font-bold text-slate-700 text-sm">{item.nome}</p>
-                                                <span className="text-[9px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded uppercase tracking-wider">{item.rubrica}</span>
+                                        <tr key={item.id} className="hover:bg-slate-50 transition-colors font-mono">
+                                            <td className="p-4 border-r border-border-grid">
+                                                <p className="font-bold text-on-surface text-xs">{item.nome}</p>
+                                                <span className="text-[8px] font-bold border border-border-grid bg-slate-100 text-slate-500 px-2 py-0.5 mt-1 inline-block uppercase tracking-widest">{item.rubrica}</span>
                                             </td>
-                                            <td className="p-4 text-sm font-bold text-slate-600">
+                                            <td className="p-4 text-xs font-bold text-slate-500 border-r border-border-grid">
                                                 {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalEst)}
                                             </td>
-                                            <td className="p-4 text-sm font-bold text-indigo-600">
+                                            <td className="p-4 text-xs font-bold text-primary-tactile border-r border-border-grid">
                                                 {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalReal)}
                                             </td>
-                                            <td className="p-4 text-sm font-bold text-emerald-600">
+                                            <td className="p-4 text-xs font-bold text-emerald-600 border-r border-border-grid">
                                                 {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(balance)}
                                             </td>
                                             <td className="p-4">
                                                 <button
                                                     onClick={() => handleGetQuotes(item)}
                                                     disabled={quotingItemId === item.id}
-                                                    className="bg-indigo-50 text-indigo-600 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-indigo-100 transition-all flex items-center gap-2"
+                                                    className="w-full bg-white border border-border-grid text-on-surface px-4 py-2 rounded-soft-touch text-[9px] font-bold uppercase tracking-widest hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
                                                 >
                                                     {quotingItemId === item.id ? (
-                                                        <div className="w-3 h-3 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                                                        <div className="w-3 h-3 border-2 border-primary-tactile border-t-transparent rounded-full animate-spin"></div>
                                                     ) : (
-                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                                                     )}
-                                                    Cotação Auto
+                                                    RUN_AUTO_QUOTE
                                                 </button>
                                             </td>
                                         </tr>
@@ -256,7 +271,7 @@ export const AcquisitionsView: React.FC<AcquisitionsViewProps> = ({ projetoId })
                                 })}
                                 {pendingItems.length === 0 && (
                                     <tr>
-                                        <td colSpan={5} className="p-8 text-center text-slate-400 italic text-sm">Tudo comprado! Parabéns.</td>
+                                        <td colSpan={5} className="p-12 text-center text-slate-400 font-mono font-bold text-[10px] uppercase tracking-widest italic border-b border-border-grid">ZERO_PENDENCIES_DETECTED // SYSTEM_COMPLETE</td>
                                     </tr>
                                 )}
                             </tbody>
@@ -266,23 +281,23 @@ export const AcquisitionsView: React.FC<AcquisitionsViewProps> = ({ projetoId })
             )}
 
             {activeTab === 'process' && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <div className="space-y-6">
-                        <div className="bg-white rounded-[2rem] border border-slate-200 p-8 shadow-sm">
-                            <h3 className="text-xl font-black text-slate-800 mb-6">Upload Inteligente</h3>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 border border-border-grid bg-white">
+                    <div className="border-r border-border-grid">
+                        <div className="bg-white p-8">
+                            <h3 className="text-xl font-serif italic text-on-surface mb-6">Source_Capture</h3>
 
-                            <label className={`flex flex-col items-center justify-center w-full h-64 border-2 border-dashed rounded-3xl cursor-pointer transition-all ${isUploading ? 'bg-slate-50 border-indigo-300' : 'bg-slate-50 border-slate-300 hover:bg-slate-100 hover:border-indigo-400'}`}>
+                            <label className={`flex flex-col items-center justify-center w-full h-80 border-2 border-dashed rounded-none cursor-pointer transition-all ${isUploading ? 'bg-slate-50 border-primary-tactile' : 'bg-slate-50 border-border-grid hover:bg-white hover:border-primary-tactile'}`}>
                                 <div className="flex flex-col items-center justify-center pt-5 pb-6">
                                     {isUploading ? (
                                         <>
-                                            <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-                                            <p className="text-sm text-indigo-600 font-bold">Processando IA...</p>
+                                            <div className="w-8 h-8 border-4 border-primary-tactile border-t-transparent rounded-full animate-spin mb-4"></div>
+                                            <p className="text-[10px] font-mono font-bold text-primary-tactile uppercase tracking-widest animate-pulse">PROCESSING_IA_NEURAL_CAPTURE...</p>
                                         </>
                                     ) : (
                                         <>
-                                            <svg className="w-10 h-10 mb-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
-                                            <p className="mb-2 text-sm text-slate-500"><span className="font-bold">Clique para enviar</span> Nota Fiscal</p>
-                                            <p className="text-xs text-slate-400">PDF, PNG, JPG (Gemini Vision)</p>
+                                            <svg className="w-10 h-10 mb-3 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+                                            <p className="mb-2 text-[10px] font-mono font-bold text-slate-500 uppercase tracking-widest"><span className="text-primary-tactile underline">UPLOAD_INITIALIZE</span> NF-E_CAPTURE</p>
+                                            <p className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-[0.2em]">FILE_TYPES: PDF_PNG_JPG (AI_VISION_V1)</p>
                                         </>
                                     )}
                                 </div>
@@ -298,104 +313,110 @@ export const AcquisitionsView: React.FC<AcquisitionsViewProps> = ({ projetoId })
                             </label>
 
                             {invoiceUrl && (
-                                <div className="mt-4 p-4 bg-emerald-50 border border-emerald-100 rounded-xl flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
+                                <div className="mt-6 p-4 bg-emerald-50 border border-emerald-100 rounded-none flex items-center gap-4">
+                                    <div className="w-8 h-8 rounded-none border border-emerald-200 bg-white text-emerald-600 flex items-center justify-center">
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
                                     </div>
                                     <div className="flex-1">
-                                        <p className="text-xs font-bold text-emerald-800">Arquivo Carregado</p>
-                                        <a href={invoiceUrl} target="_blank" rel="noreferrer" className="text-[10px] text-emerald-600 underline">Visualizar Documento</a>
+                                        <p className="text-[10px] font-mono font-bold text-emerald-800 uppercase tracking-widest">SIGNAL_CAPTURED: FILE_LOADED</p>
+                                        <a href={invoiceUrl} target="_blank" rel="noreferrer" className="text-[9px] font-mono font-bold text-emerald-600 uppercase tracking-widest hover:underline mt-1 inline-block">OPEN_SOURCE_FILE_IN_NEW_TAB</a>
                                     </div>
                                 </div>
                             )}
                         </div>
 
                         {ocrResult && (
-                            <div className="bg-slate-900 text-white rounded-[2rem] p-8 shadow-xl">
-                                <h4 className="text-sm font-black uppercase tracking-widest mb-4 text-indigo-400">Dados Extraídos</h4>
-                                <div className="space-y-4 text-sm font-medium opacity-90">
-                                    <p><span className="text-slate-500">Fornecedor:</span> {ocrResult.fornecedor || 'Não identificado'}</p>
-                                    <p><span className="text-slate-500">CNPJ:</span> {ocrResult.cnpj || 'Não identificado'}</p>
-                                    <p><span className="text-slate-500">Valor Total:</span> R$ {ocrResult.valor_total || '0.00'}</p>
-                                    <p><span className="text-slate-500">Itens:</span> {ocrResult.itens?.length || 0} encontrados</p>
+                            <div className="bg-on-surface text-surface p-8">
+                                <h4 className="text-[10px] font-mono font-bold uppercase tracking-[0.3em] mb-6 text-white/50">// EXTRACTED_METADATA_STREAM</h4>
+                                <div className="space-y-4 font-mono text-[10px] font-bold uppercase tracking-widest">
+                                    <div className="flex justify-between border-b border-white/10 pb-2">
+                                        <span className="text-white/40">VENDOR_ID:</span>
+                                        <span className="text-white">{ocrResult.fornecedor || 'NULL'}</span>
+                                    </div>
+                                    <div className="flex justify-between border-b border-white/10 pb-2">
+                                        <span className="text-white/40">TAX_ID_CNPJ:</span>
+                                        <span className="text-white">{ocrResult.cnpj || 'NULL'}</span>
+                                    </div>
+                                    <div className="flex justify-between border-b border-white/10 pb-2">
+                                        <span className="text-white/40">GROSS_AMOUNT:</span>
+                                        <span className="text-white">{formatCurrency(ocrResult.valor_total || 0)}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-white/40">ITEMS_DETECTED:</span>
+                                        <span className="text-white">{ocrResult.itens?.length || 0}_ENTRIES</span>
+                                    </div>
                                 </div>
                             </div>
                         )}
                     </div>
 
-                    <div className="bg-white rounded-[2rem] border border-slate-200 p-8 shadow-sm">
-                        <h3 className="text-xl font-black text-slate-800 mb-6">Registrar Aquisição</h3>
+                    <div className="bg-surface p-8">
+                        <h3 className="text-xl font-serif italic text-on-surface mb-6">Finalize_Record</h3>
 
-                        <div className="space-y-4">
+                        <div className="space-y-6">
                             <div>
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Vincular ao Item Planejado</label>
+                                <label className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-2">LINK_PLAN_RESOURCE</label>
                                 <select
                                     value={selectedItemId}
                                     onChange={e => setSelectedItemId(e.target.value)}
-                                    className="w-full mt-1 p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-700 bg-white"
+                                    className="w-full p-3 rounded-soft-touch border border-border-grid focus:ring-1 focus:ring-primary-tactile outline-none font-mono font-bold text-xs text-on-surface bg-white appearance-none"
                                 >
-                                    <option value="">Selecione um item...</option>
+                                    <option value="">SELECT_BUDGET_ITEM...</option>
                                     {items.filter(i => i.status !== 'executado').map(i => (
-                                        <option key={i.id} value={i.id}>{i.nome} (R$ {i.valor_unitario_estimado})</option>
+                                        <option key={i.id} value={i.id}>{i.nome.toUpperCase()} ({formatCurrency(i.valor_unitario_estimado)})</option>
                                     ))}
                                 </select>
                             </div>
 
                             <div>
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Descrição da Transação</label>
+                                <label className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-2">ENTRY_DESCRIPTION</label>
                                 <input
                                     value={formDescription}
                                     onChange={e => setFormDescription(e.target.value)}
-                                    className="w-full mt-1 p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-medium text-slate-700"
+                                    className="w-full p-3 rounded-soft-touch border border-border-grid focus:ring-1 focus:ring-primary-tactile outline-none font-mono font-bold text-xs text-on-surface"
+                                    placeholder="TRANSACTION_LOG_NAME"
                                 />
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Valor Total</label>
+                                    <label className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-2">TOTAL_VAL_BRL</label>
                                     <input
                                         type="number"
                                         value={formAmount}
                                         onChange={e => setFormAmount(Number(e.target.value))}
-                                        className="w-full mt-1 p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-700"
+                                        className="w-full p-3 rounded-soft-touch border border-border-grid focus:ring-1 focus:ring-primary-tactile outline-none font-mono font-bold text-xs text-on-surface"
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Data Emissão</label>
+                                    <label className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-2">EMISSION_DATE</label>
                                     <input
                                         type="date"
                                         value={formDate}
                                         onChange={e => setFormDate(e.target.value)}
-                                        className="w-full mt-1 p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-medium text-slate-700"
+                                        className="w-full p-3 rounded-soft-touch border border-border-grid focus:ring-1 focus:ring-primary-tactile outline-none font-mono font-bold text-xs text-on-surface"
                                     />
                                 </div>
                             </div>
 
                             {formAmount > 1000 && (
-                                <div className={`p-4 rounded-xl border ${formQuotes.length >= 3 ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
-                                    <div className="flex items-start gap-3">
-                                        <div className={`mt-0.5 w-5 h-5 rounded-full flex items-center justify-center text-white ${formQuotes.length >= 3 ? 'bg-emerald-500' : 'bg-amber-500'}`}>
-                                            {formQuotes.length >= 3 ? (
-                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                            ) : (
-                                                <span className="text-[10px] font-black">!</span>
-                                            )}
+                                <div className={`p-4 rounded-none border-2 border-dashed ${formQuotes.length >= 3 ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
+                                    <div className="flex items-start gap-4">
+                                        <div className={`mt-0.5 w-6 h-6 rounded-none flex items-center justify-center text-white font-mono font-bold ${formQuotes.length >= 3 ? 'bg-emerald-500 shadow-sm' : 'bg-amber-500 animate-pulse shadow-sm'}`}>
+                                            {formQuotes.length >= 3 ? '✓' : '!'}
                                         </div>
                                         <div>
-                                            <p className={`text-xs font-bold ${formQuotes.length >= 3 ? 'text-emerald-700' : 'text-amber-700'}`}>
-                                                Compliance: Cotações ({formQuotes.length}/3)
+                                            <p className={`text-[10px] font-mono font-bold uppercase tracking-widest ${formQuotes.length >= 3 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                                COMPLIANCE_CHECK: QUOTES_LOG ({formQuotes.length}/3)
                                             </p>
-                                            <p className="text-[10px] opacity-80 mt-1">Compras acima de R$ 1.000 exigem 3 orçamentos.</p>
+                                            <p className="text-[8px] font-mono font-bold text-slate-500 uppercase tracking-widest mt-1 opacity-70">VAL &gt; 1.000_BRL REQUIRE_MIN_3_QUOTES_IN_DATASET.</p>
                                         </div>
                                     </div>
                                 </div>
                             )}
 
-                            <button
-                                onClick={handleSaveTransaction}
-                                className="w-full py-4 bg-indigo-600 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-xl hover:bg-indigo-700 transition-all mt-4"
-                            >
-                                Finalizar e Salvar
+                                className="w-full py-4 bg-primary-tactile text-white rounded-soft-touch text-[10px] font-mono font-bold uppercase tracking-[0.25em] border border-primary-tactile hover:bg-blue-700 transition-all mt-4"
+                                FINALIZE_SAVE_RECORD
                             </button>
                         </div>
                     </div>

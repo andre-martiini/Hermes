@@ -2,6 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap');
+
 @font-face {
   font-family: 'DSEG7Classic';
   src: url('https://cdn.jsdelivr.net/npm/dseg@2.1.0/fonts/DSEG7-Classic/DSEG7Classic-Bold.woff2') format('woff2');

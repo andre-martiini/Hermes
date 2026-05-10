@@ -23,21 +23,26 @@ const HealthSection = ({ title, children, iconColor, defaultExpanded = true }: {
     const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 
     return (
-        <div className="bg-white p-6 md:p-8 rounded-none md:rounded-lg border-b md:border border-slate-200 shadow-none md:shadow-lg">
+        <div className="bg-surface p-6 md:p-10 rounded-none border border-border-grid shadow-none relative overflow-hidden group">
+            {/* Elemento Decorativo Industrial */}
+            <div className={`absolute top-0 left-0 w-1 h-full ${iconColor} opacity-50`}></div>
+            
             <button
                 onClick={() => setIsExpanded(!isExpanded)}
-                className="w-full flex items-center justify-between group"
+                className="w-full flex items-center justify-between group/btn"
             >
-                <div className="flex items-center gap-3">
-                    <span className={`w-2 h-8 ${iconColor} rounded-full`}></span>
-                    <h3 className="text-xl font-black text-slate-900 tracking-tight capitalize text-left">{title}</h3>
+                <div className="flex flex-col items-start gap-1">
+                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-[0.3em]">// SECTION_NODE</span>
+                    <h3 className="text-2xl font-serif italic text-on-surface tracking-tight text-left">{title}</h3>
                 </div>
-                <svg className={`w-5 h-5 text-slate-300 group-hover:text-slate-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
-                </svg>
+                <div className={`w-8 h-8 rounded-soft-touch border border-border-grid flex items-center justify-center transition-all ${isExpanded ? 'bg-on-surface text-surface' : 'bg-surface text-slate-300 hover:text-on-surface'}`}>
+                    <svg className={`w-4 h-4 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+                    </svg>
+                </div>
             </button>
             {isExpanded && (
-                <div className="mt-6 animate-in slide-in-from-top-2 duration-300">
+                <div className="mt-10 animate-in fade-in slide-in-from-top-4 duration-500">
                     {children}
                 </div>
             )}
@@ -52,22 +57,23 @@ const HabitHeatmap = ({ habits, selectedDate, onSelectDate }: { habits: DailyHab
     const todayStr = formatDateLocalISO(today);
 
     return (
-        <HealthSection title={`Mapa de Consistência - ${monthName}`} iconColor="bg-blue-500">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+        <HealthSection title={`Consistência_Mensal • ${monthName}`} iconColor="bg-primary-tactile">
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10 border-b border-border-grid border-dashed pb-8">
                 <div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Volume de hábitos cumpridos por dia</p>
+                    <h4 className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-[0.2em] mb-2">// HABIT_PERFORMANCE_METRICS</h4>
+                    <p className="text-xs font-serif italic text-slate-500">Volume de hábitos cumpridos processado por ciclo diário.</p>
                 </div>
-                <div className="flex items-center gap-4 bg-slate-50 p-3 rounded-lg md:rounded-2xl border border-slate-100">
-                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Legenda:</span>
-                    <div className="flex gap-1.5">
+                <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-none border border-border-grid">
+                    <span className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest">LEGEND:</span>
+                    <div className="flex gap-2">
                         {[0, 1, 2, 3, 4, 5, 6].map(c => (
-                            <div key={c} className="w-4 h-4 rounded-md shadow-sm" title={`${c} hábitos`} style={{ backgroundColor: `hsl(${(c / 6) * 120}, 75%, 45%)` }}></div>
+                            <div key={c} className="w-5 h-5 rounded-soft-touch border border-white/20 shadow-sm" title={`${c} hábitos`} style={{ backgroundColor: `hsl(${(c / 6) * 120}, 60%, 50%)` }}></div>
                         ))}
                     </div>
                 </div>
             </div>
 
-            <div className="grid grid-cols-7 sm:grid-cols-10 md:grid-cols-15 lg:grid-cols-[repeat(31,minmax(0,1fr))] gap-2 sm:gap-3 overflow-x-auto pb-4">
+            <div className="grid grid-cols-7 sm:grid-cols-10 md:grid-cols-15 lg:grid-cols-[repeat(31,minmax(0,1fr))] gap-2 sm:gap-2.5 overflow-x-auto pb-4">
                 {Array.from({ length: daysInMonth }).map((_, i) => {
                     const day = i + 1;
                     const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -88,20 +94,22 @@ const HabitHeatmap = ({ habits, selectedDate, onSelectDate }: { habits: DailyHab
                     }
 
                     const ratio = completedCount / 6;
-                    let style: React.CSSProperties = { backgroundColor: '#f8fafc', color: '#cbd5e1' };
+                    let style: React.CSSProperties = { backgroundColor: 'transparent', color: '#cbd5e1', border: '1px solid #e2e8f0' };
 
                     if (hasRecord) {
                         const hue = ratio * 120;
                         style = {
-                            backgroundColor: `hsl(${hue}, 75%, 45%)`,
+                            backgroundColor: `hsl(${hue}, 60%, 50%)`,
                             color: 'white',
-                            boxShadow: isSelected ? `0 0 0 3px white, 0 0 0 6px hsl(${hue}, 75%, 45%)` : `0 4px 12px -4px hsl(${hue}, 75%, 45%)`
+                            border: isSelected ? '2px solid black' : '1px solid rgba(255,255,255,0.2)',
+                            boxShadow: isSelected ? `0 0 0 2px white, 0 0 0 4px hsl(${hue}, 60%, 50%)` : 'none'
                         };
                     } else if (isSelected) {
                         style = {
                             backgroundColor: '#e2e8f0',
                             color: '#475569',
-                            boxShadow: `0 0 0 3px white, 0 0 0 6px #cbd5e1`
+                            border: '2px solid #64748b',
+                            boxShadow: `0 0 0 2px white, 0 0 0 4px #cbd5e1`
                         };
                     }
 
@@ -111,10 +119,10 @@ const HabitHeatmap = ({ habits, selectedDate, onSelectDate }: { habits: DailyHab
                             disabled={isFuture}
                             onClick={() => onSelectDate(dateStr)}
                             title={isFuture ? `Data futura` : hasRecord ? `Dia ${day}: ${completedCount}/6 hábitos` : `Dia ${day}: Sem registro`}
-                            className={`aspect-square rounded-xl flex items-center justify-center text-[10px] md:text-sm font-black transition-all duration-300 ${isFuture ? 'opacity-20 cursor-not-allowed' : 'hover:scale-125 hover:z-10 cursor-pointer'} ${hasRecord ? 'hover:shadow-lg' : 'hover:bg-slate-200'} ${isSelected ? 'scale-110 z-10' : ''}`}
+                            className={`aspect-square rounded-soft-touch flex items-center justify-center text-[9px] md:text-[10px] font-mono font-bold transition-all duration-300 ${isFuture ? 'opacity-10 cursor-not-allowed' : 'hover:scale-110 hover:z-10 cursor-pointer'} ${isSelected ? 'scale-110 z-10' : ''}`}
                             style={style}
                         >
-                            {day}
+                            {String(day).padStart(2, '0')}
                         </button>
                     );
                 })}
@@ -218,30 +226,32 @@ function getProtocol(
 const ProtocolPanel = ({ steps, accentClass }: { steps: ProtocolStep[]; accentClass: string }) => {
     const [open, setOpen] = useState(false);
     return (
-        <div className="mt-1">
+        <div className="mt-4">
             <button
                 onClick={() => setOpen(o => !o)}
-                className={`flex items-center gap-1 text-[9px] font-black uppercase tracking-widest ${accentClass} opacity-70 hover:opacity-100 transition-opacity`}
+                className={`flex items-center gap-2 text-[9px] font-mono font-bold uppercase tracking-[0.2em] ${accentClass} bg-surface border border-border-grid px-3 py-1.5 rounded-soft-touch transition-all hover:bg-slate-100`}
             >
-                <svg className={`w-2.5 h-2.5 transition-transform ${open ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" />
+                <svg className={`w-3 h-3 transition-transform ${open ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
                 </svg>
-                Como treinar
+                TRAINING_PROTOCOL
             </button>
             {open && (
-                <ol className="mt-2 space-y-1.5 pl-1">
-                    {steps.map((step, i) => (
-                        <li key={i} className="flex gap-2">
-                            <span className={`text-[9px] font-black ${accentClass} opacity-60 mt-0.5 shrink-0`}>{i + 1}.</span>
-                            <div>
-                                <span className="text-[9px] font-black text-slate-700">{step.label}</span>
-                                {step.detail && (
-                                    <span className="text-[9px] text-slate-400 ml-1">— {step.detail}</span>
-                                )}
-                            </div>
-                        </li>
-                    ))}
-                </ol>
+                <div className="mt-4 p-4 bg-slate-50 border border-border-grid border-dashed rounded-none animate-in slide-in-from-top-2">
+                    <ol className="space-y-3">
+                        {steps.map((step, i) => (
+                            <li key={i} className="flex gap-4">
+                                <span className={`text-[10px] font-mono font-bold ${accentClass} opacity-60 mt-0.5 shrink-0`}>[{String(i + 1).padStart(2, '0')}]</span>
+                                <div>
+                                    <span className="text-[10px] font-mono font-bold text-on-surface uppercase block">{step.label}</span>
+                                    {step.detail && (
+                                        <span className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest mt-0.5 block">— {step.detail}</span>
+                                    )}
+                                </div>
+                            </li>
+                        ))}
+                    </ol>
+                </div>
             )}
         </div>
     );
@@ -320,100 +330,118 @@ const ExerciseGoalsSection = ({
     );
 
     return (
-        <div>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">
-                Registre após os exercícios — metas se ajustam automaticamente
-            </p>
+        <div className="space-y-10">
+            <div>
+                <h4 className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-[0.3em] mb-2">// EXERCISE_LOG_STREAM</h4>
+                <p className="text-xs font-serif italic text-slate-500">
+                    Registre após os exercícios — metas se ajustam automaticamente baseado na performance histórica.
+                </p>
+            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
 
                 {/* Flexões no chão */}
-                <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-5 flex flex-col gap-3">
+                <div className="bg-emerald-50/50 border border-emerald-100 rounded-none p-6 flex flex-col gap-4 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-2 opacity-10">
+                        <svg className="w-12 h-12 text-emerald-600" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L1 21h22L12 2z"/></svg>
+                    </div>
                     <div>
-                        <span className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">Flexões no Chão</span>
-                        <div className="flex items-baseline gap-1 mt-1">
+                        <span className="text-[9px] font-mono font-bold text-emerald-600 uppercase tracking-[0.2em]">// PUSHUPS_UNIT</span>
+                        <div className="flex items-baseline gap-2 mt-2">
                             {pushupsGoal ? (
                                 <>
-                                    <span className="text-3xl font-black text-slate-900">{pushupsGoal}</span>
-                                    <span className="text-xs font-bold text-slate-400">reps (meta)</span>
+                                    <span className="text-4xl font-mono font-bold text-on-surface tracking-tighter">{pushupsGoal}</span>
+                                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">REPS_GOAL</span>
                                 </>
                             ) : (
-                                <span className="text-sm font-black text-slate-400">Primeiro registro = baseline</span>
+                                <span className="text-[10px] font-mono font-bold text-slate-400 uppercase italic">INITIALIZING_BASELINE...</span>
                             )}
                         </div>
                         {todayLog?.pushups && (
-                            <div className={`mt-1 text-[10px] font-black uppercase ${todayLog.pushups.done >= todayLog.pushups.goal ? 'text-emerald-600' : 'text-amber-500'}`}>
-                                Hoje: {todayLog.pushups.done} reps {todayLog.pushups.done >= todayLog.pushups.goal ? '✓' : ''}
+                            <div className={`mt-3 text-[10px] font-mono font-bold uppercase tracking-widest ${todayLog.pushups.done >= todayLog.pushups.goal ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                CURRENT_SESSION: {todayLog.pushups.done} REPS {todayLog.pushups.done >= todayLog.pushups.goal ? '[DONE]' : '[PENDING]'}
                             </div>
                         )}
                         <ProtocolPanel steps={getProtocol('pushups', pushupsGoal ?? 10)} accentClass="text-emerald-600" />
                     </div>
-                    <div className="flex gap-2">
-                        <input
-                            type="number"
-                            min="1"
-                            placeholder="Reps feitas"
-                            value={pushupsInput}
-                            onChange={e => setPushupsInput(e.target.value)}
-                            className="flex-1 bg-white border border-emerald-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-emerald-400"
-                        />
+                    <div className="mt-auto space-y-4">
+                        <div className="flex gap-2">
+                            <input
+                                type="number"
+                                min="1"
+                                placeholder="ENTER_VALUE"
+                                value={pushupsInput}
+                                onChange={e => setPushupsInput(e.target.value)}
+                                className="w-full bg-white border border-border-grid rounded-soft-touch px-4 py-3 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-emerald-500"
+                            />
+                        </div>
+                        <div>
+                            <span className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-2">RECENT_HISTORY (L7D)</span>
+                            <MiniHistory sessions={recentPushups} renderDot={log => {
+                                const hit = log.pushups!.done >= log.pushups!.goal;
+                                return <div className={`w-5 h-5 rounded-soft-touch border border-white/20 shadow-sm ${hit ? 'bg-emerald-500' : 'bg-rose-400'}`} title={`${log.id}: ${log.pushups!.done}/${log.pushups!.goal}`} />;
+                            }} />
+                        </div>
                     </div>
-                    <MiniHistory sessions={recentPushups} renderDot={log => {
-                        const hit = log.pushups!.done >= log.pushups!.goal;
-                        return <div className={`w-4 h-4 rounded-md ${hit ? 'bg-emerald-500' : 'bg-rose-300'}`} title={`${log.id}: ${log.pushups!.done}/${log.pushups!.goal}`} />;
-                    }} />
                 </div>
 
                 {/* Barra */}
-                <div className="bg-violet-50 border border-violet-100 rounded-2xl p-5 flex flex-col gap-3">
+                <div className="bg-violet-50/50 border border-violet-100 rounded-none p-6 flex flex-col gap-4 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-2 opacity-10">
+                        <svg className="w-12 h-12 text-violet-600" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L1 21h22L12 2z"/></svg>
+                    </div>
                     <div>
-                        <span className="text-[9px] font-black text-violet-600 uppercase tracking-widest">Barra</span>
-                        <div className="flex items-baseline gap-1 mt-1">
+                        <span className="text-[9px] font-mono font-bold text-violet-600 uppercase tracking-[0.2em]">// PULLUPS_UNIT</span>
+                        <div className="flex items-baseline gap-2 mt-2">
                             {pullupsGoal ? (
                                 <>
-                                    <span className="text-3xl font-black text-slate-900">{pullupsGoal}</span>
-                                    <span className="text-xs font-bold text-slate-400">{pullupPhaseInfo.metric} (meta)</span>
+                                    <span className="text-4xl font-mono font-bold text-on-surface tracking-tighter">{pullupsGoal}</span>
+                                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">{pullupPhaseInfo.metric.toUpperCase()}</span>
                                 </>
                             ) : (
-                                <span className="text-sm font-black text-slate-400">Primeiro registro = baseline</span>
+                                <span className="text-[10px] font-mono font-bold text-slate-400 uppercase italic">INITIALIZING_BASELINE...</span>
                             )}
                         </div>
-                        <div className="mt-1 text-[9px] font-black text-violet-500 uppercase tracking-widest">{pullupPhaseInfo.name}</div>
+                        <div className="mt-1 text-[9px] font-mono font-bold text-violet-500 uppercase tracking-widest">{pullupPhaseInfo.name}</div>
                         {todayLog?.pullups && (
-                            <div className={`mt-1 text-[10px] font-black uppercase ${todayLog.pullups.done >= todayLog.pullups.goal ? 'text-emerald-600' : 'text-amber-500'}`}>
-                                Hoje: {todayLog.pullups.done} {pullupPhaseInfo.metric} {todayLog.pullups.done >= todayLog.pullups.goal ? '✓' : ''}
+                            <div className={`mt-3 text-[10px] font-mono font-bold uppercase tracking-widest ${todayLog.pullups.done >= todayLog.pullups.goal ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                CURRENT_SESSION: {todayLog.pullups.done} {todayLog.pullups.done >= todayLog.pullups.goal ? '[DONE]' : '[PENDING]'}
                             </div>
-                        )}
-                        <p className="text-[9px] text-slate-400 mt-1 italic leading-tight">{pullupPhaseInfo.tip}</p>
-                        {pullupPhaseInfo.gate && (
-                            <p className="text-[9px] font-black text-violet-400 mt-1 uppercase tracking-wider">{pullupPhaseInfo.gate}</p>
                         )}
                         <ProtocolPanel steps={getProtocol('pullups', pullupsGoal ?? 10, pullupPhase)} accentClass="text-violet-600" />
                     </div>
-                    <div className="flex gap-2">
-                        <input
-                            type="number"
-                            min="1"
-                            placeholder={pullupPhase === 'dead_hang' ? 'Segundos' : 'Reps feitas'}
-                            value={pullupsInput}
-                            onChange={e => setPullupsInput(e.target.value)}
-                            className="flex-1 bg-white border border-violet-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-violet-400"
-                        />
+                    <div className="mt-auto space-y-4">
+                        <div className="flex gap-2">
+                            <input
+                                type="number"
+                                min="1"
+                                placeholder="ENTER_VALUE"
+                                value={pullupsInput}
+                                onChange={e => setPullupsInput(e.target.value)}
+                                className="w-full bg-white border border-border-grid rounded-soft-touch px-4 py-3 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-violet-500"
+                            />
+                        </div>
+                        <div>
+                            <span className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-2">RECENT_HISTORY (L7D)</span>
+                            <MiniHistory sessions={recentPullups} renderDot={log => {
+                                const hit = log.pullups!.done >= log.pullups!.goal;
+                                return <div className={`w-5 h-5 rounded-soft-touch border border-white/20 shadow-sm ${hit ? 'bg-violet-500' : 'bg-rose-400'}`} title={`${log.id}: ${log.pullups!.done}/${log.pullups!.goal}`} />;
+                            }} />
+                        </div>
                     </div>
-                    <MiniHistory sessions={recentPullups} renderDot={log => {
-                        const hit = log.pullups!.done >= log.pullups!.goal;
-                        return <div className={`w-4 h-4 rounded-md ${hit ? 'bg-violet-500' : 'bg-rose-300'}`} title={`${log.id}: ${log.pullups!.done}/${log.pullups!.goal}`} />;
-                    }} />
                 </div>
 
                 {/* Caminhada */}
-                <div className="bg-sky-50 border border-sky-100 rounded-2xl p-5 flex flex-col gap-3">
+                <div className="bg-sky-50/50 border border-sky-100 rounded-none p-6 flex flex-col gap-4 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-2 opacity-10">
+                        <svg className="w-12 h-12 text-sky-600" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L1 21h22L12 2z"/></svg>
+                    </div>
                     <div>
-                        <span className="text-[9px] font-black text-sky-600 uppercase tracking-widest">Caminhada</span>
-                        <div className="flex items-baseline gap-1 mt-1">
-                            <span className="text-3xl font-black text-slate-900">1h–2h</span>
+                        <span className="text-[9px] font-mono font-bold text-sky-600 uppercase tracking-[0.2em]">// WALK_UNIT</span>
+                        <div className="flex items-baseline gap-2 mt-2">
+                            <span className="text-4xl font-mono font-bold text-on-surface tracking-tighter">01h–02h</span>
+                            <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">RANGE_TARGET</span>
                         </div>
-                        <div className="text-[9px] font-black text-slate-400 uppercase mt-1">Meta mínima: 1h — Ideal: 2h</div>
                         <ProtocolPanel steps={getProtocol('walk', 60)} accentClass="text-sky-600" />
                         {todayLog?.walk && (() => {
                             const done = todayLog.walk!.done;
@@ -421,44 +449,49 @@ const ExerciseGoalsSection = ({
                             const metMin = done >= 60;
                             const metIdeal = done >= 120;
                             return (
-                                <div className="mt-2">
-                                    <div className={`text-[10px] font-black uppercase mb-1 ${metIdeal ? 'text-emerald-600' : metMin ? 'text-sky-600' : 'text-amber-500'}`}>
-                                        Hoje: {formatWalkDisplay(done)} {metIdeal ? '— Meta ideal ✓' : metMin ? '— Mínimo ✓' : '— Abaixo do mínimo'}
+                                <div className="mt-4">
+                                    <div className={`text-[10px] font-mono font-bold uppercase tracking-widest mb-2 ${metIdeal ? 'text-emerald-600' : metMin ? 'text-sky-600' : 'text-amber-600'}`}>
+                                        LOGGED: {formatWalkDisplay(done)} {metIdeal ? '[IDEAL_REACHED]' : metMin ? '[MIN_MET]' : '[LOW_INTENSITY]'}
                                     </div>
                                     {metMin && !metIdeal && (
-                                        <div className="w-full bg-sky-100 rounded-full h-1.5">
-                                            <div className="bg-sky-500 h-1.5 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                                        <div className="w-full bg-sky-200/30 rounded-none h-1 border border-sky-200">
+                                            <div className="bg-sky-500 h-full transition-all" style={{ width: `${pct}%` }} />
                                         </div>
                                     )}
                                 </div>
                             );
                         })()}
                     </div>
-                    <div className="flex gap-2">
-                        <input
-                            type="number"
-                            min="1"
-                            placeholder="Minutos caminhados"
-                            value={walkInput}
-                            onChange={e => setWalkInput(e.target.value)}
-                            className="flex-1 bg-white border border-sky-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-sky-400"
-                        />
+                    <div className="mt-auto space-y-4">
+                        <div className="flex gap-2">
+                            <input
+                                type="number"
+                                min="1"
+                                placeholder="ENTER_MINUTES"
+                                value={walkInput}
+                                onChange={e => setWalkInput(e.target.value)}
+                                className="w-full bg-white border border-border-grid rounded-soft-touch px-4 py-3 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-sky-500"
+                            />
+                        </div>
+                        <div>
+                            <span className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-2">RECENT_HISTORY (L7D)</span>
+                            <MiniHistory sessions={recentWalks} renderDot={log => {
+                                const done = log.walk!.done;
+                                const color = done >= 120 ? 'bg-emerald-500' : done >= 60 ? 'bg-sky-500' : 'bg-rose-400';
+                                return <div className={`w-5 h-5 rounded-soft-touch border border-white/20 shadow-sm ${color}`} title={`${log.id}: ${formatWalkDisplay(done)}`} />;
+                            }} />
+                        </div>
                     </div>
-                    <MiniHistory sessions={recentWalks} renderDot={log => {
-                        const done = log.walk!.done;
-                        const color = done >= 120 ? 'bg-emerald-500' : done >= 60 ? 'bg-sky-400' : 'bg-rose-300';
-                        return <div className={`w-4 h-4 rounded-md ${color}`} title={`${log.id}: ${formatWalkDisplay(done)}`} />;
-                    }} />
                 </div>
             </div>
 
-            <div className="flex justify-end">
+            <div className="flex justify-end mt-8">
                 <button
                     onClick={handleSave}
                     disabled={saving || (!pushupsInput && !pullupsInput && !walkInput)}
-                    className="bg-violet-500 text-white px-8 py-3 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-violet-600 transition-all shadow-lg shadow-violet-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-full md:w-auto bg-on-surface text-surface px-10 py-4 rounded-soft-touch text-[11px] font-mono font-bold uppercase tracking-[0.2em] hover:bg-primary-tactile transition-all shadow-none disabled:opacity-20 disabled:cursor-not-allowed"
                 >
-                    {saving ? 'Salvando...' : 'Registrar Exercícios'}
+                    {saving ? 'PROCESSING_LOG...' : 'COMMIT_EXERCISE_DATA'}
                 </button>
             </div>
         </div>
@@ -508,117 +541,125 @@ const ExamsAndConsultationsManager = ({
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-8">
             {!isAdding ? (
                 <button 
                     onClick={() => setIsAdding(true)}
-                    className="w-full py-4 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 font-bold hover:border-sky-400 hover:text-sky-600 transition-colors flex items-center justify-center gap-2"
+                    className="w-full py-6 border border-border-grid border-dashed bg-surface rounded-none text-slate-400 font-mono font-bold text-[10px] uppercase tracking-[0.3em] hover:border-primary-tactile hover:text-primary-tactile transition-all flex items-center justify-center gap-4 group"
                 >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
-                    Novo Registro
+                    <div className="w-8 h-8 rounded-soft-touch border border-border-grid flex items-center justify-center group-hover:bg-primary-tactile group-hover:text-white transition-all">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+                    </div>
+                    REGISTER_NEW_MEDICAL_EVENT
                 </button>
             ) : (
-                <div className="bg-slate-50 p-6 rounded-2xl border border-sky-100 space-y-4 animate-in fade-in slide-in-from-top-4">
-                    <div className="flex justify-between items-center mb-2">
-                        <h4 className="text-sm font-black text-slate-900 uppercase tracking-wide">Novo Registro</h4>
-                        <button onClick={() => setIsAdding(false)} className="text-slate-400 hover:text-rose-500">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                <div className="bg-surface p-8 rounded-none border border-primary-tactile space-y-8 animate-in fade-in slide-in-from-top-4 duration-500 relative">
+                    <div className="absolute top-0 right-0 p-4">
+                         <div className="text-[8px] font-mono font-bold text-primary-tactile opacity-30 uppercase tracking-[0.2em]">FORM_ID: MED_RECORD_V1</div>
+                    </div>
+                    <div className="flex justify-between items-start">
+                        <div>
+                            <span className="text-[10px] font-mono font-bold text-primary-tactile uppercase tracking-[0.3em] mb-1 flex items-center gap-2">
+                                <span className="w-2 h-2 bg-primary-tactile"></span>
+                                NEW_RECORD_ENTRY
+                            </span>
+                            <p className="text-xs font-serif italic text-slate-500">Preencha os detalhes técnicos do evento médico para indexação.</p>
+                        </div>
+                        <button onClick={() => setIsAdding(false)} className="w-8 h-8 rounded-soft-touch border border-border-grid flex items-center justify-center text-slate-300 hover:text-accent-tactile transition-all">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
                         </button>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div>
-                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Tipo</label>
-                            <div className="flex bg-white p-1 rounded-lg border border-slate-200">
+                            <label className="block text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest mb-3">EVENT_TYPE</label>
+                            <div className="flex bg-slate-50 p-1 rounded-soft-touch border border-border-grid">
                                 <button 
                                     onClick={() => setNewExam({ ...newExam, tipo: 'consulta' })}
-                                    className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${newExam.tipo === 'consulta' ? 'bg-sky-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}
+                                    className={`flex-1 py-2 text-[10px] font-mono font-bold uppercase tracking-widest rounded-soft-touch transition-all ${newExam.tipo === 'consulta' ? 'bg-on-surface text-surface' : 'text-slate-400 hover:bg-white'}`}
                                 >
-                                    Consulta
+                                    CONSULTATION
                                 </button>
                                 <button 
                                     onClick={() => setNewExam({ ...newExam, tipo: 'exame' })}
-                                    className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${newExam.tipo === 'exame' ? 'bg-indigo-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}
+                                    className={`flex-1 py-2 text-[10px] font-mono font-bold uppercase tracking-widest rounded-soft-touch transition-all ${newExam.tipo === 'exame' ? 'bg-primary-tactile text-white' : 'text-slate-400 hover:bg-white'}`}
                                 >
-                                    Exame
+                                    EXAM_PROCEDURE
                                 </button>
                             </div>
                         </div>
 
                         <div>
-                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Data</label>
+                            <label className="block text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest mb-3">EVENT_DATE</label>
                             <input 
                                 type="date"
-                                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-sky-500"
+                                className="w-full bg-white border border-border-grid rounded-soft-touch px-4 py-3 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile"
                                 value={newExam.data}
                                 onChange={e => setNewExam({ ...newExam, data: e.target.value })}
                             />
                         </div>
 
                         <div className="md:col-span-2">
-                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Título / Especialidade</label>
+                            <label className="block text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest mb-3">TITLE / SPECIALIZATION</label>
                             <input 
                                 type="text"
-                                placeholder="Ex: Cardiologista, Hemograma Completo..."
-                                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-sky-500"
+                                placeholder="E.G. CARDIOLOGY, COMPLETE_BLOOD_COUNT..."
+                                className="w-full bg-white border border-border-grid rounded-soft-touch px-4 py-3 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile"
                                 value={newExam.titulo || ''}
                                 onChange={e => setNewExam({ ...newExam, titulo: e.target.value })}
                             />
                         </div>
 
                         <div className="md:col-span-2">
-                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Local / Médico / Laboratório</label>
+                            <label className="block text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest mb-3">FACILITY / PROFESSIONAL_ID</label>
                             <input 
                                 type="text"
-                                placeholder="Ex: Dr. Silva, Lab. Exame..."
-                                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-sky-500"
+                                placeholder="E.G. DR. SMITH, DIAGNOSTIC_CENTER..."
+                                className="w-full bg-white border border-border-grid rounded-soft-touch px-4 py-3 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile"
                                 value={newExam.doutor_local || ''}
                                 onChange={e => setNewExam({ ...newExam, doutor_local: e.target.value })}
                             />
                         </div>
 
                         <div className="md:col-span-2">
-                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Arquivos / Resultados (Google Drive)</label>
-                            <div className="border-2 border-dashed border-slate-200 rounded-lg p-4 bg-white hover:bg-slate-50 transition-colors text-center cursor-pointer relative">
+                            <label className="block text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest mb-3">TECHNICAL_ATTACHMENTS (PDF/IMG)</label>
+                            <div className="border border-border-grid border-dashed rounded-none p-6 bg-slate-50 hover:bg-white transition-colors text-center cursor-pointer relative group">
                                 <input 
                                     type="file" 
                                     multiple
-                                    className="absolute inset-0 opacity-0 cursor-pointer"
+                                    className="absolute inset-0 opacity-0 cursor-pointer z-10"
                                     onChange={handleFileChange}
                                 />
-                                <div className="text-slate-400 text-xs font-bold">
-                                    {files.length > 0 ? (
-                                        <span className="text-sky-600">{files.length} arquivo(s) selecionado(s)</span>
-                                    ) : (
-                                        <span>Arraste ou clique para adicionar arquivos</span>
-                                    )}
+                                <div className="flex flex-col items-center gap-2">
+                                    <svg className="w-6 h-6 text-slate-300 group-hover:text-primary-tactile transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                                    <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400">
+                                        {files.length > 0 ? (
+                                            <span className="text-primary-tactile">{files.length} FILE(S) SELECTED_FOR_UPLOAD</span>
+                                        ) : (
+                                            <span>DRAG_DROP_OR_CLICK_TO_ATTACH</span>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <div className="flex justify-start md:justify-end pt-2">
+                    <div className="flex justify-start md:justify-end pt-4 border-t border-border-grid">
                         <button 
                             disabled={!newExam.titulo || !newExam.data}
                             onClick={handleSubmit}
-                            className="w-full md:w-auto bg-sky-500 text-white px-6 py-3 md:py-2 rounded-lg text-xs font-black uppercase tracking-widest hover:bg-sky-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-sky-200"
+                            className="w-full md:w-auto bg-primary-tactile text-white px-10 py-4 rounded-soft-touch text-[11px] font-mono font-bold uppercase tracking-[0.2em] hover:bg-on-surface transition-all disabled:opacity-20 disabled:cursor-not-allowed"
                         >
-                            Salvar Registro
+                            COMMIT_MEDICAL_RECORD
                         </button>
                     </div>
                 </div>
             )}
 
-            <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {exams.sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime()).map(exam => (
-                    <div key={exam.id} className="bg-white border border-slate-100 rounded-xl p-4 hover:shadow-md transition-all group relative">
-                        <div className="flex justify-between items-start mb-2">
-                            <div className="flex items-center gap-2">
-                                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${exam.tipo === 'consulta' ? 'bg-sky-50 text-sky-600' : 'bg-indigo-50 text-indigo-600'}`}>
-                                    {exam.tipo === 'consulta' ? 'Consulta' : 'Exame'}
-                                </span>
-                                <span className="text-[10px] font-black text-slate-300 uppercase">{formatDate(exam.data)}</span>
-                            </div>
+                    <div key={exam.id} className="bg-surface border border-border-grid rounded-none p-6 hover:border-primary-tactile transition-all group relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button 
                                 onClick={() => {
                                     if (pendingDeleteExamId !== exam.id) {
@@ -629,47 +670,58 @@ const ExamsAndConsultationsManager = ({
                                     setPendingDeleteExamId(null);
                                     onDeleteExam(exam.id);
                                 }}
-                                className={`opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity rounded-lg p-1 ${pendingDeleteExamId === exam.id ? 'bg-rose-500 text-white' : 'text-slate-300 hover:text-rose-500'}`}
-                                title={pendingDeleteExamId === exam.id ? "Confirmar exclusão" : "Excluir"}
+                                className={`w-8 h-8 rounded-soft-touch flex items-center justify-center transition-all ${pendingDeleteExamId === exam.id ? 'bg-accent-tactile text-white scale-110' : 'bg-slate-100 text-slate-400 hover:bg-accent-tactile hover:text-white'}`}
+                                title={pendingDeleteExamId === exam.id ? "CONFIRM_DELETE" : "DELETE_RECORD"}
                             >
                                 {pendingDeleteExamId === exam.id ? (
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                                 ) : (
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                 )}
                             </button>
                         </div>
 
-                        <h4 className="text-sm font-black text-slate-800 leading-tight mb-1">{exam.titulo}</h4>
-                        {exam.doutor_local && (
-                            <p className="text-xs text-slate-500 font-medium mb-3 flex items-center gap-1">
-                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                                {exam.doutor_local}
-                            </p>
-                        )}
-
-                        {exam.pool_dados && exam.pool_dados.length > 0 && (
-                            <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-slate-50">
-                                {exam.pool_dados.map(file => (
-                                    <a 
-                                        key={file.id}
-                                        href={file.valor}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 rounded-lg border border-slate-100 text-[10px] font-bold text-slate-600 hover:bg-slate-100 hover:text-sky-600 transition-colors"
-                                    >
-                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
-                                        {file.nome || 'Anexo'}
-                                    </a>
-                                ))}
+                        <div className="flex flex-col gap-4">
+                            <div className="flex items-center gap-3">
+                                <span className={`text-[8px] font-mono font-bold uppercase px-2 py-0.5 rounded-none border ${exam.tipo === 'consulta' ? 'bg-slate-50 text-slate-600 border-slate-200' : 'bg-primary-tactile/10 text-primary-tactile border-primary-tactile/20'}`}>
+                                    {exam.tipo === 'consulta' ? 'CONSULTATION' : 'EXAM_PROCEDURE'}
+                                </span>
+                                <span className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest">{formatDate(exam.data)}</span>
                             </div>
-                        )}
+                            
+                            <div>
+                                <h4 className="text-lg font-serif italic text-on-surface leading-tight mb-1">{exam.titulo}</h4>
+                                {exam.doutor_local && (
+                                    <p className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /></svg>
+                                        LOC: {exam.doutor_local}
+                                    </p>
+                                )}
+                            </div>
+
+                            {exam.pool_dados && exam.pool_dados.length > 0 && (
+                                <div className="flex flex-wrap gap-2 pt-4 border-t border-border-grid border-dashed">
+                                    {exam.pool_dados.map(file => (
+                                        <a 
+                                            key={file.id}
+                                            href={file.valor}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-soft-touch border border-border-grid text-[9px] font-mono font-bold text-slate-600 uppercase tracking-widest hover:bg-on-surface hover:text-white transition-all"
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                                            ATTACHMENT_ID_{file.id.slice(-4).toUpperCase()}
+                                        </a>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 ))}
                 
                 {exams.length === 0 && !isAdding && (
-                    <div className="text-center py-8 text-slate-300 text-[10px] font-black uppercase tracking-widest italic border-2 border-dashed border-slate-50 rounded-xl">
-                        Nenhum registro ainda
+                    <div className="md:col-span-2 text-center py-16 border border-border-grid border-dashed rounded-none">
+                        <span className="text-[10px] font-mono font-bold text-slate-300 uppercase tracking-[0.3em]">NO_MEDICAL_RECORDS_DETECTED</span>
                     </div>
                 )}
             </div>
@@ -791,357 +843,278 @@ const HealthView: React.FC<HealthViewProps> = ({
     };
 
     return (
-        <div className={`health-view space-y-0 md:space-y-8 pb-20 ${isDark ? 'health-view-dark' : ''}`}>
-            {/* Header Metrics */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-0 md:gap-6 border-b md:border-none border-slate-100">
-                <div className="bg-white p-6 rounded-none md:rounded-[2rem] border-b md:border border-slate-200 shadow-none md:shadow-xl flex flex-col justify-center relative group">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Peso Atual</span>
-                    <div className="flex items-center justify-between">
+        <div className={`health-view space-y-12 pb-32 bg-surface min-h-screen ${isDark ? 'health-view-dark' : ''}`}>
+            
+            {/* Header Metrics Industrial Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-0 border-b border-border-grid">
+                
+                {/* Peso Atual */}
+                <div className="bg-surface p-8 border-r border-border-grid flex flex-col justify-center relative group overflow-hidden">
+                    <div className="absolute top-0 right-0 p-2 opacity-5">
+                         <svg className="w-16 h-16 text-primary-tactile" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L1 21h22L12 2z"/></svg>
+                    </div>
+                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-[0.3em] mb-2">// CURRENT_BODY_MASS</span>
+                    <div className="flex items-center justify-between relative z-10">
                         <div className="flex items-baseline gap-2">
-                            <span className="text-4xl font-black text-slate-900">{hasWeightData ? currentWeight.toFixed(1) : '--'}</span>
-                            <span className="text-sm font-bold text-slate-400">kg</span>
+                            <span className="text-4xl font-mono font-bold text-on-surface tracking-tighter">
+                                {hasWeightData ? currentWeight.toFixed(1) : '--.-'}
+                            </span>
+                            <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">KG</span>
                         </div>
-                        <button
+                        <button 
                             onClick={() => setIsWeightModalOpen(true)}
-                            className="p-3 bg-rose-50 text-rose-500 rounded-xl hover:bg-rose-100 transition-all shadow-sm"
-                            title="Registrar Peso"
+                            className="w-10 h-10 rounded-soft-touch border border-border-grid flex items-center justify-center bg-slate-50 text-slate-400 hover:bg-primary-tactile hover:text-white transition-all"
                         >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
                         </button>
                     </div>
                 </div>
 
-                <div className="bg-white p-6 rounded-none md:rounded-[2rem] border-b md:border border-slate-200 shadow-none md:shadow-xl flex flex-col justify-center relative group">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Meta</span>
+                {/* Variação */}
+                <div className="bg-surface p-8 border-r border-border-grid flex flex-col justify-center relative overflow-hidden">
+                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-[0.3em] mb-2">// MASS_DELTA</span>
                     <div className="flex items-baseline gap-2">
-                        {isEditingTarget ? (
-                            <input
-                                autoFocus
-                                type="number"
-                                value={targetInput}
-                                onChange={(e) => setTargetInput(e.target.value)}
-                                onBlur={() => {
-                                    onUpdateSettings({ targetWeight: parseFloat(targetInput) || 0 });
-                                    setIsEditingTarget(false);
-                                }}
-                                className="text-2xl font-black text-rose-600 bg-rose-50 rounded-lg px-2 w-24 outline-none"
-                            />
-                        ) : (
-                            <span className="text-4xl font-black text-rose-600" onClick={() => setIsEditingTarget(true)}>
-                                {settings.targetWeight?.toFixed(1) || '--'}
-                            </span>
-                        )}
-                        <span className="text-sm font-bold text-slate-400">kg</span>
-                    </div>
-                    <button onClick={() => setIsEditingTarget(true)} className="absolute top-4 right-4 text-slate-300 hover:text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                    </button>
-                </div>
-
-                <div className={`p-6 rounded-none md:rounded-[2rem] border-b md:border-none shadow-none md:shadow-xl flex flex-col justify-center text-white ${isWeightGain ? 'bg-rose-500 border-rose-600' : isWeightLoss ? 'bg-emerald-500 border-emerald-600' : 'bg-slate-500 border-slate-600'}`}>
-                    <span className={`text-[10px] font-black uppercase tracking-widest mb-1 ${isWeightGain ? 'text-rose-100' : isWeightLoss ? 'text-emerald-100' : 'text-slate-200'}`}>{weightDeltaLabel}</span>
-                    <div className="flex items-baseline gap-2">
-                        <span className="text-4xl font-black">{hasWeightTrendData ? `${weightDeltaPrefix}${weightDeltaAbs.toFixed(1)}` : '--'}</span>
-                        <span className={`text-sm font-bold ${isWeightGain ? 'text-rose-100' : isWeightLoss ? 'text-emerald-100' : 'text-slate-200'}`}>kg</span>
+                        <span className={`text-4xl font-mono font-bold tracking-tighter ${isWeightLoss ? 'text-emerald-600' : isWeightGain ? 'text-rose-600' : 'text-on-surface'}`}>
+                            {hasWeightTrendData ? `${weightDeltaPrefix}${weightDeltaAbs.toFixed(1)}` : '0.0'}
+                        </span>
+                        <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">{weightDeltaLabel.toUpperCase()}</span>
                     </div>
                 </div>
 
-                <div className="bg-slate-900 p-6 rounded-none md:rounded-[2rem] border-b md:border-none border-slate-800 shadow-none md:shadow-xl flex flex-col justify-center text-white">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Previsão Meta</span>
-                    <div className="flex flex-col">
-                        <span className="text-xl font-black text-blue-400">{projection?.goalDate || 'Aguardando dados...'}</span>
-                        {projection?.trendPerWeek !== undefined && (
-                            <span className={`text-[9px] font-bold uppercase mt-1 ${projection.trendPerWeek < 0 ? 'text-rose-400' : 'text-slate-500'}`}>
-                                Ritmo: {projection.trendPerWeek < 0 ? '+' : '-'}{Math.abs(projection.trendPerWeek).toFixed(2)}kg/sem
-                            </span>
-                        )}
-                    </div>
-                </div>
-            </div>
-
-            {isWeightGain && hasWeightTrendData && (
-                <div className="mx-4 md:mx-0 mt-4 md:mt-0 bg-rose-50 border border-rose-200 rounded-2xl p-3 flex items-center gap-2">
-                    <svg className="w-4 h-4 text-rose-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4m0 4h.01M4.93 19h14.14c1.54 0 2.5-1.67 1.73-3L13.73 4c-.77-1.33-2.69-1.33-3.46 0L3.2 16c-.77 1.33.19 3 1.73 3z" />
-                    </svg>
-                    <p className="text-[11px] font-bold text-rose-700">
-                        Alerta: você ganhou {weightDeltaAbs.toFixed(1)} kg desde a primeira pesagem registrada.
-                    </p>
-                </div>
-            )}
-
-            {/* WEIGHT REGISTRY AND EVOLUTION CHART (Moved here for mobile positioning) */}
-            <div className="flex flex-col gap-0 md:gap-8">
-                <HealthSection title="Registro de Peso" iconColor="bg-rose-500">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
-                        <div>
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Geralmente aos sábados</p>
-                        </div>
-                    </div>
-
-                    {/* Evolution Chart (SVG) */}
-                    <div className="bg-slate-50 rounded-none md:rounded-3xl p-6 border border-slate-100 mb-8 overflow-hidden">
-                        <div className="flex justify-between items-center mb-4">
-                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Evolução de Peso</span>
-                            <div className="flex gap-4">
-                                <div className="flex items-center gap-1.5">
-                                    <div className="w-2 h-2 rounded-full bg-rose-500"></div>
-                                    <span className="text-[8px] font-bold text-slate-500 uppercase">Peso</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="relative h-[150px] w-full">
-                            {weights.length > 1 ? (
-                                <svg viewBox="0 0 400 150" className="w-full h-full overflow-visible">
-                                    {/* Target Line */}
-                                    {settings.targetWeight && weights.length > 0 && (() => {
-                                        const min = Math.min(...weights.map(v => v.weight), settings.targetWeight) - 2;
-                                        const max = Math.max(...weights.map(v => v.weight), settings.targetWeight) + 2;
-                                        const targetY = 150 - 20 - ((settings.targetWeight - min) / (max - min)) * (150 - 40);
-                                        return (
-                                            <line
-                                                x1="0" y1={targetY}
-                                                x2="400" y2={targetY}
-                                                stroke="#FDA4AF" strokeDasharray="4 4" strokeWidth="1"
-                                            />
-                                        );
-                                    })()}
-                                    <path
-                                        d={generateChartPath()}
-                                        fill="none"
-                                        stroke="#F43F5E"
-                                        strokeWidth="3"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        className="drop-shadow-sm"
-                                    />
-                                    {/* Points */}
-                                    {[...weights].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).map((v, i, arr) => {
-                                        const w_chart = 400; const h_chart = 150; const p = 20;
-                                        const min = Math.min(...arr.map(x => x.weight), settings.targetWeight || Infinity) - 2;
-                                        const max = Math.max(...arr.map(x => x.weight), settings.targetWeight || -Infinity) + 2;
-                                        const x = p + (i / (arr.length - 1)) * (w_chart - 2 * p);
-                                        const y = h_chart - p - ((v.weight - min) / (max - min)) * (h_chart - 2 * p);
-                                        return (
-                                            <circle key={i} cx={x} cy={y} r="4" fill="white" stroke="#F43F5E" strokeWidth="2" />
-                                        );
-                                    })}
-                                </svg>
+                {/* Meta */}
+                <div className="bg-surface p-8 border-r border-border-grid flex flex-col justify-center relative group overflow-hidden">
+                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-[0.3em] mb-2">// TARGET_MASS</span>
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-baseline gap-2">
+                            {isEditingTarget ? (
+                                <input
+                                    type="number"
+                                    autoFocus
+                                    className="w-24 bg-slate-50 border border-primary-tactile rounded-none px-2 py-1 text-2xl font-mono font-bold text-on-surface outline-none"
+                                    value={targetInput}
+                                    onChange={e => setTargetInput(e.target.value)}
+                                    onBlur={() => {
+                                        setIsEditingTarget(false);
+                                        onUpdateSettings({ ...settings, targetWeight: parseFloat(targetInput) });
+                                    }}
+                                    onKeyDown={e => {
+                                        if (e.key === 'Enter') {
+                                            setIsEditingTarget(false);
+                                            onUpdateSettings({ ...settings, targetWeight: parseFloat(targetInput) });
+                                        }
+                                    }}
+                                />
                             ) : (
-                                <div className="h-full flex items-center justify-center text-slate-300 text-[10px] font-black uppercase tracking-widest italic">
-                                    Precisamos de pelo menos 2 registros para o gráfico
-                                </div>
+                                <>
+                                    <span className="text-4xl font-mono font-bold text-on-surface tracking-tighter">
+                                        {settings.targetWeight ? settings.targetWeight.toFixed(1) : '---'}
+                                    </span>
+                                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">KG</span>
+                                </>
                             )}
                         </div>
-                    </div>
-
-                    {/* Weights History */}
-                    <div className="overflow-hidden border border-slate-100 rounded-none md:rounded-3xl">
-                        {/* Desktop Table */}
-                        <table className="w-full text-left hidden md:table">
-                            <thead className="bg-slate-50 border-b border-slate-200">
-                                <tr>
-                                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Data</th>
-                                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Peso</th>
-                                    <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-16"></th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-50">
-                                {sortedWeights.map((w) => (
-                                    <tr key={w.id} className="hover:bg-slate-50/50 transition-colors group/row">
-                                        <td className="px-6 py-4 text-xs font-black text-slate-700">{formatDate(w.date)}</td>
-                                        <td className="px-6 py-4 text-sm font-black text-slate-900 text-right">{w.weight.toFixed(1)} kg</td>
-                                        <td className="px-6 py-4 text-right">
-                                            <button
-                                                onClick={() => {
-                                                    if (pendingDeleteWeightId !== w.id) {
-                                                        setPendingDeleteWeightId(w.id);
-                                                        window.setTimeout(() => setPendingDeleteWeightId((current) => (current === w.id ? null : current)), 3500);
-                                                        return;
-                                                    }
-                                                    setPendingDeleteWeightId(null);
-                                                    onDeleteWeight(w.id);
-                                                }}
-                                                className={`p-2 rounded-lg md:rounded-xl transition-all opacity-0 group-hover/row:opacity-100 ${pendingDeleteWeightId === w.id ? 'bg-rose-500 text-white opacity-100' : 'text-rose-300 hover:text-rose-600 hover:bg-rose-50'}`}
-                                                title={pendingDeleteWeightId === w.id ? "Confirmar exclusão" : "Excluir Registro"}
-                                            >
-                                                {pendingDeleteWeightId === w.id ? (
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                                ) : (
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                )}
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-
-                        {/* Mobile Card View */}
-                        <div className="md:hidden divide-y divide-slate-50">
-                            {sortedWeights.map((w) => (
-                                <div key={w.id} className="p-4 flex justify-between items-center bg-white">
-                                    <div>
-                                        <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{formatDate(w.date)}</div>
-                                        <div className="text-lg font-black text-slate-900">{w.weight.toFixed(1)} kg</div>
-                                    </div>
-                                    <button
-                                        onClick={() => {
-                                            if (pendingDeleteWeightId !== w.id) {
-                                                setPendingDeleteWeightId(w.id);
-                                                window.setTimeout(() => setPendingDeleteWeightId((current) => (current === w.id ? null : current)), 3500);
-                                                return;
-                                            }
-                                            setPendingDeleteWeightId(null);
-                                            onDeleteWeight(w.id);
-                                        }}
-                                        className={`p-3 rounded-lg md:rounded-xl active:bg-rose-100 transition-all ${pendingDeleteWeightId === w.id ? 'bg-rose-500 text-white' : 'text-rose-500 bg-rose-50'}`}
-                                    >
-                                        {pendingDeleteWeightId === w.id ? (
-                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                                        ) : (
-                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                        )}
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-
-                        {sortedWeights.length === 0 && (
-                            <div className="py-12 text-center text-slate-300 font-black uppercase tracking-widest italic text-[10px] border-t border-slate-50">
-                                Tudo pronto para começar!
-                            </div>
-                        )}
-                    </div>
-                </HealthSection>
-            </div>
-
-            {/* Habit Consistency Heatmap */}
-            <HabitHeatmap habits={dailyHabits} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
-
-            <HealthSection title={selectedDate === todayStr ? "Hábitos de Hoje" : `Hábitos do dia ${selectedDate.split('-').reverse().join('/')}`} iconColor="bg-amber-500">
-                <div className="space-y-8">
-                    {/* Habit toggles (sem workout) */}
-                    <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">
-                            {selectedDate === todayStr ? "Consistência é o segredo" : "Editando registros retroativos"}
-                        </p>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-                            {[
-                                { id: 'noSugar', label: 'Sem Açúcar', color: 'rose' },
-                                { id: 'noAlcohol', label: 'Sem Álcool', color: 'purple' },
-                                { id: 'noSnacks', label: 'Sem Lanches/Delivery', color: 'orange' },
-                                { id: 'eatUntil18', label: 'Comer até as 18h', color: 'blue' },
-                                { id: 'eatSlowly', label: 'Comer Devagar', color: 'indigo' }
-                            ].map((habit) => {
-                                const colorMap: Record<string, { bg: string, border: string, text: string, dot: string }> = {
-                                    rose: { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', dot: 'bg-rose-500' },
-                                    purple: { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700', dot: 'bg-purple-500' },
-                                    orange: { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', dot: 'bg-orange-500' },
-                                    blue: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', dot: 'bg-blue-500' },
-                                    indigo: { bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700', dot: 'bg-indigo-500' }
-                                };
-                                const colors = colorMap[habit.color] || colorMap.rose;
-                                const isActive = !!currentHabits[habit.id as keyof DailyHabits];
-
-                                return (
-                                    <button
-                                        key={habit.id}
-                                        onClick={() => handleHabitToggle(habit.id as keyof DailyHabits)}
-                                        className={`w-full flex items-center justify-between p-4 rounded-lg md:rounded-2xl border-2 transition-all duration-300 ${isActive
-                                            ? `${colors.bg} ${colors.border} shadow-sm`
-                                            : 'bg-white border-slate-100 hover:border-slate-200'
-                                            }`}
-                                    >
-                                        <span className={`text-sm font-bold ${isActive ? colors.text : 'text-slate-600'}`}>
-                                            {habit.label}
-                                        </span>
-                                        <div className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${isActive
-                                            ? `${colors.dot} text-white scale-110`
-                                            : 'border-2 border-slate-200'
-                                            }`}>
-                                            {isActive && (
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>
-                                            )}
-                                        </div>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    </div>
-
-                    {/* Divisor */}
-                    <div className="border-t border-slate-100 pt-6">
-                        <p className="text-[10px] font-black text-violet-500 uppercase tracking-widest mb-4">Metas Físicas</p>
-                        <ExerciseGoalsSection
-                            exerciseLogs={exerciseLogs}
-                            exerciseSettings={exerciseSettings}
-                            onSaveExerciseLog={onSaveExerciseLog}
-                            selectedDate={selectedDate}
-                        />
+                        <button 
+                            onClick={() => setIsEditingTarget(true)}
+                            className="w-8 h-8 rounded-soft-touch border border-border-grid flex items-center justify-center text-slate-300 hover:text-on-surface transition-all"
+                        >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                        </button>
                     </div>
                 </div>
-            </HealthSection>
-            {/* Exams and Consultations Section */}
-            <div className="flex flex-col gap-0 md:gap-8">
-                <HealthSection title="Exames e Consultas" iconColor="bg-sky-500">
-                    <ExamsAndConsultationsManager
-                        exams={exams}
-                        onAddExam={onAddExam}
-                        onDeleteExam={onDeleteExam}
-                        onUpdateExam={onUpdateExam}
-                    />
-                </HealthSection>
+
+                {/* Previsão */}
+                <div className="bg-surface p-8 flex flex-col justify-center relative overflow-hidden bg-[url('https://www.transparenttextures.com/patterns/graphy.png')]">
+                    <span className="text-[10px] font-mono font-bold text-primary-tactile uppercase tracking-[0.3em] mb-2">// ETA_ESTIMATION</span>
+                    <div className="flex flex-col">
+                        <span className="text-xl font-serif italic text-on-surface tracking-tight">
+                            {projection?.goalDate || '---'}
+                        </span>
+                        {projection?.trendPerWeek !== undefined && (
+                            <span className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest mt-1">
+                                TREND: {projection.trendPerWeek.toFixed(2)} KG/WEEK
+                            </span>
+                        )}
+                    </div>
+                </div>
             </div>
 
-            {/* Modal de Registro de Peso */}
-            {isWeightModalOpen && (
-                <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-                    <div className="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-                        <div className="p-8 border-b border-slate-100 bg-rose-500/5 flex items-center justify-between">
-                            <div>
-                                <h3 className="text-xl font-black text-slate-900 tracking-tight">Registrar Peso</h3>
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Acompanhamento de Saúde</p>
+            <div className="px-6 md:px-10 space-y-12">
+                
+                {/* Consistency Heatmap Area */}
+                <HabitHeatmap habits={dailyHabits} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
+
+                {/* Main Content Stacked Layout */}
+                <div className="flex flex-col gap-12">
+                    
+                    {/* Section: Protocols & Training */}
+                    <div className="space-y-10">
+                        <HealthSection title={`Daily_Protocols • ${selectedDate === todayStr ? 'TODAY' : selectedDate}`} iconColor="bg-accent-tactile">
+                             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
+                                {[
+                                    { key: 'noSugar', label: 'ZERO_SUGAR', icon: '🧁' },
+                                    { key: 'noAlcohol', label: 'ZERO_ALCOHOL', icon: '🍷' },
+                                    { key: 'noSnacks', label: 'ZERO_SNACKS', icon: '🍟' },
+                                    { key: 'eatUntil18', label: 'FASTING_POST_18H', icon: '⏰' },
+                                    { key: 'eatSlowly', label: 'MINDFUL_EATING', icon: '🧘' }
+                                ].map((habit) => (
+                                    <button
+                                        key={habit.key}
+                                        onClick={() => handleHabitToggle(habit.key as keyof DailyHabits)}
+                                        className={`p-6 rounded-none border-2 transition-all flex flex-col items-center gap-3 group relative overflow-hidden ${currentHabits[habit.key as keyof DailyHabits] ? 'bg-accent-tactile border-accent-tactile text-white' : 'bg-surface border-border-grid text-on-surface hover:border-accent-tactile'}`}
+                                    >
+                                        <div className="absolute top-0 left-0 w-full h-0.5 bg-white/20"></div>
+                                        <span className="text-2xl group-hover:scale-125 transition-transform">{habit.icon}</span>
+                                        <span className="text-[10px] font-mono font-bold uppercase tracking-[0.2em]">{habit.label}</span>
+                                        <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center mt-2 ${currentHabits[habit.key as keyof DailyHabits] ? 'bg-white border-white' : 'border-slate-200'}`}>
+                                            {currentHabits[habit.key as keyof DailyHabits] && <svg className="w-3 h-3 text-accent-tactile" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg>}
+                                        </div>
+                                    </button>
+                                ))}
                             </div>
-                            <button onClick={() => setIsWeightModalOpen(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
-                                <svg className="w-6 h-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-                            </button>
+                        </HealthSection>
+
+                        <HealthSection title="Training_Grounds" iconColor="bg-primary-tactile">
+                            <ExerciseGoalsSection 
+                                exerciseLogs={exerciseLogs} 
+                                exerciseSettings={exerciseSettings} 
+                                onSaveExerciseLog={onSaveExerciseLog}
+                                selectedDate={selectedDate}
+                            />
+                        </HealthSection>
+                    </div>
+
+                    {/* Section: Telemetry & Records */}
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-10">
+                        
+                        {/* Gráfico de Peso Technical */}
+                        <div className="bg-surface p-8 border border-border-grid rounded-none relative overflow-hidden h-full flex flex-col">
+                            <div className="flex justify-between items-center mb-8">
+                                <div>
+                                    <h4 className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-[0.3em]">// MASS_VARIATION_CHART</h4>
+                                    <p className="text-xs font-serif italic text-slate-500">Telemetry_Data_L30D</p>
+                                </div>
+                            </div>
+                            
+                            <div className="h-[240px] w-full bg-slate-50 border border-border-grid border-dashed relative overflow-hidden mb-8">
+                                <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '15px 15px' }}></div>
+                                
+                                {weights.length > 1 ? (
+                                    <svg viewBox="0 0 400 150" className="w-full h-full drop-shadow-sm overflow-visible">
+                                        <path
+                                            d={generateChartPath()}
+                                            fill="none"
+                                            stroke="var(--primary-tactile)"
+                                            strokeWidth="3"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            className="animate-chart-trace"
+                                        />
+                                        {[...weights].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).map((v, i, arr) => {
+                                            const w = 400; const h = 150; const padding = 20;
+                                            const chartWeights = arr;
+                                            const minW = Math.min(...chartWeights.map(v => v.weight), settings.targetWeight || Infinity) - 2;
+                                            const maxW = Math.max(...chartWeights.map(v => v.weight), settings.targetWeight || -Infinity) + 2;
+                                            const rangeW = maxW - minW;
+                                            const x = padding + (i / (chartWeights.length - 1)) * (w - 2 * padding);
+                                            const y = h - padding - ((v.weight - minW) / rangeW) * (h - 2 * padding);
+                                            return (
+                                                <circle key={i} cx={x} cy={y} r="4" fill="white" stroke="var(--primary-tactile)" strokeWidth="2" />
+                                            );
+                                        })}
+                                    </svg>
+                                ) : (
+                                    <div className="flex items-center justify-center h-full text-[10px] font-mono font-bold text-slate-300 uppercase tracking-widest">
+                                        INSUFFICIENT_TELEMETRY_DATA
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Weight History List (Simplified) */}
+                            <div className="mt-auto space-y-2 max-h-[300px] overflow-y-auto pr-2">
+                                {sortedWeights.slice(0, 10).map((w) => (
+                                    <div key={w.id} className="flex items-center justify-between p-3 bg-slate-50 border border-border-grid group">
+                                        <div className="flex flex-col">
+                                            <span className="text-[10px] font-mono font-bold text-slate-400 uppercase">{formatDate(w.date)}</span>
+                                            <span className="text-sm font-mono font-bold text-on-surface">{w.weight.toFixed(1)} KG</span>
+                                        </div>
+                                        <button
+                                            onClick={() => {
+                                                if (pendingDeleteWeightId !== w.id) {
+                                                    setPendingDeleteWeightId(w.id);
+                                                    window.setTimeout(() => setPendingDeleteWeightId((current) => (current === w.id ? null : current)), 3500);
+                                                    return;
+                                                }
+                                                onDeleteWeight(w.id);
+                                            }}
+                                            className={`p-2 rounded-soft-touch transition-all ${pendingDeleteWeightId === w.id ? 'bg-accent-tactile text-white' : 'opacity-0 group-hover:opacity-100 text-slate-300 hover:text-accent-tactile'}`}
+                                        >
+                                            {pendingDeleteWeightId === w.id ? 'CONFIRM' : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
 
-                        <div className="p-8 space-y-6">
-                            <div className="space-y-2">
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Peso Atual (kg)</label>
+                        <HealthSection title="Medical_Archive" iconColor="bg-slate-400">
+                            <ExamsAndConsultationsManager 
+                                exams={exams} 
+                                onAddExam={onAddExam} 
+                                onDeleteExam={onDeleteExam}
+                                onUpdateExam={onUpdateExam}
+                            />
+                        </HealthSection>
+                    </div>
+                </div>
+            </div>
+
+            {/* Weight Update Modal */}
+            {isWeightModalOpen && (
+                <div className="fixed inset-0 bg-on-surface/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+                    <div className="bg-surface rounded-none border-2 border-primary-tactile shadow-none w-full max-w-md p-8 animate-in zoom-in-95 duration-200">
+                        <div className="flex justify-between items-start mb-8">
+                            <div>
+                                <span className="text-[10px] font-mono font-bold text-primary-tactile uppercase tracking-[0.3em] mb-1 block">// TELEMETRY_INPUT</span>
+                                <h3 className="text-2xl font-serif italic text-on-surface">Log_Body_Mass</h3>
+                            </div>
+                            <button onClick={() => setIsWeightModalOpen(false)} className="w-8 h-8 rounded-soft-touch border border-border-grid flex items-center justify-center text-slate-300 hover:text-on-surface transition-all">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+                        
+                        <div className="space-y-6">
+                            <div>
+                                <label className="block text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest mb-3">CURRENT_READING (KG)</label>
                                 <input
-                                    autoFocus
                                     type="number"
                                     step="0.1"
+                                    autoFocus
                                     placeholder="00.0"
+                                    className="w-full bg-slate-50 border border-border-grid rounded-soft-touch px-6 py-4 text-2xl font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile"
                                     value={newWeight}
-                                    onChange={(e) => setNewWeight(e.target.value)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter' && newWeight) {
+                                    onChange={e => setNewWeight(e.target.value)}
+                                />
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-4">
+                                <button
+                                    onClick={() => setIsWeightModalOpen(false)}
+                                    className="py-4 border border-border-grid text-[10px] font-mono font-bold uppercase tracking-widest hover:bg-slate-50 transition-all rounded-soft-touch"
+                                >
+                                    ABORT_ACTION
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        if (newWeight) {
                                             onAddWeight(parseFloat(newWeight), formatDateLocalISO(new Date()));
                                             setNewWeight('');
                                             setIsWeightModalOpen(false);
                                         }
                                     }}
-                                    className="w-full bg-slate-100 border-none rounded-2xl px-6 py-8 text-4xl font-black text-slate-900 text-center focus:ring-2 focus:ring-rose-500 transition-all"
-                                />
+                                    className="py-4 bg-primary-tactile text-white text-[10px] font-mono font-bold uppercase tracking-widest hover:bg-on-surface transition-all rounded-soft-touch"
+                                >
+                                    COMMIT_DATA
+                                </button>
                             </div>
-
-                            <button
-                                onClick={() => {
-                                    if (newWeight) {
-                                        onAddWeight(parseFloat(newWeight), formatDateLocalISO(new Date()));
-                                        setNewWeight('');
-                                        setIsWeightModalOpen(false);
-                                    }
-                                }}
-                                disabled={!newWeight}
-                                className="w-full bg-rose-500 text-white py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-rose-600 transition-all active:scale-95 disabled:opacity-50"
-                            >
-                                Confirmar Peso
-                            </button>
                         </div>
                     </div>
                 </div>

@@ -11504,3 +11504,60 @@ def classificarAreaTematica(req: https_fn.CallableRequest) -> dict:
 
 # Import daily WIP reset job
 from daily_reset_job import daily_wip_reset_and_degradation
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=60)
+def gerarResumoFinanceiro(req: https_fn.CallableRequest):
+    """
+    Gera um parágrafo curto de diagnóstico de saúde financeira a partir de um snapshot compacto.
+    Projetado para ser chamado apenas quando os dados financeiros mudam (fingerprint diferente).
+    """
+    from google import genai
+    from google.genai import types
+
+    data = req.data or {}
+    snapshot = data.get('snapshot')
+
+    if not snapshot or not isinstance(snapshot, dict):
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="snapshot é obrigatório."
+        )
+
+    api_key = get_gemini_api_key()
+    if not api_key:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+            message="Chave Gemini não configurada."
+        )
+
+    import json
+    snapshot_text = json.dumps(snapshot, ensure_ascii=False, indent=2)
+
+    prompt = f"""Você é um consultor financeiro pessoal. Analise o snapshot financeiro abaixo e escreva um diagnóstico de saúde financeira em 3 a 5 frases curtas e diretas em português.
+
+Seja específico com os números. Destaque o ponto mais crítico primeiro. Se há algo positivo notável, mencione. Termine com uma recomendação prática e concreta para o mês atual.
+
+Não use listas, markdown, títulos nem emojis — apenas parágrafos corridos.
+
+SNAPSHOT:
+{snapshot_text}"""
+
+    try:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-3.1-flash-lite-preview",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.4,
+                max_output_tokens=300
+            )
+        )
+        summary = (response.text or "").strip()
+        return {"summary": summary}
+    except Exception as e:
+        print(f"Erro ao gerar resumo financeiro: {e}")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message="Erro ao gerar resumo financeiro."
+        )
