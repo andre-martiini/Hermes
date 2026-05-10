@@ -104,7 +104,15 @@ const HealthView: React.FC<HealthViewProps> = ({
     const weightDelta = currentWeight - previousWeight;
     
     const todayLog = useMemo(() => exerciseLogs.find(l => l.id === selectedDate) || { id: selectedDate }, [exerciseLogs, selectedDate]);
-    const currentHabits = useMemo(() => dailyHabits.find(h => h.id === selectedDate) || { id: selectedDate }, [dailyHabits, selectedDate]);
+    const currentHabits = useMemo(() => (dailyHabits.find(h => h.id === selectedDate) || { 
+        id: selectedDate,
+        noSugar: false,
+        noAlcohol: false,
+        noSnacks: false,
+        workout: false,
+        eatUntil18: false,
+        eatSlowly: false
+    }) as DailyHabits, [dailyHabits, selectedDate]);
 
 
     return (

@@ -105,7 +105,7 @@ export const AcquisitionsView: React.FC<AcquisitionsViewProps> = ({ projetoId })
     const handleGetQuotes = async (item: ItemOrcamento) => {
         setQuotingItemId(item.id);
         try {
-            if (import.meta.env.DEV) {
+            if ((import.meta as any).env?.DEV) {
                // In local dev, we might need to proxy if using specific setup,
                // but typically standard callable works if emulators are set up or pointing to prod.
                // Assuming standard firebase config points to where functions are hosted.

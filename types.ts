@@ -351,6 +351,8 @@ export interface HealthWeight {
     id: string;
     date: string;
     weight: number;
+    fatPercentage?: number;
+    muscleMass?: number;
 }
 
 export interface DailyHabits {
