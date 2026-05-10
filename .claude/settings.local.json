@@ -17,7 +17,9 @@
       "Bash(git -C \"C:/Users/T-GAMER/Documents/gestao-Hermes\" worktree remove --force \".claude/worktrees/laughing-cartwright\")",
       "Bash(git -C \"C:/Users/T-GAMER/Documents/gestao-Hermes\" worktree remove --force \".claude/worktrees/sweet-khorana\")",
       "Bash(git -C \"C:/Users/T-GAMER/Documents/gestao-Hermes\" worktree prune)",
-      "Bash(python -c \"from google.genai import types; help\\(types.Part.from_bytes\\)\")"
+      "Bash(python -c \"from google.genai import types; help\\(types.Part.from_bytes\\)\")",
+      "Bash(sed -n '3954,3980p' \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\index.tsx\")",
+      "Bash(sed -n '3999,4030p' \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\index.tsx\")"
     ]
   }
 }

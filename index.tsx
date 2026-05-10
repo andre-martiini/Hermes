@@ -2532,15 +2532,20 @@ const App: React.FC = () => {
       const weightData = await GoogleHealthService.getWeight(today);
 
       if (Object.keys(telemetry).length > 0) {
-        await handleSaveExerciseLog(todayStr, telemetry);
+        await setDoc(doc(db, 'health_exercise_logs', todayStr), telemetry, { merge: true });
         addTerminalLog(`Telemetria capturada: ${telemetry.walk?.steps || 0} passos, ${telemetry.sleep?.totalMinutes || 0} min sono.`);
       } else {
         addTerminalLog("Nenhuma telemetria nova encontrada para hoje.");
       }
 
       if (weightData?.weight) {
-        await handleAddHealthWeight(weightData.weight, todayStr);
-        addTerminalLog(`Peso sincronizado: ${weightData.weight}kg.`);
+        const alreadyHasWeight = healthWeights.some(w => w.date === todayStr);
+        if (!alreadyHasWeight) {
+          await handleAddHealthWeight(weightData.weight, todayStr);
+          addTerminalLog(`Peso sincronizado: ${weightData.weight}kg.`);
+        } else {
+          addTerminalLog(`Peso já registrado para hoje (${healthWeights.find(w => w.date === todayStr)?.weight}kg). Sync ignorado.`);
+        }
       } else {
         addTerminalLog("Nenhum registro de peso encontrado para hoje.");
       }
@@ -3999,8 +4004,10 @@ const App: React.FC = () => {
   const handleSaveExerciseLog = async (date: string, data: Partial<ExerciseLog>) => {
     // Save the log
     await setDoc(doc(db, 'health_exercise_logs', date), data, { merge: true });
-    // Auto-mark workout habit
-    await setDoc(doc(db, 'health_daily_habits', date), { workout: true }, { merge: true });
+    // Auto-mark workout habit only when explicit exercise (pushups/pullups) is logged
+    if (data.pushups !== undefined || data.pullups !== undefined) {
+      await setDoc(doc(db, 'health_daily_habits', date), { workout: true }, { merge: true });
+    }
     // Recalculate goals from last 5 sessions
     const allLogs = [...exerciseLogs.filter(l => l.id !== date), { id: date, ...data }]
       .sort((a, b) => b.id.localeCompare(a.id));

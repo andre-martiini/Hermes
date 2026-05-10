@@ -320,7 +320,7 @@ export interface ExerciseLog {
     id: string; // date string (YYYY-MM-DD)
     pushups?: { done: number; goal: number };
     pullups?: { done: number; goal: number; phase: PullupPhase };
-    walk?: { done: number; distance?: number; steps?: number }; // minutes, meters, steps
+    walk?: { done: number; distance?: number; steps?: number }; // minutes, km, steps
     calories?: number;
     activeMinutes?: number;
     heartRate?: {
