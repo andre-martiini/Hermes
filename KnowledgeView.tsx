@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+﻿import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
 import {
     smartSearchKG,
@@ -86,11 +86,7 @@ const Chip: React.FC<{
 }> = ({ active, onClick, children }) => (
     <button
         onClick={onClick}
-        className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 ${
-            active
-                ? 'bg-slate-900 text-white shadow-lg'
-                : 'bg-white text-slate-600 border border-slate-200 hover:border-slate-400'
-        }`}
+        className={`px-4 py-2 rounded-none text-[10px] font-mono font-black uppercase tracking-[0.2em] transition-all active:scale-95 border-2 ${active ? 'bg-slate-900 text-white border-slate-900 shadow-[2px_2px_0px_rgba(15,23,42,1)]' : 'bg-white text-slate-900 border-slate-900 hover:bg-slate-100 shadow-none'}`}
     >
         {children}
     </button>
@@ -121,19 +117,21 @@ const SynthesisBlock: React.FC<{
         return segments;
     }, [text]);
 
-    return (
-        <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-2xl p-6 md:p-8 shadow-2xl">
-            <div className="flex items-center gap-3 mb-4">
-                <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-                    <svg className="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                        <path d="M12 2L15 9L22 9L16.5 14L18.5 22L12 17L5.5 22L7.5 14L2 9L9 9Z" />
-                    </svg>
+        return (
+        <div className="bg-slate-900 text-white rounded-none border-4 border-slate-900 p-6 md:p-8 relative overflow-hidden font-mono shadow-[8px_8px_0px_rgba(16,185,129,0.5)]">
+            {/* Elemento Decorativo Industrial */}
+            <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'radial-gradient(#fff 1px, transparent 1px)', backgroundSize: '15px 15px' }}></div>
+            
+            <div className="flex items-center gap-4 mb-6 relative z-10 border-b-2 border-slate-700 pb-4">
+                <div className="w-2 h-8 bg-emerald-500 animate-pulse" />
+                <div>
+                    <span className="text-[10px] font-black uppercase tracking-[0.3em] text-emerald-400 block mb-1">
+                        AI_SYNTHESIS
+                    </span>
+                    <span className="text-[8px] text-slate-400 tracking-widest">GEMINI_ENGINE // KNOWLEDGE_GRAPH</span>
                 </div>
-                <span className="text-[10px] font-black uppercase tracking-[0.25em] text-emerald-400">
-                    Síntese da IA
-                </span>
             </div>
-            <p className="text-base md:text-lg leading-relaxed tracking-tight text-slate-100 whitespace-pre-wrap">
+            <p className="text-sm md:text-base leading-relaxed tracking-tight text-slate-100 whitespace-pre-wrap relative z-10">
                 {parts.map((p, i) =>
                     p.type === 'text' ? (
                         <span key={i}>{p.value}</span>
@@ -141,10 +139,10 @@ const SynthesisBlock: React.FC<{
                         <button
                             key={i}
                             onClick={() => p.n !== undefined && onCitationClick(p.n)}
-                            className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 mx-0.5 rounded-md bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-300 hover:text-white text-xs font-black transition-all align-middle"
+                            className="inline-flex items-center justify-center min-w-[24px] h-[24px] px-2 mx-1 rounded-none border border-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/40 text-emerald-300 hover:text-white text-[10px] font-black transition-all align-middle shadow-[2px_2px_0px_rgba(16,185,129,0.5)]"
                             title={`Abrir fonte ${p.n}`}
                         >
-                            {p.n}
+                            [{p.n}]
                         </button>
                     )
                 )}
@@ -170,7 +168,7 @@ const FileSearchCitationsBlock: React.FC<{
     if (visible.length === 0) return null;
 
     return (
-        <section className="mt-4 bg-white rounded-2xl border border-emerald-100 p-5 shadow-sm">
+        <section className="mt-4 bg-slate-50 rounded-none border-4 border-slate-900 p-5 shadow-[4px_4px_0px_rgba(15,23,42,1)] font-mono">
             <div className="flex items-center justify-between gap-3 mb-4">
                 <div>
                     <h3 className="text-[10px] font-black uppercase tracking-[0.25em] text-emerald-700">
@@ -197,7 +195,7 @@ const FileSearchCitationsBlock: React.FC<{
                             key={`${citation.index}-${i}`}
                             onClick={() => result && onOpenResult(result, resultIdx)}
                             disabled={!result}
-                            className="text-left rounded-xl border border-slate-200 bg-slate-50 p-4 hover:border-emerald-300 hover:bg-emerald-50 transition-all disabled:hover:border-slate-200 disabled:hover:bg-slate-50 disabled:cursor-default"
+                            className="text-left rounded-none border-2 border-slate-900 bg-white p-4 hover:border-primary-tactile hover:bg-slate-50 transition-all shadow-[2px_2px_0px_rgba(15,23,42,1)] disabled:hover:border-slate-200 disabled:hover:bg-slate-50 disabled:cursor-default"
                         >
                             <div className="flex items-center justify-between gap-2 mb-2">
                                 <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
@@ -237,10 +235,10 @@ const KnowledgeCard: React.FC<{
     <button
         id={`kg-card-${index + 1}`}
         onClick={onClick}
-        className={`text-left bg-white rounded-2xl border transition-all p-5 flex flex-col gap-3 hover:-translate-y-0.5 active:scale-[0.99] ${
+        className={`text-left bg-white rounded-none border-4 transition-all p-5 flex flex-col gap-3 font-mono shadow-[4px_4px_0px_rgba(15,23,42,1)] hover:shadow-[6px_6px_0px_rgba(15,23,42,1)] hover:-translate-y-0.5 active:scale-[0.99] ${
             focused
-                ? 'border-emerald-500 shadow-[0_20px_50px_-10px_rgba(16,185,129,0.35)] ring-2 ring-emerald-300'
-                : 'border-slate-200 hover:border-slate-400 hover:shadow-xl'
+                ? 'border-primary-tactile shadow-[8px_8px_0px_rgba(16,185,129,1)] scale-[1.02]'
+                : 'border-slate-900 hover:border-primary-tactile hover:-translate-y-1'
         }`}
     >
         <div className="flex items-start justify-between gap-3">
@@ -373,12 +371,12 @@ const KnowledgeDrawer: React.FC<{
             />
             {/* Drawer */}
             <aside
-                className="fixed top-0 right-0 h-full w-full md:w-[45%] min-w-[320px] max-w-[720px] bg-white z-[71] shadow-[0_0_60px_rgba(0,0,0,0.25)] flex flex-col animate-in slide-in-from-right duration-300"
+                className="fixed top-0 right-0 h-full w-full md:w-[45%] min-w-[320px] max-w-[720px] bg-white z-[71] border-l-4 border-slate-900 shadow-[-8px_0px_0px_rgba(15,23,42,1)] flex flex-col animate-in slide-in-from-right duration-300 font-mono"
                 role="dialog"
                 aria-label="Detalhes do item de conhecimento"
             >
                 {/* Header */}
-                <header className="px-6 py-4 border-b border-slate-200 flex items-start justify-between gap-4">
+                <header className="px-6 py-4 border-b-4 border-slate-900 bg-slate-50 flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1.5">
                             <span
@@ -407,7 +405,7 @@ const KnowledgeDrawer: React.FC<{
                     </div>
                     <button
                         onClick={onClose}
-                        className="flex-shrink-0 w-9 h-9 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-all active:scale-95"
+                        className="flex-shrink-0 w-9 h-9 rounded-none border-2 border-slate-900 bg-white hover:bg-primary-tactile hover:text-white flex items-center justify-center transition-all active:scale-95 shadow-[2px_2px_0px_rgba(15,23,42,1)]"
                         aria-label="Fechar"
                     >
                         <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
@@ -417,13 +415,13 @@ const KnowledgeDrawer: React.FC<{
                 </header>
 
                 {/* Tabs */}
-                <div className="flex border-b border-slate-200 px-6">
+                <div className="flex border-b-4 border-slate-900 bg-slate-50 px-6 pt-2">
                     <button
                         onClick={() => setTab('original')}
                         className={`px-4 py-3 text-[10px] font-black uppercase tracking-widest transition-all ${
                             tab === 'original'
-                                ? 'text-slate-900 border-b-2 border-slate-900'
-                                : 'text-slate-400 hover:text-slate-600'
+                                ? 'text-white bg-slate-900 border-t-2 border-l-2 border-r-2 border-slate-900'
+                                : 'text-slate-500 hover:bg-slate-200 border-t-2 border-l-2 border-r-2 border-transparent hover:border-slate-300'
                         }`}
                     >
                         Documento Original
@@ -432,8 +430,8 @@ const KnowledgeDrawer: React.FC<{
                         onClick={() => setTab('raio-x')}
                         className={`px-4 py-3 text-[10px] font-black uppercase tracking-widest transition-all ${
                             tab === 'raio-x'
-                                ? 'text-slate-900 border-b-2 border-slate-900'
-                                : 'text-slate-400 hover:text-slate-600'
+                                ? 'text-white bg-slate-900 border-t-2 border-l-2 border-r-2 border-slate-900'
+                                : 'text-slate-500 hover:bg-slate-200 border-t-2 border-l-2 border-r-2 border-transparent hover:border-slate-300'
                         }`}
                     >
                         Raio-X da IA
@@ -492,7 +490,7 @@ const KnowledgeDrawer: React.FC<{
                                                         onClick={() =>
                                                             onNavigateToOrigin?.('acoes', tid)
                                                         }
-                                                        className="group flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 transition-all text-left"
+                                                        className="group flex items-center justify-between gap-3 px-4 py-3 rounded-none border-2 border-slate-900 bg-white hover:border-primary-tactile hover:bg-slate-50 transition-all text-left shadow-[2px_2px_0px_rgba(15,23,42,1)]"
                                                     >
                                                         <span className="text-xs font-bold text-slate-700 group-hover:text-emerald-900 truncate">
                                                             Tarefa #{tid}
@@ -791,11 +789,11 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
     }, [selectedMemoryId]);
 
     return (
-        <div className="w-full h-full bg-slate-50 overflow-y-auto">
+        <div className="w-full h-full bg-surface overflow-y-auto relative">
             <div className="max-w-6xl mx-auto px-4 md:px-8 py-8 md:py-12 pb-32">
                 {/* Header */}
                 <div className="mb-8">
-                    <h1 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900 mb-1">
+                    <h1 className="text-3xl md:text-4xl font-black tracking-tighter uppercase text-slate-900 mb-2 font-mono">
                         Conhecimento
                     </h1>
                     <p className="text-xs md:text-sm text-slate-500 font-medium">
@@ -834,12 +832,12 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
                                         if (e.key === 'Enter') runSearch();
                                     }}
                                     placeholder='Ex.: "Como elaboramos o relatório de gestão 2025?" ou "dispensa licitação PNAE"'
-                                    className="w-full h-14 md:h-16 pl-14 pr-28 rounded-2xl bg-white border border-slate-200 text-sm md:text-base font-medium tracking-tight text-slate-900 placeholder-slate-400 shadow-sm focus:outline-none focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10 transition-all"
+                                    className="w-full h-14 md:h-16 pl-14 pr-28 rounded-none bg-white border-4 border-slate-900 text-sm md:text-base font-mono font-bold tracking-tight text-slate-900 placeholder-slate-400 shadow-[4px_4px_0px_rgba(15,23,42,1)] focus:outline-none focus:bg-slate-50 transition-all"
                                 />
                                 <button
                                     onClick={runSearch}
                                     disabled={loading || !query.trim()}
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 px-5 h-10 md:h-11 rounded-xl bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95"
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 px-5 h-10 md:h-11 rounded-none bg-primary-tactile border-2 border-slate-900 text-white text-[10px] font-mono font-black uppercase tracking-[0.2em] hover:bg-slate-900 shadow-[2px_2px_0px_rgba(15,23,42,1)] disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95"
                                 >
                                     Buscar
                                 </button>
@@ -881,14 +879,14 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
                                 onChange={(e) =>
                                     setFiltros({ ...filtros, data_inicio: e.target.value || undefined })
                                 }
-                                className="px-3 py-1.5 rounded-full bg-white border border-slate-200 text-[10px] font-bold text-slate-700 focus:outline-none focus:border-slate-900"
+                                className="px-3 py-1.5 rounded-none bg-white border-2 border-slate-900 text-[10px] font-mono font-bold text-slate-900 focus:outline-none focus:bg-slate-50 shadow-[2px_2px_0px_rgba(15,23,42,1)]"
                             />
                             <span className="text-[10px] text-slate-400 font-black">→</span>
                             <input
                                 type="date"
                                 value={filtros.data_fim || ''}
                                 onChange={(e) => setFiltros({ ...filtros, data_fim: e.target.value || undefined })}
-                                className="px-3 py-1.5 rounded-full bg-white border border-slate-200 text-[10px] font-bold text-slate-700 focus:outline-none focus:border-slate-900"
+                                className="px-3 py-1.5 rounded-none bg-white border-2 border-slate-900 text-[10px] font-mono font-bold text-slate-900 focus:outline-none focus:bg-slate-50 shadow-[2px_2px_0px_rgba(15,23,42,1)]"
                             />
                         </div>
 
@@ -934,19 +932,19 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
                                     }
                                 }}
                                 placeholder="+ adicionar tag"
-                                className="px-3 py-1.5 rounded-full bg-white border border-slate-200 text-[10px] font-bold text-slate-700 placeholder-slate-400 focus:outline-none focus:border-slate-900"
+                                className="px-3 py-1.5 rounded-none bg-white border-2 border-slate-900 text-[10px] font-mono font-bold text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-slate-50 shadow-[2px_2px_0px_rgba(15,23,42,1)]"
                             />
                             <button
                                 onClick={handleAddTag}
                                 disabled={!tagInput.trim()}
-                                className="px-3 py-1.5 rounded-full bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-30 transition-all active:scale-95"
+                                className="px-3 py-1.5 rounded-none bg-primary-tactile border-2 border-slate-900 text-white text-[10px] font-mono font-black uppercase tracking-[0.2em] shadow-[2px_2px_0px_rgba(15,23,42,1)] disabled:opacity-30 transition-all active:scale-95"
                             >
                                 Adicionar
                             </button>
                         </div>
 
                         {loading && (
-                            <div className="bg-white rounded-2xl border border-slate-200 p-8 mb-6 flex items-center gap-4 shadow-sm">
+                            <div className="bg-slate-50 border-4 border-slate-900 rounded-none p-8 mb-6 flex items-center gap-4 shadow-[4px_4px_0px_rgba(15,23,42,1)] font-mono">
                                 <div className="w-6 h-6 rounded-full border-2 border-slate-200 border-t-slate-900 animate-spin flex-shrink-0" />
                                 <div>
                                     <div className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-400 mb-1">
@@ -960,7 +958,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
                         )}
 
                         {error && !loading && (
-                            <div className="bg-rose-50 border border-rose-200 rounded-2xl p-5 mb-6">
+                            <div className="bg-rose-50 border-4 border-rose-600 rounded-none p-5 mb-6 shadow-[4px_4px_0px_rgba(225,29,72,1)] font-mono">
                                 <p className="text-sm font-bold text-rose-700">{error}</p>
                             </div>
                         )}
@@ -1007,7 +1005,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
 
                         {!loading && !error && results.length === 0 && (
                             <div className="text-center py-16 md:py-24">
-                                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-100 flex items-center justify-center">
+                                <div className="w-16 h-16 mx-auto mb-4 rounded-none border-2 border-slate-900 bg-slate-50 flex items-center justify-center shadow-[4px_4px_0px_rgba(15,23,42,1)]">
                                     <svg
                                         className="w-8 h-8 text-slate-400"
                                         viewBox="0 0 24 24"
@@ -1029,7 +1027,7 @@ const KnowledgeView: React.FC<KnowledgeViewProps> = ({ onNavigateToOrigin }) => 
                     </>
                 ) : (
                     <div className="grid grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)] gap-6">
-                        <section className="bg-white rounded-3xl border border-slate-200 p-4 shadow-sm">
+                        <section className="bg-white border-4 border-slate-900 rounded-none p-4 shadow-[8px_8px_0px_rgba(15,23,42,1)] font-mono">
                             <div className="mb-4">
                                 <h2 className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-500">
                                     Memórias globais

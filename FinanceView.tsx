@@ -44,6 +44,7 @@ interface FinanceViewProps {
     setActiveTab: (tab: 'dashboard' | 'fixed') => void;
     isSettingsOpen: boolean;
     setIsSettingsOpen: (isOpen: boolean) => void;
+    onOpenFinancialCopilot?: () => void;
 }
 
 const FinanceSection = ({ title, children, defaultExpanded = true, disableCollapse = false }: { title: string, children: React.ReactNode, defaultExpanded?: boolean, disableCollapse?: boolean }) => {
@@ -136,7 +137,8 @@ const FinanceView = ({
     activeTab,
     setActiveTab,
     isSettingsOpen,
-    setIsSettingsOpen
+    setIsSettingsOpen,
+    onOpenFinancialCopilot
 }: FinanceViewProps) => {
 
     // Transaction States
@@ -644,6 +646,7 @@ const FinanceView = ({
                         incomeEntries={incomeEntries}
                         currentMonth={currentMonth}
                         currentYear={currentYear}
+                        onOpenFinancialCopilot={onOpenFinancialCopilot}
                     />
                     {/* Budget Bar Section */}
                     <div className="bg-surface p-6 md:p-8 rounded-none border border-border-grid shadow-none relative overflow-hidden">

@@ -1377,8 +1377,7 @@ def sync_pix_emails(service, sync_ref, logs):
             d = r.to_dict()
             income_rubrics_cache.append({
                 'id': r.id,
-                'desc': d.get('description', '').lower(),
-                'category': d.get('category', 'Renda Extra')
+                'desc': d.get('description', '').lower()
             })
 
 
@@ -1487,18 +1486,16 @@ def sync_pix_emails(service, sync_ref, logs):
                 if is_income:
                     # Busca em rubricas de renda para vinculação
                     matched_rubric_id = None
-                    matched_category = 'Renda Extra'
                     clean_desc = description.replace('Pix: ', '').lower()
                     for rb in income_rubrics_cache:
                         if rb['desc'] in clean_desc or clean_desc in rb['desc']:
                             matched_rubric_id = rb['id']
-                            matched_category = rb['category']
                             break
 
                     new_record = {
                         'description': description, 'amount': amount, 'day': dt.day,
                         'month': dt.month - 1, 'year': dt.year,
-                        'category': matched_category, 'isReceived': True, 'date': iso_date,
+                        'category': 'Geral', 'isReceived': True, 'date': iso_date,
                         'google_message_id': msg_id, 'pix_id': pix_id,
                         'rubricId': matched_rubric_id
                     }
@@ -1508,7 +1505,7 @@ def sync_pix_emails(service, sync_ref, logs):
                     sprint = 1 if dt.day < 8 else 2 if dt.day < 15 else 3 if dt.day < 22 else 4
                     new_record = {
                         'description': description, 'amount': amount, 'date': iso_date,
-                        'sprint': sprint, 'category': 'Alimentação', # Original was 'Alimentação', keeping it.
+                        'sprint': sprint, 'category': 'Geral',
                         'google_message_id': msg_id, 'pix_id': pix_id
                     }
                     db.collection('finance_transactions').add(new_record)
@@ -1580,8 +1577,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
             d = r.to_dict()
             rubrics_cache.append({
                 'id': r.id,
-                'desc': d.get('description', '').lower(),
-                'category': d.get('category', 'Conta Fixa')
+                'desc': d.get('description', '').lower()
             })
 
         processed_emails_doc = db.collection('system').document('processed_emails').get()
@@ -1609,7 +1605,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
             find_pdf(msg['payload'])
             
             # Formata rubricas para o prompt
-            rubrics_text = "\n".join([f"- {r['desc']} (ID: {r['id']}, Categoria: {r['category']})" for r in rubrics_cache])
+            rubrics_text = "\n".join([f"- {r['desc']} (ID: {r['id']})" for r in rubrics_cache])
             
             prompt = f"""
             Você é um assistente financeiro de elite. Analise o e-mail/documento anexo e extraia os dados abaixo para um BOLETO ou PAGAMENTO.
@@ -1626,7 +1622,6 @@ def sync_boletos_gmail(service, sync_ref, logs):
             - barcode: linha digitável ou código de barras (apenas números)
             - pix_code: código Pix Copia e Cola (geralmente começa com 000201...)
             - rubric_id: ID da rubrica correspondente (se houver match) ou null
-            - category: Categoria da conta (use a da rubrica se houver match)
 
             Responda APENAS em JSON no formato:
             {{
@@ -1635,8 +1630,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
               "due_date": "YYYY-MM-DD",
               "barcode": "...",
               "pix_code": "...",
-              "rubric_id": "...",
-              "category": "..."
+              "rubric_id": "..."
             }}
             Se não for um boleto/fatura ou se não encontrar dados, responda {{"error": "not_a_bill"}}.
             """
@@ -1719,13 +1713,11 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 else:
                     # BUSCA EM RUBRICAS (Fallback se a IA não retornou rubric_id)
                     matched_rubric_id = rubric_id_from_ai
-                    matched_category = data.get('category', 'Conta Fixa')
                     
                     if not matched_rubric_id:
                         for rb in rubrics_cache:
                             if name_extracted in rb['desc'] or rb['desc'] in name_extracted:
                                 matched_rubric_id = rb['id']
-                                matched_category = rb['category']
                                 break
 
                     # CRIAÇÃO: Adiciona novo card
@@ -1738,7 +1730,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
                         'barcode': data.get('barcode', ''),
                         'pixCode': data.get('pix_code', ''),
                         'isPaid': False,
-                        'category': matched_category,
+                        'category': 'Geral',
                         'rubricId': matched_rubric_id,
                         'google_message_id': msg_id,
                         'created_at': datetime.now().isoformat()
@@ -6850,12 +6842,12 @@ def askTaskAssistant(req: https_fn.CallableRequest):
                 parts.append("\nRendas Detalhadas:")
                 for r in detalhes.get("rendas", []):
                     status = "Recebido" if r.get("isReceived") else "Pendente"
-                    parts.append(f"- {r.get('description')}: R$ {r.get('amount', 0):.2f} ({status}, Categoria: {r.get('category')})")
+                    parts.append(f"- {r.get('description')}: R$ {r.get('amount', 0):.2f} ({status})")
                 
                 parts.append("\nContas Detalhadas:")
                 for c in detalhes.get("contas", []):
                     status = "Pago" if c.get("isPaid") else "Pendente"
-                    parts.append(f"- {c.get('description')}: R$ {c.get('amount', 0):.2f} ({status}, Categoria: {c.get('category')})")
+                    parts.append(f"- {c.get('description')}: R$ {c.get('amount', 0):.2f} ({status})")
                 
                 trans_docs = db.collection("finance_transactions").where("status", "==", "active").stream()
                 avulsas = []
@@ -6873,7 +6865,7 @@ def askTaskAssistant(req: https_fn.CallableRequest):
                 if avulsas:
                     parts.append("\nTransações Avulsas do Mês:")
                     for t in avulsas:
-                        parts.append(f"- {t.get('description')}: R$ {t.get('amount', 0):.2f} (Sprint {t.get('sprint')}, Categoria: {t.get('category')})")
+                        parts.append(f"- {t.get('description')}: R$ {t.get('amount', 0):.2f} (Sprint {t.get('sprint')})")
                 
                 finance_context = "\n".join(parts)
             except Exception as e:
@@ -7045,6 +7037,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
     drive_file_id = data.get('driveFileId')
     drive_file_name = (data.get('driveFileName') or 'documento').strip()
     routing_index = data.get('routingIndex') or []
+    copilot_mode = (data.get('copilotMode') or 'default').strip()
     user_uid = req.auth.uid if req.auth else None
 
     def _copilot_remaining_sec() -> float:
@@ -8097,7 +8090,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             except Exception as e:
                 return f"Erro ao consultar finanças: {e}"
 
-        def registrar_item_financeiro_v2(tipo: str, descricao: str, valor: float, categoria: str = "Geral", mes: int = None, ano: int = None, data: str = None):
+        def registrar_item_financeiro_v2(tipo: str, descricao: str, valor: float, mes: int = None, ano: int = None, data: str = None):
             """
             Registra uma nova entrada financeira (renda, obrigacao_fixa ou transacao_avulsa).
             Obrigatório apresentar rascunho (draft) ao usuário para confirmação antes de persistir.
@@ -8105,10 +8098,11 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             - tipo: 'renda', 'obrigacao_fixa' ou 'transacao_avulsa'
             - valor: valor numérico
             - mes/ano: período de competência (opcional)
+            - categoria não deve ser inferida nem solicitada por enquanto; o sistema grava "Geral" internamente.
             """
             try:
                 from tools.telegram_extended import execute
-                slots = {"tipo": tipo, "descricao": descricao, "valor": valor, "categoria": categoria, "mes": mes, "ano": ano, "data": data}
+                slots = {"tipo": tipo, "descricao": descricao, "valor": valor, "categoria": "Geral", "mes": mes, "ano": ano, "data": data}
                 return execute("registrar_item_financeiro_v2", slots, db)
             except Exception as e:
                 return f"Erro ao registrar item financeiro: {e}"
@@ -8722,9 +8716,20 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             print(f"Erro ao buscar catálogo de sistemas: {e}")
             sistemas_str = "Erro ao carregar catálogo."
 
+        mode_context = ""
+        if copilot_mode == "finance":
+            mode_context = (
+                "## MODO FINANCEIRO ATIVO\n"
+                "Você está atuando como Copiloto Financeiro do Hermes. Priorize fluxo de caixa, gastos, reserva de emergência, metas, obrigações, orçamento mensal e dúvidas educacionais sobre investimentos.\n"
+                "Para qualquer número financeiro interno, use consultar_financas_v2 antes de concluir. Não use categorias de lançamentos como base analítica enquanto a classificação estiver em revisão.\n"
+                "Você pode explicar tipos de investimento em caráter educativo, mas não deve prometer rentabilidade, recomendar compra/venda específica ou tratar isso como consultoria financeira regulada.\n"
+                "Quando sugerir próximos passos, escreva como proposta para o usuário avaliar; não crie ações, metas ou lançamentos sem confirmação explícita.\n\n"
+            )
+
         system_instruction = (
             f"Você é o Copiloto Hermes, estrategista sênior de processos. Hoje é {today_str}. "
             f"{('CONTEXTO TÉCNICO VINCULADO (OBRIGATÓRIO): ' + (f'sistemaId={system_id}, ' if system_id else '') + (f'taskId={task_id}. ' if task_id else '')) if (system_id or task_id) else ''}"
+            f"\n\n{mode_context}"
             "\n\n## CORE ESTÁTICO DO COPILOTO\n"
             f"{copilot_core.get('content', '')}\n\n"
             "## PERSONALIDADE DINÂMICA ATUAL\n"
@@ -11543,6 +11548,7 @@ Regras obrigatórias:
 - O campo "actionProposal" deve ser apenas uma proposta textual para o usuário avaliar.
 - Seja específico com os números mais relevantes.
 - Destaque o risco principal primeiro, mas também reconheça um ponto positivo se houver.
+- Ignore categorias de lançamentos financeiros. Elas estão temporariamente imprecisas e não devem fundamentar diagnóstico, risco ou proposta.
 
 Formato exato:
 {{

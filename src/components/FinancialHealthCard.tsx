@@ -14,6 +14,7 @@ interface FinancialHealthAnalysis {
     mainRisk: string;
     positivePoint: string;
     actionProposal: string;
+    isStructured?: boolean;
 }
 
 interface FinancialHealthCardProps {
@@ -27,9 +28,11 @@ interface FinancialHealthCardProps {
     incomeEntries: IncomeEntry[];
     currentMonth: number;
     currentYear: number;
+    onOpenFinancialCopilot?: () => void;
 }
 
 const CACHE_DOC = doc(db, 'finance_health_summary', 'config');
+const CACHE_SCHEMA_VERSION = 'financial-health-v2-structured-no-categories';
 
 const STATUS_STYLES: Record<FinancialHealthStatus, {
     label: string;
@@ -99,11 +102,6 @@ function buildSnapshot(props: FinancialHealthCardProps) {
     const budget = settings.monthlyBudgets?.[monthKey] ?? settings.monthlyBudget ?? 0;
     const reserveCoverageMonths = budget > 0 ? +(emergencyReserve.current / budget).toFixed(1) : 0;
     const transactionsThisMonth = transactions.filter(t => t.status !== 'deleted' && t.date.startsWith(monthKey));
-    const spendingByCategory = transactionsThisMonth.reduce<Record<string, number>>((acc, t) => {
-        const category = t.category || 'Sem categoria';
-        acc[category] = (acc[category] || 0) + t.amount;
-        return acc;
-    }, {});
 
     const billsThisMonth = fixedBills.filter(b => b.month === currentMonth && b.year === currentYear);
     const billsTotalAmount = billsThisMonth.reduce((s, b) => s + b.amount, 0);
@@ -136,14 +134,9 @@ function buildSnapshot(props: FinancialHealthCardProps) {
             budget: +budget.toFixed(2),
             spent: +currentMonthTotal.toFixed(2),
             available: +(budget - currentMonthTotal).toFixed(2),
-            topCategories: Object.entries(spendingByCategory)
-                .map(([category, amount]) => ({ category, amount: +amount.toFixed(2) }))
-                .sort((a, b) => b.amount - a.amount)
-                .slice(0, 5),
             largestTransactions: transactionsThisMonth
                 .map(t => ({
                     description: t.description,
-                    category: t.category,
                     amount: +t.amount.toFixed(2),
                     date: t.date,
                 }))
@@ -197,7 +190,10 @@ function buildSnapshot(props: FinancialHealthCardProps) {
 }
 
 function computeFingerprint(props: FinancialHealthCardProps): string {
-    return JSON.stringify(buildSnapshot(props));
+    return JSON.stringify({
+        schemaVersion: CACHE_SCHEMA_VERSION,
+        snapshot: buildSnapshot(props),
+    });
 }
 
 function normalizeStatus(value: unknown): FinancialHealthStatus {
@@ -207,7 +203,15 @@ function normalizeStatus(value: unknown): FinancialHealthStatus {
 
 function normalizeAnalysis(value: unknown): FinancialHealthAnalysis {
     if (typeof value === 'string' && value.trim()) {
-        return { ...FALLBACK_ANALYSIS, summary: value.trim(), title: 'Diagnóstico financeiro' };
+        return {
+            ...FALLBACK_ANALYSIS,
+            title: 'Diagnóstico financeiro',
+            summary: value.trim(),
+            mainRisk: '',
+            positivePoint: '',
+            actionProposal: '',
+            isStructured: false,
+        };
     }
 
     if (!value || typeof value !== 'object') return FALLBACK_ANALYSIS;
@@ -216,15 +220,19 @@ function normalizeAnalysis(value: unknown): FinancialHealthAnalysis {
     const score = typeof raw.score === 'number' && Number.isFinite(raw.score)
         ? Math.max(0, Math.min(100, Math.round(raw.score)))
         : undefined;
+    const mainRisk = raw.mainRisk?.trim() || '';
+    const positivePoint = raw.positivePoint?.trim() || '';
+    const actionProposal = raw.actionProposal?.trim() || '';
 
     return {
         status: normalizeStatus(raw.status),
         score,
         title: raw.title?.trim() || FALLBACK_ANALYSIS.title,
         summary: raw.summary?.trim() || FALLBACK_ANALYSIS.summary,
-        mainRisk: raw.mainRisk?.trim() || FALLBACK_ANALYSIS.mainRisk,
-        positivePoint: raw.positivePoint?.trim() || FALLBACK_ANALYSIS.positivePoint,
-        actionProposal: raw.actionProposal?.trim() || FALLBACK_ANALYSIS.actionProposal,
+        mainRisk,
+        positivePoint,
+        actionProposal,
+        isStructured: Boolean(mainRisk && positivePoint && actionProposal),
     };
 }
 
@@ -242,8 +250,13 @@ export function FinancialHealthCard(props: FinancialHealthCardProps) {
             try {
                 const snap = await getDoc(CACHE_DOC);
                 if (snap.exists()) {
-                    const cached = snap.data() as { analysis?: FinancialHealthAnalysis; summary?: string; fingerprint: string };
-                    if (cached.fingerprint === fingerprint) {
+                    const cached = snap.data() as {
+                        analysis?: FinancialHealthAnalysis;
+                        summary?: string;
+                        fingerprint: string;
+                        schemaVersion?: string;
+                    };
+                    if (cached.fingerprint === fingerprint && cached.schemaVersion === CACHE_SCHEMA_VERSION) {
                         setAnalysis(normalizeAnalysis(cached.analysis ?? cached.summary));
                         return;
                     }
@@ -258,6 +271,7 @@ export function FinancialHealthCard(props: FinancialHealthCardProps) {
                     analysis: newAnalysis,
                     summary: newAnalysis.summary,
                     fingerprint,
+                    schemaVersion: CACHE_SCHEMA_VERSION,
                     generatedAt: new Date().toISOString(),
                 });
                 setAnalysis(newAnalysis);
@@ -273,6 +287,12 @@ export function FinancialHealthCard(props: FinancialHealthCardProps) {
 
     const visibleAnalysis = analysis ?? FALLBACK_ANALYSIS;
     const styles = STATUS_STYLES[visibleAnalysis.status];
+    const hasStructuredDetails = Boolean(
+        visibleAnalysis.isStructured
+        && visibleAnalysis.mainRisk
+        && visibleAnalysis.positivePoint
+        && visibleAnalysis.actionProposal
+    );
 
     return (
         <div className={`p-4 rounded-none border-4 flex flex-col gap-4 ${styles.container}`}>
@@ -286,6 +306,26 @@ export function FinancialHealthCard(props: FinancialHealthCardProps) {
                     </h3>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                    {props.onOpenFinancialCopilot && (
+                        <button
+                            type="button"
+                            onClick={props.onOpenFinancialCopilot}
+                            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 border text-[9px] font-black uppercase tracking-[0.14em] font-mono transition-all ${visibleAnalysis.status === 'critical'
+                                ? 'border-rose-300 bg-white/60 text-rose-800 hover:bg-white'
+                                : visibleAnalysis.status === 'attention'
+                                ? 'border-amber-300 bg-white/60 text-amber-900 hover:bg-white'
+                                : visibleAnalysis.status === 'stable'
+                                ? 'border-sky-300 bg-white/60 text-sky-800 hover:bg-white'
+                                : 'border-emerald-300 bg-white/60 text-emerald-800 hover:bg-white'
+                            }`}
+                            title="Conversar com o copiloto financeiro"
+                        >
+                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 10v2m0-2c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            Copiloto
+                        </button>
+                    )}
                     {typeof visibleAnalysis.score === 'number' && (
                         <span className={`text-[10px] font-black uppercase tracking-widest font-mono ${styles.muted}`}>
                             {visibleAnalysis.score}/100
@@ -303,33 +343,37 @@ export function FinancialHealthCard(props: FinancialHealthCardProps) {
                         {visibleAnalysis.summary}
                     </p>
 
-                    <div className={`grid gap-3 sm:grid-cols-2 border-t pt-3 ${styles.divider}`}>
-                        <div>
-                            <p className={`text-[9px] font-black uppercase tracking-[0.18em] font-mono ${styles.eyebrow}`}>
-                                Risco principal
-                            </p>
-                            <p className={`mt-1 text-xs font-bold leading-relaxed ${styles.text}`}>
-                                {visibleAnalysis.mainRisk}
-                            </p>
+                    {hasStructuredDetails && (
+                        <div className={`grid gap-3 sm:grid-cols-2 border-t pt-3 ${styles.divider}`}>
+                            <div>
+                                <p className={`text-[9px] font-black uppercase tracking-[0.18em] font-mono ${styles.eyebrow}`}>
+                                    Risco principal
+                                </p>
+                                <p className={`mt-1 text-xs font-bold leading-relaxed ${styles.text}`}>
+                                    {visibleAnalysis.mainRisk}
+                                </p>
+                            </div>
+                            <div>
+                                <p className={`text-[9px] font-black uppercase tracking-[0.18em] font-mono ${styles.eyebrow}`}>
+                                    Ponto positivo
+                                </p>
+                                <p className={`mt-1 text-xs font-bold leading-relaxed ${styles.text}`}>
+                                    {visibleAnalysis.positivePoint}
+                                </p>
+                            </div>
                         </div>
-                        <div>
-                            <p className={`text-[9px] font-black uppercase tracking-[0.18em] font-mono ${styles.eyebrow}`}>
-                                Ponto positivo
-                            </p>
-                            <p className={`mt-1 text-xs font-bold leading-relaxed ${styles.text}`}>
-                                {visibleAnalysis.positivePoint}
-                            </p>
-                        </div>
-                    </div>
+                    )}
 
-                    <div className={`border-t pt-3 ${styles.divider}`}>
-                        <p className={`text-[9px] font-black uppercase tracking-[0.18em] font-mono ${styles.eyebrow}`}>
-                            Proposta de ação
-                        </p>
-                        <p className={`mt-1 text-sm font-black leading-relaxed ${styles.title}`}>
-                            {visibleAnalysis.actionProposal}
-                        </p>
-                    </div>
+                    {hasStructuredDetails && (
+                        <div className={`border-t pt-3 ${styles.divider}`}>
+                            <p className={`text-[9px] font-black uppercase tracking-[0.18em] font-mono ${styles.eyebrow}`}>
+                                Proposta de ação
+                            </p>
+                            <p className={`mt-1 text-sm font-black leading-relaxed ${styles.title}`}>
+                                {visibleAnalysis.actionProposal}
+                            </p>
+                        </div>
+                    )}
                 </>
             ) : loading ? (
                 <div className="space-y-3">
@@ -338,6 +382,25 @@ export function FinancialHealthCard(props: FinancialHealthCardProps) {
                 </div>
             ) : (
                 <p className={`text-sm font-bold italic ${styles.muted}`}>Aguardando análise...</p>
+            )}
+            {props.onOpenFinancialCopilot && (
+                <button
+                    type="button"
+                    onClick={props.onOpenFinancialCopilot}
+                    className={`sm:hidden flex items-center justify-center gap-2 border px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] font-mono transition-all ${visibleAnalysis.status === 'critical'
+                        ? 'border-rose-300 bg-white/60 text-rose-800'
+                        : visibleAnalysis.status === 'attention'
+                        ? 'border-amber-300 bg-white/60 text-amber-900'
+                        : visibleAnalysis.status === 'stable'
+                        ? 'border-sky-300 bg-white/60 text-sky-800'
+                        : 'border-emerald-300 bg-white/60 text-emerald-800'
+                    }`}
+                >
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 10v2m0-2c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Conversar com copiloto financeiro
+                </button>
             )}
         </div>
     );

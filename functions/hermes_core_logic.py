@@ -3539,14 +3539,15 @@ def _process_telegram_message(db, data: dict):
         from tools.telegram_extended import execute
         return execute("consultar_financas_v2", {"mes": mes, "ano": ano}, db)
 
-    def registrar_item_financeiro_v2(tipo: str, descricao: str, valor: float, categoria: str = "Geral", mes: int = None, ano: int = None, data: str = None):
+    def registrar_item_financeiro_v2(tipo: str, descricao: str, valor: float, mes: int = None, ano: int = None, data: str = None):
         """
         Registra nova renda, obrigacao_fixa ou transacao_avulsa no sistema financeiro.
         tipo: 'renda' | 'obrigacao_fixa' | 'transacao_avulsa'.
         Obrigatório apresentar rascunho completo ao usuário para confirmação antes de persistir.
+        Categoria não deve ser inferida nem solicitada por enquanto; o sistema grava "Geral" internamente.
         """
         from tools.telegram_extended import execute
-        slots = {"tipo": tipo, "descricao": descricao, "valor": valor, "categoria": categoria, "mes": mes, "ano": ano, "data": data}
+        slots = {"tipo": tipo, "descricao": descricao, "valor": valor, "categoria": "Geral", "mes": mes, "ano": ano, "data": data}
         return execute("registrar_item_financeiro_v2", slots, db)
 
     def buscar_e_analisar_email(query: str, max_results: int = 5):
@@ -3599,16 +3600,17 @@ def _process_telegram_message(db, data: dict):
         
         return f"Proposta gerada com sucesso. Draft: {draft}\n\n[SISTEMA: Os botões de confirmação serão anexados automaticamente a esta resposta.]"
 
-    def propor_lancamento_financeiro(tipo: str, descricao: str, valor: float, categoria: str = "Geral", mes: int = None, ano: int = None, data: str = None):
+    def propor_lancamento_financeiro(tipo: str, descricao: str, valor: float, mes: int = None, ano: int = None, data: str = None):
         """
         Gera uma proposta de lançamento financeiro para o usuário confirmar via botões.
         tipo: 'renda' | 'obrigacao_fixa' | 'transacao_avulsa'.
+        Categoria não deve ser inferida nem exibida por enquanto.
         """
         pending_data = {
             "tipo": tipo,
             "descricao": descricao,
             "valor": valor,
-            "categoria": categoria,
+            "categoria": "Geral",
             "mes": mes,
             "ano": ano,
             "data": data
@@ -3621,7 +3623,6 @@ def _process_telegram_message(db, data: dict):
             f"• Tipo: {tipo}\n"
             f"• Descrição: {descricao}\n"
             f"• Valor: R$ {valor:.2f}\n"
-            f"• Categoria: {categoria}\n"
         )
         return f"Proposta financeira gerada. Draft: {draft}\n\n[SISTEMA: Os botões de confirmação serão anexados automaticamente a esta resposta.]"
 

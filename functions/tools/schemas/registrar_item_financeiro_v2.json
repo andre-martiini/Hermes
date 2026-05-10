@@ -21,10 +21,6 @@
                 "type": "number",
                 "description": "Valor monetário do item."
             },
-            "categoria": {
-                "type": "string",
-                "description": "Categoria do item (ex: 'Moradia', 'Alimentação', 'Lazer', 'Trabalho')."
-            },
             "mes": {
                 "type": "integer",
                 "description": "Mês de referência (0-11). Relevante para rendas e obrigações fixas."

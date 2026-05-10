@@ -361,13 +361,14 @@ interface HermesCopilotoDrawerProps {
     isTemporary?: boolean;
     sessionId?: string | null;
     autoStartMic?: boolean;
+    copilotMode?: 'default' | 'finance';
 }
 
 type UploadPhase = 'idle' | 'uploading' | 'processing';
 const MOBILE_BREAKPOINT = 768;
 
 export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
-    isOpen, onClose, taskId, systemId, isDark = false, variant = 'drawer', userId, onOpenTask, onOpenTool, activeDocument, isTemporary, sessionId, autoStartMic = false
+    isOpen, onClose, taskId, systemId, isDark = false, variant = 'drawer', userId, onOpenTask, onOpenTool, activeDocument, isTemporary, sessionId, autoStartMic = false, copilotMode = 'default'
 }) => {
     const [sessions, setSessions] = useState<Session[]>([]);
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -383,6 +384,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const toolMenuRef = useRef<HTMLDivElement>(null);
+    const isFinancialCopilot = copilotMode === 'finance';
 
     // ── Estado do modal de relatório ─────────────────────────────────────────
     const [reportModalOpen, setReportModalOpen] = useState(false);
@@ -528,10 +530,11 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             ? {}
             : {
                 userId,
-                title: 'Nova Conversa',
+                title: isFinancialCopilot ? 'Copiloto Financeiro' : 'Nova Conversa',
                 createdAt: Timestamp.now(),
                 taskId: taskId || null,
-                systemId: systemId || null
+                systemId: systemId || null,
+                copilotMode
             };
 
         await setDoc(sessionRef, {
@@ -1351,11 +1354,12 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         try {
             const sessRef = await addDoc(collection(db, 'sessoes_copiloto'), {
                 userId,
-                title: initialPrompt ? initialPrompt.slice(0, 40) + '...' : 'Nova Conversa',
+                title: initialPrompt ? initialPrompt.slice(0, 40) + '...' : isFinancialCopilot ? 'Copiloto Financeiro' : 'Nova Conversa',
                 createdAt: Timestamp.now(),
                 lastMessageAt: Timestamp.now(),
                 taskId: taskId || null,
-                systemId: systemId || null
+                systemId: systemId || null,
+                copilotMode
             });
 
             setCurrentSessionId(sessRef.id);
@@ -1451,6 +1455,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 systemId: systemId || null,
                 driveFileId: driveFileId || null,
                 driveFileName: driveFileName || null,
+                copilotMode,
                 routingIndex: getRoutingIndex()
             }), COPILOTO_CALLABLE_TIMEOUT_MS, COPILOTO_CLIENT_TIMEOUT_MESSAGE);
 
@@ -1676,11 +1681,19 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             {/* Header - Unified Style */}
             <div className={`shrink-0 px-4 py-2 flex items-center justify-between border-b ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
                 <div className="flex items-center gap-2 min-w-0">
-                    <svg className={`w-4 h-4 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                    </svg>
+                    {isFinancialCopilot ? (
+                        <svg className={`w-4 h-4 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 10v2m0-2c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    ) : (
+                        <svg className={`w-4 h-4 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                        </svg>
+                    )}
                     <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2 min-w-0">
-                        <span className={`text-[9px] font-black uppercase tracking-widest font-mono ${isDark ? 'text-white/40' : 'text-slate-400'}`}>Copiloto Hermes</span>
+                        <span className={`text-[9px] font-black uppercase tracking-widest font-mono ${isDark ? 'text-white/40' : 'text-slate-400'}`}>
+                            {isFinancialCopilot ? 'Copiloto Financeiro' : 'Copiloto Hermes'}
+                        </span>
                         {taskId && (
                             <div className="flex items-center gap-1.5 shrink-0">
                                 <span className="hidden sm:inline text-[9px] text-slate-300 opacity-30">•</span>
@@ -2837,7 +2850,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                             }
                                         }
                                     }}
-                                    placeholder={isRecording ? '🎙 Gravando… clique no microfone para parar' : isProcessingMic ? 'Transcrevendo áudio...' : isTranscribing ? 'Transcrevendo áudio...' : attachedFile ? 'Pergunte sobre o arquivo ou envie sem texto…' : pastedContext ? 'Pergunte sobre o contexto ou envie sem texto…' : 'Escreva Aqui'}
+                                    placeholder={isRecording ? '🎙 Gravando… clique no microfone para parar' : isProcessingMic ? 'Transcrevendo áudio...' : isTranscribing ? 'Transcrevendo áudio...' : attachedFile ? 'Pergunte sobre o arquivo ou envie sem texto…' : pastedContext ? 'Pergunte sobre o contexto ou envie sem texto…' : isFinancialCopilot ? 'Pergunte sobre gastos, fluxo, reserva ou investimentos' : 'Escreva Aqui'}
                                     className={`w-full px-2 pt-2.5 pb-1.5 text-sm leading-5 font-mono font-medium outline-none border-0 resize-none bg-transparent ${isDark ? 'text-white placeholder:text-white/20' : 'text-slate-700 placeholder:text-slate-400'} transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed`}
                                 />
                             </div>

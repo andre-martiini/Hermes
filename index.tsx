@@ -1,4 +1,4 @@
-
+﻿
 
 
 
@@ -1312,7 +1312,8 @@ const App: React.FC = () => {
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isCopilotoOpen, setIsCopilotoOpen] = useState(false);
-  const [copilotoAutoStartMic, setCopilotoAutoStartMic] = useState(false);
+  const [copilotoAutoStartMic, setCopilotoAutoStartMic] = useState(false);
+  const [copilotoMode, setCopilotoMode] = useState<'default' | 'finance'>('default');
   const [isQuickNoteModalOpen, setIsQuickNoteModalOpen] = useState(false);
   const [hasAutoExpanded, setHasAutoExpanded] = useState(false);
 
@@ -6268,7 +6269,12 @@ const App: React.FC = () => {
                     activeTab={financeActiveTab}
                     setActiveTab={setFinanceActiveTab}
                     isSettingsOpen={isFinanceSettingsOpen}
-                    setIsSettingsOpen={setIsFinanceSettingsOpen}
+                    setIsSettingsOpen={setIsFinanceSettingsOpen}
+                    onOpenFinancialCopilot={() => {
+                      setCopilotoMode('finance');
+                      setCopilotoAutoStartMic(false);
+                      setIsCopilotoOpen(true);
+                    }}
                   />
 
                 ) : viewMode === 'knowledge' ? (
@@ -6278,7 +6284,7 @@ const App: React.FC = () => {
                     />
                     <button
                       onClick={() => setViewMode('dashboard')}
-                      className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-2xl md:hidden z-[60]"
+                      className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white border-2 border-slate-900 px-8 py-4 rounded-none text-[10px] font-mono font-black uppercase tracking-[0.2em] shadow-[4px_4px_0px_rgba(15,23,42,1)] md:hidden z-[60]"
                     >
                       Voltar ao Painel
                     </button>
@@ -6314,7 +6320,7 @@ const App: React.FC = () => {
                   </div>
 
                 ) : viewMode === 'sistemas-dev' ? (
-                  <div className={`systems-view animate-in fade-in duration-500 pb-20 ${isDarkTheme ? 'systems-view-dark' : ''}`}>
+                  <div className="animate-in fade-in duration-500 pb-20 font-mono">
                     {!selectedSystemId ? (
                       /* TABLE VIEW */
                       (() => {
@@ -6332,108 +6338,85 @@ const App: React.FC = () => {
                         return (
                           <div className="space-y-4">
                             {/* Toolbar */}
-                            <div className="flex flex-col md:flex-row gap-3 items-start md:items-center justify-between">
-                              <div className="flex flex-wrap gap-2">
-                                {(['todos', 'ideia', 'prototipacao', 'desenvolvimento', 'testes', 'producao'] as const).map(s => (
-                                  <button
-                                    key={s}
-                                    onClick={() => setSistemaFilterStatus(s)}
-                                    className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${sistemaFilterStatus === s
-                                      ? 'bg-slate-900 text-white'
-                                      : 'bg-white border border-slate-200 text-slate-500 hover:border-slate-400'
-                                      }`}
-                                  >
-                                    {s === 'todos' ? 'Todos' : statusLabelMap[s]}
-                                  </button>
-                                ))}
-                              </div>
-                              <input
-                                type="text"
-                                placeholder="Buscar sistema..."
-                                value={sistemaSearch}
-                                onChange={e => setSistemaSearch(e.target.value)}
-                                className="w-full md:w-64 bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-violet-400 transition-all"
-                              />
+                                                        {/* Toolbar Industrial */}
+                            <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between border-b-4 border-slate-900 pb-6">
+                              <div>
+                                <h3 className="text-2xl font-black uppercase tracking-tighter">SYS_REGISTRY::NODES</h3>
+                                <div className="flex items-center gap-3 mt-1">
+                                  <div className="w-2 h-2 bg-emerald-500 animate-pulse" />
+                                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em]">Active_Cores: {sistemasUnits.length}</p>
+                                </div>
+                              </div>
+                              <div className="relative">
+                                <input
+                                  type="text"
+                                  placeholder="SEARCH_CORE_ID..."
+                                  value={sistemaSearch}
+                                  onChange={e => setSistemaSearch(e.target.value)}
+                                  className="w-full md:w-80 bg-white border-2 border-slate-900 px-6 py-3 text-xs font-black uppercase tracking-widest outline-none focus:bg-slate-50 transition-all placeholder:text-slate-300"
+                                />
+                              </div>
                             </div>
                             {/* Table */}
-                            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-                              <table className="w-full text-sm">
-                                <thead>
-                                  <tr className="border-b border-slate-100 bg-slate-50/80">
-                                    <th className="text-left px-5 py-3.5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Nome</th>
-                                    <th className="text-left px-4 py-3.5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
-                                    <th className="text-center px-4 py-3.5 text-[10px] font-black text-slate-400 uppercase tracking-widest hidden md:table-cell">Abertas</th>
-                                    <th className="text-center px-4 py-3.5 text-[10px] font-black text-slate-400 uppercase tracking-widest hidden md:table-cell">Concluídas</th>
-                                    <th className="text-center px-4 py-3.5 text-[10px] font-black text-slate-400 uppercase tracking-widest hidden lg:table-cell">Recursos</th>
-                                    <th className="text-center px-4 py-3.5 text-[10px] font-black text-slate-400 uppercase tracking-widest hidden lg:table-cell">Ações</th>
-                                    <th className="text-right px-5 py-3.5 text-[10px] font-black text-slate-400 uppercase tracking-widest hidden md:table-cell">Atualizado</th>
-                                  </tr>
+                                                        <div className="border-4 border-slate-900 bg-white shadow-[8px_8px_0px_rgba(15,23,42,1)] overflow-x-auto">
+                              <table className="w-full text-left border-collapse font-mono">
+                                <thead>
+                                  <tr className="bg-slate-900 text-white border-b-4 border-slate-900">
+                                    <th className="px-6 py-5 text-[10px] font-black uppercase tracking-[0.3em]">Kernel_ID</th>
+                                    <th className="px-6 py-5 text-[10px] font-black uppercase tracking-[0.3em] text-center">Active_Actions</th>
+                                    <th className="px-6 py-5 text-[10px] font-black uppercase tracking-[0.3em] text-right">Last_Sync</th>
+                                  </tr>
                                 </thead>
-                                <tbody>
-                                  {filtered.map((unit, idx) => {
-                                    const sysDetails = sistemasDetalhes.find(s => s.id === unit.id) || { id: unit.id, nome: unit.nome.replace('SISTEMA:', '').trim(), status: 'ideia' as SistemaStatus, data_criacao: new Date().toISOString(), data_atualizacao: new Date().toISOString() };
-                                    const systemName = unit.nome.replace('SISTEMA:', '').trim();
-                                    const sysWorkItems = workItems.filter(w => w.sistema_id === unit.id);
-                                    const openCount = sysWorkItems.filter(w => !w.concluido).length;
-                                    const doneCount = sysWorkItems.filter(w => w.concluido).length;
-                                    const resourceCount = [sysDetails.repositorio_principal, sysDetails.link_documentacao, sysDetails.link_google_ai_studio, sysDetails.link_hospedado].filter(Boolean).length;
-                                    const sysBaseIds = knowledgeBases.filter(base => base.sistema_id === unit.id).map(base => base.id);
-                                    const sysKnowledgeIds = new Set(knowledgeItems.filter(item => item.base_id && sysBaseIds.includes(item.base_id)).map(item => item.id));
-                                    const linkedCount = tarefas.filter(task =>
-                                      (task.base_conhecimento && sysBaseIds.includes(task.base_conhecimento)) ||
-                                      (task.knowledge_item_ids || []).some(id => sysKnowledgeIds.has(id)) ||
-                                      task.sistema === systemName
-                                    ).length;
-                                    const updatedAt = new Date(sysDetails.data_atualizacao).toLocaleDateString('pt-BR');
-                                    return (
-                                      <tr
-                                        key={unit.id}
-                                        onClick={() => setSelectedSystemId(unit.id)}
-                                        className={`cursor-pointer transition-colors hover:bg-violet-50/60 border-b border-slate-50 last:border-0 ${idx % 2 !== 0 ? 'bg-slate-50/30' : ''}`}
-                                      >
-                                        <td className="px-5 py-4">
-                                          <div className="flex items-center gap-3">
-                                            <span className={`w-2 h-2 rounded-full shrink-0 ${statusDotMap[sysDetails.status] || 'bg-slate-400'}`}></span>
-                                            <span className="font-bold text-slate-900 truncate max-w-[180px] md:max-w-[260px]">{systemName}</span>
-                                            {openCount > 0 && (
-                                              <span className="bg-violet-100 text-violet-700 text-[9px] font-black px-1.5 py-0.5 rounded-full leading-none shrink-0">{openCount}</span>
-                                            )}
-                                          </div>
-                                        </td>
-                                        <td className="px-4 py-4">
-                                          <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${statusPillMap[sysDetails.status] || 'bg-slate-100 text-slate-600'}`}>
-                                            {statusLabelMap[sysDetails.status] || sysDetails.status}
-                                          </span>
-                                        </td>
-                                        <td className="px-4 py-4 text-center hidden md:table-cell">
-                                          {openCount > 0 ? (
-                                            <span className="bg-orange-100 text-orange-700 text-[10px] font-black px-2 py-1 rounded-lg">{openCount}</span>
-                                          ) : (
-                                            <span className="text-slate-300 text-[10px] font-bold">â€”</span>
-                                          )}
-                                        </td>
-                                        <td className="px-4 py-4 text-center hidden md:table-cell">
-                                          <span className="text-slate-500 text-[11px] font-bold">{doneCount}</span>
-                                        </td>
-                                        <td className="px-4 py-4 text-center hidden lg:table-cell">
-                                          <span className={`text-[11px] font-black ${resourceCount === 4 ? 'text-emerald-600' : resourceCount === 0 ? 'text-slate-300' : 'text-slate-500'}`}>{resourceCount}/4</span>
-                                        </td>
-                                        <td className="px-4 py-4 text-center hidden lg:table-cell">
-                                          <span className="text-slate-500 text-[11px] font-bold">{linkedCount}</span>
-                                        </td>
-                                        <td className="px-5 py-4 text-right hidden md:table-cell">
-                                          <span className="text-[10px] text-slate-400 font-bold">{updatedAt}</span>
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
-                                  {filtered.length === 0 && (
-                                    <tr>
-                                      <td colSpan={7} className="px-5 py-16 text-center">
-                                        <p className="text-slate-300 font-black text-[10px] uppercase tracking-widest">Nenhum sistema encontrado</p>
-                                      </td>
-                                    </tr>
-                                  )}
+                                                                <tbody>
+                                  {filtered.map((unit, idx) => {
+                                    const sysD = sistemasDetalhes.find(s => s.id === unit.id);
+                                    const systemName = unit.nome.replace('SISTEMA:', '').trim();
+                                    
+                                    // Contagem de aÃ§Ãµes vinculadas (Kernel Logic)
+                                    const systemBaseIds = knowledgeBases.filter(b => b.sistema_id === unit.id).map(b => b.id);
+                                    const systemKnowledgeIds = new Set(
+                                      knowledgeItems.filter(item => item.base_id && systemBaseIds.includes(item.base_id)).map(item => item.id)
+                                    );
+                                    const linkedCount = tarefas.filter(t =>
+                                      (t.base_conhecimento && systemBaseIds.includes(t.base_conhecimento)) ||
+                                      (t.knowledge_item_ids || []).some(id => systemKnowledgeIds.has(id)) ||
+                                      t.sistema === systemName
+                                    ).length;
+
+                                    return (
+                                      <tr 
+                                        key={unit.id} 
+                                        onClick={() => setSelectedSystemId(unit.id)}
+                                        className="group border-b-2 border-slate-100 hover:bg-slate-50 transition-all cursor-pointer active:bg-slate-100"
+                                      >
+                                        <td className="px-6 py-6">
+                                          <div className="flex items-center gap-4">
+                                            <div className="w-1.5 h-6 bg-primary-tactile group-hover:h-10 transition-all" />
+                                            <div className="flex flex-col">
+                                                <span className="text-sm font-black uppercase tracking-tight group-hover:text-primary-tactile">{systemName}</span>
+                                                <span className="text-[8px] font-bold text-slate-400 tracking-widest mt-0.5">KERNEL_NODE::{unit.id.slice(0,8)}</span>
+                                            </div>
+                                          </div>
+                                        </td>
+                                        <td className="px-6 py-6 text-center">
+                                          <div className="inline-flex flex-col items-center">
+                                            <span className="text-lg font-black text-slate-900 leading-none">
+                                              {String(linkedCount).padStart(3, '0')}
+                                            </span>
+                                            <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest mt-1">ACTIONS</span>
+                                          </div>
+                                        </td>
+                                        <td className="px-6 py-6 text-right">
+                                          <p className="text-[11px] font-black text-slate-900">
+                                            {sysD?.data_atualizacao ? new Date(sysD.data_atualizacao).toLocaleDateString('pt-BR') : 'NEVER'}
+                                          </p>
+                                          <p className="text-[8px] font-bold text-slate-400 uppercase mt-0.5 tracking-tighter">
+                                            SYNC_TIMESTAMP
+                                          </p>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
                                 </tbody>
                               </table>
                             </div>
@@ -8368,8 +8351,9 @@ const App: React.FC = () => {
 
         <HermesCopilotoDrawer
           isOpen={isCopilotoOpen}
-          onClose={() => { setIsCopilotoOpen(false); setCopilotoAutoStartMic(false); }}
-          autoStartMic={copilotoAutoStartMic}
+          onClose={() => { setIsCopilotoOpen(false); setCopilotoAutoStartMic(false); setCopilotoMode('default'); }}
+          autoStartMic={copilotoAutoStartMic}
+          copilotMode={copilotoMode}
           isDark={isDarkTheme}
           taskId={selectedTask?.id || selectedWorkItem?.id}
           systemId={selectedSystemId || (selectedTask as any)?.sistema_id || selectedWorkItem?.sistema_id}
@@ -8388,7 +8372,8 @@ const App: React.FC = () => {
             }
           }}
           onOpenTool={(tool, id) => {
-            setIsCopilotoOpen(false);
+            setIsCopilotoOpen(false);
+            setCopilotoMode('default');
             setActiveModule('acoes');
             setViewMode('ferramentas');
             if (tool === 'slides') {
