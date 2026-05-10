@@ -33,7 +33,7 @@ const HealthSection = ({ title, children, iconColor, defaultExpanded = true }: {
             >
                 <div className="flex flex-col items-start gap-1">
                     <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-[0.3em]">// SECTION_NODE</span>
-                    <h3 className="text-2xl font-serif italic text-on-surface tracking-tight text-left">{title}</h3>
+                    <h3 className="text-2xl font-mono font-bold text-on-surface tracking-tight text-left">{title}</h3>
                 </div>
                 <div className={`w-8 h-8 rounded-soft-touch border border-border-grid flex items-center justify-center transition-all ${isExpanded ? 'bg-on-surface text-surface' : 'bg-surface text-slate-300 hover:text-on-surface'}`}>
                     <svg className={`w-4 h-4 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -61,7 +61,7 @@ const HabitHeatmap = ({ habits, selectedDate, onSelectDate }: { habits: DailyHab
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10 border-b border-border-grid border-dashed pb-8">
                 <div>
                     <h4 className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-[0.2em] mb-2">// HABIT_PERFORMANCE_METRICS</h4>
-                    <p className="text-xs font-serif italic text-slate-500">Volume de hábitos cumpridos processado por ciclo diário.</p>
+                    <p className="text-xs font-mono font-bold text-slate-500 uppercase tracking-widest">Volume de hábitos cumpridos processado por ciclo diário.</p>
                 </div>
                 <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-none border border-border-grid">
                     <span className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest">LEGEND:</span>
@@ -333,7 +333,7 @@ const ExerciseGoalsSection = ({
         <div className="space-y-10">
             <div>
                 <h4 className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-[0.3em] mb-2">// EXERCISE_LOG_STREAM</h4>
-                <p className="text-xs font-serif italic text-slate-500">
+                <p className="text-xs font-mono font-bold text-slate-500 uppercase tracking-widest">
                     Registre após os exercícios — metas se ajustam automaticamente baseado na performance histórica.
                 </p>
             </div>
@@ -563,7 +563,7 @@ const ExamsAndConsultationsManager = ({
                                 <span className="w-2 h-2 bg-primary-tactile"></span>
                                 NEW_RECORD_ENTRY
                             </span>
-                            <p className="text-xs font-serif italic text-slate-500">Preencha os detalhes técnicos do evento médico para indexação.</p>
+                            <p className="text-xs font-mono font-bold text-slate-500 uppercase tracking-widest">Preencha os detalhes técnicos do evento médico para indexação.</p>
                         </div>
                         <button onClick={() => setIsAdding(false)} className="w-8 h-8 rounded-soft-touch border border-border-grid flex items-center justify-center text-slate-300 hover:text-accent-tactile transition-all">
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -690,7 +690,7 @@ const ExamsAndConsultationsManager = ({
                             </div>
                             
                             <div>
-                                <h4 className="text-lg font-serif italic text-on-surface leading-tight mb-1">{exam.titulo}</h4>
+                                <h4 className="text-lg font-mono font-bold text-on-surface leading-tight mb-1">{exam.titulo}</h4>
                                 {exam.doutor_local && (
                                     <p className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
                                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /></svg>
@@ -926,7 +926,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                 <div className="bg-surface p-8 flex flex-col justify-center relative overflow-hidden bg-[url('https://www.transparenttextures.com/patterns/graphy.png')]">
                     <span className="text-[10px] font-mono font-bold text-primary-tactile uppercase tracking-[0.3em] mb-2">// ETA_ESTIMATION</span>
                     <div className="flex flex-col">
-                        <span className="text-xl font-serif italic text-on-surface tracking-tight">
+                        <span className="text-xl font-mono font-bold text-on-surface tracking-tight">
                             {projection?.goalDate || '---'}
                         </span>
                         {projection?.trendPerWeek !== undefined && (
@@ -991,7 +991,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                             <div className="flex justify-between items-center mb-8">
                                 <div>
                                     <h4 className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-[0.3em]">// MASS_VARIATION_CHART</h4>
-                                    <p className="text-xs font-serif italic text-slate-500">Telemetry_Data_L30D</p>
+                                    <p className="text-xs font-mono font-bold text-slate-500 uppercase tracking-widest">Telemetry_Data_L30D</p>
                                 </div>
                             </div>
                             
@@ -1074,7 +1074,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                         <div className="flex justify-between items-start mb-8">
                             <div>
                                 <span className="text-[10px] font-mono font-bold text-primary-tactile uppercase tracking-[0.3em] mb-1 block">// TELEMETRY_INPUT</span>
-                                <h3 className="text-2xl font-serif italic text-on-surface">Log_Body_Mass</h3>
+                                <h3 className="text-2xl font-mono font-bold text-on-surface">Log_Body_Mass</h3>
                             </div>
                             <button onClick={() => setIsWeightModalOpen(false)} className="w-8 h-8 rounded-soft-touch border border-border-grid flex items-center justify-center text-slate-300 hover:text-on-surface transition-all">
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>

@@ -58,13 +58,13 @@ const FinanceSection = ({ title, children, defaultExpanded = true, disableCollap
                     onClick={() => setIsExpanded(!isExpanded)}
                     className="w-full flex items-center justify-between group"
                 >
-                    <h4 className="text-xl font-serif font-bold text-on-surface uppercase tracking-tight">{title}</h4>
+                    <h4 className="text-xl font-mono font-bold text-on-surface uppercase tracking-tight">{title}</h4>
                     <svg className={`w-5 h-5 text-slate-300 group-hover:text-primary-tactile transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
                     </svg>
                 </button>
             ) : (
-                <h4 className="text-xl font-serif font-bold text-on-surface uppercase tracking-tight mb-6">{title}</h4>
+                <h4 className="text-xl font-mono font-bold text-on-surface uppercase tracking-tight mb-6">{title}</h4>
             )}
             {showChildren && (
                 <div className={`${!disableCollapse ? 'mt-6' : ''} animate-in slide-in-from-top-2 duration-300`}>
@@ -260,6 +260,42 @@ const FinanceView = ({
     };
 
     const isAddingGoalVisible = activeTab === 'dashboard';
+
+    const handleExportCSV = () => {
+        const filteredTransactions = transactions
+            .filter(t => {
+                const d = new Date(t.date);
+                return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+            })
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+        if (filteredTransactions.length === 0) {
+            return;
+        }
+
+        const headers = ['Data', 'Descrição', 'Valor'];
+        const rows = filteredTransactions.map(t => [
+            new Date(t.date).toLocaleDateString('pt-BR'),
+            t.description || 'LOG_ITEM_STREAM',
+            t.amount.toFixed(2).replace('.', ',')
+        ]);
+
+        const csvContent = [
+            headers.join(';'),
+            ...rows.map(row => row.join(';'))
+        ].join('\n');
+
+        const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const monthName = new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth));
+        link.setAttribute('href', url);
+        link.setAttribute('download', `lancamentos_${monthName}_${currentYear}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
 
     // Helper to get previous month data
     const getPrevMonthData = () => {
@@ -652,7 +688,7 @@ const FinanceView = ({
                     <div className="bg-surface p-6 md:p-8 rounded-none border border-border-grid shadow-none relative overflow-hidden">
                         <div className="flex justify-between items-end mb-6">
                             <div>
-                                <h4 className="text-2xl font-serif font-bold text-on-surface tracking-tight mb-1">
+                                <h4 className="text-2xl font-mono font-bold text-on-surface tracking-tight mb-1">
                                     // GASTO ACUMULADO • {new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}
                                 </h4>
                                 <div className="text-2xl md:text-5xl font-mono font-bold text-on-surface tracking-tighter leading-none">
@@ -714,7 +750,13 @@ const FinanceView = ({
                         {/* TRANSACTIONS (LEFT COLUMN) */}
                         <div className="order-2 md:order-1 h-full">
                             <FinanceSection title={`Lançamentos de ${new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(new Date(currentYear, currentMonth))}`} disableCollapse>
-                                <div className="flex justify-end mb-4">
+                                <div className="flex justify-end mb-4 gap-6">
+                                    <button
+                                        onClick={handleExportCSV}
+                                        className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-primary-tactile transition-colors"
+                                    >
+                                        Exportar CSV
+                                    </button>
                                     <button
                                         onClick={() => {
                                             setNewTransaction({ date: new Date().toISOString(), sprint: 1, category: 'Alimentação' });
@@ -841,7 +883,7 @@ const FinanceView = ({
                             {/* Emergency Reserve Section */}
                             <div className="bg-surface p-6 rounded-none border border-border-grid shadow-none relative overflow-hidden group">
                                 <div className="mt-2">
-                                    <h5 className="text-xl font-serif font-bold text-on-surface flex items-center gap-2">
+                                    <h5 className="text-xl font-mono font-bold text-on-surface flex items-center gap-2">
                                         RESERVA_EMERGÊNCIA
                                     </h5>
                                     <div className="flex items-end gap-2 mt-2">
@@ -930,7 +972,7 @@ const FinanceView = ({
                                                             <textarea
                                                                 defaultValue={goal.name}
                                                                 rows={1}
-                                                                className="w-full bg-transparent border-none p-0 font-serif font-bold text-on-surface text-lg outline-none focus:ring-0 rounded-none transition-all resize-none overflow-hidden leading-snug pr-16"
+                                                                className="w-full bg-transparent border-none p-0 font-mono font-bold text-on-surface text-lg outline-none focus:ring-0 rounded-none transition-all resize-none overflow-hidden leading-snug pr-16"
                                                                 onInput={(e) => {
                                                                     const el = e.currentTarget;
                                                                     el.style.height = 'auto';

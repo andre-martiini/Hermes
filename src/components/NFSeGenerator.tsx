@@ -167,7 +167,7 @@ export const NFSeGenerator = ({ onClose }: { onClose: () => void }) => {
         {/* Header Industrial */}
         <div className="bg-on-surface text-surface p-6 flex justify-between items-center border-b border-primary-tactile shrink-0">
           <div>
-            <h2 className="text-2xl font-serif italic text-white tracking-tight">NFSe_Data_Generator_V1</h2>
+            <h2 className="text-2xl font-mono font-bold text-white tracking-tight">NFSe_Data_Generator_V1</h2>
             <div className="flex items-center gap-3 mt-1">
                 <span className="text-[10px] font-mono font-bold uppercase tracking-[0.2em] opacity-50">// NATIONAL_PORTAL_INTEGRATION</span>
                 <span className="w-1 h-1 rounded-full bg-primary-tactile"></span>

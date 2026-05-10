@@ -121,7 +121,7 @@ export const PgcAuditRow = ({
             </span>
           )}
         </div>
-        <h4 className="text-xl font-black text-slate-900 tracking-tight leading-snug font-serif">
+        <h4 className="text-xl font-mono font-bold text-slate-900 tracking-tight leading-snug">
           {item.entrega}
         </h4>
         <p className="text-xs font-medium text-slate-500 leading-relaxed mt-1">
@@ -260,7 +260,7 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
         e.dataTransfer.setData('task-id', task.id);
         e.dataTransfer.effectAllowed = 'move';
       }}
-      className={`group w-full px-4 md:px-6 py-5 md:py-4 border-b transition-all flex flex-col sm:flex-row sm:items-start gap-4 md:gap-6 animate-in cursor-pointer relative ${isEditingDateTime ? 'z-[100]' : 'z-auto'} ${isDark ? 'border-white/10 hover:bg-white/[0.03]' : 'border-border-grid hover:bg-slate-50/70'} ${isCompleted ? 'opacity-60 grayscale-[0.35]' : ''} ${highlighted ? (isDark ? 'bg-white/10 border-l-2 border-l-accent-tactile' : 'bg-surface-container border-l-2 border-l-primary-tactile') : 'bg-transparent'}`}
+      className={`group w-full px-4 md:px-6 py-5 md:py-4 border-b transition-all flex flex-col sm:flex-row sm:items-start gap-4 md:gap-6 animate-in cursor-pointer relative ${isEditingDateTime ? 'z-[1000]' : 'z-auto'} ${isDark ? 'border-white/10 hover:bg-white/[0.03]' : 'border-border-grid hover:bg-slate-50/70'} ${isCompleted ? 'opacity-60 grayscale-[0.35]' : ''} ${highlighted ? (isDark ? 'bg-white/10 border-l-2 border-l-accent-tactile' : 'bg-surface-container border-l-2 border-l-primary-tactile') : 'bg-transparent'}`}
     >
       <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-0">
         <div className="flex flex-col gap-0.5 text-slate-300 group-hover:text-slate-400 cursor-grab active:cursor-grabbing transition-colors shrink-0">
@@ -323,7 +323,7 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
           </button>
 
           {isEditingDateTime && (
-            <div className="absolute top-full right-0 mt-2 p-4 bg-white border border-border-grid shadow-xl z-50 flex flex-col gap-3 min-w-[200px] animate-in fade-in zoom-in-95 duration-200">
+            <div className="absolute top-full right-0 mt-2 p-4 bg-white border border-border-grid shadow-xl z-[1001] flex flex-col gap-3 min-w-[200px] animate-in fade-in zoom-in-95 duration-200">
               <div className="space-y-1">
                 <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest font-mono">Reagendar Prazo</p>
                 <input 

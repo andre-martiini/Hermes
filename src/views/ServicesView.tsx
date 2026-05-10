@@ -159,7 +159,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
         {/* Header & Tabs Industriais */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b-2 border-primary-tactile pb-6">
             <div>
-                <h3 className="text-3xl font-serif italic text-on-surface">Services_Portfolio</h3>
+                <h3 className="text-3xl font-mono font-bold text-on-surface">Services_Portfolio</h3>
                 <div className="flex items-center gap-2 mt-2">
                     <span className="text-[10px] font-mono font-bold text-primary-tactile uppercase tracking-widest">// REVENUE_MANAGEMENT_V2</span>
                     <span className="w-1 h-1 rounded-full bg-primary-tactile"></span>
@@ -234,7 +234,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
             <div className="bg-surface rounded-none border border-border-grid shadow-none overflow-hidden min-h-[500px]">
                 <div className="flex items-center justify-between p-8 border-b border-border-grid bg-slate-50/50">
                     <div>
-                        <h3 className="text-xl font-serif italic text-on-surface">Service_Inventory</h3>
+                        <h3 className="text-xl font-mono font-bold text-on-surface">Service_Inventory</h3>
                         <p className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest mt-1">ACTIVE_SERVICE_REGISTRY_NODE</p>
                     </div>
                     <button
@@ -285,7 +285,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                     </span>
                                 </div>
 
-                                <h4 className="text-lg font-serif italic text-on-surface leading-tight mb-4 group-hover:text-primary-tactile transition-colors">{service.titulo}</h4>
+                                <h4 className="text-lg font-mono font-bold text-on-surface leading-tight mb-4 group-hover:text-primary-tactile transition-colors">{service.titulo}</h4>
                                 
                                 <div className="space-y-3 font-mono text-[10px] uppercase tracking-widest mb-8">
                                     <div className="flex justify-between border-b border-slate-100 pb-2">
@@ -346,7 +346,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                 <span className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest">// CONTRACT_TYPE: {selectedService.tipo_contrato}</span>
                             </div>
                             <input
-                                className="text-3xl font-serif italic text-on-surface bg-transparent border-none outline-none focus:ring-1 focus:ring-primary-tactile rounded-none p-1 w-full"
+                                className="text-3xl font-mono font-bold text-on-surface bg-transparent border-none outline-none focus:ring-1 focus:ring-primary-tactile rounded-none p-1 w-full"
                                 value={localDoc?.titulo || ''}
                                 onChange={(e) => setLocalDoc(prev => prev ? { ...prev, titulo: e.target.value } : null)}
                                 onBlur={(e) => onUpdateService(selectedService.id, { titulo: e.target.value })}

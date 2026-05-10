@@ -187,7 +187,7 @@ export const AcquisitionsView: React.FC<AcquisitionsViewProps> = ({ projetoId })
         <div className="p-6 space-y-12 animate-in fade-in duration-500 bg-surface min-h-screen">
             {/* Título de Seção Industrial */}
             <div className="border-b-2 border-primary-tactile pb-4">
-                <h2 className="text-3xl font-serif italic text-on-surface">Acquisitions_Inventory</h2>
+                <h2 className="text-3xl font-mono font-bold text-on-surface">Acquisitions_Inventory</h2>
                 <div className="flex items-center gap-2 mt-2">
                     <span className="text-[10px] font-mono font-bold text-primary-tactile uppercase tracking-widest">// PROJECT_ID: {projetoId}</span>
                     <span className="w-1 h-1 rounded-full bg-primary-tactile"></span>
@@ -214,7 +214,7 @@ export const AcquisitionsView: React.FC<AcquisitionsViewProps> = ({ projetoId })
             {activeTab === 'needs' && (
                 <div className="bg-surface rounded-none border border-border-grid p-0 shadow-none">
                     <div className="p-6 border-b border-border-grid bg-slate-50/50">
-                        <h3 className="text-lg font-serif italic text-on-surface">Pending_Procurement</h3>
+                        <h3 className="text-lg font-mono font-bold text-on-surface">Pending_Procurement</h3>
                         <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest mt-1">LOG: PENDING_ACQUISITIONS_DETECTED_IN_ORCAMENTO</p>
                     </div>
 
@@ -284,7 +284,7 @@ export const AcquisitionsView: React.FC<AcquisitionsViewProps> = ({ projetoId })
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 border border-border-grid bg-white">
                     <div className="border-r border-border-grid">
                         <div className="bg-white p-8">
-                            <h3 className="text-xl font-serif italic text-on-surface mb-6">Source_Capture</h3>
+                            <h3 className="text-xl font-mono font-bold text-on-surface mb-6">Source_Capture</h3>
 
                             <label className={`flex flex-col items-center justify-center w-full h-80 border-2 border-dashed rounded-none cursor-pointer transition-all ${isUploading ? 'bg-slate-50 border-primary-tactile' : 'bg-slate-50 border-border-grid hover:bg-white hover:border-primary-tactile'}`}>
                                 <div className="flex flex-col items-center justify-center pt-5 pb-6">
@@ -351,7 +351,7 @@ export const AcquisitionsView: React.FC<AcquisitionsViewProps> = ({ projetoId })
                     </div>
 
                     <div className="bg-surface p-8">
-                        <h3 className="text-xl font-serif italic text-on-surface mb-6">Finalize_Record</h3>
+                        <h3 className="text-xl font-mono font-bold text-on-surface mb-6">Finalize_Record</h3>
 
                         <div className="space-y-6">
                             <div>
@@ -414,8 +414,10 @@ export const AcquisitionsView: React.FC<AcquisitionsViewProps> = ({ projetoId })
                                     </div>
                                 </div>
                             )}
-
+                            <button
+                                onClick={handleSaveTransaction}
                                 className="w-full py-4 bg-primary-tactile text-white rounded-soft-touch text-[10px] font-mono font-bold uppercase tracking-[0.25em] border border-primary-tactile hover:bg-blue-700 transition-all mt-4"
+                            >
                                 FINALIZE_SAVE_RECORD
                             </button>
                         </div>
