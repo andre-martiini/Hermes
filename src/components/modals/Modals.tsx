@@ -10,6 +10,9 @@ import {
 import { formatDate, formatDateLocalISO } from '../../../types';
 import { detectAreaFromTitle, callScrapeSipac } from '../../utils/helpers';
 import { WysiwygEditor } from '../ui/UIComponents';
+
+type ThemeMode = 'system' | 'dark' | 'light';
+
 export const HermesModal = ({ isOpen, title, message, type, onConfirm, onCancel, confirmLabel, cancelLabel }: HermesModalProps) => {
   if (!isOpen) return null;
 
@@ -51,7 +54,9 @@ export const SettingsModal = ({
   onDeleteUnidade,
   onUpdateUnidade,
   onEmitNotification,
-  initialTab
+  initialTab,
+  themeMode,
+  onThemeModeChange
 }: {
   settings: AppSettings,
   unidades: { id: string, nome: string, palavras_chave?: string[] }[],
@@ -62,6 +67,8 @@ export const SettingsModal = ({
   onUpdateUnidade: (id: string, updates: any) => void,
   onEmitNotification: (title: string, message: string, type: 'info' | 'warning' | 'success' | 'error') => void,
   initialTab?: 'notifications' | 'context' | 'sistemas' | 'google' | 'pomodoro',
+  themeMode: ThemeMode,
+  onThemeModeChange: (mode: ThemeMode) => void,
   showConfirm: (title: string, message: string, onConfirm: () => void, onCancel?: () => void) => void
 }) => {
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
@@ -147,7 +154,34 @@ export const SettingsModal = ({
         </div>
       </div>
 
-        <div className="p-8 space-y-10 overflow-y-auto custom-scrollbar flex-1">
+        <div className="p-8 space-y-10 overflow-y-auto custom-scrollbar flex-1 dark:bg-slate-950">
+          <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500">
+            <h4 className="text-[10px] font-black text-slate-900 dark:text-slate-100 uppercase tracking-[0.2em] border-b border-slate-100 dark:border-slate-800 pb-2 flex items-center gap-2">
+              <span className="w-2 h-2 bg-slate-900 dark:bg-slate-100 rounded-full"></span>
+              Aparência
+            </h4>
+            <div className="p-5 bg-slate-50 dark:bg-slate-900 rounded-none md:rounded-2xl border border-slate-100 dark:border-slate-800">
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { mode: 'light' as ThemeMode, label: 'Claro', desc: 'Interface clara' },
+                  { mode: 'dark' as ThemeMode, label: 'Escuro', desc: 'Interface escura' },
+                  { mode: 'system' as ThemeMode, label: 'Sistema', desc: 'Segue o aparelho' },
+                ].map(option => (
+                  <button
+                    key={option.mode}
+                    onClick={() => onThemeModeChange(option.mode)}
+                    className={`min-h-[72px] rounded-none border px-3 py-3 text-left transition-all font-mono ${themeMode === option.mode
+                      ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 border-slate-900 dark:border-slate-100 shadow-lg'
+                      : 'bg-white dark:bg-slate-950 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600'
+                      }`}
+                  >
+                    <p className="text-[10px] font-black uppercase tracking-widest leading-none">{option.label}</p>
+                    <p className={`text-[8px] font-bold uppercase tracking-wider mt-2 leading-tight ${themeMode === option.mode ? 'text-white/70 dark:text-slate-600' : 'text-slate-400 dark:text-slate-500'}`}>{option.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
           {activeTab === 'notifications' ? (
             <>
 

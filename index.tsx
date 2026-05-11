@@ -1892,7 +1892,7 @@ const App: React.FC = () => {
   const [isSidebarRetracted, setIsSidebarRetracted] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem('hermes-theme-mode');
-    if (saved === 'dark' || saved === 'light') return saved;
+    if (saved === 'dark' || saved === 'light' || saved === 'system') return saved;
     return 'system';
   });
   const [prefersDark, setPrefersDark] = useState(false);
@@ -1917,7 +1917,9 @@ const App: React.FC = () => {
   }, []);
   useEffect(() => {
     localStorage.setItem('hermes-theme-mode', themeMode);
-  }, [themeMode]);
+    const shouldUseDark = themeMode === 'dark' || (themeMode === 'system' && prefersDark);
+    document.documentElement.classList.toggle('dark', shouldUseDark);
+  }, [themeMode, prefersDark]);
   // Sync selectedTask with updated data from Firestore to ensure components have latest data
   useEffect(() => {
     if (selectedTask) {
@@ -4795,7 +4797,7 @@ const App: React.FC = () => {
                   </div>
                 </div>
                 {/* Opções de Sub-módulo para Mobile (Ações / PGD / Concluídas) */}
-                {(viewMode === 'gallery' || viewMode === 'licitacoes' || viewMode === 'assistencia' || viewMode === 'pgc' || viewMode === 'concluidas') && activeModule === 'acoes' && (
+                {(viewMode === 'gallery' || viewMode === 'licitacoes' || viewMode === 'assistencia' || viewMode === 'pgc' || viewMode === 'concluidas') && activeModule === 'acoes' && !(selectedTask && (taskModalMode === 'execute' || (taskModalMode === 'default' && selectedTask.area_tematica === 'CLC'))) && (
                   <div className="flex md:hidden items-center gap-1 mt-3 pt-3 border-t animate-in slide-in-from-top-2 duration-300 border-border-grid">
                     <button
                       onClick={() => {
@@ -7281,13 +7283,6 @@ const App: React.FC = () => {
                 onSave={handleUpdateTarefa}
                 unidades={unidades}
                 onClose={() => setSelectedTask(null)}
-                onNavigate={(mode) => {
-                  setSelectedTask(null);
-                  setViewMode(mode);
-                  if (mode === 'gallery') setSearchTerm('');
-                  if (mode === 'concluidas') setCompletedLimit(10);
-                }}
-                viewMode={viewMode}
                 showToast={showToast}
                 notifications={notifications}
                 isSyncing={isSyncing}
@@ -7460,6 +7455,8 @@ const App: React.FC = () => {
               settings={appSettings}
               unidades={unidades}
               initialTab={settingsTab}
+              themeMode={themeMode}
+              onThemeModeChange={setThemeMode}
               onSave={handleUpdateAppSettings}
               onClose={() => {
                 setIsSettingsModalOpen(false);

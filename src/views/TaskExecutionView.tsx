@@ -132,8 +132,6 @@ interface TaskExecutionViewProps {
   onOpenCopilotoTask?: (taskId: string) => void;
   onOpenCopilotoTool?: (tool: string, id: string) => void;
   onCreateAction: () => void;
-  onNavigate: (mode: 'gallery' | 'pgc' | 'concluidas') => void;
-  viewMode: string;
 }
 
 type MobileTab = 'mapa' | 'diario' | 'copiloto';
@@ -193,8 +191,6 @@ export const TaskExecutionView = ({
   onOpenCopilotoTask,
   onOpenCopilotoTool,
   onCreateAction,
-  onNavigate,
-  viewMode,
 }: TaskExecutionViewProps) => {
 
   // ─── Derived Data ─────────────────────────────────────────────
@@ -1504,26 +1500,6 @@ export const TaskExecutionView = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-1 mt-1 pt-3 border-t animate-in slide-in-from-top-2 duration-300 border-border-grid">
-            <button
-              onClick={() => onNavigate('gallery')}
-              className={`flex-1 py-1.5 rounded-none text-xs font-black uppercase tracking-widest transition-all font-mono ${(viewMode === 'gallery' || viewMode === 'licitacoes' || viewMode === 'assistencia') ? 'bg-slate-900 text-white' : isDark ? 'text-slate-300 hover:bg-white/10' : 'text-slate-500 hover:bg-slate-200/50'}`}
-            >
-              Ações
-            </button>
-            <button
-              onClick={() => onNavigate('pgc')}
-              className={`flex-1 py-1.5 rounded-none text-xs font-black uppercase tracking-widest transition-all font-mono ${viewMode === 'pgc' ? 'bg-slate-900 text-white' : isDark ? 'text-slate-300 hover:bg-white/10' : 'text-slate-500 hover:bg-slate-200/50'}`}
-            >
-              PGD
-            </button>
-            <button
-              onClick={() => onNavigate('concluidas')}
-              className={`flex-1 py-1.5 rounded-none text-xs font-black uppercase tracking-widest transition-all font-mono ${viewMode === 'concluidas' ? 'bg-slate-900 text-white' : isDark ? 'text-slate-300 hover:bg-white/10' : 'text-slate-500 hover:bg-slate-200/50'}`}
-            >
-              Concluídas
-            </button>
-          </div>
         </div>
 
         <div className="hidden sm:flex items-center gap-4">
