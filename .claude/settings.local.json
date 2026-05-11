@@ -21,7 +21,9 @@
       "Bash(sed -n '3954,3980p' \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\index.tsx\")",
       "Bash(sed -n '3999,4030p' \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\index.tsx\")",
       "Bash(Get-ChildItem -Path \"src\", \"src/components\" -Recurse -Filter \"*.tsx\")",
-      "Bash(Select-Object -First 30)"
+      "Bash(Select-Object -First 30)",
+      "Bash(findstr /s \"weights\\\\|habits\\\\|exerciseLogs\\\\|health\" *.ts *.tsx src/**/*.ts src/**/*.tsx)",
+      "Bash(findstr \"collection\\\\|doc\\(\")"
     ]
   }
 }

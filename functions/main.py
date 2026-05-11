@@ -11850,3 +11850,107 @@ SNAPSHOT:
             code=https_fn.FunctionsErrorCode.INTERNAL,
             message="Erro ao gerar resumo financeiro."
         )
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=60)
+def gerarResumoSaude(req: https_fn.CallableRequest):
+    """
+    Gera um diagnóstico estruturado de saúde geral a partir de um snapshot compacto.
+    Chamado apenas quando os dados de saúde mudam (fingerprint diferente).
+    """
+    from google import genai
+    from google.genai import types
+
+    data = req.data or {}
+    snapshot = data.get('snapshot')
+
+    if not snapshot or not isinstance(snapshot, dict):
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="snapshot é obrigatório."
+        )
+
+    api_key = get_gemini_api_key()
+    if not api_key:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+            message="Chave Gemini não configurada."
+        )
+
+    import json
+    import re
+    snapshot_text = json.dumps(snapshot, ensure_ascii=False, indent=2)
+
+    prompt = f"""Você é um coach de saúde pessoal e analista de bem-estar. Analise o snapshot de saúde abaixo e gere um diagnóstico em português.
+
+O snapshot contém dados reais do usuário: biometria (peso e meta), hábitos diários (taxa de adesão por hábito nos últimos 7 e 30 dias, streak), atividade física (média de passos, distância, calorias, dias com meta atingida), sono (média de horas, sono profundo, dias abaixo de 7h) e dor (escala 0-10 matinal/noturna, crises recentes).
+
+Regras obrigatórias:
+- Responda somente JSON válido, sem markdown, sem títulos externos e sem emojis.
+- Não crie tarefas, registros ou qualquer ação dentro do sistema.
+- O campo "actionProposal" deve ser uma proposta textual concreta e específica para o usuário avaliar esta semana.
+- Seja específico com os números mais relevantes do snapshot.
+- Se algum dado estiver ausente (null), ignore essa dimensão na análise.
+- Priorize as dimensões com dados mais completos.
+
+Formato exato:
+{{
+  "status": "critical" | "attention" | "stable" | "strong",
+  "score": 0,
+  "title": "frase curta com o diagnóstico central",
+  "summary": "síntese em 1 ou 2 frases, com números reais do snapshot",
+  "mainRisk": "principal ponto de atenção com números específicos",
+  "positivePoint": "ponto positivo real do período, ou cautela se não houver",
+  "actionProposal": "proposta prática e específica para esta semana, sem executar nada"
+}}
+
+Critérios de status:
+- "critical": peso muito acima da meta E hábitos ruins E sono deteriorado E dor elevada. Ou crise de dor recente com outros indicadores negativos.
+- "attention": desequilíbrio em 2+ dimensões (ex: baixa adesão a hábitos, sono abaixo de 6h na média, peso crescendo consistentemente).
+- "stable": maioria das dimensões controladas, sem deterioração clara, adesão razoável a hábitos.
+- "strong": boa adesão a hábitos (>70% em 30d), peso próximo ou abaixo da meta, sono adequado (>7h média), atividade física regular, dor baixa ou ausente.
+
+SNAPSHOT:
+{snapshot_text}"""
+
+    try:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-3.1-flash-lite-preview",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.35,
+                max_output_tokens=320
+            )
+        )
+        raw_text = (response.text or "").strip()
+        clean_text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text, flags=re.IGNORECASE).strip()
+        analysis = json.loads(clean_text)
+
+        allowed_status = {"critical", "attention", "stable", "strong"}
+        status = analysis.get("status")
+        if status not in allowed_status:
+            status = "attention"
+
+        score = analysis.get("score")
+        try:
+            score = max(0, min(100, int(score)))
+        except Exception:
+            score = None
+
+        normalized = {
+            "status": status,
+            "score": score,
+            "title": str(analysis.get("title") or "Diagnóstico de saúde").strip(),
+            "summary": str(analysis.get("summary") or "").strip(),
+            "mainRisk": str(analysis.get("mainRisk") or "").strip(),
+            "positivePoint": str(analysis.get("positivePoint") or "").strip(),
+            "actionProposal": str(analysis.get("actionProposal") or "").strip(),
+        }
+        return {"analysis": normalized, "summary": normalized["summary"]}
+    except Exception as e:
+        print(f"Erro ao gerar resumo de saúde: {e}")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message="Erro ao gerar resumo de saúde."
+        )

@@ -5,6 +5,7 @@ import {
     HealthExam, PoolItem, HealthTelegramReminder
 } from './types';
 import { GoogleHealthService } from './GoogleHealthService';
+import { HealthSummaryCard } from './src/components/HealthSummaryCard';
 
 interface HealthViewProps {
     weights: HealthWeight[];
@@ -281,6 +282,15 @@ const HealthView: React.FC<HealthViewProps> = ({
 
             {/* 3. MAIN GRID CONTENT */}
             <div className="p-6 md:p-10">
+                {/* HEALTH SUMMARY AI CARD */}
+                <div className="mb-8">
+                    <HealthSummaryCard
+                        weights={weights}
+                        dailyHabits={dailyHabits}
+                        exerciseLogs={exerciseLogs}
+                        settings={settings}
+                    />
+                </div>
                 {activeTab === 'telemetry' ? (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
                         
