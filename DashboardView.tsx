@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
     Tarefa, FinanceTransaction, FinanceSettings, FixedBill, IncomeEntry,
-    HealthWeight, DailyHabits, HealthSettings, WorkItem, Sistema
+    HealthWeight, DailyHabits, HealthSettings, WorkItem, Sistema, ExerciseLog
 } from './types';
 
 interface DashboardViewProps {
@@ -14,6 +14,7 @@ interface DashboardViewProps {
     healthWeights: HealthWeight[];
     healthDailyHabits: DailyHabits[];
     healthSettings: HealthSettings;
+    exerciseLogs: ExerciseLog[];
     unidades: { id: string, nome: string }[];
     sistemasDetalhes: Sistema[];
     workItems: WorkItem[];
@@ -110,31 +111,57 @@ const BarChart = ({ data, color, isDark = false, maxHeight = 65 }: { data: numbe
     );
 };
 
-const SystemsBarChart = ({ data, isDark = false }: { data: [string, number][], isDark?: boolean }) => {
-    const max = Math.max(...data.map(d => d[1]), 1);
+const SystemsHeatmap = ({ data, isDark = false }: { data: {id: string, name: string, count: number, lastSync?: string}[], isDark?: boolean }) => {
+    const max = Math.max(...data.map(d => d.count), 1);
+    
+    const getInitials = (name: string) => {
+        if (!name) return '?';
+        const cleanName = name.replace(/^SISTEMA:?\s*/i, '').replace(/[–—\-]/g, ' ');
+        const words = cleanName.split(/\s+/).filter(w => w.length > 0 && !['DE', 'DO', 'DA', 'DOS', 'DAS', 'COM', 'EM', 'PARA'].includes(w.toUpperCase()));
+        
+        const acronym = words.find(w => w.length >= 2 && w === w.toUpperCase() && !/^\d+$/.test(w));
+        if (acronym) return acronym.slice(0, 3);
+
+        if (words.length === 0) return '?';
+        if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+        return words.map(w => w[0]).join('').toUpperCase().slice(0, 3);
+    };
+
     return (
-        <div className="space-y-1 md:space-y-2">
-            {data.map((item, i) => (
-                <div key={i} className="space-y-0.5 md:space-y-1">
-                    <div className={`flex justify-between text-[8px] md:text-[10px] font-black uppercase tracking-widest font-mono ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                        <span className="truncate max-w-[150px] md:max-w-[200px]">{item[0]}</span>
-                        <span className={`${isDark ? 'text-white' : 'text-on-surface'}`}>{item[1]} ajustes</span>
+        <div className="flex flex-wrap gap-2 md:gap-3">
+            {data.map((item, i) => {
+                const intensity = item.count === 0 ? 0 : Math.min(Math.max(Math.ceil((item.count / max) * 5), 1), 5);
+                const bgClasses = [
+                    isDark ? 'bg-violet-950/40 text-violet-300/40' : 'bg-violet-200/40 text-violet-900/30', // 0
+                    isDark ? 'bg-violet-800 text-violet-100' : 'bg-violet-300 text-violet-900', // 1
+                    isDark ? 'bg-violet-700 text-white' : 'bg-violet-500 text-white', // 2
+                    isDark ? 'bg-violet-600 text-white' : 'bg-violet-700 text-white', // 3
+                    isDark ? 'bg-violet-500 text-white' : 'bg-violet-800 text-white', // 4
+                    isDark ? 'bg-violet-400 text-white' : 'bg-violet-950 text-white', // 5
+                ];
+
+                return (
+                    <div 
+                        key={item.id}
+                        title={`${item.name || 'Sistema'}${item.lastSync ? ` (Sinc: ${new Date(item.lastSync).toLocaleDateString('pt-BR')})` : ''}: ${item.count} ações`}
+                        className={`w-14 h-14 md:w-20 md:h-20 flex flex-col items-center justify-center transition-all hover:scale-105 cursor-help shadow-lg ${bgClasses[intensity]}`}
+                    >
+                        <span className="text-xs md:text-lg font-black font-mono leading-none">
+                            {getInitials(item.name)}
+                        </span>
+                        <span className={`text-[8px] md:text-[10px] font-black font-lcd mt-1 ${intensity > 2 ? 'opacity-70' : 'opacity-40'}`}>
+                            {item.count}
+                        </span>
                     </div>
-                    <div className={`h-1.5 md:h-2.5 rounded-none overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-lcd-bg border border-border-grid'}`}>
-                        <div
-                            className="h-full bg-accent-tactile transition-all duration-1000"
-                            style={{ width: `${(item[1] / max) * 100}%` }}
-                        />
-                    </div>
-                </div>
-            ))}
+                );
+            })}
         </div>
     );
 };
 
 const HiddenMoney = ({ className = "", compact = false }: { className?: string, compact?: boolean }) => (
     <span className={`inline-block font-black tracking-normal select-none font-lcd ${className}`} aria-label="valor oculto">
-        R$ {compact ? '••••' : '••••••'}
+        <span className="font-mono">R$</span> {compact ? '••••' : '••••••'}
     </span>
 );
 
@@ -171,6 +198,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     healthWeights = [],
     healthDailyHabits = [],
     healthSettings = {} as HealthSettings,
+    exerciseLogs = [] as ExerciseLog[],
     unidades = [],
     sistemasDetalhes = [],
     workItems = [],
@@ -331,6 +359,23 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         return streak;
     }, [healthDailyHabits]);
 
+    const last7Habits = useMemo(() => {
+        const today = new Date();
+        return Array.from({ length: 7 }, (_, i) => {
+            const d = new Date(today);
+            d.setDate(today.getDate() - (6 - i));
+            const key = d.toISOString().slice(0, 10);
+            const record = healthDailyHabits.find(h => h.id === key);
+            const done = record ? [record.noSugar, record.noAlcohol, record.noSnacks, record.workout, record.eatUntil18, record.eatSlowly].filter(Boolean).length : 0;
+            return { label: String(d.getDate()).padStart(2, '0'), done, total: 6, isToday: i === 6 };
+        });
+    }, [healthDailyHabits]);
+
+    const todayTelemetry = useMemo(() => {
+        const key = new Date().toISOString().slice(0, 10);
+        return exerciseLogs.find(l => l.id === key) || null;
+    }, [exerciseLogs]);
+
     // --- SYSTEMS LOGIC ---
     const systemsByPhase = useMemo(() => {
         const phases: Record<string, number> = { ideia: 0, prototipacao: 0, desenvolvimento: 0, testes: 0, producao: 0 };
@@ -339,14 +384,16 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     }, [sistemasDetalhes]);
 
     const systemsByAdjustments = useMemo(() => {
-        const counts: Record<string, number> = {};
-        workItems.filter(w => !w.concluido).forEach(w => {
-            const unit = unidades.find(u => u.id === w.sistema_id);
-            const name = unit ? unit.nome.replace('SISTEMA:', '').trim() : 'Geral';
-            counts[name] = (counts[name] || 0) + 1;
-        });
-        return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
-    }, [workItems, unidades]);
+        return sistemasDetalhes.map(sys => {
+            const activeWorkItems = workItems.filter(w => w.sistema_id === sys.id && !w.concluido);
+            return {
+                id: sys.id,
+                name: sys.nome || 'Sistema',
+                count: activeWorkItems.length,
+                lastSync: sys.github_rag_synced_at
+            };
+        }).sort((a, b) => b.count - a.count);
+    }, [sistemasDetalhes, workItems]);
 
     return (
         <div className="animate-in fade-in duration-700 flex flex-col h-full lg:h-[calc(100vh-5rem)] p-1 md:p-2 lg:p-1 w-full max-w-[1600px] mx-auto overflow-hidden">
@@ -422,13 +469,13 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                             <div>
                                 <p className="text-[10px] font-black uppercase tracking-[0.2em] font-mono text-emerald-950/60">Consumo Mensal (Dias Ativos)</p>
                                 <div className="text-xl md:text-2xl font-black font-lcd text-emerald-950 mt-1">
-                                    {isFinanceVisible ? `R$ ${currentMonthTotalSpent.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}` : <HiddenMoney compact />}
+                                    {isFinanceVisible ? <><span className="font-mono">R$</span> {currentMonthTotalSpent.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}</> : <HiddenMoney compact />}
                                 </div>
                             </div>
                             <div className="text-right">
                                 <p className="text-[8px] font-black uppercase tracking-[0.2em] font-mono text-emerald-950/60">Disponível</p>
                                 <div className={`text-sm md:text-base font-black font-lcd ${availableBalance < 0 ? 'text-red-900' : 'text-emerald-950/80'}`}>
-                                    {isFinanceVisible ? `R$ ${availableBalance.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}` : '••••'}
+                                    {isFinanceVisible ? <><span className="font-mono">R$</span> {availableBalance.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}</> : '••••'}
                                 </div>
                             </div>
                         </div>
@@ -470,29 +517,32 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                 </DashboardCard>
 
                 {/* CARD: SAÚDE */}
-                <DashboardCard title="Saúde" iconColor="bg-rose-500" onRedirect={() => onNavigate('saude')} isDark={isDark}>
-                    <div className="space-y-4">
-                        <div className="flex justify-between items-end gap-2">
-                            <div className={`p-3 rounded-none flex-1 border-t border-black/20 border-b border-white/50 ${isDark ? 'bg-slate-900' : 'bg-lcd-bg shadow-lcd-panel'}`}>
-                                <p className="text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-1 font-mono text-slate-600">Peso Atual</p>
-                                <div className="text-2xl font-black font-lcd text-on-surface">{currentWeight.toFixed(1)} <span className="text-xs opacity-50">kg</span></div>
-                            </div>
-                            <div className={`p-3 rounded-none flex-1 border-t border-black/20 border-b border-white/50 ${isDark ? 'bg-slate-900' : 'bg-lcd-bg shadow-lcd-panel'}`}>
-                                <p className="text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-1 font-mono text-slate-600">Variação</p>
-                                <div className={`text-2xl font-black font-lcd ${weightDelta > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                                    {weightDeltaPrefix}{weightDeltaAbs.toFixed(1)} <span className="text-xs opacity-50">kg</span>
-                                </div>
-                            </div>
+                <DashboardCard title="Saúde" iconColor="bg-red-500" onRedirect={() => onNavigate('saude')} isDark={isDark}>
+                    <div className={`h-full flex flex-col gap-3 p-4 rounded-none border-4 bg-[#FF6B6B] ${isDark ? 'border-black/20 shadow-[inset_0_4px_10px_rgba(0,0,0,0.2)]' : 'border-black/10 shadow-[inset_0_4px_12px_rgba(0,0,0,0.15)]'}`}>
+                        <div className="flex items-center justify-between shrink-0">
+                            <p className="text-[10px] font-black uppercase tracking-[0.2em] font-mono text-red-950/60">Telemetria Hoje</p>
+                            <span className="text-[10px] font-black uppercase font-mono text-red-950">{habitStreak} DIAS</span>
                         </div>
-                        <div>
-                            <div className="flex justify-between items-center mb-2">
-                                <p className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest font-mono ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Ofensiva de Hábitos</p>
-                                <span className="bg-operational-orange text-white text-[9px] font-black px-2 py-0.5 rounded-none shadow-soft-touch font-mono">{habitStreak} DIAS</span>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-3 flex-1">
+                            <div className="flex flex-col justify-center">
+                                <p className="text-[8px] font-black uppercase tracking-[0.2em] font-mono text-red-950/60 mb-0.5">Peso Atual</p>
+                                <div className="text-xl md:text-2xl font-black font-lcd text-red-950 leading-none">{currentWeight > 0 ? currentWeight.toFixed(1) : '—'}<span className="text-xs text-red-950/50 ml-1">kg</span></div>
+                                <div className="text-[10px] font-black font-lcd text-red-950/70 mt-0.5">{currentWeight > 0 ? `${weightDeltaPrefix}${weightDeltaAbs.toFixed(1)} kg` : '—'}</div>
                             </div>
-                            <div className="flex gap-1">
-                                {Array.from({ length: 7 }).map((_, i) => (
-                                    <div key={i} className={`flex-1 h-8 rounded-none border border-black/5 ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`} />
-                                ))}
+                            <div className="flex flex-col justify-center">
+                                <p className="text-[8px] font-black uppercase tracking-[0.2em] font-mono text-red-950/60 mb-0.5">Passos</p>
+                                <div className="text-xl md:text-2xl font-black font-lcd text-red-950 leading-none">{todayTelemetry?.walk?.steps ? todayTelemetry.walk.steps.toLocaleString('pt-BR') : '—'}</div>
+                                <div className="text-[10px] font-black font-lcd text-red-950/70 mt-0.5">{todayTelemetry?.walk?.distance ? `${todayTelemetry.walk.distance.toFixed(1)} km` : '—'}</div>
+                            </div>
+                            <div className="flex flex-col justify-center">
+                                <p className="text-[8px] font-black uppercase tracking-[0.2em] font-mono text-red-950/60 mb-0.5">Gasto Calórico</p>
+                                <div className="text-xl md:text-2xl font-black font-lcd text-red-950 leading-none">{todayTelemetry?.calories ? Math.round(todayTelemetry.calories).toLocaleString('pt-BR') : '—'}<span className="text-xs text-red-950/50 ml-1">kcal</span></div>
+                                <div className="text-[10px] font-black font-lcd text-red-950/70 mt-0.5">{todayTelemetry?.activeMinutes ? `${todayTelemetry.activeMinutes} min ativos` : '—'}</div>
+                            </div>
+                            <div className="flex flex-col justify-center">
+                                <p className="text-[8px] font-black uppercase tracking-[0.2em] font-mono text-red-950/60 mb-0.5">Sono</p>
+                                <div className="text-xl md:text-2xl font-black font-lcd text-red-950 leading-none">{todayTelemetry?.sleep?.totalMinutes ? `${Math.floor(todayTelemetry.sleep.totalMinutes / 60)}h ${todayTelemetry.sleep.totalMinutes % 60}m` : '—'}</div>
+                                <div className="text-[10px] font-black font-lcd text-red-950/70 mt-0.5">{todayTelemetry?.sleep?.deepMinutes ? `${todayTelemetry.sleep.deepMinutes}m prof.` : '—'}</div>
                             </div>
                         </div>
                     </div>
@@ -500,18 +550,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
                 {/* CARD: SISTEMAS */}
                 <DashboardCard title="Sistemas" iconColor="bg-violet-500" onRedirect={() => onNavigate('sistemas-dev')} isDark={isDark}>
-                    <div className="space-y-4 flex flex-col h-full">
-                        <div className="flex flex-wrap gap-2">
-                            {systemsByPhase.map(([phase, count]) => (
-                                <div key={phase} className={`px-3 py-1.5 rounded-none border-2 shadow-soft-touch flex items-center gap-2 transition-all ${isDark ? 'bg-slate-900 border-white/10' : 'bg-white border-slate-900'}`}>
-                                    <span className="text-[8px] font-black uppercase tracking-widest font-mono text-slate-400">{phase}</span>
-                                    <span className="text-xs font-black font-lcd">{count}</span>
-                                </div>
-                            ))}
-                        </div>
+                    <div className={`h-full flex flex-col gap-4 p-4 rounded-none border-4 bg-[#A78BFA] ${isDark ? 'border-black/20 shadow-[inset_0_4px_10px_rgba(0,0,0,0.2)]' : 'border-black/10 shadow-[inset_0_4px_12px_rgba(0,0,0,0.15)]'}`}>
                         <div className="flex-1 overflow-y-auto pr-1">
-                            <p className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-2 font-mono ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Pendências por Sistema</p>
-                            <SystemsBarChart data={systemsByAdjustments} isDark={isDark} />
+                            <p className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest mb-4 font-mono ${isDark ? 'text-violet-200/60' : 'text-violet-950/60'}`}>Mapa de Calor Operacional</p>
+                            <SystemsHeatmap data={systemsByAdjustments} isDark={isDark} />
                         </div>
                     </div>
                 </DashboardCard>

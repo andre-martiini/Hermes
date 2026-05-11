@@ -5176,6 +5176,7 @@ const App: React.FC = () => {
                         healthWeights={healthWeights}
                         healthDailyHabits={healthDailyHabits}
                         healthSettings={healthSettings}
+                        exerciseLogs={exerciseLogs}
                         unidades={unidades}
                         sistemasDetalhes={sistemasDetalhes}
                         workItems={workItems}
