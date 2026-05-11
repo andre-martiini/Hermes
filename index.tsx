@@ -10,7 +10,8 @@ import {
   formatDate, formatDateLocalISO, Sistema, SistemaStatus, WorkItem, WorkItemPhase,
   WorkItemPriority, QualityLog, WorkItemAudit, GoogleCalendarEvent,
   PoolItem, CustomNotification, HealthExam, ConhecimentoItem, UndoAction, HermesModalProps,
-  ShoppingItem, Projeto, SlideHistoryEntry, BaseConhecimento, TipoAcao, Servico, Toast
+  ShoppingItem, Projeto, SlideHistoryEntry, BaseConhecimento, TipoAcao, Servico, Toast,
+  HealthTelegramReminder
 } from './types';
 import HealthView from './HealthView';
 import { GoogleHealthService } from './GoogleHealthService';
@@ -1174,6 +1175,7 @@ const App: React.FC = () => {
   const [healthSettings, setHealthSettings] = useState<HealthSettings>({ targetWeight: 0 });
   const [exerciseLogs, setExerciseLogs] = useState<ExerciseLog[]>([]);
   const [exerciseSettings, setExerciseSettings] = useState<ExerciseSettings>({});
+  const [healthTelegramReminders, setHealthTelegramReminders] = useState<HealthTelegramReminder[]>([]);
   // Systems State
   const [sistemasDetalhes, setSistemasDetalhes] = useState<Sistema[]>([]);
   const [workItems, setWorkItems] = useState<WorkItem[]>([]);
@@ -1486,6 +1488,9 @@ const App: React.FC = () => {
     const unsubExerciseSettings = onSnapshot(doc(db, 'health_exercise_settings', 'config'), (snap) => {
       if (snap.exists()) setExerciseSettings(snap.data() as ExerciseSettings);
     }, handleSnapshotError('health_exercise_settings/config'));
+    const unsubHealthTelegramReminders = onSnapshot(collection(db, 'health_telegram_reminders'), (snapshot) => {
+      setHealthTelegramReminders(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as HealthTelegramReminder)));
+    }, handleSnapshotError('health_telegram_reminders'));
     const unsubKnowledge = onSnapshot(collection(db, 'conhecimento'), (snapshot) => {
       setKnowledgeItems(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ConhecimentoItem)));
     }, handleSnapshotError('conhecimento'));
@@ -1518,6 +1523,7 @@ const App: React.FC = () => {
       unsubHealthSettings();
       unsubExerciseLogs();
       unsubExerciseSettings();
+      unsubHealthTelegramReminders();
       unsubKnowledge();
       unsubMasterKnowledge();
       unsubKnowledgeBases();
@@ -4011,11 +4017,27 @@ const App: React.FC = () => {
   const handleUpdateHealthHabits = async (date: string, habits: Partial<DailyHabits>) => {
     await setDoc(doc(db, 'health_daily_habits', date), habits, { merge: true });
   };
+  const handleSaveHealthTelegramReminder = async (reminder: HealthTelegramReminder) => {
+    const nowIso = new Date().toISOString();
+    const payload: HealthTelegramReminder = {
+      ...reminder,
+      telegramOnly: true,
+      created_by_uid: reminder.created_by_uid || user?.uid,
+      data_atualizacao: nowIso,
+      data_criacao: reminder.data_criacao || nowIso,
+    };
+    await setDoc(doc(db, 'health_telegram_reminders', reminder.id), payload, { merge: true });
+  };
+  const handleDeleteHealthTelegramReminder = async (id: string) => {
+    await deleteDoc(doc(db, 'health_telegram_reminders', id));
+    showToast("Lembrete removido.", "info");
+  };
   const handleSaveExerciseLog = async (date: string, data: Partial<ExerciseLog>) => {
     // Save the log
     await setDoc(doc(db, 'health_exercise_logs', date), data, { merge: true });
+    const hasExerciseData = data.pushups !== undefined || data.pullups !== undefined || data.plank !== undefined || data.bridge !== undefined || data.birdDog !== undefined || data.squats !== undefined;
     // Auto-mark workout habit only when explicit exercise (pushups/pullups) is logged
-    if (data.pushups !== undefined || data.pullups !== undefined) {
+    if (hasExerciseData) {
       await setDoc(doc(db, 'health_daily_habits', date), { workout: true }, { merge: true });
     }
     // Recalculate goals from last 5 sessions
@@ -4096,7 +4118,7 @@ const App: React.FC = () => {
       }
     }
     await setDoc(doc(db, 'health_exercise_settings', 'config'), newSettings, { merge: true });
-    showToast("Exercício registrado!", "success");
+    if (hasExerciseData) showToast("Exercício registrado!", "success");
   };
   const handleMarkNotificationRead = (id: string) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
@@ -5550,6 +5572,9 @@ const App: React.FC = () => {
                     exerciseLogs={exerciseLogs}
                     exerciseSettings={exerciseSettings}
                     onSaveExerciseLog={handleSaveExerciseLog}
+                    telegramReminders={healthTelegramReminders}
+                    onSaveTelegramReminder={handleSaveHealthTelegramReminder}
+                    onDeleteTelegramReminder={handleDeleteHealthTelegramReminder}
                     exams={exams}
                     onAddExam={async (exam, files) => {
                       let poolItems: PoolItem[] = [];

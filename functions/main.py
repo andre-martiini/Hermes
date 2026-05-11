@@ -2330,7 +2330,91 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
 
 
 
-    # 2. Lembretes de Ações (Specific Task Reminders)
+    # 2. Lembretes de saude enviados somente pelo Telegram.
+    default_health_reminders = [
+        {
+            "id": "spine_morning",
+            "title": "Rotina lombar",
+            "message": "André, hora da sua rotina lombar. Comece leve: mobilidade, respiração e sem pressa.",
+            "time": "05:00",
+            "enabled": True,
+            "daysOfWeek": [0, 1, 2, 3, 4, 5, 6],
+            "category": "spine",
+        },
+        {
+            "id": "lunch_slow",
+            "title": "Almoço com calma",
+            "message": "André, lembre de comer devagar no almoço. Ritmo baixo também é estratégia.",
+            "time": "11:45",
+            "enabled": True,
+            "daysOfWeek": [1, 2, 3, 4, 5],
+            "category": "nutrition",
+        },
+        {
+            "id": "food_window",
+            "title": "Janela alimentar",
+            "message": "André, última janela alimentar chegando. Se for comer, mantenha leve.",
+            "time": "17:30",
+            "enabled": True,
+            "daysOfWeek": [0, 1, 2, 3, 4, 5, 6],
+            "category": "nutrition",
+        },
+        {
+            "id": "pain_checkin",
+            "title": "Check-in lombar",
+            "message": "André, check-in rápido: como ficou sua lombar hoje?",
+            "time": "21:30",
+            "enabled": True,
+            "daysOfWeek": [0, 1, 2, 3, 4, 5, 6],
+            "category": "pain",
+        },
+    ]
+
+    health_reminders_by_id = {item["id"]: item for item in default_health_reminders}
+    try:
+        for reminder_doc in db.collection("health_telegram_reminders").stream():
+            data = reminder_doc.to_dict() or {}
+            data["id"] = data.get("id") or reminder_doc.id
+            health_reminders_by_id[reminder_doc.id] = data
+    except Exception as exc:
+        print(f"[HealthReminders] Falha ao carregar lembretes: {exc}")
+
+    for reminder in health_reminders_by_id.values():
+        reminder_id = str(reminder.get("id") or "").strip()
+        if not reminder_id or not reminder.get("enabled", True):
+            continue
+        if reminder.get("time") != current_time_str:
+            continue
+        days = reminder.get("daysOfWeek")
+        if isinstance(days, list) and days and js_day_of_week not in days:
+            continue
+        sent_id = f"health_telegram_{reminder_id}_{today_str}"
+        if db.collection("system_reminders").document(sent_id).get().exists:
+            continue
+
+        owner_uid = reminder.get("created_by_uid")
+        telegram_chat_id = _resolve_telegram_chat_id_for_uid(db, owner_uid) or _resolve_default_telegram_chat_id(db)
+        if telegram_chat_id:
+            title = (reminder.get("title") or "Lembrete de saúde").strip()
+            message = (reminder.get("message") or "André, lembrete de saúde configurado no Hermes.").strip()
+            keyboard = None
+            if reminder.get("category") == "pain":
+                keyboard = [
+                    [{"text": str(n), "callback_data": f"health_pain:{today_str}:{n}"} for n in range(0, 6)],
+                    [{"text": str(n), "callback_data": f"health_pain:{today_str}:{n}"} for n in range(6, 11)],
+                ]
+            sent = _send_telegram_message_raw_with_keyboard(db, telegram_chat_id, f"{title}\n\n{message}", keyboard)
+            db.collection("system_reminders").document(sent_id).set({
+                "sent_at": now.isoformat(),
+                "sent": bool(sent),
+                "type": "health_telegram",
+                "reminder_id": reminder_id,
+            })
+        else:
+            print(f"[HealthReminders] Nenhum chat_id encontrado para {reminder_id}")
+
+
+    # 3. Lembretes de Ações (Specific Task Reminders)
 
     from google.cloud.firestore import Query
 
@@ -5431,6 +5515,37 @@ def _send_telegram_message_raw(db, chat_id: str | int | None, text: str):
         return True
     except Exception as exc:
         print(f"[Telegram] Erro ao enviar lembrete: {exc}")
+        return False
+
+
+def _send_telegram_message_raw_with_keyboard(db, chat_id: str | int | None, text: str, inline_keyboard: list | None):
+    if not chat_id or not text:
+        return False
+    try:
+        import requests
+
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
+        bot_token = keys_doc.to_dict().get('telegram_bot_token') if keys_doc.exists else None
+        bot_token = bot_token or os.environ.get('TELEGRAM_BOT_TOKEN')
+        if not bot_token:
+            print("[Telegram] TELEGRAM_BOT_TOKEN nao configurado.")
+            return False
+
+        payload = {"chat_id": str(chat_id), "text": text}
+        if inline_keyboard:
+            payload["reply_markup"] = {"inline_keyboard": inline_keyboard}
+
+        resp = requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json=payload,
+            timeout=10
+        )
+        if not resp.ok:
+            print(f"[Telegram] Falha ao enviar lembrete com botoes: {resp.status_code} {resp.text[:300]}")
+            return False
+        return True
+    except Exception as exc:
+        print(f"[Telegram] Erro ao enviar lembrete com botoes: {exc}")
         return False
 
 

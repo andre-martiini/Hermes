@@ -320,6 +320,10 @@ export interface ExerciseLog {
     id: string; // date string (YYYY-MM-DD)
     pushups?: { done: number; goal: number };
     pullups?: { done: number; goal: number; phase: PullupPhase };
+    plank?: { seconds: number };
+    bridge?: { reps: number };
+    birdDog?: { reps: number };
+    squats?: { reps: number };
     walk?: { done: number; distance?: number; steps?: number }; // minutes, km, steps
     calories?: number;
     activeMinutes?: number;
@@ -331,6 +335,13 @@ export interface ExerciseLog {
         totalMinutes: number;
         deepMinutes?: number;
         remMinutes?: number;
+    };
+    pain?: {
+        morning?: number;
+        evening?: number;
+        sciatica?: boolean;
+        crisis?: boolean;
+        notes?: string;
     };
 }
 
@@ -367,6 +378,23 @@ export interface DailyHabits {
 
 export interface HealthSettings {
     targetWeight: number;
+    walkingMinimumMinutes?: number;
+    walkingIdealMinutes?: number;
+}
+
+export interface HealthTelegramReminder {
+    id: string;
+    title: string;
+    message: string;
+    time: string; // HH:mm
+    enabled: boolean;
+    daysOfWeek?: number[]; // 0-6 (Sunday-Saturday)
+    category?: 'spine' | 'walking' | 'nutrition' | 'pain' | 'custom';
+    telegramOnly?: boolean;
+    created_by_uid?: string;
+    last_sent_date?: string;
+    data_criacao?: string;
+    data_atualizacao?: string;
 }
 
 export interface HealthExam {

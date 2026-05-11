@@ -1500,7 +1500,30 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
             print(f"[TelegramCards] Falha ao resolver sistema do diagnostico: {exc}")
         return ""
 
-    if data == "exit_context":
+    if data.startswith("health_pain:"):
+        parts = data.split(":")
+        pain_date = parts[1] if len(parts) > 1 else ""
+        pain_raw = parts[2] if len(parts) > 2 else ""
+        try:
+            pain_score = max(0, min(10, int(pain_raw)))
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", pain_date):
+                raise ValueError("data inválida")
+            doc_ref = db.collection("health_exercise_logs").document(pain_date)
+            current = doc_ref.get()
+            current_pain = ((current.to_dict() or {}).get("pain") or {}) if current.exists else {}
+            current_pain["evening"] = pain_score
+            current_pain["telegram_checked_at"] = datetime.now(timezone.utc).isoformat()
+            doc_ref.set({"pain": current_pain}, merge=True)
+            _answer_callback_query(token, query_id, f"Dor registrada: {pain_score}/10")
+            response_text = f"✅ Check-in lombar registrado: <b>{pain_score}/10</b> em {pain_date}."
+            _persist_callback_turn(f"Check-in lombar: {pain_score}/10", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+        except Exception as exc:
+            print(f"[HealthCheckin] Falha ao registrar dor: {exc}")
+            _answer_callback_query(token, query_id, "Não consegui registrar.")
+            _send_telegram_message(token, chat_id, "⚠️ Não consegui registrar esse check-in lombar. Tente responder novamente.")
+
+    elif data == "exit_context":
         acao_titulo = session.get("acao_titulo") or "anterior"
         response_text = f"✅ Saindo do contexto <b>{acao_titulo}</b>. Voltando ao modo geral."
         _answer_callback_query(token, query_id, "Contexto liberado.")

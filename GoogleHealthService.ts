@@ -2,6 +2,8 @@ import { HealthWeight, ExerciseLog } from './types';
 
 const CLIENT_ID = "1003307358410-o3tbms16qbisurm47vb667plt3c27n1g.apps.googleusercontent.com";
 const TOKEN_STORAGE_KEY = 'hermes_google_health_token';
+const GOOGLE_FIT_ESTIMATED_STEPS_SOURCE = 'derived:com.google.step_count.delta:com.google.android.gms:estimated_steps';
+const PREFERRED_STEP_SOURCE_LABEL = 'health_platform';
 
 // Health Connect: sleep. Google Fit: steps, distance, calories, active minutes, weight, sleep fallback.
 const SCOPES = [
@@ -17,6 +19,13 @@ type SavedGoogleHealthToken = {
     token?: string;
     expiry?: number;
     scope?: string;
+};
+
+type StepSourceTotal = {
+    sourceId: string;
+    label: string;
+    steps: number;
+    isEstimatedSteps: boolean;
 };
 
 export class GoogleHealthService {
@@ -132,16 +141,28 @@ export class GoogleHealthService {
     }
 
     private static async fetchFitAggregate(dataTypeNames: string[], startMs: number, endMs: number) {
+        return this.fetchFitAggregateBy(
+            dataTypeNames.map(dataTypeName => ({ dataTypeName })),
+            startMs,
+            endMs
+        );
+    }
+
+    private static async fetchFitAggregateBy(
+        aggregateBy: Array<{ dataTypeName: string } | { dataSourceId: string }>,
+        startMs: number,
+        endMs: number
+    ) {
         if (!this.accessToken) await this.authorize();
 
         const body = {
-            aggregateBy: dataTypeNames.map(dataTypeName => ({ dataTypeName })),
+            aggregateBy,
             bucketByTime: { durationMillis: endMs - startMs },
             startTimeMillis: startMs,
             endTimeMillis: endMs,
         };
 
-        console.log('[GoogleFit] Fetching:', dataTypeNames);
+        console.log('[GoogleFit] Fetching:', aggregateBy);
         const response = await fetch('https://fitness.googleapis.com/fitness/v1/users/me/dataset:aggregate', {
             method: 'POST',
             headers: {
@@ -161,6 +182,123 @@ export class GoogleHealthService {
         const data = await response.json();
         console.log('[GoogleFit] Received:', data);
         return data;
+    }
+
+    private static fetchFitEstimatedSteps(startMs: number, endMs: number) {
+        return this.fetchFitAggregateBy(
+            [{ dataSourceId: GOOGLE_FIT_ESTIMATED_STEPS_SOURCE }],
+            startMs,
+            endMs
+        );
+    }
+
+    private static async fetchFitDataSources(dataTypeName: string) {
+        if (!this.accessToken) await this.authorize();
+
+        const params = new URLSearchParams({ dataTypeName });
+        const response = await fetch(`https://fitness.googleapis.com/fitness/v1/users/me/dataSources?${params.toString()}`, {
+            headers: {
+                Authorization: `Bearer ${this.accessToken}`,
+                Accept: 'application/json',
+            },
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            console.error('[GoogleFit] Data sources error:', response.status, err);
+            return [];
+        }
+
+        const data = await response.json();
+        return data?.dataSource ?? [];
+    }
+
+    private static getDataSourceLabel(source: any) {
+        const app = source.application?.name || source.application?.packageName;
+        const device = [source.device?.manufacturer, source.device?.model].filter(Boolean).join(' ');
+        return source.dataStreamName || device || app || source.dataStreamId || 'Unknown source';
+    }
+
+    private static async fetchStepSourceTotals(startMs: number, endMs: number) {
+        const visibleSources = await this.fetchFitDataSources('com.google.step_count.delta');
+        const sourceIds = [
+            GOOGLE_FIT_ESTIMATED_STEPS_SOURCE,
+            ...visibleSources.map((source: any) => source.dataStreamId).filter(Boolean),
+        ].filter((sourceId, index, allSourceIds) => allSourceIds.indexOf(sourceId) === index);
+
+        const sourceLookup = new Map(visibleSources.map((source: any) => [source.dataStreamId, source]));
+        const totals = await Promise.all(sourceIds.slice(0, 20).map(async (sourceId) => {
+            const data = await this.fetchFitAggregateBy([{ dataSourceId: sourceId }], startMs, endMs);
+            return {
+                sourceId,
+                label: sourceId === GOOGLE_FIT_ESTIMATED_STEPS_SOURCE
+                    ? 'Google Fit estimated_steps'
+                    : this.getDataSourceLabel(sourceLookup.get(sourceId)),
+                steps: this.getAggregateValue(data, 'step_count', 'intVal'),
+                isEstimatedSteps: sourceId === GOOGLE_FIT_ESTIMATED_STEPS_SOURCE,
+            };
+        }));
+
+        const relevantTotals = totals.filter(total => total.steps > 0);
+        console.table(relevantTotals.map(total => ({
+            steps: total.steps,
+            source: total.label,
+            estimated: total.isEstimatedSteps,
+            sourceId: total.sourceId,
+        })));
+        return relevantTotals;
+    }
+
+    private static chooseStepCount(sourceTotals: StepSourceTotal[], estimatedSteps: number) {
+        const preferredSource = sourceTotals.find(total =>
+            !total.isEstimatedSteps &&
+            total.steps > 0 &&
+            total.label.toLowerCase() === PREFERRED_STEP_SOURCE_LABEL
+        );
+        if (preferredSource) {
+            return {
+                steps: preferredSource.steps,
+                sourceLabel: preferredSource.label,
+            };
+        }
+
+        const individualSources = sourceTotals.filter(total => !total.isEstimatedSteps && total.steps > 0);
+        if (!individualSources.length) {
+            return {
+                steps: estimatedSteps,
+                sourceLabel: 'Google Fit estimated_steps',
+            };
+        }
+
+        const largestIndividual = individualSources.reduce((best, current) =>
+            current.steps > best.steps ? current : best
+        );
+        const looksDuplicated = estimatedSteps > 0 && largestIndividual.steps > 0 && estimatedSteps >= largestIndividual.steps * 1.6;
+
+        if (looksDuplicated) {
+            console.warn('[GoogleFit] estimated_steps looks duplicated; using largest individual step source instead.', {
+                estimatedSteps,
+                selectedSource: largestIndividual.label,
+                selectedSteps: largestIndividual.steps,
+            });
+            return {
+                steps: largestIndividual.steps,
+                sourceLabel: largestIndividual.label,
+            };
+        }
+
+        return {
+            steps: estimatedSteps || largestIndividual.steps,
+            sourceLabel: estimatedSteps ? 'Google Fit estimated_steps' : largestIndividual.label,
+        };
+    }
+
+    private static getAggregateValue(data: any, dataTypeName: string, valueType: 'intVal' | 'fpVal') {
+        const dataset = (data?.bucket?.[0]?.dataset ?? []).find((ds: any) =>
+            String(ds.dataSourceId ?? '').includes(dataTypeName)
+        );
+        const points: any[] = dataset?.point ?? [];
+        return points.reduce((acc, point) => acc + (point.value?.[0]?.[valueType] ?? 0), 0);
     }
 
     private static async fetchFitSleepSessions(startTime: Date, endTime: Date) {
@@ -241,12 +379,14 @@ export class GoogleHealthService {
         const end = new Date(date);
         end.setHours(23, 59, 59, 999);
 
-        const [fitData, healthSleepData, fitSleepData, fitSleepSessionData] = await Promise.all([
+        const [fitData, estimatedStepsData, stepSourceTotals, healthSleepData, fitSleepData, fitSleepSessionData] = await Promise.all([
             this.fetchFitAggregate(
-                ['com.google.step_count.delta', 'com.google.distance.delta', 'com.google.calories.expended', 'com.google.active_minutes'],
+                ['com.google.distance.delta', 'com.google.calories.expended', 'com.google.active_minutes'],
                 start.getTime(),
                 end.getTime()
             ),
+            this.fetchFitEstimatedSteps(start.getTime(), end.getTime()),
+            this.fetchStepSourceTotals(start.getTime(), end.getTime()),
             this.fetchHealthV4('sleep', start, end),
             this.fetchFitAggregate(
                 ['com.google.sleep.segment'],
@@ -258,22 +398,13 @@ export class GoogleHealthService {
 
         const summary: Partial<ExerciseLog> = {};
 
-        const datasets: any[] = fitData?.bucket?.[0]?.dataset ?? [];
-        let steps = 0, distanceM = 0, calories = 0, activeMin = 0;
-
-        for (const ds of datasets) {
-            const points: any[] = ds.point ?? [];
-            const id: string = ds.dataSourceId ?? '';
-            if (id.includes('step_count')) {
-                steps = points.reduce((acc, p) => acc + (p.value?.[0]?.intVal ?? 0), 0);
-            } else if (id.includes('distance')) {
-                distanceM = points.reduce((acc, p) => acc + (p.value?.[0]?.fpVal ?? 0), 0);
-            } else if (id.includes('calories')) {
-                calories = points.reduce((acc, p) => acc + (p.value?.[0]?.fpVal ?? 0), 0);
-            } else if (id.includes('active_minutes')) {
-                activeMin = points.reduce((acc, p) => acc + (p.value?.[0]?.intVal ?? 0), 0);
-            }
-        }
+        const estimatedSteps = this.getAggregateValue(estimatedStepsData, 'step_count', 'intVal');
+        const selectedSteps = this.chooseStepCount(stepSourceTotals, estimatedSteps);
+        const steps = selectedSteps.steps;
+        const distanceM = this.getAggregateValue(fitData, 'distance', 'fpVal');
+        const calories = this.getAggregateValue(fitData, 'calories', 'fpVal');
+        const activeMillis = this.getAggregateValue(fitData, 'active_minutes', 'intVal');
+        const activeMin = Math.round(activeMillis / 60000);
 
         if (steps > 0 || distanceM > 0 || activeMin > 0) {
             summary.walk = {
@@ -283,6 +414,15 @@ export class GoogleHealthService {
             };
         }
         if (calories > 0) summary.calories = Math.round(calories);
+
+        console.log('[GoogleFit] Daily telemetry parsed:', {
+            date: date.toLocaleDateString(),
+            steps,
+            distanceKm: Number((distanceM / 1000).toFixed(2)),
+            activeMinutes: activeMin,
+            totalCaloriesIncludingBmr: Math.round(calories),
+            stepSource: selectedSteps.sourceLabel,
+        });
 
         if (healthSleepData?.dataPoints && healthSleepData.dataPoints.length > 0) {
             let totalSleepSec = 0;
