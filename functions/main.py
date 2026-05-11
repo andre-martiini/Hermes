@@ -224,7 +224,7 @@ def _perf_log(prefix: str, perf_state: dict, extra: dict | None = None):
 
 GOOGLE_BASE_SCOPES = [
     'https://www.googleapis.com/auth/tasks',
-    'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/gmail.modify',
     'https://www.googleapis.com/auth/calendar',
     'https://www.googleapis.com/auth/drive',
 ]
@@ -270,6 +270,19 @@ def get_google_creds(scopes=None):
 
     creds_data = creds_doc.to_dict()
     stored_scopes = creds_data.get('scopes') or GOOGLE_BASE_SCOPES
+    required_scopes = scopes or GOOGLE_BASE_SCOPES
+    missing_scopes = sorted(set(required_scopes) - set(stored_scopes))
+    if missing_scopes:
+        db.collection('system').document('google_credentials').set({
+            'auth_status': 'reauth_required',
+            'auth_error': 'missing_scopes',
+            'auth_error_message': GOOGLE_REAUTH_MESSAGE,
+            'missing_scopes': missing_scopes,
+            'updated_at': firestore.SERVER_TIMESTAMP
+        }, merge=True)
+        raise GoogleAuthRevokedError(
+            f"{GOOGLE_REAUTH_MESSAGE} Escopos ausentes: {', '.join(missing_scopes)}"
+        )
 
     creds = Credentials(
         token=creds_data.get('token'),
@@ -319,6 +332,25 @@ def get_gmail_service():
     from googleapiclient.discovery import build
 
     return build('gmail', 'v1', credentials=get_google_creds())
+
+
+def archive_gmail_message(service, msg_id, sync_ref=None, logs=None, reason="financeiro"):
+    """Remove o label INBOX depois que o e-mail financeiro foi absorvido pelo Hermes."""
+    try:
+        service.users().messages().modify(
+            userId='me',
+            id=msg_id,
+            body={'removeLabelIds': ['INBOX']}
+        ).execute()
+        if sync_ref is not None and logs is not None:
+            log_to_firestore(sync_ref, logs, f"[GMAIL] E-mail financeiro arquivado ({reason}): {msg_id}")
+        return True
+    except Exception as e:
+        if sync_ref is not None and logs is not None:
+            log_to_firestore(sync_ref, logs, f"[GMAIL] Aviso: nao foi possivel arquivar {msg_id}: {e}")
+        else:
+            print(f"[GMAIL] Aviso: nao foi possivel arquivar {msg_id}: {e}")
+        return False
 
 
 
@@ -1417,7 +1449,9 @@ def sync_pix_emails(service, sync_ref, logs):
 
             msg_id = msg['id']
 
-            if msg_id in processed_ids or msg_id in existing_google_ids: continue
+            if msg_id in processed_ids or msg_id in existing_google_ids:
+                archive_gmail_message(service, msg_id, sync_ref, logs, "pix-ja-processado")
+                continue
 
             
 
@@ -1508,9 +1542,7 @@ def sync_pix_emails(service, sync_ref, logs):
                 if is_duplicate:
 
                     new_processed_ids.append(msg_id)
-
-                    continue
-                    new_processed_ids.append(msg_id)
+                    archive_gmail_message(service, msg_id, sync_ref, logs, "pix-duplicado")
                     continue
 
                 # Salva no banco
@@ -1544,6 +1576,7 @@ def sync_pix_emails(service, sync_ref, logs):
                 
                 new_processed_ids.append(msg_id)
                 log_to_firestore(sync_ref, logs, f"[PIX] Processado: {description} (R$ {amount:.2f})")
+                archive_gmail_message(service, msg_id, sync_ref, logs, "pix-lancado")
 
 
         if new_processed_ids:
@@ -1590,6 +1623,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
         
         # Cache de boletos existentes para permitir duplicatas ou vinculação
         existing_bills_cache = []
+        existing_bill_google_ids = set()
         for b in db.collection('fixed_bills').stream():
             d = b.to_dict()
             existing_bills_cache.append({
@@ -1601,6 +1635,8 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 'isPaid': d.get('isPaid', False),
                 'rubricId': d.get('rubricId')
             })
+            if d.get('google_message_id'):
+                existing_bill_google_ids.add(d['google_message_id'])
 
         # Cache de rubricas para vinculação automática
         rubrics_cache = []
@@ -1617,6 +1653,9 @@ def sync_boletos_gmail(service, sync_ref, logs):
 
         for m_info in messages:
             msg_id = m_info['id']
+            if msg_id in existing_bill_google_ids:
+                archive_gmail_message(service, msg_id, sync_ref, logs, "boleto-ja-lancado")
+                continue
             if msg_id in processed_ids: continue
             
             msg = service.users().messages().get(userId='me', id=msg_id).execute()
@@ -1717,6 +1756,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
 
                 if is_exact_dup:
                     new_processed_ids.append(msg_id)
+                    archive_gmail_message(service, msg_id, sync_ref, logs, "boleto-duplicado")
                     continue
                 
                 if found_existing_id:
@@ -1741,6 +1781,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
                     db.collection('fixed_bills').document(found_existing_id).update(update_data)
                     log_to_firestore(sync_ref, logs, f"[BOLETO] Vinculado ao card '{data['description']}': R$ {data['amount']}")
                     processed_count += 1
+                    archive_gmail_message(service, msg_id, sync_ref, logs, "boleto-vinculado")
                 else:
                     # BUSCA EM RUBRICAS (Fallback se a IA não retornou rubric_id)
                     matched_rubric_id = rubric_id_from_ai
@@ -1768,6 +1809,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
                     })
                     log_to_firestore(sync_ref, logs, f"[BOLETO] Importado (Novo Card): {data['description']} (R$ {data['amount']})")
                     processed_count += 1
+                    archive_gmail_message(service, msg_id, sync_ref, logs, "boleto-lancado")
                 
                 new_processed_ids.append(msg_id)
 

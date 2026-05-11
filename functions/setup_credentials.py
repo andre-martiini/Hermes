@@ -23,7 +23,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 
 SCOPES = [
     "https://www.googleapis.com/auth/tasks",
-    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/forms.body",
@@ -56,6 +56,10 @@ def _authenticate(credentials_path, token_path, force):
     creds = None
     if os.path.exists(token_path) and not force:
         creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+        if not creds.has_scopes(SCOPES):
+            print("Token existente nao tem todos os escopos necessarios. Sera feita uma nova autenticacao.")
+            _backup_and_remove(token_path)
+            creds = None
 
     if creds and creds.valid:
         return creds

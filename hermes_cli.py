@@ -20,10 +20,10 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google.auth.exceptions import RefreshError
 
-# Escopos para Google APIs (Tasks e Gmail Readonly)
+# Escopos para Google APIs
 SCOPES = [
     'https://www.googleapis.com/auth/tasks',
-    'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/gmail.modify',
     'https://www.googleapis.com/auth/calendar',
     'https://www.googleapis.com/auth/drive',
     'https://www.googleapis.com/auth/forms.body'
@@ -73,6 +73,10 @@ def get_google_creds():
     creds = None
     if os.path.exists('token.json'):
         creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+        if not creds.has_scopes(SCOPES):
+            print("Token existente nao tem todos os escopos necessarios. Iniciando nova autenticacao...")
+            os.remove('token.json')
+            creds = None
     
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
@@ -111,6 +115,23 @@ def get_tasks_service():
 
 def get_gmail_service():
     return build('gmail', 'v1', credentials=get_google_creds())
+
+def archive_gmail_message(service, msg_id, log=None, reason="financeiro"):
+    try:
+        service.users().messages().modify(
+            userId='me',
+            id=msg_id,
+            body={'removeLabelIds': ['INBOX']}
+        ).execute()
+        if log:
+            log(f"[GMAIL] E-mail financeiro arquivado ({reason}): {msg_id}")
+        return True
+    except Exception as e:
+        if log:
+            log(f"[GMAIL] Aviso: nao foi possivel arquivar {msg_id}: {e}")
+        else:
+            print(f"[GMAIL] Aviso: nao foi possivel arquivar {msg_id}: {e}")
+        return False
 
 def get_calendar_service():
     return build('calendar', 'v3', credentials=get_google_creds())
@@ -609,7 +630,9 @@ def sync_pix_emails(db, log_list=None, sync_ref=None):
 
         for msg in messages:
             msg_id = msg['id']
-            if msg_id in processed_ids or msg_id in existing_google_ids: continue
+            if msg_id in processed_ids or msg_id in existing_google_ids:
+                archive_gmail_message(service, msg_id, log, "pix-ja-processado")
+                continue
             
             details = service.users().messages().get(userId='me', id=msg_id).execute()
             internal_date_ms = int(details.get('internalDate', time.time() * 1000))
@@ -633,6 +656,7 @@ def sync_pix_emails(db, log_list=None, sync_ref=None):
                 if is_income:
                     if record in existing_income:
                         new_processed_ids.append(msg_id)
+                        archive_gmail_message(service, msg_id, log, "pix-duplicado")
                         continue
                     db.collection('finance_income').add({
                         'description': description, 'amount': amount, 'day': dt.day,
@@ -642,6 +666,7 @@ def sync_pix_emails(db, log_list=None, sync_ref=None):
                 else:
                     if record in existing_transactions:
                         new_processed_ids.append(msg_id)
+                        archive_gmail_message(service, msg_id, log, "pix-duplicado")
                         continue
                     db.collection('finance_transactions').add({
                         'description': description, 'amount': amount, 'date': iso_date,
@@ -650,6 +675,7 @@ def sync_pix_emails(db, log_list=None, sync_ref=None):
                     
                 new_processed_ids.append(msg_id)
                 log(f"[PIX] Processado: {description} (R$ {amount:.2f})")
+                archive_gmail_message(service, msg_id, log, "pix-lancado")
         
         if new_processed_ids:
             updated_ids = list(set(processed_ids + new_processed_ids))
