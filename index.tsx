@@ -1234,6 +1234,10 @@ const App: React.FC = () => {
   const [convertingIdea, setConvertingIdea] = useState<BrainstormIdea | null>(null);
   const [isSystemSelectorOpen, setIsSystemSelectorOpen] = useState(false);
   const [taskInitialData, setTaskInitialData] = useState<Partial<Tarefa> | null>(null);
+
+  const handleSnapshotError = (label: string) => (err: any) => {
+    console.error(`[Firestore] Listener falhou (${label}):`, err);
+  };
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -1419,83 +1423,83 @@ const App: React.FC = () => {
     if (!user) return;
     const unsubSistemas = onSnapshot(collection(db, 'sistemas_detalhes'), (snapshot) => {
       setSistemasDetalhes(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Sistema)));
-    });
+    }, handleSnapshotError('sistemas_detalhes'));
     const unsubGoogleCalendar = onSnapshot(collection(db, 'google_calendar_events'), (snapshot) => {
       setGoogleCalendarEvents(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as GoogleCalendarEvent)));
-    });
+    }, handleSnapshotError('google_calendar_events'));
     const unsubWorkItems = onSnapshot(collection(db, 'sistemas_work_items'), (snapshot) => {
       setWorkItems(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as WorkItem)));
-    });
+    }, handleSnapshotError('sistemas_work_items'));
     const unsubTransactions = onSnapshot(collection(db, 'finance_transactions'), (snapshot) => {
       setFinanceTransactions(snapshot.docs
         .map(d => ({ id: d.id, ...d.data() } as FinanceTransaction))
         .filter(t => t.status !== 'deleted')
       );
-    });
+    }, handleSnapshotError('finance_transactions'));
     const unsubGoals = onSnapshot(collection(db, 'finance_goals'), (snapshot) => {
       setFinanceGoals(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as FinanceGoal)));
-    });
+    }, handleSnapshotError('finance_goals'));
     const unsubSettings = onSnapshot(doc(db, 'finance_settings', 'config'), (doc) => {
       if (doc.exists()) {
         setFinanceSettings(doc.data() as FinanceSettings);
       }
-    });
+    }, handleSnapshotError('finance_settings/config'));
     const qFixedBills = query(collection(db, 'fixed_bills'));
     const unsubFixedBills = onSnapshot(qFixedBills, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FixedBill));
       setFixedBills(data);
-    });
+    }, handleSnapshotError('fixed_bills'));
     const unsubRubrics = onSnapshot(collection(db, 'bill_rubrics'), (snapshot) => {
       setBillRubrics(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as BillRubric)));
-    });
+    }, handleSnapshotError('bill_rubrics'));
     const unsubIncomeEntries = onSnapshot(collection(db, 'income_entries'), (snapshot) => {
       setIncomeEntries(snapshot.docs
         .map(d => ({ id: d.id, ...d.data() } as IncomeEntry))
         .filter(e => e.status !== 'deleted')
       );
-    });
+    }, handleSnapshotError('income_entries'));
     const unsubIncomeRubrics = onSnapshot(collection(db, 'income_rubrics'), (snapshot) => {
       setIncomeRubrics(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as IncomeRubric)));
-    });
+    }, handleSnapshotError('income_rubrics'));
     const unsubShopping = onSnapshot(collection(db, 'shopping_items'), (snapshot) => {
       setShoppingItems(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ShoppingItem)));
-    });
+    }, handleSnapshotError('shopping_items'));
     // Services Sync
     const qServices = query(collection(db, 'servicos'), orderBy('data_criacao', 'desc'));
     const unsubProjects = onSnapshot(qServices, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Servico[];
       setServices(data);
-    });
+    }, handleSnapshotError('servicos'));
     // Health Sync
     const unsubHealthWeights = onSnapshot(collection(db, 'health_weights'), (snapshot) => {
       setHealthWeights(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as HealthWeight)));
-    });
+    }, handleSnapshotError('health_weights'));
     const unsubHealthHabits = onSnapshot(collection(db, 'health_daily_habits'), (snapshot) => {
       setHealthDailyHabits(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DailyHabits)));
-    });
+    }, handleSnapshotError('health_daily_habits'));
     const unsubHealthSettings = onSnapshot(doc(db, 'health_settings', 'config'), (doc) => {
       if (doc.exists()) setHealthSettings(doc.data() as HealthSettings);
-    });
+    }, handleSnapshotError('health_settings/config'));
     const unsubExerciseLogs = onSnapshot(collection(db, 'health_exercise_logs'), (snapshot) => {
       setExerciseLogs(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ExerciseLog)));
-    });
+    }, handleSnapshotError('health_exercise_logs'));
     const unsubExerciseSettings = onSnapshot(doc(db, 'health_exercise_settings', 'config'), (snap) => {
       if (snap.exists()) setExerciseSettings(snap.data() as ExerciseSettings);
-    });
+    }, handleSnapshotError('health_exercise_settings/config'));
     const unsubKnowledge = onSnapshot(collection(db, 'conhecimento'), (snapshot) => {
       setKnowledgeItems(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ConhecimentoItem)));
-    });
+    }, handleSnapshotError('conhecimento'));
     const unsubMasterKnowledge = onSnapshot(collection(db, 'conhecimento_mestre'), (snapshot) => {
       setMasterKnowledge(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
+    }, handleSnapshotError('conhecimento_mestre'));
     const unsubKnowledgeBases = onSnapshot(collection(db, 'knowledge_bases'), (snapshot) => {
       setKnowledgeBases(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as BaseConhecimento)));
-    });
+    }, handleSnapshotError('knowledge_bases'));
     const unsubscribeSistemasAtivos = onSnapshot(doc(db, 'configuracoes', 'sistemas'), (docSnap) => {
       if (docSnap.exists()) {
         setSistemasAtivos(docSnap.data().lista || []);
       }
-    });
+    }, handleSnapshotError('configuracoes/sistemas'));
     return () => {
       unsubSistemas();
       unsubGoogleCalendar();
@@ -2200,7 +2204,7 @@ const App: React.FC = () => {
       if (snap.exists()) {
         setAppSettings(snap.data() as AppSettings);
       }
-    });
+    }, handleSnapshotError('configuracoes/geral'));
     return () => unsub();
   }, [user]);
   const handleUpdateAppSettings = async (newSettings: AppSettings) => {
@@ -2493,7 +2497,7 @@ const App: React.FC = () => {
         if (data.status === 'processing' || data.status === 'requested') setIsSyncing(true);
         if (data.status === 'completed' || data.status === 'error') setIsSyncing(false);
       }
-    });
+    }, handleSnapshotError('system/sync'));
     return () => unsub();
   }, [user]);
   const handleSync = async () => {
@@ -3077,12 +3081,16 @@ const App: React.FC = () => {
     }
   };
   useEffect(() => {
+    if (!user) {
+      setExams([]);
+      return;
+    }
     const unsub = onSnapshot(collection(db, 'exames'), (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as HealthExam));
       setExams(data);
-    });
+    }, handleSnapshotError('exames'));
     return () => unsub();
-  }, []);
+  }, [user]);
   const handleDeleteWorkItem = async (id: string) => {
     const item = workItems.find(w => w.id === id);
     if (!item) return;
@@ -3526,13 +3534,13 @@ const App: React.FC = () => {
     const unsubscribeAtividadesPGC = onSnapshot(qAtividadesPGC, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AtividadeRealizada));
       setAtividadesPGC(data);
-    });
+    }, handleSnapshotError('atividades_pgc'));
     // Listener para Afastamentos
     const qAfastamentos = query(collection(db, 'afastamentos'));
     const unsubscribeAfastamentos = onSnapshot(qAfastamentos, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Afastamento));
       setAfastamentos(data);
-    });
+    }, handleSnapshotError('afastamentos'));
     // Listeners para Entregas (coleção atual + legado)
     let entregasMain: EntregaInstitucional[] = [];
     let entregasLegacy: EntregaInstitucional[] = [];
@@ -3562,7 +3570,7 @@ const App: React.FC = () => {
     const unsubscribeUnidades = onSnapshot(qUnidades, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as { id: string, nome: string, palavras_chave?: string[] }));
       setUnidades(data);
-    });
+    }, handleSnapshotError('unidades'));
     return () => {
       unsubscribeTarefas();
       unsubscribeEntregas();
@@ -3608,7 +3616,7 @@ const App: React.FC = () => {
     const unsubscribePlanos = onSnapshot(qPlanos, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlanoTrabalho));
       setPlanosTrabalho(data);
-    });
+    }, handleSnapshotError('planos_trabalho'));
     return () => unsubscribePlanos();
   }, [user]);
   useEffect(() => {
@@ -3617,11 +3625,11 @@ const App: React.FC = () => {
     const unsubscribeBrainstorm = onSnapshot(qBrainstorm, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BrainstormIdea));
       setBrainstormIdeas(data.sort((a, b) => b.timestamp.localeCompare(a.timestamp)));
-    });
+    }, handleSnapshotError('brainstorm_ideas'));
     const unsubscribeKnowledge = onSnapshot(collection(db, 'conhecimento'), (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ConhecimentoItem));
       setKnowledgeItems(data);
-    });
+    }, handleSnapshotError('conhecimento'));
     return () => {
       unsubscribeBrainstorm();
       unsubscribeKnowledge();

@@ -84,9 +84,40 @@ SYNC_LOCK_DOC_ID = 'sync_lock'
 SYNC_LOCK_STALE_SECONDS = 15 * 60
 MAX_SYNC_PASSES = 3
 COPILOT_FUNCTION_TIMEOUT_SEC = 540
-COPILOT_SOFT_DEADLINE_SEC = 510
-COPILOT_MODEL_TIMEOUT_MS = 90000
-COPILOT_TOOL_TIMEOUT_SEC = 60
+COPILOT_SOFT_DEADLINE_SEC = 210
+COPILOT_MODEL_TIMEOUT_MS = 70000
+COPILOT_MODEL_RETRY_TIMEOUT_MS = 30000
+COPILOT_TOOL_TIMEOUT_SEC = 45
+COPILOT_CHAT_MODEL = os.environ.get("COPILOT_CHAT_MODEL", "gemini-3.1-flash-lite-preview")
+COPILOT_FALLBACK_MODEL = os.environ.get("COPILOT_FALLBACK_MODEL", "gemini-3.1-flash-lite-preview")
+COPILOT_DEADLINE_FALLBACK_TEXT = (
+    "O modelo de IA demorou demais para concluir esta resposta e eu interrompi a chamada "
+    "antes de estourar o tempo da conversa. Tente dividir o pedido em partes menores, "
+    "pedir primeiro um levantamento objetivo ou anexar apenas o trecho essencial."
+)
+
+
+def _is_copilot_deadline_error(error: Exception) -> bool:
+    code = getattr(error, "code", None)
+    status = str(getattr(error, "status", "") or "").upper()
+    message = str(getattr(error, "message", "") or "")
+    details = str(getattr(error, "details", "") or "")
+    full_text = " ".join([str(error), status, message, details]).upper()
+    return (
+        code == 504
+        or "DEADLINE_EXCEEDED" in full_text
+        or "DEADLINE EXPIRED" in full_text
+        or "READTIMEOUT" in full_text
+        or "TIMED OUT" in full_text
+        or "TIMEOUT" in full_text
+    )
+
+
+def _is_retryable_gemini_server_error(error: Exception) -> bool:
+    code = getattr(error, "code", None)
+    status = str(getattr(error, "status", "") or "").upper()
+    full_text = f"{error} {status}".upper()
+    return code in {500, 502, 503} or any(token in full_text for token in ("INTERNAL", "UNAVAILABLE", "BAD_GATEWAY"))
 
 # ---------------------------------------------------------------------------
 # In-process Firestore document cache (TTL = 60 s per Cloud Function instance)
@@ -8697,7 +8728,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 return f"ERRO|{str(_re)}"
 
         # Configuração do Chat com ferramentas
-        model_id = "gemini-3.1-pro-preview"
+        model_id = COPILOT_CHAT_MODEL
         
         from datetime import datetime
         today_str = datetime.now().strftime("%Y-%m-%d")
@@ -9579,10 +9610,42 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         report_data = None
         tool_invocation_data = None
         deadline_fallback_text = None
-        response = chat.send_message(final_prompt)
-        _perf_mark(perf_state, "web.first_model_response")
+        response = None
+        try:
+            response = chat.send_message(final_prompt)
+            _perf_mark(perf_state, "web.first_model_response")
+        except Exception as _first_send_err:
+            if not _is_copilot_deadline_error(_first_send_err):
+                raise
+            print(f"[Copiloto] Gemini deadline na primeira resposta: {_first_send_err}")
+            _perf_mark(perf_state, "web.first_model_deadline")
+            try:
+                response = client.models.generate_content(
+                    model=COPILOT_FALLBACK_MODEL,
+                    contents=[
+                        (
+                            "Responda em pt-BR, de forma objetiva. A chamada principal do Copiloto "
+                            "atingiu deadline; nao acione ferramentas e, se faltar dado interno, diga "
+                            "qual informacao precisa ser consultada em uma nova pergunta mais focada."
+                        ),
+                        final_prompt[:24000],
+                    ],
+                    config=types.GenerateContentConfig(
+                        system_instruction=(system_instruction + _correcao_hint)[:12000],
+                        http_options=types.HttpOptions(timeout=COPILOT_MODEL_RETRY_TIMEOUT_MS),
+                    ),
+                )
+                _perf_mark(perf_state, "web.first_model_fallback")
+            except Exception as _fallback_err:
+                print(f"[Copiloto] Fallback rapido tambem falhou: {_fallback_err}")
+                deadline_fallback_text = COPILOT_DEADLINE_FALLBACK_TEXT
+                response = None
+
         _max_iter = 10
         for _round in range(_max_iter):
+            if deadline_fallback_text or response is None:
+                break
+
             if _copilot_remaining_sec() < 75:
                 deadline_fallback_text = (
                     "A consulta chegou perto do limite seguro de processamento. "
@@ -9721,8 +9784,16 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 response = chat.send_message(function_response_parts)
                 _perf_mark(perf_state, "web.tool_roundtrip")
             except Exception as _send_err:
-                from google.genai.errors import ServerError as _GeminiServerError
-                if isinstance(_send_err, _GeminiServerError) and '500' in str(_send_err):
+                if _is_copilot_deadline_error(_send_err):
+                    print(f"[Copiloto] Gemini deadline ao consolidar ferramentas: {_send_err}")
+                    deadline_fallback_text = (
+                        "Executei parte das consultas internas, mas a consolidacao da resposta demorou demais. "
+                        "Interrompi antes do timeout para preservar a conversa. Tente refazer a pergunta de forma "
+                        "mais focada ou solicitar o proximo trecho."
+                    )
+                    _perf_mark(perf_state, "web.tool_roundtrip_deadline")
+                    break
+                if _is_retryable_gemini_server_error(_send_err):
                     print(f"[Copiloto] Gemini 500 ao enviar resultados de ferramentas — tentando com payload reduzido: {_send_err}")
                     _reduced_parts = []
                     for _p in function_response_parts:
@@ -9738,8 +9809,19 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                             )
                         except Exception:
                             _reduced_parts.append(_p)
-                    response = chat.send_message(_reduced_parts)
-                    _perf_mark(perf_state, "web.tool_roundtrip_retry")
+                    try:
+                        response = chat.send_message(_reduced_parts)
+                        _perf_mark(perf_state, "web.tool_roundtrip_retry")
+                    except Exception as _retry_err:
+                        if _is_copilot_deadline_error(_retry_err):
+                            print(f"[Copiloto] Gemini deadline no retry reduzido: {_retry_err}")
+                            deadline_fallback_text = (
+                                "As consultas internas retornaram, mas a consolidacao final demorou demais. "
+                                "Interrompi antes do timeout. Tente pedir um resumo menor ou o proximo trecho."
+                            )
+                            _perf_mark(perf_state, "web.tool_roundtrip_retry_deadline")
+                            break
+                        raise
                 else:
                     raise
 

@@ -270,7 +270,9 @@ export const TaskExecutionView = ({
       setPendingDeepResearchId(null);
     }, 12 * 60 * 1000);
 
-    const unsub = onSnapshot(doc(db, 'deep_research_tasks', pendingDeepResearchId), (docSnap) => {
+    const unsub = onSnapshot(
+      doc(db, 'deep_research_tasks', pendingDeepResearchId),
+      (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         if (data.status === 'COMPLETED' || data.status === 'FAILED' || data.status === 'CANCELLED') {
@@ -299,7 +301,15 @@ export const TaskExecutionView = ({
           clearTimeout(fallbackTimer);
         }
       }
-    });
+      },
+      (err) => {
+        console.error('[Firestore] Listener falhou (deep_research_tasks):', err);
+        setIsDeepResearching(false);
+        setPendingDeepResearchId(null);
+        clearTimeout(fallbackTimer);
+        showToast('Nao foi possivel acompanhar a pesquisa profunda por permissao do Firestore.', 'error');
+      }
+    );
 
     return () => {
       unsub();

@@ -55,6 +55,28 @@ const withClientTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, mes
     }
 };
 
+const getCopilotoErrorMessage = (err: any) => {
+    const raw = err?.message || err?.details || String(err) || '';
+    const code = String(err?.code || '').toLowerCase();
+
+    if (
+        code.includes('deadline-exceeded') ||
+        /DEADLINE_EXCEEDED|Deadline expired|deadline|timed out|timeout/i.test(raw)
+    ) {
+        return 'O copiloto demorou demais para responder. Tente dividir o pedido em partes menores ou pedir primeiro um levantamento objetivo.';
+    }
+
+    if (code.includes('permission-denied')) {
+        return 'O copiloto nao conseguiu acessar um dado necessario no Firestore por falta de permissao.';
+    }
+
+    if (/internal|500/i.test(raw)) {
+        return 'O copiloto encontrou uma falha interna ao processar a resposta. Tente novamente com um pedido mais focado.';
+    }
+
+    return raw || 'Erro desconhecido ao consultar o copiloto.';
+};
+
 const isCopilotoFileSupported = (file: File) => {
     const fileName = file.name.toLowerCase();
     const isExtensionSupported = COPILOTO_SUPPORTED_FILE_EXTENSIONS.some((extension) => fileName.endsWith(extension));
@@ -699,13 +721,17 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     // Load pool_dados from active task for @ mentions
     useEffect(() => {
         if (!taskId) { setTaskPoolItems([]); return; }
-        return onSnapshot(doc(db, 'tarefas', taskId), (snap) => {
-            if (snap.exists()) {
-                const items = ((snap.data().pool_dados as PoolItem[]) || [])
-                    .filter(item => item.tipo !== 'telefone');
-                setTaskPoolItems(items);
-            }
-        });
+        return onSnapshot(
+            doc(db, 'tarefas', taskId),
+            (snap) => {
+                if (snap.exists()) {
+                    const items = ((snap.data().pool_dados as PoolItem[]) || [])
+                        .filter(item => item.tipo !== 'telefone');
+                    setTaskPoolItems(items);
+                }
+            },
+            handleFirestoreListenerError
+        );
     }, [taskId]);
 
     // Load Sessions
@@ -1480,7 +1506,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         } catch (err: any) {
             console.error("Erro no Copiloto:", err);
 
-            const errMsg: string = err?.message || String(err) || 'Erro desconhecido.';
+            const errMsg = getCopilotoErrorMessage(err);
 
             // Aborta a barra instantaneamente: impede que o usuário veja "100%"
             // enquanto um banner de erro vermelho é exibido simultaneamente.
