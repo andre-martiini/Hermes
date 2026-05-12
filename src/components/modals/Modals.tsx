@@ -1261,38 +1261,19 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                 ))}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1 font-mono">Área Temática :: Context</label>
-                  <select
-                    value={formData.area_tematica}
-                    onChange={e => {
-                      setFormData({ ...formData, area_tematica: e.target.value as Categoria });
-                      setAutoClassified(true);
-                    }}
-                    className="w-full bg-slate-100 border border-border-grid rounded-none px-4 py-3 text-xs font-bold text-slate-900 focus:ring-1 focus:ring-slate-900 transition-all font-mono uppercase tracking-widest"
-                  >
-                    <option value="GERAL">Geral</option>
-                    <option value="NÃO CLASSIFICADA">Não Classificada</option>
-                    {unidades.map(u => (
-                      <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex items-end gap-2">
-                  <button
-                    onClick={() => setIsExtraContextOpen(!isExtraContextOpen)}
-                    className={`h-11 flex-1 rounded-none text-[9px] font-black uppercase tracking-widest transition-all font-mono border-2 ${isExtraContextOpen ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-100 text-slate-600 border-border-grid hover:bg-slate-200'}`}
-                  >
-                    Contexto IA
-                  </button>
-                  <button
-                    onClick={() => setIsTranscriptionSelectorOpen(!isTranscriptionSelectorOpen)}
-                    className={`h-11 flex-1 rounded-none text-[9px] font-black uppercase tracking-widest transition-all font-mono border-2 ${isTranscriptionSelectorOpen ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-border-grid hover:bg-slate-100'}`}
-                  >
-                    Vincular Atas
-                  </button>
-                </div>
+              <div className="flex items-end gap-2">
+                <button
+                  onClick={() => setIsExtraContextOpen(!isExtraContextOpen)}
+                  className={`h-11 flex-1 rounded-none text-[9px] font-black uppercase tracking-widest transition-all font-mono border-2 ${isExtraContextOpen ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-100 text-slate-600 border-border-grid hover:bg-slate-200'}`}
+                >
+                  Contexto IA
+                </button>
+                <button
+                  onClick={() => setIsTranscriptionSelectorOpen(!isTranscriptionSelectorOpen)}
+                  className={`h-11 flex-1 rounded-none text-[9px] font-black uppercase tracking-widest transition-all font-mono border-2 ${isTranscriptionSelectorOpen ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-border-grid hover:bg-slate-100'}`}
+                >
+                  Vincular Atas
+                </button>
               </div>
 
               {isTranscriptionSelectorOpen && (
@@ -1463,17 +1444,39 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                     />
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Status</label>
-                    <select
-                      value={formData.status}
-                      onChange={e => setFormData({ ...formData, status: e.target.value as Status })}
-                      className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
-                    >
-                      <option value="em andamento">Em Andamento</option>
-                      <option value="stand-by">Stand-by</option>
-                      <option value="concluído">Concluído</option>
-                    </select>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Status</label>
+                      <select
+                        value={formData.status}
+                        onChange={e => setFormData({ ...formData, status: e.target.value as Status })}
+                        className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                      >
+                        <option value="em andamento">Em Andamento</option>
+                        <option value="stand-by">Stand-by</option>
+                        <option value="concluído">Concluído</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Área Temática</label>
+                      <select
+                        value={formData.area_tematica}
+                        onChange={e => {
+                          setFormData({ ...formData, area_tematica: e.target.value as Categoria });
+                          setAutoClassified(true);
+                        }}
+                        className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
+                      >
+                        <option value="GERAL">Geral</option>
+                        <option value="SAÚDE">Saúde</option>
+                        <option value="FINANCEIRO">Financeiro</option>
+                        <option value="SISTEMA">Sistema</option>
+                        <option value="NÃO CLASSIFICADA">Não Classificada</option>
+                        {unidades.map(u => (
+                          <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
                   {/* Tags Dinâmicas */}
@@ -1825,6 +1828,9 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
                 className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
               >
                 <option value="GERAL">Geral</option>
+                <option value="SAÚDE">Saúde</option>
+                <option value="FINANCEIRO">Financeiro</option>
+                <option value="SISTEMA">Sistema</option>
                 <option value="NÃO CLASSIFICADA">Não Classificada</option>
                 {unidades.map(u => (
                   <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>

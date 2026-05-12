@@ -221,22 +221,17 @@ export const formatInlineWhatsAppText = (text: string, isDarkMode: boolean = fal
 export const detectAreaFromTitle = (titulo: string): Categoria => {
   const tituloLower = titulo.toLowerCase();
 
-  // Palavras-chave para CLC
   const clcKeywords = ['licitação', 'licitacao', 'pregão', 'pregao', 'contrato', 'dispensa', 'inexigibilidade', 'compra', 'aquisição', 'aquisicao', 'processo'];
-
-  // Palavras-chave para Assistência Estudantil
   const assistenciaKeywords = ['assistência', 'assistencia', 'estudantil', 'aluno', 'bolsa', 'auxílio', 'auxilio', 'permanência', 'permanencia'];
+  const saudeKeywords = ['saúde', 'saude', 'médico', 'medico', 'exame', 'consulta', 'medicamento', 'hospital', 'biometria', 'peso', 'treino'];
+  const financeiroKeywords = ['pagamento', 'boleto', 'conta', 'dinheiro', 'valor', 'reais', 'financeiro', 'banco', 'transferência', 'pix', 'gasto', 'orçamento'];
+  const sistemaKeywords = ['sistema', 'bug', 'feature', 'desenvolvimento', 'dev', 'api', 'banco de dados', 'deploy', 'servidor'];
 
-  // Verifica CLC primeiro
-  if (clcKeywords.some(keyword => tituloLower.includes(keyword))) {
-    return 'CLC';
-  }
+  if (clcKeywords.some(keyword => tituloLower.includes(keyword))) return 'CLC';
+  if (assistenciaKeywords.some(keyword => tituloLower.includes(keyword))) return 'ASSISTÊNCIA';
+  if (saudeKeywords.some(keyword => tituloLower.includes(keyword))) return 'SAÚDE';
+  if (financeiroKeywords.some(keyword => tituloLower.includes(keyword))) return 'FINANCEIRO';
+  if (sistemaKeywords.some(keyword => tituloLower.includes(keyword))) return 'SISTEMA';
 
-  // Verifica Assistência Estudantil
-  if (assistenciaKeywords.some(keyword => tituloLower.includes(keyword))) {
-    return 'ASSISTÊNCIA';
-  }
-
-  // Se não encontrar palavras-chave específicas, retorna GERAL
   return 'GERAL';
 };

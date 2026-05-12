@@ -1206,7 +1206,7 @@ const App: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isCopilotoOpen, setIsCopilotoOpen] = useState(false);
   const [copilotoAutoStartMic, setCopilotoAutoStartMic] = useState(false);
-  const [copilotoMode, setCopilotoMode] = useState<'default' | 'finance'>('default');
+  const [copilotoMode, setCopilotoMode] = useState<'default' | 'finance' | 'saude'>('default');
   const [isQuickNoteModalOpen, setIsQuickNoteModalOpen] = useState(false);
   const [hasAutoExpanded, setHasAutoExpanded] = useState(false);
   // Estados PGC
@@ -5625,6 +5625,11 @@ const App: React.FC = () => {
                       showToast("Registro atualizado.", "success");
                     }}
                     isDark={isDarkTheme}
+                    onOpenHealthCopilot={() => {
+                      setCopilotoMode('saude');
+                      setCopilotoAutoStartMic(false);
+                      setIsCopilotoOpen(true);
+                    }}
                   />
                 ) : viewMode === 'ferramentas' ? (
                   <FerramentasView

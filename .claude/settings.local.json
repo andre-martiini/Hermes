@@ -23,7 +23,8 @@
       "Bash(Get-ChildItem -Path \"src\", \"src/components\" -Recurse -Filter \"*.tsx\")",
       "Bash(Select-Object -First 30)",
       "Bash(findstr /s \"weights\\\\|habits\\\\|exerciseLogs\\\\|health\" *.ts *.tsx src/**/*.ts src/**/*.tsx)",
-      "Bash(findstr \"collection\\\\|doc\\(\")"
+      "Bash(findstr \"collection\\\\|doc\\(\")",
+      "Bash(python3)"
     ]
   }
 }

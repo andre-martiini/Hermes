@@ -26,6 +26,7 @@ interface HealthViewProps {
     onDeleteExam: (id: string) => void;
     onUpdateExam: (id: string, updates: Partial<HealthExam>) => void;
     isDark?: boolean;
+    onOpenHealthCopilot?: () => void;
 }
 
 // --- UTILS & CONSTANTS ---
@@ -183,7 +184,7 @@ const HealthView: React.FC<HealthViewProps> = ({
     weights, dailyHabits, settings, onUpdateSettings, onAddWeight, onDeleteWeight, 
     onUpdateHabits, exerciseLogs, exerciseSettings, onSaveExerciseLog, exams, 
     telegramReminders, onSaveTelegramReminder, onDeleteTelegramReminder,
-    onAddExam, onDeleteExam, onUpdateExam, isDark = false
+    onAddExam, onDeleteExam, onUpdateExam, isDark = false, onOpenHealthCopilot
 }) => {
     const [selectedDate, setSelectedDate] = useState<string>(formatDateLocalISO(new Date()));
     const [activeTab, setActiveTab] = useState<'telemetry' | 'archive'>('telemetry');
@@ -289,6 +290,7 @@ const HealthView: React.FC<HealthViewProps> = ({
                         dailyHabits={dailyHabits}
                         exerciseLogs={exerciseLogs}
                         settings={settings}
+                        onOpenHealthCopilot={onOpenHealthCopilot}
                     />
                 </div>
                 {activeTab === 'telemetry' ? (

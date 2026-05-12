@@ -230,16 +230,26 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
     return `${parts[2]} ${months[Number(parts[1]) - 1]}`;
   };
 
-  const getTagStyle = (name: string, type: 'category' | 'project') => {
+  const getHighlightClass = (name?: string) => {
+    if (isDark || !name || name === 'NÃO CLASSIFICADA') return '';
     const n = name.toUpperCase();
-    if (type === 'category') {
-      if (n === 'CLC') return 'bg-blue-50 text-blue-600 border-blue-100';
-      if (n === 'SAÚDE' || n === 'SAUDE') return 'bg-rose-50 text-rose-600 border-rose-100';
-      if (n === 'FINANCEIRO' || n === 'FINANCEIRA') return 'bg-emerald-50 text-emerald-600 border-emerald-100';
-      if (n === 'ASSISTÊNCIA' || n.includes('ESTUDANTIL')) return 'bg-purple-50 text-purple-600 border-purple-100';
-    }
+    if (n.includes('CLC')) return 'bg-blue-100/70 px-1 -mx-1 rounded-sm decoration-clone';
+    if (n.includes('SAÚDE') || n.includes('SAUDE')) return 'bg-rose-100/70 px-1 -mx-1 rounded-sm decoration-clone';
+    if (n.includes('FINANCEIRO') || n.includes('FINANCEIRA')) return 'bg-emerald-100/70 px-1 -mx-1 rounded-sm decoration-clone';
+    if (n.includes('ASSISTÊNCIA') || n.includes('ESTUDANTIL')) return 'bg-purple-100/70 px-1 -mx-1 rounded-sm decoration-clone';
+    return '';
+  };
+
+  const getTagStyle = (name: string) => {
+    const n = name.toUpperCase();
+    if (n.includes('CLC')) return 'bg-blue-50 text-blue-600 border-blue-100';
+    if (n.includes('SAÚDE') || n.includes('SAUDE')) return 'bg-rose-50 text-rose-600 border-rose-100';
+    if (n.includes('FINANCEIRO') || n.includes('FINANCEIRA')) return 'bg-emerald-50 text-emerald-600 border-emerald-100';
+    if (n.includes('ASSISTÊNCIA') || n.includes('ESTUDANTIL')) return 'bg-purple-50 text-purple-600 border-purple-100';
     return 'bg-slate-50 text-slate-500 border-slate-100';
   };
+
+  const highlightClass = getHighlightClass(task.area_tematica);
 
   const dateDisplay = formatDateShort(task.data_limite);
 
@@ -296,19 +306,25 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
             </div>
           )}
           <div className={`${highlighted ? `text-[15px] md:text-lg font-black` : `text-[13px] md:text-[15px] font-medium`} leading-snug transition-colors whitespace-normal break-words font-mono ${isCompleted ? 'line-through text-slate-400' : ''}`}>
-            {task.titulo}
+            {highlightClass ? (
+              <span className={highlightClass}>
+                {task.titulo}
+              </span>
+            ) : task.titulo}
           </div>
         </div>
       </div>
 
+
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-2 flex-wrap">
           {task.area_tematica && task.area_tematica !== 'NÃO CLASSIFICADA' && (
-            <span className={`text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded-none border font-mono uppercase ${isDark ? 'bg-white/10 text-white' : getTagStyle(task.area_tematica, 'category')}`}>
+            <span className={`text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded-none border font-mono uppercase ${isDark ? 'bg-white/10 text-white' : getTagStyle(task.area_tematica)}`}>
               {task.area_tematica.replace('SISTEMA:', '').trim()}
             </span>
           )}
         </div>
+
 
         <div className="relative" ref={menuRef}>
           <button 

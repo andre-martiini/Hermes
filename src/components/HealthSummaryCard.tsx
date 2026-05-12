@@ -22,6 +22,7 @@ interface HealthSummaryCardProps {
     dailyHabits: DailyHabits[];
     exerciseLogs: ExerciseLog[];
     settings: HealthSettings;
+    onOpenHealthCopilot?: () => void;
 }
 
 const CACHE_DOC = doc(db, 'health_summary', 'config');
@@ -302,6 +303,24 @@ export function HealthSummaryCard(props: HealthSummaryCardProps) {
                     </h3>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                    {props.onOpenHealthCopilot && (
+                        <button
+                            type="button"
+                            onClick={props.onOpenHealthCopilot}
+                            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 border text-[9px] font-black uppercase tracking-[0.14em] font-mono transition-all ${
+                                visibleAnalysis.status === 'critical' ? 'border-rose-300 bg-white/60 text-rose-800 hover:bg-white'
+                                : visibleAnalysis.status === 'attention' ? 'border-amber-300 bg-white/60 text-amber-800 hover:bg-white'
+                                : visibleAnalysis.status === 'stable' ? 'border-sky-300 bg-white/60 text-sky-800 hover:bg-white'
+                                : 'border-emerald-300 bg-white/60 text-emerald-800 hover:bg-white'
+                            }`}
+                            title="Conversar com o copiloto de saude"
+                        >
+                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                            </svg>
+                            Copiloto
+                        </button>
+                    )}
                     {typeof visibleAnalysis.score === 'number' && (
                         <span className={`text-[10px] font-black uppercase tracking-widest font-mono ${styles.muted}`}>
                             {visibleAnalysis.score}/100
@@ -358,6 +377,23 @@ export function HealthSummaryCard(props: HealthSummaryCardProps) {
                 </div>
             ) : (
                 <p className={`text-sm font-bold italic ${styles.muted}`}>Aguardando análise...</p>
+            )}
+            {props.onOpenHealthCopilot && (
+                <button
+                    type="button"
+                    onClick={props.onOpenHealthCopilot}
+                    className={`sm:hidden flex items-center justify-center gap-2 border px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] font-mono transition-all ${
+                        visibleAnalysis.status === 'critical' ? 'border-rose-300 bg-white/60 text-rose-800'
+                        : visibleAnalysis.status === 'attention' ? 'border-amber-300 bg-white/60 text-amber-800'
+                        : visibleAnalysis.status === 'stable' ? 'border-sky-300 bg-white/60 text-sky-800'
+                        : 'border-emerald-300 bg-white/60 text-emerald-800'
+                    }`}
+                >
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                    </svg>
+                    Conversar com copiloto de saude
+                </button>
             )}
         </div>
     );
