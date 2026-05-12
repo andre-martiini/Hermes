@@ -134,14 +134,14 @@ function buildSnapshot(props: FinancialHealthCardProps) {
             budget: +budget.toFixed(2),
             spent: +currentMonthTotal.toFixed(2),
             available: +(budget - currentMonthTotal).toFixed(2),
-            largestTransactions: transactionsThisMonth
+            lancamentos: transactionsThisMonth
+                .filter(t => t.amount > 50)
                 .map(t => ({
                     description: t.description,
                     amount: +t.amount.toFixed(2),
                     date: t.date,
                 }))
-                .sort((a, b) => b.amount - a.amount)
-                .slice(0, 5),
+                .sort((a, b) => b.amount - a.amount),
         },
         fluxoCaixa: {
             receivedIncome: +currentMonthIncome.toFixed(2),

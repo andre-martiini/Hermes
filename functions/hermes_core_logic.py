@@ -2118,6 +2118,7 @@ def _build_system_instruction_guarded_v2(
         "4. Ao receber perguntas sobre a acao, responda com base nos dados acima.\n"
         "5. Se o usuario pedir para atualizar, criar passos ou registrar progresso, use as ferramentas disponiveis.\n"
         "6. Se o usuario pedir links ou anexos, cite apenas as URLs/DRIVE_FILE_ID listados em Arquivos Disponiveis. Nunca use rotulos clicaveis como 'Acessar Pasta' sem mostrar a URL real.\n"
+        "7. PROIBIDO usar consultar_historico_acoes neste modo — a acao ja esta carregada acima. Use apenas ferramentas de atualizacao (plano, diario, notas).\n"
     )
     return base + acao_section
 
@@ -3190,6 +3191,13 @@ def _process_telegram_message(db, data: dict):
         status: str = None,
     ):
         """Busca ações e tarefas no Hermes. Use status para filtrar por estado (ex: 'em andamento', 'concluída', 'cancelada'). Use data_limite_inicio/fim (YYYY-MM-DD) para filtrar por prazo."""
+        if contexto_ativo == "acao" and acao_snapshot:
+            titulo_acao = acao_snapshot.get("titulo") or request_acao_id or "ação atual"
+            return (
+                f"Contexto trancado na ação '{titulo_acao}'. "
+                "Os dados desta ação já estão carregados no contexto — use-os diretamente. "
+                "Para pesquisar outras ações, o usuário deve sair primeiro com /sair."
+            )
         from tools.busca_grafo import buscar_tarefas
 
         _STOPWORDS_TG = {"de", "a", "o", "que", "e", "do", "da", "em", "um", "uma",
