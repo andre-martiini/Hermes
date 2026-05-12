@@ -9626,6 +9626,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                             extraction_text = extraction_text[4:]
 
                     meta = json.loads(extraction_text)
+                    if isinstance(meta, list):
+                        meta = meta[0] if meta else {}
+                    if not isinstance(meta, dict):
+                        meta = {}
                     titulo_doc = meta.get('titulo', real_file_name)
                     natureza_doc = meta.get('natureza', 'Documento')
                     resumo_doc = meta.get('resumo', '')

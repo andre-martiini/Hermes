@@ -30,7 +30,8 @@
       "PowerShell(python -c \"import ast; ast.parse\\(open\\(r'C:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\functions\\\\main.py', encoding='utf-8', errors='replace'\\).read\\(\\)\\); print\\('Syntax OK'\\)\" 2>&1)",
       "PowerShell($lines = Get-Content \"C:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\functions\\\\main.py\"; $start = 8916; $end = 8935; $lines[$start..$end] | ForEach-Object -Begin { $n = 8917 } -Process { \"${n}: $_\"; $n++ })",
       "PowerShell(Remove-Item \"C:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\fix_check.py\", \"C:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\fix_saude.py\", \"C:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\fix_saude2.py\" -ErrorAction SilentlyContinue; $lines = Get-Content \"C:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\functions\\\\main.py\"; $start = 8916; $end = 8945; $lines[$start..$end] | ForEach-Object -Begin { $n = 8917 } -Process { \"${n}: $_\"; $n++ })",
-      "mcp__plugin_claude-mem_mcp-search__smart_unfold"
+      "mcp__plugin_claude-mem_mcp-search__smart_unfold",
+      "Bash(python -c ' *)"
     ]
   }
 }
