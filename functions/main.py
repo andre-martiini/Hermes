@@ -8916,88 +8916,42 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
         elif copilot_mode == "saude":
             mode_context = (
-                "## MODO COPILOTO DE SAÚDE ATIVO
-"
-                "Você está atuando como Copiloto de Saúde do Hermes. Priorize orientações sobre hábitos, exercícios, alimentação, controle de peso, sono e gestão da dor lombar.
-"
+                "## MODO COPILOTO DE SAÚDE ATIVO\n"
+                "Você está atuando como Copiloto de Saúde do Hermes. Priorize orientações sobre hábitos, exercícios, alimentação, controle de peso, sono e gestão da dor lombar.\n"
                 "Para qualquer métrica de saúde atual, use as ferramentas disponíveis antes de concluir. "
-                "Quando sugerir próximos passos, escreva como proposta para o usuário avaliar; não crie registros, metas ou logs sem confirmação explícita.
-
-"
-                "## PROTOCOLO CLÍNICO PESSOAL DO USUÁRIO
-"
-                "O usuário possui as seguintes condições diagnosticadas e protocolos prescritos:
-
-"
-                "### Diagnósticos
-"
-                "- **Síndrome de Bertolotti**: Megapófise no processo transverso de L5 (LSTV). Pseudoarticulação/fusão com o sacro. Bloqueio cinético L5-S1 > hipermobilidade compensatória em L4-L5. Dor lombar crônica; crises matinais por acúmulo inflamatório durante o sono.
-"
-                "- **DRGE + Esofagite Erosiva Grau A + Hiato diafragmático alargado**: Confirmado endoscopia 18/07/2024. Esfíncter esofágico comprometido por perda do suporte crural.
-
-"
-                "### Rotina matinal de descompressão (antes de qualquer carga axial)
-"
-                "1. Joelho ao peito unilateral: 30s por lado, deitado
-"
-                "2. Postura da criança (Balasana): 1-2 min respiração diafragmática
-"
-                "3. Gato-vaca: 10-15 ciclos lentos sincronizados com respiração
-
-"
-                "### Ergonomia ocupacional
-"
-                "- Não sentar/ficar de pé estático >40-45 min; micro-caminhadas de 2 min entre posturas
-
-"
-                "### Estabilização segmentar (diário)
-"
-                "1. Ativação TrA (drawing-in/bracing): 8-10s isometria x10, sem Valsalva
-"
-                "2. Ponte pélvica (bridging): pelve neutra, TrA + glúteo máximo
-"
-                "3. Bird-dog: quadrúpede, braço + perna opostos, pelve sem rotação
-
-"
-                "### Pilates - restrições rígidas
-"
-                "- PROIBIDOS: The Saw, Rolling Like a Ball, Jackknife, rotações extremas de tronco livre
-"
-                "- PERMITIDOS: rotação torácica pura com pelve fixada (T12 para cima), fortalecimento isométrico de core
-
-"
-                "### Protocolo de caminhada (6-6-6 / Fartlek)
-"
-                "- 5-6x/semana, >100 min totais/dia; SOMENTE superfícies planas
-"
-                "- Zona 1 (5-6 min): aquecimento leve
-"
-                "- Zona 2 (20-40 min): alternar vigoroso 3-5 min + lento 1,5-3 min
-"
-                "- Zona 3 (5-6 min): desaquecimento
-"
-                "- Locais Vitória-ES: Parque Pedra da Cebola, Orla Camburi (domingo Rua de Lazer 5h-13h), Parque Botânico Vale
-
-"
-                "### Dieta anti-refluxo e anti-inflamatória
-"
-                "- EVITAR: frituras, ultraprocessados, café forte, carbonatadas, pimenta, chocolate. Não comer nas 3h antes de deitar.
-"
-                "- FAVORECER: gengibre, aveia, frango grelhado, tofu, azeite extravirgem, abacate, nozes
-"
-                "- Suplemento: Bromelina + Rutosídeo
-
-"
-                "### Sequenciamento alimentar (GLP-1 endógeno)
-"
-                "Ordem: 1) Vegetais/fibras folhosas 2) Proteínas magras 3) Carboidratos complexos em porção limitada
-
-"
-                "### Hábitos rastreados
-"
-                "noSugar, noAlcohol, noSnacks, workout, eatUntil18, eatSlowly. Streak = dias consecutivos com >=4/6 hábitos.
-
-"
+                "Quando sugerir próximos passos, escreva como proposta para o usuário avaliar; não crie registros, metas ou logs sem confirmação explícita.\n\n"
+                "## PROTOCOLO CLÍNICO PESSOAL DO USUÁRIO\n"
+                "O usuário possui as seguintes condições diagnosticadas e protocolos prescritos:\n\n"
+                "### Diagnósticos\n"
+                "- **Síndrome de Bertolotti**: Megapófise no processo transverso de L5 (LSTV). Pseudoarticulação/fusão com o sacro. Bloqueio cinético L5-S1 > hipermobilidade compensatória em L4-L5. Dor lombar crônica; crises matinais por acúmulo inflamatório durante o sono.\n"
+                "- **DRGE + Esofagite Erosiva Grau A + Hiato diafragmático alargado**: Confirmado endoscopia 18/07/2024. Esfíncter esofágico comprometido por perda do suporte crural.\n\n"
+                "### Rotina matinal de descompressão (antes de qualquer carga axial)\n"
+                "1. Joelho ao peito unilateral: 30s por lado, deitado\n"
+                "2. Postura da criança (Balasana): 1-2 min respiração diafragmática\n"
+                "3. Gato-vaca: 10-15 ciclos lentos sincronizados com respiração\n\n"
+                "### Ergonomia ocupacional\n"
+                "- Não sentar/ficar de pé estático >40-45 min; micro-caminhadas de 2 min entre posturas\n\n"
+                "### Estabilização segmentar (diário)\n"
+                "1. Ativação TrA (drawing-in/bracing): 8-10s isometria x10, sem Valsalva\n"
+                "2. Ponte pélvica (bridging): pelve neutra, TrA + glúteo máximo\n"
+                "3. Bird-dog: quadrúpede, braço + perna opostos, pelve sem rotação\n\n"
+                "### Pilates - restrições rígidas\n"
+                "- PROIBIDOS: The Saw, Rolling Like a Ball, Jackknife, rotações extremas de tronco livre\n"
+                "- PERMITIDOS: rotação torácica pura com pelve fixada (T12 para cima), fortalecimento isométrico de core\n\n"
+                "### Protocolo de caminhada (6-6-6 / Fartlek)\n"
+                "- 5-6x/semana, >100 min totais/dia; SOMENTE superfícies planas\n"
+                "- Zona 1 (5-6 min): aquecimento leve\n"
+                "- Zona 2 (20-40 min): alternar vigoroso 3-5 min + lento 1,5-3 min\n"
+                "- Zona 3 (5-6 min): desaquecimento\n"
+                "- Locais Vitória-ES: Parque Pedra da Cebola, Orla Camburi (domingo Rua de Lazer 5h-13h), Parque Botânico Vale\n\n"
+                "### Dieta anti-refluxo e anti-inflamatória\n"
+                "- EVITAR: frituras, ultraprocessados, café forte, carbonatadas, pimenta, chocolate. Não comer nas 3h antes de deitar.\n"
+                "- FAVORECER: gengibre, aveia, frango grelhado, tofu, azeite extravirgem, abacate, nozes\n"
+                "- Suplemento: Bromelina + Rutosídeo\n\n"
+                "### Sequenciamento alimentar (GLP-1 endógeno)\n"
+                "Ordem: 1) Vegetais/fibras folhosas 2) Proteínas magras 3) Carboidratos complexos em porção limitada\n\n"
+                "### Hábitos rastreados\n"
+                "noSugar, noAlcohol, noSnacks, workout, eatUntil18, eatSlowly. Streak = dias consecutivos com >=4/6 hábitos.\n\n"
             )
 
         system_instruction = (

@@ -228,6 +228,13 @@ export const TaskExecutionView = ({
             createdAt: serverTimestamp(),
             lastMessageAt: serverTimestamp()
           });
+
+          await addDoc(collection(db, 'sessoes_copiloto', sessRef.id, 'mensagens'), {
+            role: 'assistant',
+            content: `Foco total ativado para o documento: **${focusedFile.nome}**. Estou pronto para analisar o conteúdo e ajudar você com dúvidas técnicas, resumos ou extração de informações. Como posso ser útil?`,
+            timestamp: serverTimestamp()
+          });
+
           setTempSessionId(sessRef.id);
         } catch (err) {
           console.error("Erro ao criar sessão temporária:", err);
@@ -455,7 +462,7 @@ export const TaskExecutionView = ({
   const lastMobileScrollTopRef = useRef(0);
   const headerToggleCooldownRef = useRef(false);
 
-  const isBreakActive = false;
+
 
   const progressPercent = useMemo(() => {
     const items = currentTaskData.plano_acao || [];
@@ -1603,17 +1610,41 @@ export const TaskExecutionView = ({
       <div ref={workspaceRef} className="flex-1 min-h-0 flex flex-col gap-0 overflow-hidden lg:flex-row lg:gap-0 p-0">
 
         {focusedFile && isDesktopViewport ? (
-          <DocumentViewer
-            file={focusedFile}
-            onClose={async () => {
-              if (tempSessionId) {
-                await deleteDoc(doc(db, 'sessoes_copiloto', tempSessionId));
-                setTempSessionId(null);
-              }
-              setFocusedFile(null);
-            }}
-            isDark={isDark}
-          />
+          <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+            <div className="flex-1 flex flex-col min-w-0">
+              <DocumentViewer
+                file={focusedFile}
+                onClose={async () => {
+                  if (tempSessionId) {
+                    await deleteDoc(doc(db, 'sessoes_copiloto', tempSessionId));
+                    setTempSessionId(null);
+                  }
+                  setFocusedFile(null);
+                }}
+                isDark={isDark}
+              />
+            </div>
+            {/* Copiloto em Modo de Foco lateral */}
+            <div 
+              className="w-full lg:w-[440px] shrink-0 border-l border-border-grid flex flex-col bg-[#050505]"
+              style={{ width: isDesktopViewport ? copilotPanelWidth : '100%' }}
+            >
+              <HermesCopilotoDrawer
+                isOpen
+                onClose={() => setFocusedFile(null)}
+                isDark={isDark}
+                variant="embedded"
+                taskId={task.id}
+                systemId={currentTaskData.sistema}
+                userId={copilotoUserId}
+                activeDocument={focusedFile}
+                isTemporary={!!tempSessionId}
+                sessionId={tempSessionId}
+                onOpenTask={onOpenCopilotoTask}
+                onOpenTool={onOpenCopilotoTool}
+              />
+            </div>
+          </div>
         ) : (
           <>
 

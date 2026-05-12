@@ -28,12 +28,6 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
       daysBeforeEnd: 5
     },
     custom: []
-  },
-  pomodoro: {
-    enabled: true,
-    focusTime: 10,
-    breakTime: 5,
-    enableBeep: true
   }
 };
 

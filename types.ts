@@ -430,12 +430,6 @@ export interface CustomNotification {
 
 export interface AppSettings {
     googleDriveFolderId?: string;
-    pomodoro?: {
-        enabled: boolean;
-        focusTime: number; // minutes
-        breakTime: number; // minutes
-        enableBeep?: boolean;
-    };
     notifications: {
         enablePush: boolean;
         habitsReminder: {
