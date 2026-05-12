@@ -4727,7 +4727,10 @@ def on_knowledge_item_updated(event: firestore_fn.Event[firestore_fn.Change[fire
 
 
 
-@firestore_fn.on_document_created(document="conhecimento/{itemId}")
+@firestore_fn.on_document_created(
+    document="conhecimento/{itemId}",
+    memory=options.MemoryOption.MB_512,
+)
 
 
 
@@ -9500,6 +9503,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     _, done = downloader.next_chunk()
                 fh.seek(0)
                 file_bytes = fh.read()
+                fh.close()
+                del fh  # libera o buffer BytesIO imediatamente (evita cópia dupla em memória)
                 local_pdf_text = ""
                 local_pdf_metadata = None
                 local_docx_text = ""
@@ -9525,6 +9530,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
                         tmp.write(file_bytes)
                         tmp_path = tmp.name
+                    del file_bytes  # libera bytes após gravar no disco; File API vai ler do tmp_path
 
                     # 4. Faz upload para a File API do Gemini
                     gemini_file = client.files.upload(
@@ -9535,6 +9541,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         )
                     )
                     os.unlink(tmp_path)
+                else:
+                    del file_bytes  # texto já extraído localmente; bytes brutos não são mais necessários
 
                 # O bloco try/finally abaixo garante que o arquivo seja sempre
                 # deletado da File API do Gemini, mesmo que a extração falhe.
