@@ -991,12 +991,15 @@ def _extract_action_search_context_query(text: str) -> str | None:
     lowered = _normalize_for_matching(text).strip()
     if not lowered:
         return None
-    wants_search = any(marker in lowered for marker in (
+    # Long messages (forwarded texts, context info) are never intent commands
+    if len(text.strip()) > 500:
+        return None
+    wants_search = any(re.search(r'\b' + marker + r'\b', lowered) for marker in (
         "pesquisa", "pesquise", "buscar", "busca", "busque",
         "procura", "procure", "localiza", "localize",
     ))
     mentions_action = any(marker in lowered for marker in ("acao", "acoes", "tarefa", "tarefas"))
-    wants_context = "contexto" in lowered and any(marker in lowered for marker in (
+    wants_context = "contexto" in lowered and any(re.search(r'\b' + marker + r'\b', lowered) for marker in (
         "ative", "ativa", "ativar", "entre", "entra", "entrar",
     ))
     if not (wants_search and mentions_action and wants_context):
@@ -1009,6 +1012,8 @@ def _extract_action_lookup_query(text: str) -> str | None:
     """Detects requests that only ask to find/list an action, without locking context."""
     lowered = _normalize_for_matching(text).strip()
     if not lowered:
+        return None
+    if len(text.strip()) > 500:
         return None
     wants_search = any(marker in lowered for marker in (
         "pesquisa", "pesquise", "pesquisar", "buscar", "busca", "busque",
