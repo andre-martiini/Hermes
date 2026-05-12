@@ -8121,6 +8121,58 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             except Exception as e:
                 return f"Erro ao consultar finanças: {e}"
 
+        def consultar_saude(ultimos_dias: int = 7, data_especifica: str = None):
+            """Consulta dados de saúde e exercício do usuário: sono, passos, calorias, hábitos diários e peso.
+            Parâmetros:
+            - ultimos_dias: número de dias a consultar (padrão: 7, máximo: 30)
+            - data_especifica: data no formato YYYY-MM-DD para consulta de um dia específico (sobrepõe ultimos_dias)
+            """
+            try:
+                import json
+                from datetime import date, timedelta
+                today = date.today()
+                if data_especifica:
+                    start_date = data_especifica
+                    end_date = data_especifica
+                else:
+                    n = min(int(ultimos_dias or 7), 30)
+                    start_date = (today - timedelta(days=n - 1)).isoformat()
+                    end_date = today.isoformat()
+
+                logs = []
+                for d in db.collection('health_exercise_logs').stream():
+                    if start_date <= d.id <= end_date:
+                        entry = d.to_dict() or {}
+                        entry['data'] = d.id
+                        logs.append(entry)
+                logs.sort(key=lambda x: x['data'], reverse=True)
+
+                habits = []
+                for d in db.collection('health_daily_habits').stream():
+                    if start_date <= d.id <= end_date:
+                        h = d.to_dict() or {}
+                        h['data'] = d.id
+                        habits.append(h)
+                habits.sort(key=lambda x: x['data'], reverse=True)
+
+                weight_start = (today - timedelta(days=30)).isoformat()
+                weights = []
+                for d in db.collection('health_weights').stream():
+                    w = d.to_dict() or {}
+                    if w.get('date', '') >= weight_start:
+                        weights.append(w)
+                weights.sort(key=lambda x: x.get('date', ''), reverse=True)
+
+                result = {
+                    "periodo": {"inicio": start_date, "fim": end_date},
+                    "logs_exercicio": logs,
+                    "habitos_diarios": habits,
+                    "pesos_recentes": weights[:5],
+                }
+                return json.dumps(result, ensure_ascii=False, default=str)
+            except Exception as e:
+                return f"Erro ao consultar dados de saúde: {e}"
+
         def registrar_item_financeiro_v2(tipo: str, descricao: str, valor: float, mes: int = None, ano: int = None, data: str = None):
             """
             Registra uma nova entrada financeira (renda, obrigacao_fixa ou transacao_avulsa).
@@ -9132,6 +9184,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'encontrar_slot_livre': encontrar_slot_livre,
             'preparar_reagendamento_em_lote': preparar_reagendamento_em_lote,
             'consultar_financas_v2': consultar_financas_v2,
+            'consultar_saude': consultar_saude,
             'registrar_item_financeiro_v2': registrar_item_financeiro_v2,
             'calculadora': calculadora,
         }
@@ -9211,6 +9264,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'encontrar_slot_livre': encontrar_slot_livre,
             'preparar_reagendamento_em_lote': preparar_reagendamento_em_lote,
             'consultar_financas_v2': consultar_financas_v2,
+            'consultar_saude': consultar_saude,
             'registrar_item_financeiro_v2': registrar_item_financeiro_v2,
             'calculadora': calculadora,
         }
@@ -9246,6 +9300,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     encontrar_slot_livre,
                     preparar_reagendamento_em_lote,
                     consultar_financas_v2,
+                    consultar_saude,
                     registrar_item_financeiro_v2,
                     calculadora,
                 ] + dynamic_tools,

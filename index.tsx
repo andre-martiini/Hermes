@@ -2537,8 +2537,11 @@ const App: React.FC = () => {
       const telemetry = await GoogleHealthService.getDailyTelemetry(today);
       const weightData = await GoogleHealthService.getWeight(today);
 
-      if (Object.keys(telemetry).length > 0) {
-        await setDoc(doc(db, 'health_exercise_logs', todayStr), telemetry, { merge: true });
+      const cleanTelemetry = Object.fromEntries(
+        Object.entries(telemetry).filter(([, v]) => v !== undefined && v !== null)
+      );
+      if (Object.keys(cleanTelemetry).length > 0) {
+        await setDoc(doc(db, 'health_exercise_logs', todayStr), cleanTelemetry, { merge: true });
         addTerminalLog(`Telemetria capturada: ${telemetry.walk?.steps || 0} passos, ${telemetry.sleep?.totalMinutes || 0} min sono.`);
       } else {
         addTerminalLog("Nenhuma telemetria nova encontrada para hoje.");
