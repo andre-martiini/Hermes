@@ -1429,7 +1429,7 @@ export const TaskExecutionView = ({
 
   // ─── Render ───────────────────────────────────────────────────
   return (
-    <div className={`fixed inset-0 z-[200] flex flex-col overflow-hidden transition-colors duration-700 ${bg} ${isBreakActive ? '!bg-[#1a0b0b]' : ''}`}>
+    <div className={`fixed inset-0 z-[200] flex flex-col overflow-hidden transition-colors duration-700 ${bg}`}>
 
       {/* ══════════════════════════════════════════════════════════
           HEADER BAR
@@ -2214,7 +2214,7 @@ export const TaskExecutionView = ({
                   handleDroppedFiles={handleDiaryFilesSelected}
                   setModalConfig={setModalConfig}
                   applyFormatting={() => { }}
-                  isTimerRunning={isDark}
+                  isDark={isDark}
                   diaryEndRef={diaryEndRef}
                   handleDiaryScroll={(event) => handleMobileHeaderScroll(event.currentTarget.scrollTop)}
                   handleEditDiaryEntry={(index) => {
