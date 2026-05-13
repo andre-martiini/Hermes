@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import {
   Tarefa, HermesNotification, WysiwygEditorProps, PlanoTrabalhoItem,
   EntregaInstitucional, AtividadeRealizada, Toast
@@ -336,6 +336,9 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
           >
             <svg className="w-3 h-3 md:w-3.5 md:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
             <span>{dateDisplay} {task.horario_inicio ? `• ${task.horario_inicio}` : ''}</span>
+            {task.auto_data_atualizada && (
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" title="Data atualizada automaticamente" />
+            )}
           </button>
 
           {isEditingDateTime && (
@@ -440,9 +443,20 @@ export const NotificationCenter = ({
           <h3 className="text-[10px] font-black text-on-surface uppercase tracking-widest font-mono">Notificações</h3>
           <p className="text-[8px] text-slate-400 font-black uppercase mt-1 font-mono">Hermes Sys-Core</p>
         </div>
-        <span className="bg-primary-tactile text-white text-[10px] font-black px-2.5 py-1 rounded-none shadow-soft-touch font-mono">
-          {notifications.filter(n => !n.isRead).length}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="bg-primary-tactile text-white text-[10px] font-black px-2.5 py-1 rounded-none shadow-soft-touch font-mono">
+            {notifications.filter(n => !n.isRead).length}
+          </span>
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-700 transition-colors p-1"
+            aria-label="Fechar notificações"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </div>
       <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
         {notifications.length > 0 ? (

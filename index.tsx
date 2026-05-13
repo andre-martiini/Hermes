@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import {
@@ -2413,26 +2413,6 @@ const App: React.FC = () => {
   // Data-driven Notifications (Budget, Overdue, PGC)
   useEffect(() => {
     const todayStr = formatDateLocalISO(new Date());
-    // 1. Overdue Tasks (Once a day check)
-    if (appSettings.notifications.overdueTasks.enabled && localStorage.getItem('lastOverdueCheckDate') !== todayStr) {
-      const overdueCount = tarefas.filter(t =>
-        normalizeStatus(t.status) !== 'concluido' &&
-        t.status !== 'excluído' as any &&
-        !isStandbyStatus(t.status) &&
-        t.data_limite && t.data_limite !== "-" && t.data_limite !== "0000-00-00" &&
-        t.data_limite < todayStr
-      ).length;
-      if (overdueCount > 0) {
-        emitNotification(
-          "Ações Vencidas",
-          `Você tem ${overdueCount} ações fora do prazo. Que tal atualizá-las para hoje?`,
-          'warning',
-          'acoes',
-          `overdue-${todayStr}`
-        );
-        localStorage.setItem('lastOverdueCheckDate', todayStr);
-      }
-    }
     // 2. Budget Risk (Whenever data changes, throttled to once per day notification AND real spending increase)
     if (appSettings.notifications.budgetRisk.enabled) {
       const now = new Date();
@@ -4219,7 +4199,6 @@ const App: React.FC = () => {
   }, [tarefas]);
   const tarefasAgrupadas: Record<string, Tarefa[]> = useMemo(() => {
     const buckets = {
-      atrasadas: [] as Tarefa[],
       hoje: [] as Tarefa[],
       amanha: [] as Tarefa[],
       estaSemana: [] as Tarefa[],
@@ -4257,7 +4236,7 @@ const App: React.FC = () => {
         return;
       }
       if (t.data_limite < todayStr) {
-        buckets.atrasadas.push(t);
+        buckets.hoje.push(t);
       } else if (t.data_limite === todayStr) {
         buckets.hoje.push(t);
       } else if (t.data_limite === tomorrowStr) {
@@ -4291,7 +4270,6 @@ const App: React.FC = () => {
     const finalGroups: Record<string, Tarefa[]> = {};
     // Stand-by: visual top, but auto-expand ignores it
     if (buckets.standBy.length > 0) finalGroups["Ações em Stand-by"] = buckets.standBy;
-    if (buckets.atrasadas.length > 0) finalGroups["Atrasadas"] = buckets.atrasadas;
     if (buckets.hoje.length > 0) finalGroups["Hoje"] = buckets.hoje;
     if (buckets.amanha.length > 0) finalGroups["Amanhã"] = buckets.amanha;
     if (buckets.estaSemana.length > 0) finalGroups["Esta Semana"] = buckets.estaSemana;
@@ -4314,7 +4292,6 @@ const App: React.FC = () => {
     if (!hasAutoExpanded && Object.keys(tarefasAgrupadas).length > 0) {
       const keys = Object.keys(tarefasAgrupadas);
       let sectionsToExpand: string[] = [];
-      if (keys.includes("Atrasadas")) sectionsToExpand.push("Atrasadas");
       if (keys.includes("Hoje")) sectionsToExpand.push("Hoje");
       if (sectionsToExpand.length === 0) {
         const fallback = keys.find(k => k !== "Ações em Stand-by" && k !== "Concluídas");
@@ -5259,7 +5236,7 @@ const App: React.FC = () => {
                                   {filteredAndSortedTarefas.map((task) => (
                                     <tr
                                       key={task.id}
-                                      onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
+                                      onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
                                       className={`transition-colors cursor-pointer ${isDarkTheme ? 'hover:bg-slate-800/50' : 'hover:bg-slate-50'} ${selectedTaskIds.includes(task.id) ? (isDarkTheme ? 'bg-blue-900/20' : 'bg-blue-50/30') : ''}`}
                                     >
                                       <td className="px-8 py-4 text-center">
@@ -5302,7 +5279,7 @@ const App: React.FC = () => {
                                 {filteredAndSortedTarefas.map((task) => (
                                   <div
                                     key={task.id}
-                                    onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
+                                    onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
                                     className={`p-6 space-y-4 hover:bg-slate-50 transition-colors cursor-pointer ${selectedTaskIds.includes(task.id) ? 'bg-blue-50/30' : ''}`}
                                   >
                                     <div className="flex items-start gap-4">
@@ -5397,7 +5374,7 @@ const App: React.FC = () => {
                                               <RowCard
                                                 task={task}
                                                 isDark={isDarkTheme}
-                                                onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
+                                                onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
                                                 onToggle={handleToggleTarefaStatus}
                                                 onDelete={handleDeleteTarefa}
                                                 onEdit={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
@@ -5447,7 +5424,7 @@ const App: React.FC = () => {
                                               task={task}
                                               isDark={isDarkTheme}
                                               highlighted={label === 'Hoje' && tasks.filter(t => normalizeStatus(t.status) !== 'concluido')[0]?.id === task.id}
-                                              onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
+                                              onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
                                               onToggle={handleToggleTarefaStatus}
                                               onDelete={handleDeleteTarefa}
                                               onEdit={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
@@ -5499,7 +5476,7 @@ const App: React.FC = () => {
                             <RowCard
                               task={task}
                               isDark={isDarkTheme}
-                              onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
+                              onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
                               onToggle={handleToggleTarefaStatus}
                               onDelete={handleDeleteTarefa}
                               onEdit={(t) => { setSelectedTask(t); setTaskModalMode('default'); }}

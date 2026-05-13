@@ -2406,11 +2406,6 @@ export const TaskExecutionView = ({
         </div>
       )}
 
-      {isNotificationCenterOpen && (
-        <div className="absolute top-20 right-6 z-[300] w-80 md:w-96 shadow-2xl animate-in slide-in-from-right-4 duration-300">
-          <NotificationCenter notifications={notifications} onMarkAsRead={onMarkAsRead} onDismiss={onDismiss} isOpen={isNotificationCenterOpen} onClose={onCloseNotifications} />
-        </div>
-      )}
 
 
       {/* ══════════════════════════════════════════════════════════

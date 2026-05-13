@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 
 export type Status = 'em andamento' | 'stand-by' | 'concluído';
 
@@ -103,6 +103,7 @@ export interface Tarefa {
     kg_tags?: string[];                  // Tags geradas pela Fase 1 (Retrieval-First)
     kg_crystallized?: boolean;           // true após a Fase 2 ser concluída
     artefatos_kg?: ArtefatoKG[];         // Artefatos indexados pelo módulo de artefatos
+    auto_data_atualizada?: boolean;
 }
 
 export interface ArtefatoKG {

@@ -33,7 +33,13 @@
       "mcp__plugin_claude-mem_mcp-search__smart_unfold",
       "Bash(python -c ' *)",
       "mcp__plugin_claude-mem_mcp-search__search",
-      "mcp__plugin_claude-mem_mcp-search__timeline"
+      "mcp__plugin_claude-mem_mcp-search__timeline",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\functions\\\\daily_reset_job.py\")",
+      "Bash(Select-Object -Skip 0 -First 120)",
+      "Bash(Get-Content -Path \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\src\\\\components\\\\ui\\\\SpeedDialMenu.tsx\" -Encoding UTF8)",
+      "Bash(Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\src\\\\components\\\\ui\\\\UIComponents.tsx\" -TotalCount 533 -Tail 120)"
     ]
   }
 }
