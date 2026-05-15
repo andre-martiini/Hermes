@@ -19,7 +19,7 @@ import { MeetingTranscriptionTool } from './src/components/tools/MeetingTranscri
 import { STATUS_COLORS, PROJECT_COLORS, SLIDES_HISTORY_KEY } from './constants';
 import { db, functions, getFirebaseMessaging, auth, googleProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, onSnapshot, query, orderBy, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, writeBatch, getDoc, getDocs, where } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, writeBatch, getDoc, getDocs, where, serverTimestamp } from 'firebase/firestore';
 import { getToken, onMessage } from 'firebase/messaging';
 import { httpsCallable } from 'firebase/functions';
 import FinanceView from './FinanceView';
@@ -1184,6 +1184,7 @@ const App: React.FC = () => {
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
   const [isPgdTerminalOpen, setIsPgdTerminalOpen] = useState(false);
   const [pgdTerminalLogs, setPgdTerminalLogs] = useState<string[]>([]);
+  const [activePgdTaskId, setActivePgdTaskId] = useState<string | null>(null);
   const [isModalCompletedLogsOpen, setIsModalCompletedLogsOpen] = useState(false);
   const [isQuickLogModalOpen, setIsQuickLogModalOpen] = useState(false);
   const [isShoppingAIModalOpen, setIsShoppingAIModalOpen] = useState(false);
@@ -2078,20 +2079,26 @@ const App: React.FC = () => {
     return () => window.removeEventListener('popstate', handlePopState);
   }, [activeModule, viewMode, selectedSystemId, isLogsModalOpen, isPgdTerminalOpen, activeFerramenta, lastBackPress]);
   useEffect(() => {
-    let eventSource: EventSource | null = null;
-    if (isPgdTerminalOpen) {
-      eventSource = new EventSource('http://127.0.0.1:8000/api/automations/logs');
-      eventSource.onmessage = (e) => {
-        setPgdTerminalLogs((prev) => [...prev, e.data]);
-      };
-      eventSource.onerror = () => {
-        // Ignora erros para reconectar suavemente
-      };
-    }
-    return () => {
-      if (eventSource) eventSource.close();
-    };
-  }, [isPgdTerminalOpen]);
+    if (!isPgdTerminalOpen || !activePgdTaskId) return;
+    const unsub = onSnapshot(
+      doc(db, 'fila_automacoes', activePgdTaskId),
+      (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data();
+        const logs: string[] = data?.logs ?? [];
+        setPgdTerminalLogs(logs);
+        if (data?.status === 'concluido' || data?.status === 'erro_permanente') {
+          const statusMsg = data.status === 'concluido'
+            ? '[✅] Tarefa concluída com sucesso.'
+            : '[💀] Tarefa encerrada com erro permanente.';
+          setPgdTerminalLogs(prev =>
+            prev[prev.length - 1] === statusMsg ? prev : [...prev, statusMsg]
+          );
+        }
+      },
+    );
+    return () => unsub();
+  }, [isPgdTerminalOpen, activePgdTaskId]);
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [isHabitsReminderOpen, setIsHabitsReminderOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'notifications' | 'context' | 'sistemas'>('notifications');
@@ -7090,18 +7097,19 @@ const App: React.FC = () => {
                               </div>
                               <button
                                 onClick={async () => {
-                                  showToast('Iniciando automação do ponto eletrônico...', 'info');
+                                  showToast('Enfileirando automação do Ponto Eletrônico...', 'info');
                                   try {
-                                    const response = await fetch('http://127.0.0.1:8000/api/automations/ponto-eletronico', {
-                                      method: 'POST',
+                                    const docRef = await addDoc(collection(db, 'fila_automacoes'), {
+                                      tipo: 'ponto_eletronico',
+                                      payload: {},
+                                      status: 'pendente',
+                                      tentativas: 0,
+                                      logs: [],
+                                      criado_em: serverTimestamp(),
                                     });
-                                    if (response.ok) {
-                                      showToast('Script do Ponto Eletrônico acionado com sucesso!', 'success');
-                                    } else {
-                                      showToast('Erro ao contatar o servidor local de automação.', 'error');
-                                    }
+                                    showToast(`Ponto Eletrônico enfileirado (${docRef.id.slice(0, 6)}…). Queue processor irá executar.`, 'success');
                                   } catch (e) {
-                                    showToast('O servidor Python de automação (server.py) não está rodando.', 'error');
+                                    showToast('Erro ao gravar tarefa no Firestore.', 'error');
                                   }
                                 }}
                                 className="w-full bg-slate-900 text-white py-3 rounded-none text-[10px] font-black uppercase tracking-[0.2em] hover:bg-emerald-600 transition-all shadow-md font-mono"
@@ -7180,22 +7188,22 @@ const App: React.FC = () => {
                                     mes_ano: currentPlan.mes_ano,
                                     entregas: allDeliveries
                                   };
-                                  showToast('Iniciando automação do PGD no Petrvs...', 'info');
+                                  showToast('Enfileirando execução PGD no Petrvs...', 'info');
                                   try {
-                                    const response = await fetch('http://127.0.0.1:8000/api/automations/executar-pgd', {
-                                      method: 'POST',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify(payload),
+                                    const docRef = await addDoc(collection(db, 'fila_automacoes'), {
+                                      tipo: 'executar_pgd',
+                                      payload,
+                                      status: 'pendente',
+                                      tentativas: 0,
+                                      logs: [],
+                                      criado_em: serverTimestamp(),
                                     });
-                                    if (response.ok) {
-                                      showToast('Pacote de dados enviado! Iniciando monitoramento...', 'success');
-                                      setPgdTerminalLogs([]);
-                                      setIsPgdTerminalOpen(true);
-                                    } else {
-                                      showToast('Erro no processamento do servidor de automação.', 'error');
-                                    }
+                                    setActivePgdTaskId(docRef.id);
+                                    setPgdTerminalLogs([]);
+                                    setIsPgdTerminalOpen(true);
+                                    showToast('PGD enfileirado. Monitorando execução...', 'success');
                                   } catch (e) {
-                                    showToast('Servidor de automação não está respondendo.', 'error');
+                                    showToast('Erro ao gravar tarefa no Firestore.', 'error');
                                   }
                                 }}
                                 className={`w-full py-3 rounded-none text-[10px] font-black uppercase tracking-[0.2em] transition-all shadow-md font-mono ${(() => {

@@ -1,3 +1,5 @@
+# LEGADO — substituído por queue_processor.py (Firestore queue com retry automático).
+# Mantido apenas como fallback local direto. Não iniciar junto com queue_processor.py.
 import subprocess
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
