@@ -1737,13 +1737,22 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                 <div className="flex items-center gap-1.5">
                     {!isTemporary && (
-                        <button
-                            onClick={() => handleCreateSession()}
-                            className={`p-1.5 rounded-none transition-all ${isDark ? 'text-white/50 hover:bg-white/10 hover:text-white' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-900'}`}
-                            title="Nova Conversa"
-                        >
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-                        </button>
+                        <>
+                            <button
+                                onClick={() => setShowHistory(v => !v)}
+                                className={`p-1.5 rounded-none transition-all ${showHistory ? (isDark ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-900') : (isDark ? 'text-white/50 hover:bg-white/10 hover:text-white' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-900')}`}
+                                title="Histórico de Conversas"
+                            >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            </button>
+                            <button
+                                onClick={() => handleCreateSession()}
+                                className={`p-1.5 rounded-none transition-all ${isDark ? 'text-white/50 hover:bg-white/10 hover:text-white' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-900'}`}
+                                title="Nova Conversa"
+                            >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+                            </button>
+                        </>
                     )}
                     <button
                         onClick={onClose}
