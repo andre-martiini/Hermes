@@ -1,4 +1,5 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Tarefa, HermesNotification, WysiwygEditorProps, PlanoTrabalhoItem,
   EntregaInstitucional, AtividadeRealizada, Toast
@@ -188,7 +189,15 @@ export const PgcAuditRow = ({
   );
 };
 
-export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, onDelete, onEdit, onUpdateToToday, onUpdateTask, highlighted }: {
+const isBlankTaskDescription = (value?: string | null) => !value || /^[\s\-_–—]*$/.test(value);
+
+const hasDescriptionSynthesisContext = (task: Tarefa) => {
+  const hasDiary = (task.acompanhamento || []).some(entry => String(entry?.nota || '').trim().length > 0);
+  const hasPlan = (task.plano_acao || []).some(item => String(item?.text || '').trim().length > 0);
+  return hasDiary || hasPlan;
+};
+
+export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, onDelete, onEdit, onUpdateToToday, onUpdateTask, onSynthesizeDescription, isSynthesizingDescription, highlighted }: {
   task: Tarefa,
   isDark?: boolean,
   onClick?: () => void,
@@ -197,25 +206,25 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
   onEdit: (t: Tarefa) => void,
   onUpdateToToday?: (t: Tarefa) => void,
   onUpdateTask?: (id: string, updates: Partial<Tarefa>) => void,
+  onSynthesizeDescription?: (t: Tarefa) => void | Promise<void>,
+  isSynthesizingDescription?: boolean,
   highlighted?: boolean
 }) => {
   const statusValue = normalizeStatus(task.status);
   const isCompleted = statusValue === 'concluido';
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isEditingDateTime, setIsEditingDateTime] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [localDate, setLocalDate] = useState(task.data_limite || '');
+  const [localTime, setLocalTime] = useState(task.horario_inicio || '');
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsEditingDateTime(false);
-      }
-    };
-    if (isEditingDateTime) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isEditingDateTime]);
+    setLocalDate(task.data_limite || '');
+    setLocalTime(task.horario_inicio || '');
+  }, [task.data_limite, task.horario_inicio, isEditingDateTime]);
+
+  // handleClickOutside removido pois agora utilizamos um modal centralizado com backdrop
 
   const formatDateShort = (dateStr: string) => {
     if (!dateStr || dateStr === '-' || dateStr === 'Sem Data') return '-';
@@ -252,26 +261,93 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
   const highlightClass = getHighlightClass(task.area_tematica);
 
   const dateDisplay = formatDateShort(task.data_limite);
+  const canSynthesizeDescription = isBlankTaskDescription(task.descricao) && hasDescriptionSynthesisContext(task);
 
   const handleQuickDate = (type: 'today' | 'tomorrow') => {
     const d = new Date();
     if (type === 'tomorrow') d.setDate(d.getDate() + 1);
     const dStr = d.toISOString().split('T')[0];
-    onUpdateTask?.(task.id, { data_limite: dStr, data_inicio: dStr });
+    setLocalDate(dStr);
+    onUpdateTask?.(task.id, { data_limite: dStr, data_inicio: dStr, horario_inicio: localTime });
+    setIsEditingDateTime(false);
+  };
+
+  const getTodayIso = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const handleConfirmReschedule = () => {
+    let finalDate = localDate;
+    const today = getTodayIso();
+    if (finalDate && finalDate < today) {
+      finalDate = today;
+      setLocalDate(finalDate);
+    }
+    if (finalDate !== task.data_limite || localTime !== (task.horario_inicio || '')) {
+      onUpdateTask?.(task.id, { 
+        data_limite: finalDate || task.data_limite, 
+        data_inicio: finalDate || task.data_limite,
+        horario_inicio: localTime 
+      });
+    }
     setIsEditingDateTime(false);
   };
 
   return (
     <div
-      onClick={onClick}
-      onMouseLeave={() => setIsConfirmingDelete(false)}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData('task-id', task.id);
         e.dataTransfer.effectAllowed = 'move';
       }}
-      className={`group w-full px-4 md:px-6 py-5 md:py-4 border-b transition-all flex flex-col sm:flex-row sm:items-start gap-4 md:gap-6 animate-in cursor-pointer relative ${isEditingDateTime ? 'z-[1000]' : 'z-auto'} ${isDark ? 'border-white/10 hover:bg-white/[0.03]' : 'border-border-grid hover:bg-slate-50/70'} ${isCompleted ? 'opacity-60 grayscale-[0.35]' : ''} ${highlighted ? (isDark ? 'bg-white/10 border-l-2 border-l-accent-tactile' : 'bg-surface-container border-l-2 border-l-primary-tactile') : 'bg-transparent'}`}
+      className={`group w-full border-b transition-all flex flex-col animate-in relative ${isEditingDateTime ? 'z-[1000]' : 'z-auto'} ${isDark ? 'border-white/10' : 'border-border-grid'} ${isCompleted ? 'opacity-60 grayscale-[0.35]' : ''} ${highlighted ? (isDark ? 'bg-white/10 border-l-2 border-l-accent-tactile' : 'bg-surface-container border-l-2 border-l-primary-tactile') : 'bg-transparent'}`}
     >
+      <div
+        onClick={onClick}
+        onMouseLeave={() => setIsConfirmingDelete(false)}
+        className={`w-full pl-4 pr-16 md:pl-6 md:pr-20 py-5 md:py-4 transition-all flex flex-col sm:flex-row sm:items-start gap-4 md:gap-6 cursor-pointer relative ${isDark ? 'hover:bg-white/[0.03]' : 'hover:bg-slate-50/70'}`}
+      >
+        <div className={`absolute top-3 right-3 z-10 flex items-center gap-1 ${isConfirmingDelete ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity duration-200`}>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsExpanded(!isExpanded);
+            }}
+            className={`p-1.5 transition-all flex items-center justify-center rounded-none ${isDark ? 'text-slate-500 hover:text-white hover:bg-white/5' : 'text-slate-400 hover:text-slate-900 hover:bg-slate-100'}`}
+            title={isExpanded ? "Ocultar detalhes" : "Mostrar detalhes"}
+          >
+            <svg className={`w-3.5 h-3.5 transition-transform duration-300 ${isExpanded ? 'rotate-180 text-primary-tactile' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (isConfirmingDelete) {
+                onDelete(task.id);
+              } else {
+                setIsConfirmingDelete(true);
+              }
+            }}
+            className={`p-1.5 transition-all flex items-center gap-1.5 rounded-none font-mono text-[9px] font-black uppercase ${
+              isConfirmingDelete
+                ? 'bg-rose-600 text-white px-2.5 shadow-soft-touch opacity-100'
+                : `${isDark ? 'text-slate-500 hover:text-rose-400 hover:bg-white/5' : 'text-slate-400 hover:text-rose-600 hover:bg-slate-100'}`
+            }`}
+            title={isConfirmingDelete ? "Confirmar exclusão" : "Excluir ação"}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            {isConfirmingDelete && <span>Excluir?</span>}
+          </button>
+        </div>
+
       <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-0">
         <div className="flex flex-col gap-0.5 text-slate-300 group-hover:text-slate-400 cursor-grab active:cursor-grabbing transition-colors shrink-0">
           <div className="flex gap-0.5">
@@ -341,54 +417,163 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
             )}
           </button>
 
-          {isEditingDateTime && (
-            <div className="absolute top-full right-0 mt-2 p-4 bg-white border border-border-grid shadow-xl z-[1001] flex flex-col gap-3 min-w-[200px] animate-in fade-in zoom-in-95 duration-200">
-              <div className="space-y-1">
-                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest font-mono">Reagendar Prazo</p>
-                <input 
-                  type="date"
-                  value={task.data_limite || ''}
-                  onChange={(e) => {
-                    onUpdateTask?.(task.id, { data_limite: e.target.value, data_inicio: e.target.value });
-                  }}
-                  className="w-full bg-slate-50 border border-border-grid px-2 py-1.5 text-[10px] font-black font-mono focus:ring-1 focus:ring-primary-tactile outline-none"
-                />
-              </div>
-              <div className="space-y-1">
-                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest font-mono">Horário</p>
-                <input 
-                  type="time"
-                  value={task.horario_inicio || ''}
-                  onChange={(e) => {
-                    onUpdateTask?.(task.id, { horario_inicio: e.target.value });
-                  }}
-                  className="w-full bg-slate-50 border border-border-grid px-2 py-1.5 text-[10px] font-black font-mono focus:ring-1 focus:ring-primary-tactile outline-none"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <button 
-                  onClick={(e) => { e.stopPropagation(); handleQuickDate('today'); }}
-                  className="py-2 bg-slate-100 hover:bg-slate-200 text-[8px] font-black uppercase tracking-widest font-mono transition-colors"
-                >
-                  Hoje
-                </button>
-                <button 
-                  onClick={(e) => { e.stopPropagation(); handleQuickDate('tomorrow'); }}
-                  className="py-2 bg-slate-100 hover:bg-slate-200 text-[8px] font-black uppercase tracking-widest font-mono transition-colors"
-                >
-                  Amanhã
-                </button>
-              </div>
-              <button 
-                onClick={(e) => { e.stopPropagation(); setIsEditingDateTime(false); }}
-                className="w-full bg-slate-900 text-white py-2 text-[8px] font-black uppercase tracking-widest font-mono hover:bg-slate-800 transition-colors"
+          {isEditingDateTime && createPortal(
+            <div 
+              className="fixed inset-0 z-[99999] bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-300 font-mono"
+              onClick={(e) => { e.stopPropagation(); setIsEditingDateTime(false); }}
+            >
+              <div 
+                className={`relative w-full max-w-md p-6 md:p-8 border shadow-2xl flex flex-col gap-6 animate-in zoom-in-95 duration-300 ${isDark ? 'bg-slate-900 border-slate-800 text-white shadow-black/80' : 'bg-white border-border-grid text-slate-900'}`}
+                onClick={(e) => e.stopPropagation()}
               >
-                Concluir
-              </button>
-            </div>
+                {/* Header & Close Button */}
+                <div className="flex items-center justify-between border-b pb-4 border-current/10">
+                  <div className="min-w-0 pr-4">
+                    <h3 className="text-base md:text-lg font-black uppercase tracking-widest">Alterar Cronograma</h3>
+                    <p className="text-[10px] opacity-60 mt-1 font-mono truncate">{task.titulo}</p>
+                  </div>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setIsEditingDateTime(false); }}
+                    className={`p-2 transition-transform hover:rotate-90 duration-200 shrink-0 ${isDark ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-black'}`}
+                    title="Fechar"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </div>
+
+                {/* Inputs Section */}
+                <div className="flex flex-col gap-4 py-2">
+                  <div className="space-y-1.5">
+                    <label className={`text-xs font-black uppercase tracking-widest font-mono block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Reagendar Prazo (Data Limite)</label>
+                    <input 
+                      type="date"
+                      min={getTodayIso()}
+                      value={localDate}
+                      onChange={(e) => setLocalDate(e.target.value)}
+                      style={{ colorScheme: isDark ? 'dark' : 'light' }}
+                      className={`w-full border px-3 py-2.5 text-xs font-black font-mono focus:ring-1 focus:ring-primary-tactile outline-none transition-colors ${isDark ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-slate-50 border-border-grid text-slate-900'}`}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className={`text-xs font-black uppercase tracking-widest font-mono block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Horário Previsto</label>
+                    <input 
+                      type="time"
+                      value={localTime}
+                      onChange={(e) => setLocalTime(e.target.value)}
+                      style={{ colorScheme: isDark ? 'dark' : 'light' }}
+                      className={`w-full border px-3 py-2.5 text-xs font-black font-mono focus:ring-1 focus:ring-primary-tactile outline-none transition-colors ${isDark ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-slate-50 border-border-grid text-slate-900'}`}
+                    />
+                  </div>
+                </div>
+
+                {/* Quick Actions & Confirm */}
+                <div className="flex flex-col gap-3 pt-2 border-t border-current/10">
+                  <div className="grid grid-cols-2 gap-3">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleQuickDate('today'); }}
+                      className={`py-3 text-xs font-black uppercase tracking-widest transition-colors border ${isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 border-slate-200 hover:bg-slate-200 text-slate-800'}`}
+                    >
+                      Hoje
+                    </button>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleQuickDate('tomorrow'); }}
+                      className={`py-3 text-xs font-black uppercase tracking-widest transition-colors border ${isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 border-slate-200 hover:bg-slate-200 text-slate-800'}`}
+                    >
+                      Amanhã
+                    </button>
+                  </div>
+
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleConfirmReschedule(); }}
+                    className={`w-full py-3.5 text-xs font-black uppercase tracking-widest transition-colors shadow-soft-touch ${isDark ? 'bg-primary-tactile hover:bg-primary-tactile/80 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}
+                  >
+                    Concluir Reagendamento
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
           )}
         </div>
       </div>
+    </div>
+
+    {isExpanded && (
+        <div 
+          onClick={(e) => e.stopPropagation()} 
+          className={`w-full px-4 md:px-6 py-4 border-t animate-in slide-in-from-top-2 duration-200 font-mono text-xs ${isDark ? 'bg-black/40 border-white/10 text-slate-300' : 'bg-slate-50/80 border-border-grid text-slate-700'}`}
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-1">Descrição / Síntese</span>
+              <div className="space-y-2">
+                <p className="whitespace-pre-wrap font-mono leading-relaxed">{!isBlankTaskDescription(task.descricao) ? task.descricao : <span className="italic opacity-50">Sem descrição detalhada</span>}</p>
+                {canSynthesizeDescription && onSynthesizeDescription && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSynthesizeDescription(task);
+                    }}
+                    disabled={isSynthesizingDescription}
+                    className={`inline-flex items-center gap-2 px-3 py-1.5 border text-[9px] font-black uppercase tracking-widest transition-all disabled:opacity-60 disabled:cursor-wait ${isDark ? 'bg-indigo-500/15 border-indigo-400/30 text-indigo-200 hover:bg-indigo-500/25' : 'bg-indigo-50 border-indigo-100 text-indigo-700 hover:bg-indigo-100'}`}
+                    title="Gerar descricao com IA a partir do diario e checklist"
+                  >
+                    <svg className={`w-3.5 h-3.5 ${isSynthesizingDescription ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    {isSynthesizingDescription ? 'Gerando...' : 'Gerar descricao com IA'}
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-1">Status</span>
+                <span className={`inline-block px-2 py-0.5 uppercase tracking-widest text-[10px] font-black border ${task.status === 'concluído' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : task.status === 'stand-by' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-blue-500/10 border-blue-500/30 text-blue-400'}`}>
+                  {task.status}
+                </span>
+              </div>
+              {task.sistema && (
+                <div>
+                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-1">Sistema Associado</span>
+                  <span className="inline-block px-2 py-0.5 bg-white/5 border border-white/10 text-[10px] font-bold text-slate-300">{task.sistema}</span>
+                </div>
+              )}
+              {task.tags && task.tags.length > 0 && (
+                <div>
+                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-1">Tags</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {task.tags.map(tag => (
+                      <span key={tag} className="px-2 py-0.5 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[10px] font-bold">#{tag}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {task.pool_dados && task.pool_dados.length > 0 && (
+                <div>
+                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-1">Anexos no Pool</span>
+                  <span className="text-[11px] font-bold">{task.pool_dados.length} item(ns) anexado(s)</span>
+                </div>
+              )}
+            </div>
+          </div>
+          {task.plano_acao && task.plano_acao.length > 0 && (
+            <div className="mt-4 pt-3 border-t border-current/10">
+              <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">Checklist / Plano de Ação ({task.plano_acao.filter(p => p.completed).length}/{task.plano_acao.length})</span>
+              <div className="space-y-1.5 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
+                {task.plano_acao.map(item => (
+                  <div key={item.id} className="flex items-start gap-2 text-[11px]">
+                    <span className={`mt-0.5 text-[10px] shrink-0 ${item.completed ? 'text-emerald-400' : 'text-slate-500'}`}>{item.completed ? '✓' : '•'}</span>
+                    <span className={item.completed ? 'line-through text-slate-500' : ''}>{item.text}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 });

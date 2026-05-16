@@ -1093,6 +1093,15 @@ Responda SOMENTE com JSON válido no formato abaixo, sem markdown, sem explicaç
     </div>
   );
 };
+
+const isBlankActionDescription = (value?: string | null) => !value || /^[\s\-_–—]*$/.test(value);
+
+const hasActionDescriptionContext = (task: Tarefa) => {
+  const hasDiary = (task.acompanhamento || []).some(entry => String(entry?.nota || '').trim().length > 0);
+  const hasPlan = (task.plano_acao || []).some(item => String(item?.text || '').trim().length > 0);
+  return hasDiary || hasPlan;
+};
+
 const App: React.FC = () => {
   const [routeTick, setRouteTick] = useState(0);
   const pathname = window.location.pathname;
@@ -1204,6 +1213,8 @@ const App: React.FC = () => {
   const logMediaRecorderRef = useRef<MediaRecorder | null>(null);
   const logAudioChunksRef = useRef<Blob[]>([]);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [descriptionSynthesisTaskId, setDescriptionSynthesisTaskId] = useState<string | null>(null);
+  const [isBatchDescriptionSynthesisRunning, setIsBatchDescriptionSynthesisRunning] = useState(false);
   const [isCopilotoOpen, setIsCopilotoOpen] = useState(false);
   const [copilotoAutoStartMic, setCopilotoAutoStartMic] = useState(false);
   const [copilotoMode, setCopilotoMode] = useState<'default' | 'finance' | 'saude'>('default');
@@ -2654,6 +2665,85 @@ const App: React.FC = () => {
       showToast('Erro ao salvar alterações.', 'error');
     }
   };
+
+  const handleSynthesizeTaskDescription = async (task: Tarefa) => {
+    if (descriptionSynthesisTaskId || isBatchDescriptionSynthesisRunning) return;
+    if (!isBlankActionDescription(task.descricao) || !hasActionDescriptionContext(task)) {
+      showToast('Esta ação não possui contexto suficiente para sintetizar.', 'info');
+      return;
+    }
+    setDescriptionSynthesisTaskId(task.id);
+    showToast('Gerando descrição executiva...', 'info');
+    try {
+      const fn = httpsCallable(functions, 'sintetizarDescricaoAcao', { timeout: 300000 });
+      const result = await fn({ taskId: task.id });
+      const data = result.data as any;
+      if (data?.status === 'completed') {
+        showToast('Descrição sintetizada com sucesso.', 'success');
+      } else {
+        showToast('A ação não atende mais aos critérios de síntese.', 'warning');
+      }
+    } catch (err: any) {
+      console.error('Erro ao sintetizar descrição:', err);
+      showToast(err?.message || 'Erro ao gerar descrição com IA.', 'error');
+    } finally {
+      setDescriptionSynthesisTaskId(null);
+    }
+  };
+
+  const runBatchDescriptionSynthesis = async (limit: number) => {
+    setIsBatchDescriptionSynthesisRunning(true);
+    showToast('Síntese em lote iniciada...', 'info');
+    try {
+      const fn = httpsCallable(functions, 'sintetizarDescricaoAcao', { timeout: 300000 });
+      const result = await fn({ batch: true, limit });
+      const data = result.data as any;
+      const processed = Number(data?.processed || 0);
+      const failed = Array.isArray(data?.failed) ? data.failed.length : 0;
+      const remaining = Number(data?.remainingEligible || 0);
+      if (processed > 0) {
+        showToast(`${processed} descrição(ões) sintetizada(s).${failed ? ` ${failed} falha(s).` : ''}${remaining ? ` ${remaining} restante(s).` : ''}`, failed ? 'warning' : 'success');
+      } else if (failed > 0) {
+        showToast('Nenhuma descrição foi sintetizada no lote.', 'error');
+      } else {
+        showToast('Nenhuma ação elegível foi encontrada.', 'info');
+      }
+    } catch (err: any) {
+      console.error('Erro na síntese em lote:', err);
+      showToast(err?.message || 'Erro ao sintetizar descrições em lote.', 'error');
+    } finally {
+      setIsBatchDescriptionSynthesisRunning(false);
+    }
+  };
+
+  const handleBatchSynthesizeDescriptions = async () => {
+    if (isBatchDescriptionSynthesisRunning || descriptionSynthesisTaskId) return;
+    setIsBatchDescriptionSynthesisRunning(true);
+    try {
+      const fn = httpsCallable(functions, 'sintetizarDescricaoAcao', { timeout: 300000 });
+      showToast('Verificando ações elegíveis...', 'info');
+      const result = await fn({ dryRun: true, limit: 50 });
+      const data = result.data as any;
+      const eligibleCount = Number(data?.eligibleCount || 0);
+      const limit = Math.min(Number(data?.limit || 50), eligibleCount);
+      setIsBatchDescriptionSynthesisRunning(false);
+      if (eligibleCount === 0) {
+        showToast('Nenhuma ação com descrição vazia e contexto útil foi encontrada.', 'info');
+        return;
+      }
+      showConfirm(
+        'Sintetizar descrições vazias',
+        `Foram identificadas ${eligibleCount} ações elegíveis no banco de dados. O processamento iniciará ${limit} ação(ões) agora e atualizará a tela via Firestore.`,
+        () => { void runBatchDescriptionSynthesis(limit); },
+        () => setIsBatchDescriptionSynthesisRunning(false)
+      );
+    } catch (err: any) {
+      setIsBatchDescriptionSynthesisRunning(false);
+      console.error('Erro ao contar ações elegíveis:', err);
+      showToast(err?.message || 'Erro ao verificar ações elegíveis.', 'error');
+    }
+  };
+
   const handleReorderTasks = async (taskId: string, targetTaskId: string, label?: string) => {
     let currentLabel = label;
     if (!currentLabel) {
@@ -4200,6 +4290,9 @@ const App: React.FC = () => {
       t.status !== 'excluído' as any
     ).length;
   }, [tarefas]);
+  const descriptionSynthesisEligibleCount = useMemo(() => {
+    return tarefas.filter(task => isBlankActionDescription(task.descricao) && hasActionDescriptionContext(task)).length;
+  }, [tarefas]);
   const tarefasAgrupadas: Record<string, Tarefa[]> = useMemo(() => {
     const buckets = {
       hoje: [] as Tarefa[],
@@ -5008,6 +5101,24 @@ const App: React.FC = () => {
                           <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none outline-none text-xs font-bold w-full font-mono" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                         </div>
                       )}
+                      {viewMode === 'gallery' && (
+                        <button
+                          onClick={handleBatchSynthesizeDescriptions}
+                          disabled={isBatchDescriptionSynthesisRunning || Boolean(descriptionSynthesisTaskId) || descriptionSynthesisEligibleCount === 0}
+                          className={`hidden xl:flex px-4 py-2 rounded-none text-[10px] font-black uppercase tracking-widest items-center gap-2 transition-all active:scale-95 font-mono border disabled:opacity-50 disabled:cursor-not-allowed ${isDarkTheme ? 'bg-indigo-500/15 text-indigo-200 border-indigo-400/30 hover:bg-indigo-500/25' : 'bg-indigo-50 text-indigo-700 border-indigo-100 hover:bg-indigo-100'}`}
+                          title="Sintetizar descrições vazias com IA"
+                        >
+                          <svg className={`w-4 h-4 ${isBatchDescriptionSynthesisRunning ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                          </svg>
+                          {isBatchDescriptionSynthesisRunning ? 'Sintetizando...' : 'Sintetizar Vazias'}
+                          {descriptionSynthesisEligibleCount > 0 && (
+                            <span className="px-1.5 py-0.5 bg-current/10 text-[9px] font-black">
+                              {descriptionSynthesisEligibleCount}
+                            </span>
+                          )}
+                        </button>
+                      )}
                       <button
                         onClick={() => setIsCreateModalOpen(true)}
                         className="bg-slate-900 text-white px-5 py-2 rounded-none text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-slate-800 transition-all active:scale-95 font-mono"
@@ -5190,6 +5301,22 @@ const App: React.FC = () => {
                     <div className="flex flex-col md:flex-row items-center justify-between mb-4 gap-4 px-4 md:px-0">
                       {/* Linha de Filtros e Ações Globais */}
                       <div className="flex items-center justify-between w-full gap-2">
+                        <button
+                          onClick={handleBatchSynthesizeDescriptions}
+                          disabled={isBatchDescriptionSynthesisRunning || Boolean(descriptionSynthesisTaskId) || descriptionSynthesisEligibleCount === 0}
+                          className={`xl:hidden w-full sm:w-auto px-4 py-2 rounded-none text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 font-mono border disabled:opacity-50 disabled:cursor-not-allowed ${isDarkTheme ? 'bg-indigo-500/15 text-indigo-200 border-indigo-400/30 hover:bg-indigo-500/25' : 'bg-indigo-50 text-indigo-700 border-indigo-100 hover:bg-indigo-100'}`}
+                          title="Sintetizar descrições vazias com IA"
+                        >
+                          <svg className={`w-4 h-4 ${isBatchDescriptionSynthesisRunning ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                          </svg>
+                          {isBatchDescriptionSynthesisRunning ? 'Sintetizando...' : 'Sintetizar descrições vazias'}
+                          {descriptionSynthesisEligibleCount > 0 && (
+                            <span className="px-1.5 py-0.5 bg-current/10 text-[9px] font-black">
+                              {descriptionSynthesisEligibleCount}
+                            </span>
+                          )}
+                        </button>
                       </div>
                     </div>
                     {dashboardViewMode === 'calendar' ? (
@@ -5383,6 +5510,8 @@ const App: React.FC = () => {
                                                 onEdit={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
                                                 onUpdateToToday={handleUpdateToToday}
                                                 onUpdateTask={handleUpdateTarefa}
+                                                onSynthesizeDescription={handleSynthesizeTaskDescription}
+                                                isSynthesizingDescription={descriptionSynthesisTaskId === task.id}
                                               />
                                             </div>
                                           ))}
@@ -5433,6 +5562,8 @@ const App: React.FC = () => {
                                               onEdit={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
                                               onUpdateToToday={handleUpdateToToday}
                                               onUpdateTask={handleUpdateTarefa}
+                                              onSynthesizeDescription={handleSynthesizeTaskDescription}
+                                              isSynthesizingDescription={descriptionSynthesisTaskId === task.id}
                                             />
                                           </div>
                                         ))
@@ -5484,6 +5615,8 @@ const App: React.FC = () => {
                               onDelete={handleDeleteTarefa}
                               onEdit={(t) => { setSelectedTask(t); setTaskModalMode('default'); }}
                               onUpdateTask={handleUpdateTarefa}
+                              onSynthesizeDescription={handleSynthesizeTaskDescription}
+                              isSynthesizingDescription={descriptionSynthesisTaskId === task.id}
                             />
                           </div>
                         ))}

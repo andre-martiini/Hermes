@@ -1,5 +1,5 @@
 import React from 'react';
-import { AppSettings, Categoria, Tarefa } from '../../types';
+import { AppSettings, Categoria, Tarefa, formatDateLocalISO } from '../../types';
 import { functions } from '../../firebase';
 import { httpsCallable } from 'firebase/functions';
 
@@ -121,6 +121,22 @@ export const applyStandbyDateRules = (
     payload.horario_inicio = null;
     payload.horario_fim = null;
     return payload;
+  }
+
+  if (previousTask) {
+    const oldStatusNorm = normalizeStatus(previousTask.status || '');
+    const newStatusNorm = normalizeStatus(nextStatus || '');
+    const wasCompletedOrStandby = oldStatusNorm === 'concluido' || isStandbyStatus(previousTask.status);
+
+    if (wasCompletedOrStandby && newStatusNorm === 'em andamento') {
+      if (!dateWasAdded) {
+        const todayStr = formatDateLocalISO(new Date());
+        payload.data_limite = todayStr;
+        payload.data_inicio = todayStr;
+      }
+      payload.horario_inicio = null;
+      payload.horario_fim = null;
+    }
   }
 
   return payload;

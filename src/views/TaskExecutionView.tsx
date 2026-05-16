@@ -243,6 +243,37 @@ export const TaskExecutionView = ({
       createTempSession();
     }
   }, [focusedFile, isDesktopViewport, tempSessionId, copilotoUserId, task.id, currentTaskData.sistema]);
+  const [localDataLimite, setLocalDataLimite] = useState(currentTaskData.data_limite || '');
+  const [localPrazoFinal, setLocalPrazoFinal] = useState(currentTaskData.prazo_final || '');
+  const [localHorarioInicio, setLocalHorarioInicio] = useState(currentTaskData.horario_inicio || '');
+  const [localHorarioFim, setLocalHorarioFim] = useState(currentTaskData.horario_fim || '');
+
+  useEffect(() => {
+    setLocalDataLimite(currentTaskData.data_limite || '');
+    setLocalPrazoFinal(currentTaskData.prazo_final || '');
+    setLocalHorarioInicio(currentTaskData.horario_inicio || '');
+    setLocalHorarioFim(currentTaskData.horario_fim || '');
+  }, [currentTaskData.data_limite, currentTaskData.prazo_final, currentTaskData.horario_inicio, currentTaskData.horario_fim]);
+
+  const getTodayIso = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const handleBlurDataLimite = () => {
+    let finalDate = localDataLimite;
+    const today = getTodayIso();
+    if (finalDate && finalDate < today) {
+      finalDate = today;
+      setLocalDataLimite(finalDate);
+      showToast("Data de execução ajustada para hoje (não é permitido agendar no passado)", "info");
+    }
+    onSave(task.id, { data_limite: finalDate, data_inicio: finalDate });
+  };
+
   const [newFollowUp, setNewFollowUp] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [showPool, setShowPool] = useState(false);
@@ -1824,22 +1855,26 @@ export const TaskExecutionView = ({
                       <div className="space-y-3">
                         <div>
                           <p className={`${labelCls} mb-1 opacity-60`}>Data de Execução</p>
-                          <input type="date" value={currentTaskData.data_limite || ''} onChange={e => onSave(task.id, { data_limite: e.target.value })}
+                          <input type="date" min={getTodayIso()} value={localDataLimite} onChange={e => setLocalDataLimite(e.target.value)} onBlur={handleBlurDataLimite}
+                            style={{ colorScheme: isDark ? 'dark' : 'light' }}
                             className={`w-full px-3 py-2 rounded-none text-xs font-bold outline-none focus:ring-1 focus:ring-primary-tactile border transition-all font-mono mb-3 ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-border-grid text-slate-900'}`} />
                             
                           <p className={`${labelCls} mb-1 opacity-60`}>Prazo Final (Opcional)</p>
-                          <input type="date" value={currentTaskData.prazo_final || ''} onChange={e => onSave(task.id, { prazo_final: e.target.value })}
+                          <input type="date" value={localPrazoFinal} onChange={e => setLocalPrazoFinal(e.target.value)} onBlur={() => onSave(task.id, { prazo_final: localPrazoFinal })}
+                            style={{ colorScheme: isDark ? 'dark' : 'light' }}
                             className={`w-full px-3 py-2 rounded-none text-xs font-bold outline-none focus:ring-1 focus:ring-primary-tactile border transition-all font-mono ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-border-grid text-slate-900'}`} />
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <div>
                             <p className={`${labelCls} mb-1 opacity-60`}>Início</p>
-                            <input type="time" value={currentTaskData.horario_inicio || ''} onChange={e => onSave(task.id, { horario_inicio: e.target.value })}
+                            <input type="time" value={localHorarioInicio} onChange={e => setLocalHorarioInicio(e.target.value)} onBlur={() => onSave(task.id, { horario_inicio: localHorarioInicio })}
+                              style={{ colorScheme: isDark ? 'dark' : 'light' }}
                               className={`w-full px-3 py-2 rounded-none text-xs font-bold outline-none focus:ring-1 focus:ring-primary-tactile border transition-all font-mono ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-border-grid text-slate-900'}`} />
                           </div>
                           <div>
                             <p className={`${labelCls} mb-1 opacity-60`}>Fim</p>
-                            <input type="time" value={currentTaskData.horario_fim || ''} onChange={e => onSave(task.id, { horario_fim: e.target.value })}
+                            <input type="time" value={localHorarioFim} onChange={e => setLocalHorarioFim(e.target.value)} onBlur={() => onSave(task.id, { horario_fim: localHorarioFim })}
+                              style={{ colorScheme: isDark ? 'dark' : 'light' }}
                               className={`w-full px-3 py-2 rounded-none text-xs font-bold outline-none focus:ring-1 focus:ring-primary-tactile border transition-all font-mono ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-border-grid text-slate-900'}`} />
                           </div>
                         </div>

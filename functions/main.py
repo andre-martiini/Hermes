@@ -192,6 +192,139 @@ def get_db():
 
     return firestore.client()
 
+
+DESCRIPTION_SYNTHESIS_MODEL = os.environ.get("DESCRIPTION_SYNTHESIS_MODEL", "gemini-3.1-flash-lite")
+DESCRIPTION_SYNTHESIS_BATCH_LIMIT = 50
+
+
+def _clean_meaningful_text(value, max_chars: int = 1600) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"\s+", " ", text)
+    if len(text) > max_chars:
+        return text[:max_chars].rstrip() + "..."
+    return text
+
+
+def _is_blank_action_description(value) -> bool:
+    if value is None:
+        return True
+    if not isinstance(value, str):
+        return False
+    return re.fullmatch(r"[\s\-_–—]*", value or "") is not None
+
+
+def _extract_action_diary_entries(task_data: dict, limit: int = 40) -> list[dict]:
+    entries = []
+    raw_entries = task_data.get("acompanhamento") or []
+    if not isinstance(raw_entries, list):
+        return entries
+    for entry in raw_entries:
+        if isinstance(entry, dict):
+            note = _clean_meaningful_text(entry.get("nota"), 1800)
+            date = _clean_meaningful_text(entry.get("data"), 80)
+        else:
+            note = _clean_meaningful_text(entry, 1800)
+            date = ""
+        if note:
+            entries.append({"data": date, "nota": note})
+    return entries[-limit:]
+
+
+def _extract_action_plan_items(task_data: dict, limit: int = 80) -> list[dict]:
+    items = []
+    raw_items = task_data.get("plano_acao") or []
+    if not isinstance(raw_items, list):
+        return items
+    for item in raw_items:
+        if isinstance(item, dict):
+            text = _clean_meaningful_text(item.get("text") or item.get("titulo") or item.get("descricao"), 1200)
+            completed = bool(item.get("completed"))
+        else:
+            text = _clean_meaningful_text(item, 1200)
+            completed = False
+        if text:
+            items.append({"text": text, "completed": completed})
+    return items[:limit]
+
+
+def _is_task_eligible_for_description_synthesis(task_data: dict) -> tuple[bool, str]:
+    if not _is_blank_action_description(task_data.get("descricao")):
+        return False, "descricao_existente"
+    diary_entries = _extract_action_diary_entries(task_data)
+    plan_items = _extract_action_plan_items(task_data)
+    if not diary_entries and not plan_items:
+        return False, "sem_contexto"
+    return True, "elegivel"
+
+
+def _build_description_synthesis_prompt(task_data: dict) -> str:
+    title = _clean_meaningful_text(task_data.get("titulo") or "Acao sem titulo", 500)
+    status = _clean_meaningful_text(task_data.get("status"), 120) or "Nao informado"
+    area = _clean_meaningful_text(task_data.get("area_tematica") or task_data.get("projeto"), 200) or "Nao informada"
+    diary_entries = _extract_action_diary_entries(task_data)
+    plan_items = _extract_action_plan_items(task_data)
+
+    diary_text = "\n".join(
+        f"- [{entry.get('data') or 'sem data'}] {entry.get('nota')}"
+        for entry in diary_entries
+    ) or "- Sem registros significativos."
+    plan_text = "\n".join(
+        f"- [{'X' if item.get('completed') else ' '}] {item.get('text')}"
+        for item in plan_items
+    ) or "- Sem checklist significativo."
+
+    return f"""Voce e um redator executivo senior. Recebera o titulo de uma acao, seus registros cronologicos de diario de bordo e as etapas do seu plano de acao.
+Sua missao e elaborar uma sintese descritiva coesa (de 1 a 2 paragrafos concisos) que explique de forma cristalina:
+1. O objetivo principal e escopo da demanda.
+2. O progresso atual resumido (o que ja foi feito e os proximos passos cruciais).
+
+Regras de Formatacao:
+- Seja impessoal, profissional e direto (pt-BR).
+- Nao utilize saudacoes, introducoes ou meta-comentarios ("Aqui esta a descricao").
+- Retorne APENAS o texto da descricao resultante.
+
+CONTEXTO DA ACAO
+Titulo: {title}
+Status: {status}
+Area/Projeto: {area}
+
+DIARIO DE BORDO
+{diary_text}
+
+CHECKLIST / PLANO DE ACAO
+{plan_text}"""
+
+
+def _sanitize_generated_description(text: str) -> str:
+    cleaned = str(text or "").strip()
+    cleaned = re.sub(r"^```(?:markdown|text)?", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"```$", "", cleaned).strip()
+    cleaned = re.sub(r"^(aqui esta|segue|descricao gerada|sintese executiva)\s*:?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned[:2500].strip()
+
+
+def _generate_action_description(client, task_data: dict) -> str:
+    response = client.models.generate_content(
+        model=DESCRIPTION_SYNTHESIS_MODEL,
+        contents=_build_description_synthesis_prompt(task_data),
+        config={"temperature": 0.25, "max_output_tokens": 700}
+    )
+    description = _sanitize_generated_description(getattr(response, "text", "") or "")
+    if len(description) < 40:
+        raise ValueError("Descricao sintetizada ficou vazia ou curta demais.")
+    return description
+
+
+def _count_eligible_description_synthesis_tasks(db_ref) -> int:
+    count = 0
+    for task_doc in db_ref.collection("tarefas").stream():
+        task_data = task_doc.to_dict() or {}
+        eligible, _reason = _is_task_eligible_for_description_synthesis(task_data)
+        if eligible:
+            count += 1
+    return count
+
 def _perf_now_ms() -> int:
     return int(time.perf_counter() * 1000)
 
@@ -11678,6 +11811,136 @@ Requisitos:
         })
 
         send_telegram_notification(f"❌ A pesquisa profunda sobre '{topic}' falhou ou excedeu o limite de tempo.\nErro: {error_msg[:100]}")
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=300
+)
+def sintetizarDescricaoAcao(req: https_fn.CallableRequest):
+    """
+    Sintetiza descricoes executivas para acoes sem descricao, usando diario e plano de acao.
+    Modos:
+    - {taskId}: processa uma tarefa especifica.
+    - {batch: true, limit?: number}: processa lote limitado de tarefas elegiveis.
+    - {dryRun: true}: conta tarefas elegiveis sem chamar o modelo.
+    """
+    from google import genai as _genai
+
+    if not req.auth:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.UNAUTHENTICATED,
+            message="Autenticacao obrigatoria."
+        )
+
+    data = req.data or {}
+    task_id = str(data.get("taskId") or "").strip()
+    dry_run = bool(data.get("dryRun"))
+    batch_mode = bool(data.get("batch")) or not task_id
+    requested_limit = data.get("limit", DESCRIPTION_SYNTHESIS_BATCH_LIMIT)
+
+    try:
+        limit = int(requested_limit)
+    except Exception:
+        limit = DESCRIPTION_SYNTHESIS_BATCH_LIMIT
+    limit = max(1, min(limit, DESCRIPTION_SYNTHESIS_BATCH_LIMIT))
+
+    try:
+        db_ref = get_db()
+
+        if dry_run:
+            return {
+                "status": "preview",
+                "eligibleCount": _count_eligible_description_synthesis_tasks(db_ref),
+                "limit": limit
+            }
+
+        keys_doc = _cached_doc_get(db_ref, "system", "api_keys")
+        gemini_key = keys_doc.to_dict().get("gemini_api_key") if keys_doc.exists else None
+        if not gemini_key:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                message="Chave Gemini nao configurada em system/api_keys."
+            )
+
+        client = _genai.Client(api_key=gemini_key)
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        def process_task(task_ref, task_data: dict) -> dict:
+            eligible, reason = _is_task_eligible_for_description_synthesis(task_data)
+            if not eligible:
+                return {"id": task_ref.id, "status": "ignored", "reason": reason}
+
+            description = _generate_action_description(client, task_data)
+            task_ref.update({
+                "descricao": description,
+                "data_atualizacao": now_iso,
+                "descricao_sintetizada_por": "gemini",
+                "descricao_sintetizada_modelo": DESCRIPTION_SYNTHESIS_MODEL,
+                "descricao_sintetizada_em": now_iso
+            })
+            return {
+                "id": task_ref.id,
+                "status": "completed",
+                "descriptionLength": len(description)
+            }
+
+        if task_id:
+            task_ref = db_ref.collection("tarefas").document(task_id)
+            task_doc = task_ref.get()
+            if not task_doc.exists:
+                raise https_fn.HttpsError(
+                    code=https_fn.FunctionsErrorCode.NOT_FOUND,
+                    message="Acao nao encontrada."
+                )
+            result = process_task(task_ref, task_doc.to_dict() or {})
+            return {**result, "processed": 1 if result.get("status") == "completed" else 0}
+
+        processed = []
+        ignored = 0
+        failed = []
+        scanned = 0
+
+        for task_doc in db_ref.collection("tarefas").stream():
+            scanned += 1
+            task_data = task_doc.to_dict() or {}
+            eligible, _reason = _is_task_eligible_for_description_synthesis(task_data)
+            if not eligible:
+                ignored += 1
+                continue
+            if len(processed) >= limit:
+                break
+            try:
+                result = process_task(task_doc.reference, task_data)
+                if result.get("status") == "completed":
+                    processed.append(result["id"])
+                else:
+                    ignored += 1
+            except Exception as item_error:
+                failed.append({"id": task_doc.id, "error": str(item_error)[:300]})
+
+        remaining_estimate = max(0, _count_eligible_description_synthesis_tasks(db_ref))
+        return {
+            "status": "completed",
+            "batch": batch_mode,
+            "scanned": scanned,
+            "processed": len(processed),
+            "processedIds": processed,
+            "ignored": ignored,
+            "failed": failed,
+            "remainingEligible": remaining_estimate,
+            "limit": limit
+        }
+
+    except https_fn.HttpsError:
+        raise
+    except Exception as e:
+        print(f"[sintetizarDescricaoAcao] Erro: {e}")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=str(e)
+        )
+
 
 @https_fn.on_call(
     cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]),

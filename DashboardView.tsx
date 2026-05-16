@@ -143,7 +143,7 @@ const SystemsHeatmap = ({ data, isDark = false }: { data: {id: string, name: str
             {data.map((item, i) => {
                 const intensity = item.count === 0 ? 0 : Math.min(Math.max(Math.ceil((item.count / max) * 5), 1), 5);
                 const bgClasses = [
-                    isDark ? 'bg-sky-950/20 text-sky-400/30 border-sky-900/30' : 'bg-sky-200/20 text-sky-900/20 border-sky-900/10', // 0
+                    isDark ? 'bg-sky-950/20 text-slate-400/70 border-sky-900/30' : 'bg-sky-200/20 text-sky-900/20 border-sky-900/10', // 0
                     isDark ? 'bg-sky-800 text-white border-sky-700' : 'bg-sky-200 text-sky-900 border-sky-300', // 1
                     isDark ? 'bg-sky-700 text-white border-sky-600' : 'bg-sky-300 text-sky-950 border-sky-400', // 2
                     isDark ? 'bg-sky-600 text-white border-sky-500' : 'bg-sky-400 text-sky-950 border-sky-500', // 3
@@ -414,10 +414,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                 <DashboardCard title="Ações" iconColor="bg-accent-tactile" onRedirect={() => onNavigate('gallery')} isDark={isDark}>
                     <div className={`h-full flex flex-col gap-4 p-2 md:p-4 rounded-none bg-transparent`}>
                         <div className="flex items-center justify-between shrink-0">
-                            <p className="text-[10px] font-bold uppercase tracking-[0.2em] font-mono text-on-surface/50">// CARGA SEMANAL (D+6)</p>
+                            <p className={`text-[10px] font-bold uppercase tracking-[0.2em] font-mono ${isDark ? 'text-slate-400' : 'text-on-surface/50'}`}>// CARGA SEMANAL (D+6)</p>
                             <div className="flex items-center gap-2 md:gap-3">
                                 <div className="flex items-center gap-1.5">
-                                    <span className="text-[10px] font-bold uppercase font-mono text-on-surface">{inProgressActions.length} TOTAL</span>
+                                    <span className={`text-[10px] font-bold uppercase font-mono ${isDark ? 'text-[#f0f1f0]' : 'text-on-surface'}`}>{inProgressActions.length} TOTAL</span>
                                 </div>
                                 {overdueCount > 0 && (
                                     <div className="px-2 py-0.5 bg-red-50 border border-red-100 flex items-center gap-1.5">
@@ -434,7 +434,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                 
                                 return (
                                     <div key={i} className="flex-1 flex flex-col items-center justify-end h-full group">
-                                        <span className={`text-[11px] md:text-sm font-bold font-mono mb-1 ${day.count > 0 ? 'text-on-surface' : 'text-on-surface/10'}`}>
+                                        <span className={`text-[11px] md:text-sm font-bold font-mono mb-1 ${day.count > 0 ? (isDark ? 'text-[#f0f1f0]' : 'text-on-surface') : (isDark ? 'text-slate-600' : 'text-on-surface/10')}`}>
                                             {String(day.count).padStart(2, '0')}
                                         </span>
                                         <div 
@@ -443,10 +443,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                                 ? 'bg-accent-tactile' 
                                                 : day.count > 0 
                                                     ? 'bg-accent-tactile/20 hover:bg-accent-tactile/40'
-                                                    : 'bg-slate-100'}`}
+                                                    : isDark ? 'bg-white/5' : 'bg-slate-100'}`}
                                         ></div>
                                         <div className={`mt-3 flex flex-col items-center gap-0.5 ${day.isToday ? 'opacity-100' : 'opacity-40'}`}>
-                                            <span className="text-[9px] md:text-[10px] font-bold font-mono leading-none whitespace-nowrap text-on-surface">
+                                            <span className={`text-[9px] md:text-[10px] font-bold font-mono leading-none whitespace-nowrap ${isDark ? 'text-[#f0f1f0]' : 'text-on-surface'}`}>
                                                 {String(day.dayNum).padStart(2, '0')} {day.monthName}
                                             </span>
                                         </div>
@@ -477,13 +477,13 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                     <div className={`h-full flex flex-col gap-4 p-2 md:p-4 rounded-none bg-transparent`}>
                         <div className="flex items-center justify-between shrink-0">
                             <div>
-                                <p className="text-[10px] font-bold uppercase tracking-[0.2em] font-mono text-on-surface/50">// CONSUMO MENSAL ATIVO</p>
+                                <p className={`text-[10px] font-bold uppercase tracking-[0.2em] font-mono ${isDark ? 'text-slate-400' : 'text-on-surface/50'}`}>// CONSUMO MENSAL ATIVO</p>
                                 <div className="text-xl md:text-2xl font-bold font-mono text-emerald-600 mt-1">
                                     {isFinanceVisible ? <><span className="text-xs opacity-60">R$</span> {currentMonthTotalSpent.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}</> : <HiddenMoney compact />}
                                 </div>
                             </div>
                             <div className="text-right">
-                                <p className="text-[9px] font-bold uppercase tracking-[0.2em] font-mono text-on-surface/40">DISPONÍVEL</p>
+                                <p className={`text-[9px] font-bold uppercase tracking-[0.2em] font-mono ${isDark ? 'text-slate-400' : 'text-on-surface/40'}`}>DISPONÍVEL</p>
                                 <div className={`text-sm md:text-base font-bold font-lcd ${availableBalance < 0 ? 'text-red-600' : 'text-emerald-600/80'}`}>
                                     {isFinanceVisible ? <>{availableBalance.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}</> : '••••'}
                                 </div>
@@ -505,7 +505,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                                     title={`Dia ${item.day}: R$ ${item.amount.toFixed(2)}`}
                                                 ></div>
                                                 <div className="mt-2">
-                                                    <span className="text-[8px] font-bold font-mono text-on-surface/30 group-hover:text-emerald-600">
+                                                    <span className={`text-[8px] font-bold font-mono group-hover:text-emerald-600 ${isDark ? 'text-slate-400' : 'text-on-surface/30'}`}>
                                                         {String(item.day).padStart(2, '0')}
                                                     </span>
                                                 </div>
@@ -514,12 +514,12 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                     })
                                 ) : (
                                     <div className="flex-1 h-full flex items-center justify-center border border-dashed border-border-grid">
-                                        <span className="text-[10px] font-bold uppercase font-mono text-on-surface/20 italic">SEM REGISTROS</span>
+                                        <span className={`text-[10px] font-bold uppercase font-mono italic ${isDark ? 'text-slate-500' : 'text-on-surface/20'}`}>SEM REGISTROS</span>
                                     </div>
                                 )
                             ) : (
                                 <div className="flex-1 h-full flex items-center justify-center border border-dashed border-border-grid">
-                                    <span className="text-[10px] font-bold uppercase font-mono text-on-surface/20 italic">DADOS OMITIDOS</span>
+                                    <span className={`text-[10px] font-bold uppercase font-mono italic ${isDark ? 'text-slate-500' : 'text-on-surface/20'}`}>DADOS OMITIDOS</span>
                                 </div>
                             )}
                         </div>
@@ -530,39 +530,39 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                 <DashboardCard title="Saúde" iconColor="bg-safety-red" onRedirect={() => onNavigate('saude')} isDark={isDark}>
                     <div className={`h-full flex flex-col gap-3 p-2 md:p-4 rounded-none bg-transparent`}>
                         <div className="flex items-center justify-between shrink-0">
-                            <p className="text-[10px] font-bold uppercase tracking-[0.2em] font-mono text-on-surface/50">// MONITORAMENTO ATIVO</p>
-                            <span className="text-[10px] font-bold uppercase font-mono text-on-surface">{habitStreak} DIAS CONSEC.</span>
+                            <p className={`text-[10px] font-bold uppercase tracking-[0.2em] font-mono ${isDark ? 'text-slate-400' : 'text-on-surface/50'}`}>// MONITORAMENTO ATIVO</p>
+                            <span className={`text-[10px] font-bold uppercase font-mono ${isDark ? 'text-[#f0f1f0]' : 'text-on-surface'}`}>{habitStreak} DIAS CONSEC.</span>
                         </div>
                         <div className="grid grid-cols-2 gap-x-4 gap-y-3 flex-1">
                             <div className="flex flex-col justify-center border-l-2 border-red-500/10 pl-3">
-                                <p className="text-[9px] font-bold uppercase tracking-[0.1em] font-mono text-on-surface/40 mb-1">Massa Corporal</p>
-                                <div className="text-xl md:text-2xl font-bold font-mono text-on-surface leading-none">
+                                <p className={`text-[9px] font-bold uppercase tracking-[0.1em] font-mono mb-1 ${isDark ? 'text-slate-400' : 'text-on-surface/40'}`}>Massa Corporal</p>
+                                <div className={`text-xl md:text-2xl font-bold font-mono leading-none ${isDark ? 'text-[#f0f1f0]' : 'text-on-surface'}`}>
                                     {currentWeight > 0 ? currentWeight.toFixed(1) : '—'}
                                     <span className="text-[10px] opacity-40 ml-1">KG</span>
                                 </div>
-                                <div className="text-[10px] font-bold font-mono text-on-surface/20 mt-1">Δ {currentWeight > 0 ? `${weightDeltaPrefix}${weightDeltaAbs.toFixed(1)}` : '—'}</div>
+                                <div className={`text-[10px] font-bold font-mono mt-1 ${isDark ? 'text-slate-400' : 'text-on-surface/20'}`}>Δ {currentWeight > 0 ? `${weightDeltaPrefix}${weightDeltaAbs.toFixed(1)}` : '—'}</div>
                             </div>
                             <div className="flex flex-col justify-center border-l-2 border-red-500/10 pl-3">
-                                <p className="text-[9px] font-bold uppercase tracking-[0.1em] font-mono text-on-surface/40 mb-1">Locomoção</p>
-                                <div className="text-xl md:text-2xl font-bold font-mono text-on-surface leading-none">
+                                <p className={`text-[9px] font-bold uppercase tracking-[0.1em] font-mono mb-1 ${isDark ? 'text-slate-400' : 'text-on-surface/40'}`}>Locomoção</p>
+                                <div className={`text-xl md:text-2xl font-bold font-mono leading-none ${isDark ? 'text-[#f0f1f0]' : 'text-on-surface'}`}>
                                     {todayTelemetry?.walk?.steps ? todayTelemetry.walk.steps.toLocaleString('pt-BR') : '—'}
                                 </div>
-                                <div className="text-[10px] font-bold font-mono text-on-surface/20 mt-1">{todayTelemetry?.walk?.distance ? `${todayTelemetry.walk.distance.toFixed(1)} KM` : '—'}</div>
+                                <div className={`text-[10px] font-bold font-mono mt-1 ${isDark ? 'text-slate-400' : 'text-on-surface/20'}`}>{todayTelemetry?.walk?.distance ? `${todayTelemetry.walk.distance.toFixed(1)} KM` : '—'}</div>
                             </div>
                             <div className="flex flex-col justify-center border-l-2 border-red-500/10 pl-3">
-                                <p className="text-[9px] font-bold uppercase tracking-[0.1em] font-mono text-on-surface/40 mb-1">Gasto Calórico</p>
-                                <div className="text-xl md:text-2xl font-bold font-mono text-on-surface leading-none">
+                                <p className={`text-[9px] font-bold uppercase tracking-[0.1em] font-mono mb-1 ${isDark ? 'text-slate-400' : 'text-on-surface/40'}`}>Gasto Calórico</p>
+                                <div className={`text-xl md:text-2xl font-bold font-mono leading-none ${isDark ? 'text-[#f0f1f0]' : 'text-on-surface'}`}>
                                     {todayTelemetry?.calories ? Math.round(todayTelemetry.calories).toLocaleString('pt-BR') : '—'}
                                     <span className="text-[10px] opacity-40 ml-1">KCAL</span>
                                 </div>
-                                <div className="text-[10px] font-bold font-mono text-on-surface/20 mt-1">{todayTelemetry?.activeMinutes ? `${todayTelemetry.activeMinutes} MIN ATIVOS` : '—'}</div>
+                                <div className={`text-[10px] font-bold font-mono mt-1 ${isDark ? 'text-slate-400' : 'text-on-surface/20'}`}>{todayTelemetry?.activeMinutes ? `${todayTelemetry.activeMinutes} MIN ATIVOS` : '—'}</div>
                             </div>
                             <div className="flex flex-col justify-center border-l-2 border-red-500/10 pl-3">
-                                <p className="text-[9px] font-bold uppercase tracking-[0.1em] font-mono text-on-surface/40 mb-1">Repouso</p>
-                                <div className="text-xl md:text-2xl font-bold font-mono text-on-surface leading-none">
+                                <p className={`text-[9px] font-bold uppercase tracking-[0.1em] font-mono mb-1 ${isDark ? 'text-slate-400' : 'text-on-surface/40'}`}>Repouso</p>
+                                <div className={`text-xl md:text-2xl font-bold font-mono leading-none ${isDark ? 'text-[#f0f1f0]' : 'text-on-surface'}`}>
                                     {todayTelemetry?.sleep?.totalMinutes ? `${Math.floor(todayTelemetry.sleep.totalMinutes / 60)}H ${todayTelemetry.sleep.totalMinutes % 60}M` : '—'}
                                 </div>
-                                <div className="text-[10px] font-bold font-mono text-on-surface/20 mt-1">STATUS NOMINAL</div>
+                                <div className={`text-[10px] font-bold font-mono mt-1 ${isDark ? 'text-slate-400' : 'text-on-surface/20'}`}>STATUS NOMINAL</div>
                             </div>
                         </div>
                     </div>
@@ -572,7 +572,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                 <DashboardCard title="Sistemas" iconColor="bg-primary-tactile" onRedirect={() => onNavigate('sistemas-dev')} isDark={isDark}>
                     <div className={`h-full flex flex-col gap-4 p-2 md:p-4 rounded-none bg-transparent`}>
                         <div className="flex-1 overflow-y-auto pr-1">
-                            <p className={`text-[10px] font-bold uppercase tracking-widest mb-4 font-mono text-on-surface/40`}>// MAPA DE CALOR OPERACIONAL</p>
+                            <p className={`text-[10px] font-bold uppercase tracking-widest mb-4 font-mono ${isDark ? 'text-slate-400' : 'text-on-surface/40'}`}>// MAPA DE CALOR OPERACIONAL</p>
                             <SystemsHeatmap data={systemsByAdjustments} isDark={isDark} />
                         </div>
                     </div>
