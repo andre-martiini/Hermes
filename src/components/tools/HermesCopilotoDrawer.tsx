@@ -450,6 +450,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [isDragActive, setIsDragActive] = useState(false);
     const dragCounterRef = useRef(0);
+    const abortControllerRef = useRef<AbortController | null>(null);
+    const isCancelledRef = useRef(false);
 
     // Estado para rastrear qual diagnóstico está em processamento
     const [diagnosingId, setDiagnosingId] = useState<string | null>(null);
@@ -1414,6 +1416,9 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
         setAttachedFile(null);
         setPastedContext(null);
         setFooterError(null);
+        isCancelledRef.current = false;
+        const abortController = new AbortController();
+        abortControllerRef.current = abortController;
         setIsLoading(true);
 
         try {
@@ -1433,7 +1438,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 const uploadRes = await fetch(UPLOAD_ENDPOINT, {
                     method: 'POST',
                     headers: { Authorization: `Bearer ${idToken}` },
-                    body: formData
+                    body: formData,
+                    signal: abortController.signal
                 });
 
                 if (!uploadRes.ok) {
@@ -1450,6 +1456,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 startProgressAnimation();
             }
 
+            if (isCancelledRef.current) return;
+
             // Constrói o conteúdo da mensagem do usuário para o histórico
             const userMessageContent = hasFile && fileToSend
                 ? `📎 ${fileToSend.name}${text.trim() ? `\n\n${text.trim()}` : ''}`
@@ -1463,6 +1471,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 content: userMessageContent,
                 timestamp: Timestamp.now()
             });
+
+            if (isCancelledRef.current) return;
 
             // 2. Chama a Cloud Function
             const askCopiloto = httpsCallable(functions, 'askCopilotoHermes', { timeout: COPILOTO_CALLABLE_TIMEOUT_MS });
@@ -1486,6 +1496,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 routingIndex: getRoutingIndex()
             }), COPILOTO_CALLABLE_TIMEOUT_MS, COPILOTO_CLIENT_TIMEOUT_MESSAGE);
 
+            if (isCancelledRef.current) return;
+
             const data = response.data as any;
 
             // 3. Atualiza título da sessão se for a primeira mensagem
@@ -1505,6 +1517,11 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             await completeProgress();
 
         } catch (err: any) {
+            if (isCancelledRef.current || err?.name === 'AbortError') {
+                abortProgress();
+                return;
+            }
+
             console.error("Erro no Copiloto:", err);
 
             const errMsg = getCopilotoErrorMessage(err);
@@ -2605,6 +2622,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                     </div>
                                     <button
                                         onClick={() => {
+                                            isCancelledRef.current = true;
+                                            abortControllerRef.current?.abort();
                                             setIsLoading(false);
                                             setUploadPhase('idle');
                                             setProgressWidth(0);
