@@ -1,4 +1,3 @@
-﻿
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import {
@@ -5101,24 +5100,6 @@ const App: React.FC = () => {
                           <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none outline-none text-xs font-bold w-full font-mono" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                         </div>
                       )}
-                      {viewMode === 'gallery' && (
-                        <button
-                          onClick={handleBatchSynthesizeDescriptions}
-                          disabled={isBatchDescriptionSynthesisRunning || Boolean(descriptionSynthesisTaskId) || descriptionSynthesisEligibleCount === 0}
-                          className={`hidden xl:flex px-4 py-2 rounded-none text-[10px] font-black uppercase tracking-widest items-center gap-2 transition-all active:scale-95 font-mono border disabled:opacity-50 disabled:cursor-not-allowed ${isDarkTheme ? 'bg-indigo-500/15 text-indigo-200 border-indigo-400/30 hover:bg-indigo-500/25' : 'bg-indigo-50 text-indigo-700 border-indigo-100 hover:bg-indigo-100'}`}
-                          title="Sintetizar descrições vazias com IA"
-                        >
-                          <svg className={`w-4 h-4 ${isBatchDescriptionSynthesisRunning ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                          </svg>
-                          {isBatchDescriptionSynthesisRunning ? 'Sintetizando...' : 'Sintetizar Vazias'}
-                          {descriptionSynthesisEligibleCount > 0 && (
-                            <span className="px-1.5 py-0.5 bg-current/10 text-[9px] font-black">
-                              {descriptionSynthesisEligibleCount}
-                            </span>
-                          )}
-                        </button>
-                      )}
                       <button
                         onClick={() => setIsCreateModalOpen(true)}
                         className="bg-slate-900 text-white px-5 py-2 rounded-none text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-slate-800 transition-all active:scale-95 font-mono"
@@ -5206,13 +5187,13 @@ const App: React.FC = () => {
                         {item.label}
                       </button>
                     ))}
-                    <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-slate-100">
+                    <div className={`grid grid-cols-2 gap-2 mt-4 pt-4 border-t ${isDarkTheme ? 'border-slate-800' : 'border-slate-100'}`}>
                       <button
                         onClick={() => {
                           handleSync();
                           setIsMobileMenuOpen(false);
                         }}
-                        className="px-4 py-2.5 rounded-none text-xs font-black uppercase tracking-widest font-mono bg-blue-50 text-blue-700 hover:bg-blue-100 flex items-center justify-center gap-2 transition-colors"
+                        className={`px-4 py-2.5 rounded-none text-xs font-black uppercase tracking-widest font-mono flex items-center justify-center gap-2 transition-colors ${isDarkTheme ? 'bg-blue-950/40 text-blue-400 hover:bg-blue-900/50 border border-blue-900/40' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`}
                       >
                         <svg className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                         {isSyncing ? 'Sync...' : 'Sync'}
@@ -5222,14 +5203,14 @@ const App: React.FC = () => {
                           setIsSettingsModalOpen(true);
                           setIsMobileMenuOpen(false);
                         }}
-                        className="px-4 py-2.5 rounded-none text-xs font-black uppercase tracking-widest font-mono bg-slate-100 text-slate-600 hover:bg-slate-200/50 flex items-center justify-center gap-2 transition-colors"
+                        className={`px-4 py-2.5 rounded-none text-xs font-black uppercase tracking-widest font-mono flex items-center justify-center gap-2 transition-colors ${isDarkTheme ? 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800' : 'bg-slate-100 text-slate-600 hover:bg-slate-200/50'}`}
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                         Config
                       </button>
                       <button
                         onClick={handleLogout}
-                        className="col-span-2 px-4 py-2.5 rounded-none text-xs font-black uppercase tracking-widest font-mono bg-rose-50 text-rose-600 hover:bg-rose-100 flex items-center justify-center gap-2 mt-2 transition-colors"
+                        className={`col-span-2 px-4 py-2.5 rounded-none text-xs font-black uppercase tracking-widest font-mono flex items-center justify-center gap-2 mt-2 transition-colors ${isDarkTheme ? 'bg-rose-950/40 text-rose-400 hover:bg-rose-900/50 border border-rose-900/40' : 'bg-rose-50 text-rose-600 hover:bg-rose-100'}`}
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
                         Sair da Conta
@@ -5301,22 +5282,6 @@ const App: React.FC = () => {
                     <div className="flex flex-col md:flex-row items-center justify-between mb-4 gap-4 px-4 md:px-0">
                       {/* Linha de Filtros e Ações Globais */}
                       <div className="flex items-center justify-between w-full gap-2">
-                        <button
-                          onClick={handleBatchSynthesizeDescriptions}
-                          disabled={isBatchDescriptionSynthesisRunning || Boolean(descriptionSynthesisTaskId) || descriptionSynthesisEligibleCount === 0}
-                          className={`xl:hidden w-full sm:w-auto px-4 py-2 rounded-none text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 font-mono border disabled:opacity-50 disabled:cursor-not-allowed ${isDarkTheme ? 'bg-indigo-500/15 text-indigo-200 border-indigo-400/30 hover:bg-indigo-500/25' : 'bg-indigo-50 text-indigo-700 border-indigo-100 hover:bg-indigo-100'}`}
-                          title="Sintetizar descrições vazias com IA"
-                        >
-                          <svg className={`w-4 h-4 ${isBatchDescriptionSynthesisRunning ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                          </svg>
-                          {isBatchDescriptionSynthesisRunning ? 'Sintetizando...' : 'Sintetizar descrições vazias'}
-                          {descriptionSynthesisEligibleCount > 0 && (
-                            <span className="px-1.5 py-0.5 bg-current/10 text-[9px] font-black">
-                              {descriptionSynthesisEligibleCount}
-                            </span>
-                          )}
-                        </button>
                       </div>
                     </div>
                     {dashboardViewMode === 'calendar' ? (
@@ -5770,6 +5735,7 @@ const App: React.FC = () => {
                     onPendingSharedAudioFileConsumed={() => setPendingSharedAudioFile(null)}
                     pendingSharedVideoFile={pendingSharedVideoFile}
                     onPendingSharedVideoFileConsumed={() => setPendingSharedVideoFile(null)}
+                    isDark={isDarkTheme}
                   />
                 ) : viewMode === 'services' ? (
                   <ServicesView
@@ -5882,6 +5848,7 @@ const App: React.FC = () => {
                 ) : viewMode === 'rag-bases' ? (
                   <div className="fixed inset-0 z-[50] md:relative md:inset-auto md:z-0 h-full">
                     <RAGBasesView
+                      isDark={isDarkTheme}
                       bases={knowledgeBases}
                       items={knowledgeItems}
                       onCreateBase={handleCreateBase}
