@@ -28,46 +28,30 @@ const COLOR_OPTIONS = [
 
 const FileIcon: React.FC<{ tipo: string }> = ({ tipo }) => {
     const t = (tipo || '').toLowerCase();
-    if (t === 'pdf') return (
-        <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center flex-shrink-0">
-            <span className="text-xs font-black text-red-600">PDF</span>
-        </div>
-    );
-    if (['doc', 'docx'].includes(t)) return (
-        <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
-            <span className="text-xs font-black text-blue-600">DOC</span>
-        </div>
-    );
-    if (['xls', 'xlsx'].includes(t)) return (
-        <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center flex-shrink-0">
-            <span className="text-xs font-black text-green-600">XLS</span>
-        </div>
-    );
-    if (t === 'link') return (
-        <div className="w-10 h-10 bg-violet-100 rounded-xl flex items-center justify-center flex-shrink-0">
-            <svg className="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-            </svg>
-        </div>
-    );
-    if (['txt', 'md'].includes(t)) return (
-        <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center flex-shrink-0">
-            <span className="text-xs font-black text-slate-500">TXT</span>
-        </div>
-    );
+    const colors: Record<string, string> = {
+        'pdf': 'bg-rose-50 text-rose-600 border-rose-200',
+        'doc': 'bg-blue-50 text-blue-600 border-blue-200',
+        'docx': 'bg-blue-50 text-blue-600 border-blue-200',
+        'xls': 'bg-emerald-50 text-emerald-600 border-emerald-200',
+        'xlsx': 'bg-emerald-50 text-emerald-600 border-emerald-200',
+        'link': 'bg-violet-50 text-violet-600 border-violet-200',
+        'txt': 'bg-slate-50 text-slate-600 border-slate-200',
+        'md': 'bg-slate-50 text-slate-600 border-slate-200',
+    };
+    const cls = colors[t] || 'bg-slate-50 text-slate-600 border-slate-200';
     return (
-        <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center flex-shrink-0">
-            <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-            </svg>
+        <div className={`w-10 h-10 border flex items-center justify-center flex-shrink-0 font-mono font-black text-[9px] uppercase tracking-tighter ${cls}`}>
+            {t === 'link' ? (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+            ) : t.substring(0, 3)}
         </div>
     );
 };
 
 const VectorBadge: React.FC<{ hasEmbedding: boolean }> = ({ hasEmbedding }) => (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${hasEmbedding ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}`}>
-        <span className={`w-1.5 h-1.5 rounded-full ${hasEmbedding ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-        {hasEmbedding ? 'Vetorizado' : 'Sem vetor'}
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 border font-mono text-[9px] font-black uppercase tracking-widest ${hasEmbedding ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
+        <div className={`w-1.5 h-1.5 ${hasEmbedding ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+        {hasEmbedding ? 'Vetorizado' : 'Offline'}
     </span>
 );
 
@@ -83,6 +67,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
     onVectorizeItem,
     showConfirm,
 }) => {
+    const [mobileView, setMobileView] = useState<'bases' | 'content'>('bases');
     const [selectedBaseId, setSelectedBaseId] = useState<string | null>(bases[0]?.id ?? null);
     const [isCreatingBase, setIsCreatingBase] = useState(false);
     const [newBaseName, setNewBaseName] = useState('');
@@ -167,40 +152,60 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
     };
 
     return (
-        <div className="flex h-full min-h-screen bg-slate-50">
+        <div className="flex flex-col md:flex-row h-[100dvh] bg-[#f9f9f9] overflow-hidden">
             {/* Sidebar */}
-            <aside className="w-64 flex-shrink-0 bg-white border-r border-slate-200 flex flex-col">
-                <div className="p-4 border-b border-slate-100">
-                    <div className="flex items-center gap-2 mb-1">
-                        <svg className="w-4 h-4 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                        </svg>
-                        <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Bases RAG</span>
+            <aside className={`w-full md:w-72 flex-shrink-0 bg-white border-r border-slate-200 flex flex-col h-full ${mobileView === 'content' ? 'hidden md:flex' : 'flex'}`}>
+                <div className="p-6 border-b border-slate-200">
+                    <div className="flex items-center gap-4 mb-4 md:hidden">
+                        <button
+                            onClick={() => window.history.back()}
+                            className="w-10 h-10 flex items-center justify-center border border-slate-200 text-slate-900 bg-white"
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                            </svg>
+                        </button>
+                        <p className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest">SAIR DO MÓDULO</p>
                     </div>
+                    <div className="flex items-center gap-2 mb-1">
+                        <div className="w-2 h-2 bg-violet-500"></div>
+                        <p className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest">SYSTEM: RAG BASES</p>
+                    </div>
+                    <h2 className="text-sm font-mono font-black text-slate-900 uppercase tracking-tight">Arquivos de Conhecimento</h2>
                 </div>
 
-                <nav className="flex-1 overflow-y-auto p-2">
-                    {bases.map(base => (
+                <nav className="flex-1 overflow-y-auto">
+                    {bases.map((base, idx) => (
                         <button
                             key={base.id}
-                            onClick={() => setSelectedBaseId(base.id)}
-                            className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left transition-all mb-0.5 group ${selectedBaseId === base.id ? 'bg-violet-50 text-violet-800' : 'text-slate-600 hover:bg-slate-50'}`}
+                            onClick={() => {
+                                setSelectedBaseId(base.id);
+                                setMobileView('content');
+                            }}
+                            className={`w-full flex items-center gap-3 px-6 py-4 border-b border-slate-100 text-left transition-all group relative ${selectedBaseId === base.id ? 'bg-slate-50' : 'hover:bg-slate-50/50'}`}
                         >
-                            <span
-                                className="w-7 h-7 rounded-lg flex items-center justify-center text-sm flex-shrink-0"
-                                style={{ backgroundColor: (base.cor || '#f59e0b') + '22' }}
-                            >
-                                {base.emoji || '📁'}
-                            </span>
-                            <span className="text-sm font-semibold truncate flex-1">{base.nome}</span>
-                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${selectedBaseId === base.id ? 'bg-violet-100 text-violet-600' : 'bg-slate-100 text-slate-400'}`}>
-                                {items.filter(i => i.base_id === base.id).length}
-                            </span>
+                            {selectedBaseId === base.id && (
+                                <div className="absolute left-0 top-0 bottom-0 w-1 bg-violet-600"></div>
+                            )}
+                            <div className="flex flex-col flex-1 min-w-0">
+                                <div className="flex items-center justify-between mb-1">
+                                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">BASE-{String(idx + 1).padStart(3, '0')}</span>
+                                    <span className={`text-[10px] font-mono font-black ${selectedBaseId === base.id ? 'text-violet-600' : 'text-slate-400'}`}>
+                                        ITEMS: {items.filter(i => i.base_id === base.id).length}
+                                    </span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-lg flex-shrink-0">{base.emoji || '📁'}</span>
+                                    <span className={`text-sm font-mono font-black truncate uppercase tracking-tight ${selectedBaseId === base.id ? 'text-slate-900' : 'text-slate-600'}`}>
+                                        {base.nome}
+                                    </span>
+                                </div>
+                            </div>
                         </button>
                     ))}
                 </nav>
 
-                <div className="p-3 border-t border-slate-100">
+                <div className="p-4 border-t border-slate-200 bg-slate-50">
                     {isCreatingBase ? (
                         <div className="flex flex-col gap-2">
                             <input
@@ -208,21 +213,21 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                                 value={newBaseName}
                                 onChange={e => setNewBaseName(e.target.value)}
                                 onKeyDown={e => { if (e.key === 'Enter') handleCreateBase(); if (e.key === 'Escape') setIsCreatingBase(false); }}
-                                placeholder="Nome da base..."
-                                className="w-full px-3 py-2 text-sm border border-violet-300 rounded-lg outline-none focus:ring-2 focus:ring-violet-500"
+                                placeholder="NOME DA BASE..."
+                                className="w-full px-3 py-2 text-xs font-mono font-bold border border-slate-200 rounded-none outline-none focus:border-violet-500 bg-white"
                             />
                             <div className="flex gap-2">
-                                <button onClick={handleCreateBase} className="flex-1 py-1.5 bg-violet-600 text-white rounded-lg text-xs font-bold hover:bg-violet-700">Criar</button>
-                                <button onClick={() => setIsCreatingBase(false)} className="flex-1 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-200">Cancelar</button>
+                                <button onClick={handleCreateBase} className="flex-1 py-2 bg-slate-900 text-white rounded-none text-[10px] font-mono font-black uppercase tracking-widest hover:bg-black transition-colors">Criar</button>
+                                <button onClick={() => setIsCreatingBase(false)} className="flex-1 py-2 bg-white border border-slate-200 text-slate-600 rounded-none text-[10px] font-mono font-black uppercase tracking-widest hover:bg-slate-50 transition-colors">Cancelar</button>
                             </div>
                         </div>
                     ) : (
                         <button
                             onClick={() => setIsCreatingBase(true)}
-                            className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-slate-500 hover:bg-slate-50 hover:text-violet-600 transition-all text-sm font-semibold"
+                            className="w-full flex items-center justify-center gap-2 px-3 py-3 border border-dashed border-slate-300 text-slate-400 hover:border-violet-400 hover:text-violet-600 transition-all text-[10px] font-mono font-black uppercase tracking-widest"
                         >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" />
                             </svg>
                             Nova Base RAG
                         </button>
@@ -231,7 +236,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
             </aside>
 
             {/* Main Content */}
-            <main className="flex-1 flex flex-col overflow-hidden">
+            <main className={`flex-1 flex flex-col h-full overflow-hidden ${mobileView === 'bases' ? 'hidden md:flex' : 'flex'}`}>
                 {!selectedBase ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-center p-12">
                         <div className="w-20 h-20 bg-violet-50 rounded-3xl flex items-center justify-center mb-4">
@@ -244,69 +249,73 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                 ) : (
                     <>
                         {/* Header */}
-                        <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center gap-4">
-                            <span
-                                className="w-10 h-10 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
-                                style={{ backgroundColor: (selectedBase.cor || '#f59e0b') + '22' }}
-                            >
-                                {selectedBase.emoji || '📁'}
-                            </span>
-                            <div className="flex-1 min-w-0">
-                                <h1 className="text-lg font-black text-slate-900 truncate">{selectedBase.nome}</h1>
-                                {selectedBase.descricao && (
-                                    <p className="text-xs text-slate-400 truncate">{selectedBase.descricao}</p>
-                                )}
+                        <div className="bg-white border-b border-slate-200 px-4 md:px-8 py-4 md:py-6 flex flex-col md:flex-row md:items-center gap-4 md:gap-6">
+                            <div className="flex items-center justify-between md:justify-start gap-4">
+                                <button
+                                    onClick={() => setMobileView('bases')}
+                                    className="md:hidden flex items-center justify-center w-10 h-10 border border-slate-200 text-slate-900 bg-white hover:bg-slate-50 transition-colors z-10"
+                                    title="VOLTAR PARA LISTA"
+                                >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                                    </svg>
+                                </button>
+                                <div className="flex items-center gap-3">
+                                    <span className="text-2xl">{selectedBase.emoji || '📁'}</span>
+                                    <div className="min-w-0">
+                                        <p className="text-[10px] font-mono font-black text-violet-500 uppercase tracking-[0.2em]">KNOWLEDGE BASE</p>
+                                        <h1 className="text-xl font-mono font-black text-slate-900 uppercase tracking-tight truncate">{selectedBase.nome}</h1>
+                                    </div>
+                                </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                                {/* Search */}
-                                <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 gap-2 w-48">
-                                    <svg className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            {selectedBase.descricao && (
+                                <p className="text-[11px] font-mono text-slate-400 font-bold ml-0 md:ml-10 truncate hidden md:block">{selectedBase.descricao}</p>
+                            )}
+                            <div className="flex items-center gap-2 md:gap-3 overflow-x-auto pb-2 md:pb-0 scrollbar-hide">
+                                {/* Search - Hidden on mobile if needed, or smaller */}
+                                <div className="flex items-center bg-slate-50 border border-slate-200 rounded-none px-3 md:px-4 py-2 md:py-2.5 gap-2 md:gap-3 min-w-[140px] md:w-64 focus-within:border-violet-400 transition-all">
+                                    <svg className="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                                     </svg>
                                     <input
                                         value={searchTerm}
                                         onChange={e => setSearchTerm(e.target.value)}
-                                        placeholder="Buscar documentos..."
-                                        className="bg-transparent text-xs text-slate-700 outline-none w-full placeholder:text-slate-300"
+                                        placeholder="BUSCAR DOCUMENTOS..."
+                                        className="bg-transparent text-[11px] font-mono font-black text-slate-700 outline-none w-full placeholder:text-slate-300 uppercase tracking-widest"
                                     />
                                 </div>
-                                {/* Add Link */}
                                 <button
                                     onClick={() => setIsAddLinkOpen(true)}
-                                    className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-100 transition-all"
+                                    className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-none text-[10px] font-mono font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
                                 >
-                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                                     </svg>
                                     Link
                                 </button>
-                                {/* Upload */}
                                 <button
                                     onClick={() => fileInputRef.current?.click()}
                                     disabled={isUploading}
-                                    className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 text-white rounded-xl text-xs font-bold hover:bg-violet-700 transition-all disabled:opacity-60"
+                                    className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 text-white rounded-none text-[10px] font-mono font-black uppercase tracking-widest hover:bg-violet-700 transition-all disabled:opacity-60 shadow-lg shadow-violet-100"
                                 >
                                     {isUploading ? (
-                                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
                                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                                         </svg>
                                     ) : (
-                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                                         </svg>
                                     )}
-                                    {isUploading ? 'Enviando...' : 'Upload'}
+                                    {isUploading ? 'PROCESSANDO' : 'UPLOAD'}
                                 </button>
-                                {/* Settings */}
                                 <button
                                     onClick={() => setEditingBase(selectedBase)}
-                                    className="w-9 h-9 flex items-center justify-center bg-slate-50 border border-slate-200 text-slate-500 rounded-xl hover:bg-slate-100 transition-all"
-                                    title="Configurar base"
+                                    className="w-10 h-10 flex-shrink-0 flex items-center justify-center bg-white border border-slate-200 text-slate-500 rounded-none hover:bg-slate-50 transition-all"
                                 >
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                                     </svg>
                                 </button>
                             </div>
@@ -314,7 +323,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
 
                         {/* Drop zone + Document list */}
                         <div
-                            className={`flex-1 overflow-y-auto p-6 transition-all ${isDragging ? 'bg-violet-50 ring-2 ring-violet-400 ring-inset' : ''}`}
+                            className={`flex-1 overflow-y-auto p-4 md:p-6 transition-all ${isDragging ? 'bg-violet-50 ring-2 ring-violet-400 ring-inset' : ''}`}
                             onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
                             onDragLeave={() => setIsDragging(false)}
                             onDrop={handleFileDrop}
@@ -328,46 +337,46 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                             )}
 
                             {baseItems.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
-                                    <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mb-4">
-                                        <svg className="w-8 h-8 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-center border-2 border-dashed border-slate-200">
+                                    <div className="w-16 h-16 bg-slate-50 flex items-center justify-center mb-6">
+                                        <svg className="w-8 h-8 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                                         </svg>
                                     </div>
-                                    <p className="text-slate-400 font-semibold text-sm mb-1">Nenhum documento nesta base</p>
-                                    <p className="text-slate-300 text-xs">Arraste arquivos aqui ou use o botão Upload</p>
+                                    <p className="text-[10px] font-mono font-black text-slate-300 uppercase tracking-[0.3em] mb-2">SYSTEM: NO DATA DETECTED</p>
+                                    <p className="text-slate-400 text-[11px] font-mono">Arraste arquivos aqui ou use o comando UPLOAD.</p>
                                 </div>
                             ) : (
-                                <div className="flex flex-col gap-2">
+                                <div className="flex flex-col border-l border-t border-slate-200">
                                     {baseItems.map(item => (
                                         <div
                                             key={item.id}
-                                            className="bg-white border border-slate-100 rounded-2xl px-4 py-3 flex items-center gap-3 hover:border-slate-200 hover:shadow-sm transition-all group"
+                                            className="bg-white border-r border-b border-slate-200 px-6 py-4 flex items-center gap-4 hover:bg-slate-50 transition-all group relative -ml-px -mt-px"
                                         >
                                             <FileIcon tipo={item.tipo_arquivo} />
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-sm font-semibold text-slate-800 truncate">{item.titulo}</p>
-                                                <div className="flex items-center gap-2 mt-0.5">
-                                                    <span className="text-[10px] text-slate-400">
+                                            <div className="flex-1 min-w-0 py-1">
+                                                <p className="text-[13px] font-mono font-black text-slate-800 uppercase tracking-tight truncate">{item.titulo}</p>
+                                                <div className="flex flex-wrap items-center gap-2 md:gap-3 mt-1">
+                                                    <span className="text-[9px] font-mono font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">
                                                         {new Date(item.data_criacao).toLocaleDateString('pt-BR')}
                                                     </span>
                                                     <VectorBadge hasEmbedding={!!(item as any).embedding} />
                                                     {item.tags && item.tags.length > 0 && item.tags.slice(0, 2).map(tag => (
-                                                        <span key={tag} className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full font-medium">{tag}</span>
+                                                        <span key={tag} className="text-[9px] font-mono font-black bg-slate-100 text-slate-500 px-2 py-0.5 uppercase tracking-widest">{tag}</span>
                                                     ))}
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <div className="flex items-center gap-1 md:gap-2 opacity-0 group-hover:opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                                                 {item.url_drive && item.url_drive !== '' && (
                                                     <a
                                                         href={item.url_drive}
                                                         target="_blank"
                                                         rel="noopener noreferrer"
-                                                        className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                                                        className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 border border-slate-100 transition-all"
                                                         title="Abrir arquivo"
                                                     >
                                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                                                         </svg>
                                                     </a>
                                                 )}
@@ -379,8 +388,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                                                             setVectorizingId(null);
                                                         }}
                                                         disabled={vectorizingId === item.id}
-                                                        className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                                                        title={vectorizingId === item.id ? 'Vetorizando...' : 'Vetorizar agora'}
+                                                        className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-violet-600 hover:bg-violet-50 border border-slate-100 transition-all disabled:opacity-60"
                                                     >
                                                         {vectorizingId === item.id ? (
                                                             <svg className="w-4 h-4 animate-spin text-violet-500" fill="none" viewBox="0 0 24 24">
@@ -389,18 +397,17 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                                                             </svg>
                                                         ) : (
                                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13 10V3L4 14h7v7l9-11h-7z" />
                                                             </svg>
                                                         )}
                                                     </button>
                                                 )}
                                                 <button
                                                     onClick={() => handleDeleteItem(item.id)}
-                                                    className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
-                                                    title="Remover"
+                                                    className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-100 transition-all"
                                                 >
                                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                                                     </svg>
                                                 </button>
                                             </div>
@@ -425,33 +432,33 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
             {/* Add Link Modal */}
             {isAddLinkOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6">
-                        <h2 className="text-base font-black text-slate-900 mb-4">Adicionar Link</h2>
-                        <div className="flex flex-col gap-3">
+                    <div className="bg-white rounded-none shadow-2xl w-full max-w-md p-8 border border-slate-200">
+                        <h2 className="text-sm font-mono font-black text-slate-900 uppercase tracking-[0.2em] mb-6">ADICIONAR RECURSO EXTERNO</h2>
+                        <div className="flex flex-col gap-5">
                             <div>
-                                <label className="text-xs font-bold text-slate-500 mb-1 block">URL</label>
+                                <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-1.5 block">URL DE ORIGEM</label>
                                 <input
                                     autoFocus
                                     value={linkUrl}
                                     onChange={e => setLinkUrl(e.target.value)}
                                     placeholder="https://..."
-                                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-violet-500"
+                                    className="w-full px-4 py-3 text-xs font-mono font-bold border border-slate-200 rounded-none outline-none focus:border-violet-500 bg-slate-50"
                                 />
                             </div>
                             <div>
-                                <label className="text-xs font-bold text-slate-500 mb-1 block">Título (opcional)</label>
+                                <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-1.5 block">TÍTULO IDENTIFICADOR (OPCIONAL)</label>
                                 <input
                                     value={linkTitle}
                                     onChange={e => setLinkTitle(e.target.value)}
                                     onKeyDown={e => { if (e.key === 'Enter') handleAddLink(); }}
-                                    placeholder="Nome do link..."
-                                    className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-violet-500"
+                                    placeholder="NOME DO LINK..."
+                                    className="w-full px-4 py-3 text-xs font-mono font-bold border border-slate-200 rounded-none outline-none focus:border-violet-500 bg-slate-50"
                                 />
                             </div>
                         </div>
-                        <div className="flex gap-2 mt-5">
-                            <button onClick={handleAddLink} className="flex-1 py-2.5 bg-violet-600 text-white rounded-xl text-sm font-bold hover:bg-violet-700">Adicionar</button>
-                            <button onClick={() => { setIsAddLinkOpen(false); setLinkUrl(''); setLinkTitle(''); }} className="flex-1 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-200">Cancelar</button>
+                        <div className="flex gap-3 mt-8">
+                            <button onClick={handleAddLink} className="flex-1 py-3 bg-violet-600 text-white rounded-none text-[10px] font-mono font-black uppercase tracking-widest hover:bg-violet-700 transition-all">Sincronizar</button>
+                            <button onClick={() => { setIsAddLinkOpen(false); setLinkUrl(''); setLinkTitle(''); }} className="flex-1 py-3 bg-white border border-slate-200 text-slate-600 rounded-none text-[10px] font-mono font-black uppercase tracking-widest hover:bg-slate-50 transition-all">Cancelar</button>
                         </div>
                     </div>
                 </div>
@@ -506,40 +513,43 @@ const EditBaseModal: React.FC<EditBaseModalProps> = ({ base, onSave, onDelete, o
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-                <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-                    <h2 className="text-base font-black text-slate-900">Configurar Base RAG</h2>
-                    <button onClick={onClose} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-lg">
+            <div className="bg-white rounded-none shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto border border-slate-200">
+                <div className="p-8 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+                    <div>
+                        <p className="text-[10px] font-mono font-black text-violet-500 uppercase tracking-widest mb-1">SYSTEM CONFIGURATION</p>
+                        <h2 className="text-sm font-mono font-black text-slate-900 uppercase tracking-tight">Configurar Base RAG</h2>
+                    </div>
+                    <button onClick={onClose} className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 bg-white">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
                         </svg>
                     </button>
                 </div>
 
-                <div className="p-6 flex flex-col gap-4">
+                <div className="p-8 flex flex-col gap-6">
                     {/* Identity */}
-                    <div className="flex gap-3">
-                        <div>
-                            <label className="text-xs font-bold text-slate-500 mb-1 block">Ícone</label>
-                            <div className="grid grid-cols-4 gap-1">
+                    <div className="flex gap-6">
+                        <div className="flex-1">
+                            <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-2 block">Ícone do Sistema</label>
+                            <div className="grid grid-cols-4 gap-2">
                                 {EMOJI_OPTIONS.map(e => (
                                     <button
                                         key={e}
                                         onClick={() => setEmoji(e)}
-                                        className={`w-9 h-9 text-lg rounded-lg flex items-center justify-center transition-all ${emoji === e ? 'bg-violet-100 ring-2 ring-violet-400' : 'bg-slate-50 hover:bg-slate-100'}`}
+                                        className={`w-10 h-10 text-xl flex items-center justify-center transition-all border ${emoji === e ? 'bg-violet-50 border-violet-400 ring-1 ring-violet-400' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'}`}
                                     >{e}</button>
                                 ))}
                             </div>
                         </div>
-                        <div className="flex-1">
-                            <label className="text-xs font-bold text-slate-500 mb-1 block">Cor</label>
-                            <div className="grid grid-cols-4 gap-1">
-                                {COLOR_OPTIONS.map(c => (
+                        <div className="w-32">
+                            <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-2 block">Cor ID</label>
+                            <div className="grid grid-cols-3 gap-2">
+                                {COLOR_OPTIONS.slice(0, 6).map(c => (
                                     <button
                                         key={c.value}
                                         onClick={() => setCor(c.value)}
                                         title={c.label}
-                                        className={`w-9 h-9 rounded-lg transition-all ${cor === c.value ? 'ring-2 ring-offset-1 ring-slate-400 scale-110' : 'hover:scale-105'}`}
+                                        className={`w-8 h-8 transition-all border-2 ${cor === c.value ? 'border-slate-900 scale-110' : 'border-transparent hover:scale-105'}`}
                                         style={{ backgroundColor: c.value }}
                                     />
                                 ))}
@@ -548,76 +558,76 @@ const EditBaseModal: React.FC<EditBaseModalProps> = ({ base, onSave, onDelete, o
                     </div>
 
                     <div>
-                        <label className="text-xs font-bold text-slate-500 mb-1 block">Nome</label>
+                        <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-2 block">Nome da Base</label>
                         <input
                             value={nome}
                             onChange={e => setNome(e.target.value)}
-                            className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-violet-500"
+                            className="w-full px-4 py-3 text-xs font-mono font-bold border border-slate-200 rounded-none outline-none focus:border-violet-500 bg-slate-50 uppercase tracking-widest"
                         />
                     </div>
 
                     <div>
-                        <label className="text-xs font-bold text-slate-500 mb-1 block">Descrição</label>
+                        <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-2 block">Descrição Técnica</label>
                         <input
                             value={descricao}
                             onChange={e => setDescricao(e.target.value)}
-                            placeholder="Para que serve esta base?"
-                            className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-violet-500"
+                            placeholder="FINALIDADE DESTA BASE NO SISTEMA..."
+                            className="w-full px-4 py-3 text-xs font-mono font-bold border border-slate-200 rounded-none outline-none focus:border-violet-500 bg-slate-50 uppercase tracking-widest"
                         />
                     </div>
 
                     {/* RAG Config */}
-                    <div className="border-t border-slate-100 pt-4">
-                        <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Configuração RAG</p>
-                        <div className="flex flex-col gap-3">
-                            <label className="flex items-center gap-3 cursor-pointer">
+                    <div className="border-t border-slate-200 pt-6">
+                        <p className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-[0.2em] mb-4">MÓDULOS DE INTEGRAÇÃO RAG</p>
+                        <div className="flex flex-col gap-4">
+                            <label className="flex items-center gap-4 cursor-pointer group">
                                 <div
                                     onClick={() => setIncluirDiarios(!incluirDiarios)}
-                                    className={`w-10 h-6 rounded-full transition-colors flex-shrink-0 ${incluirDiarios ? 'bg-violet-600' : 'bg-slate-200'}`}
+                                    className={`w-12 h-6 border transition-colors relative ${incluirDiarios ? 'bg-violet-600 border-violet-700' : 'bg-slate-200 border-slate-300'}`}
                                 >
-                                    <div className={`w-4 h-4 bg-white rounded-full shadow m-1 transition-transform ${incluirDiarios ? 'translate-x-4' : ''}`} />
+                                    <div className={`w-4 h-4 bg-white shadow-sm absolute top-0.5 transition-all ${incluirDiarios ? 'left-7' : 'left-0.5'}`} />
                                 </div>
-                                <span className="text-sm font-semibold text-slate-700">Incluir diários de bordo das ações</span>
+                                <span className="text-[11px] font-mono font-black text-slate-700 uppercase tracking-tight">Incluir Diários de Bordo</span>
                             </label>
-                            <label className="flex items-center gap-3 cursor-pointer">
+                            <label className="flex items-center gap-4 cursor-pointer group">
                                 <div
                                     onClick={() => setIncluirManual(!incluirManual)}
-                                    className={`w-10 h-6 rounded-full transition-colors flex-shrink-0 ${incluirManual ? 'bg-violet-600' : 'bg-slate-200'}`}
+                                    className={`w-12 h-6 border transition-colors relative ${incluirManual ? 'bg-violet-600 border-violet-700' : 'bg-slate-200 border-slate-300'}`}
                                 >
-                                    <div className={`w-4 h-4 bg-white rounded-full shadow m-1 transition-transform ${incluirManual ? 'translate-x-4' : ''}`} />
+                                    <div className={`w-4 h-4 bg-white shadow-sm absolute top-0.5 transition-all ${incluirManual ? 'left-7' : 'left-0.5'}`} />
                                 </div>
-                                <span className="text-sm font-semibold text-slate-700">Incluir manual do HERMES</span>
+                                <span className="text-[11px] font-mono font-black text-slate-700 uppercase tracking-tight">Incluir Manual Operacional</span>
                             </label>
-                            <div>
-                                <label className="text-xs font-bold text-slate-500 mb-1 block">Categorias vinculadas</label>
-                                <input
-                                    value={categoriasInput}
-                                    onChange={e => setCategoriasInput(e.target.value)}
-                                    placeholder="TI, GESTÃO, FINANCEIRO"
-                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-violet-500"
-                                />
-                                <p className="text-[10px] text-slate-400 mt-1">Separe por vírgula</p>
-                            </div>
-                            <div>
-                                <label className="text-xs font-bold text-slate-500 mb-1 block">Tags vinculadas</label>
-                                <input
-                                    value={tagsInput}
-                                    onChange={e => setTagsInput(e.target.value)}
-                                    placeholder="manual, procedimento"
-                                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-violet-500"
-                                />
-                                <p className="text-[10px] text-slate-400 mt-1">Separe por vírgula</p>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Categorias</label>
+                                    <input
+                                        value={categoriasInput}
+                                        onChange={e => setCategoriasInput(e.target.value)}
+                                        placeholder="TI, FINANCEIRO..."
+                                        className="w-full px-4 py-2 text-[10px] font-mono font-bold border border-slate-200 rounded-none outline-none focus:border-violet-500 bg-slate-50 uppercase"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Tags RAG</label>
+                                    <input
+                                        value={tagsInput}
+                                        onChange={e => setTagsInput(e.target.value)}
+                                        placeholder="PROCEDIMENTO..."
+                                        className="w-full px-4 py-2 text-[10px] font-mono font-bold border border-slate-200 rounded-none outline-none focus:border-violet-500 bg-slate-50 uppercase"
+                                    />
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <div className="p-6 border-t border-slate-100 flex gap-2">
-                    <button onClick={handleSave} className="flex-1 py-3 bg-violet-600 text-white rounded-2xl text-sm font-black hover:bg-violet-700">Salvar</button>
-                    <button onClick={onClose} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-2xl text-sm font-black hover:bg-slate-200">Cancelar</button>
-                    <button onClick={onDelete} className="py-3 px-4 bg-red-50 text-red-500 rounded-2xl text-sm font-black hover:bg-red-100">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                <div className="p-8 border-t border-slate-200 flex gap-3 bg-slate-50">
+                    <button onClick={handleSave} className="flex-1 py-4 bg-slate-900 text-white rounded-none text-[10px] font-mono font-black uppercase tracking-widest hover:bg-black transition-all">Atualizar Sistema</button>
+                    <button onClick={onClose} className="flex-1 py-4 bg-white border border-slate-200 text-slate-600 rounded-none text-[10px] font-mono font-black uppercase tracking-widest hover:bg-slate-50 transition-all">Cancelar</button>
+                    <button onClick={onDelete} className="w-14 flex items-center justify-center bg-rose-50 text-rose-600 border border-rose-100 rounded-none hover:bg-rose-100 transition-all">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                         </svg>
                     </button>
                 </div>

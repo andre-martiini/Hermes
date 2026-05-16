@@ -1,4 +1,4 @@
-﻿
+
 import { Status } from './types';
 
 export const STATUS_COLORS: Record<string, string> = {
@@ -14,8 +14,11 @@ export const PROJECT_COLORS: Record<string, string> = {
   'SIGEX': 'text-indigo-700 font-black',
   'PROEN': 'text-cyan-700 font-black',
   'PLS-MEC': 'text-orange-700 font-black',
-  'CLC (Licitações e Compras)': 'text-rose-700 font-black',
-  'Assistência Estudantil': 'text-emerald-700 font-black',
+  'CLC': 'text-rose-700 font-black',
+  'ASSISTÊNCIA': 'text-emerald-700 font-black',
+  'SAÚDE': 'text-rose-600 font-black',
+  'FINANCEIRO': 'text-violet-600 font-black',
+  'SISTEMA': 'text-blue-600 font-black',
 };
 
 export const DEFAULT_JSON_URL = '/tarefas_andre.json';

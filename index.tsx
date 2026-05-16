@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import {
@@ -10,7 +10,8 @@ import {
   formatDate, formatDateLocalISO, Sistema, SistemaStatus, WorkItem, WorkItemPhase,
   WorkItemPriority, QualityLog, WorkItemAudit, GoogleCalendarEvent,
   PoolItem, CustomNotification, HealthExam, ConhecimentoItem, UndoAction, HermesModalProps,
-  ShoppingItem, Projeto, SlideHistoryEntry, BaseConhecimento, TipoAcao, Servico, Toast
+  ShoppingItem, Projeto, SlideHistoryEntry, BaseConhecimento, TipoAcao, Servico, Toast,
+  HealthTelegramReminder
 } from './types';
 import HealthView from './HealthView';
 import { GoogleHealthService } from './GoogleHealthService';
@@ -1174,6 +1175,7 @@ const App: React.FC = () => {
   const [healthSettings, setHealthSettings] = useState<HealthSettings>({ targetWeight: 0 });
   const [exerciseLogs, setExerciseLogs] = useState<ExerciseLog[]>([]);
   const [exerciseSettings, setExerciseSettings] = useState<ExerciseSettings>({});
+  const [healthTelegramReminders, setHealthTelegramReminders] = useState<HealthTelegramReminder[]>([]);
   // Systems State
   const [sistemasDetalhes, setSistemasDetalhes] = useState<Sistema[]>([]);
   const [workItems, setWorkItems] = useState<WorkItem[]>([]);
@@ -1204,7 +1206,7 @@ const App: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isCopilotoOpen, setIsCopilotoOpen] = useState(false);
   const [copilotoAutoStartMic, setCopilotoAutoStartMic] = useState(false);
-  const [copilotoMode, setCopilotoMode] = useState<'default' | 'finance'>('default');
+  const [copilotoMode, setCopilotoMode] = useState<'default' | 'finance' | 'saude'>('default');
   const [isQuickNoteModalOpen, setIsQuickNoteModalOpen] = useState(false);
   const [hasAutoExpanded, setHasAutoExpanded] = useState(false);
   // Estados PGC
@@ -1486,6 +1488,9 @@ const App: React.FC = () => {
     const unsubExerciseSettings = onSnapshot(doc(db, 'health_exercise_settings', 'config'), (snap) => {
       if (snap.exists()) setExerciseSettings(snap.data() as ExerciseSettings);
     }, handleSnapshotError('health_exercise_settings/config'));
+    const unsubHealthTelegramReminders = onSnapshot(collection(db, 'health_telegram_reminders'), (snapshot) => {
+      setHealthTelegramReminders(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as HealthTelegramReminder)));
+    }, handleSnapshotError('health_telegram_reminders'));
     const unsubKnowledge = onSnapshot(collection(db, 'conhecimento'), (snapshot) => {
       setKnowledgeItems(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ConhecimentoItem)));
     }, handleSnapshotError('conhecimento'));
@@ -1518,6 +1523,7 @@ const App: React.FC = () => {
       unsubHealthSettings();
       unsubExerciseLogs();
       unsubExerciseSettings();
+      unsubHealthTelegramReminders();
       unsubKnowledge();
       unsubMasterKnowledge();
       unsubKnowledgeBases();
@@ -2407,26 +2413,6 @@ const App: React.FC = () => {
   // Data-driven Notifications (Budget, Overdue, PGC)
   useEffect(() => {
     const todayStr = formatDateLocalISO(new Date());
-    // 1. Overdue Tasks (Once a day check)
-    if (appSettings.notifications.overdueTasks.enabled && localStorage.getItem('lastOverdueCheckDate') !== todayStr) {
-      const overdueCount = tarefas.filter(t =>
-        normalizeStatus(t.status) !== 'concluido' &&
-        t.status !== 'excluído' as any &&
-        !isStandbyStatus(t.status) &&
-        t.data_limite && t.data_limite !== "-" && t.data_limite !== "0000-00-00" &&
-        t.data_limite < todayStr
-      ).length;
-      if (overdueCount > 0) {
-        emitNotification(
-          "Ações Vencidas",
-          `Você tem ${overdueCount} ações fora do prazo. Que tal atualizá-las para hoje?`,
-          'warning',
-          'acoes',
-          `overdue-${todayStr}`
-        );
-        localStorage.setItem('lastOverdueCheckDate', todayStr);
-      }
-    }
     // 2. Budget Risk (Whenever data changes, throttled to once per day notification AND real spending increase)
     if (appSettings.notifications.budgetRisk.enabled) {
       const now = new Date();
@@ -4014,11 +4000,27 @@ const App: React.FC = () => {
   const handleUpdateHealthHabits = async (date: string, habits: Partial<DailyHabits>) => {
     await setDoc(doc(db, 'health_daily_habits', date), habits, { merge: true });
   };
+  const handleSaveHealthTelegramReminder = async (reminder: HealthTelegramReminder) => {
+    const nowIso = new Date().toISOString();
+    const payload: HealthTelegramReminder = {
+      ...reminder,
+      telegramOnly: true,
+      created_by_uid: reminder.created_by_uid || user?.uid,
+      data_atualizacao: nowIso,
+      data_criacao: reminder.data_criacao || nowIso,
+    };
+    await setDoc(doc(db, 'health_telegram_reminders', reminder.id), payload, { merge: true });
+  };
+  const handleDeleteHealthTelegramReminder = async (id: string) => {
+    await deleteDoc(doc(db, 'health_telegram_reminders', id));
+    showToast("Lembrete removido.", "info");
+  };
   const handleSaveExerciseLog = async (date: string, data: Partial<ExerciseLog>) => {
     // Save the log
     await setDoc(doc(db, 'health_exercise_logs', date), data, { merge: true });
+    const hasExerciseData = data.pushups !== undefined || data.pullups !== undefined || data.plank !== undefined || data.bridge !== undefined || data.birdDog !== undefined || data.squats !== undefined;
     // Auto-mark workout habit only when explicit exercise (pushups/pullups) is logged
-    if (data.pushups !== undefined || data.pullups !== undefined) {
+    if (hasExerciseData) {
       await setDoc(doc(db, 'health_daily_habits', date), { workout: true }, { merge: true });
     }
     // Recalculate goals from last 5 sessions
@@ -4099,7 +4101,7 @@ const App: React.FC = () => {
       }
     }
     await setDoc(doc(db, 'health_exercise_settings', 'config'), newSettings, { merge: true });
-    showToast("Exercício registrado!", "success");
+    if (hasExerciseData) showToast("Exercício registrado!", "success");
   };
   const handleMarkNotificationRead = (id: string) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
@@ -4200,7 +4202,6 @@ const App: React.FC = () => {
   }, [tarefas]);
   const tarefasAgrupadas: Record<string, Tarefa[]> = useMemo(() => {
     const buckets = {
-      atrasadas: [] as Tarefa[],
       hoje: [] as Tarefa[],
       amanha: [] as Tarefa[],
       estaSemana: [] as Tarefa[],
@@ -4238,7 +4239,7 @@ const App: React.FC = () => {
         return;
       }
       if (t.data_limite < todayStr) {
-        buckets.atrasadas.push(t);
+        buckets.hoje.push(t);
       } else if (t.data_limite === todayStr) {
         buckets.hoje.push(t);
       } else if (t.data_limite === tomorrowStr) {
@@ -4272,7 +4273,6 @@ const App: React.FC = () => {
     const finalGroups: Record<string, Tarefa[]> = {};
     // Stand-by: visual top, but auto-expand ignores it
     if (buckets.standBy.length > 0) finalGroups["Ações em Stand-by"] = buckets.standBy;
-    if (buckets.atrasadas.length > 0) finalGroups["Atrasadas"] = buckets.atrasadas;
     if (buckets.hoje.length > 0) finalGroups["Hoje"] = buckets.hoje;
     if (buckets.amanha.length > 0) finalGroups["Amanhã"] = buckets.amanha;
     if (buckets.estaSemana.length > 0) finalGroups["Esta Semana"] = buckets.estaSemana;
@@ -4295,7 +4295,6 @@ const App: React.FC = () => {
     if (!hasAutoExpanded && Object.keys(tarefasAgrupadas).length > 0) {
       const keys = Object.keys(tarefasAgrupadas);
       let sectionsToExpand: string[] = [];
-      if (keys.includes("Atrasadas")) sectionsToExpand.push("Atrasadas");
       if (keys.includes("Hoje")) sectionsToExpand.push("Hoje");
       if (sectionsToExpand.length === 0) {
         const fallback = keys.find(k => k !== "Ações em Stand-by" && k !== "Concluídas");
@@ -5157,6 +5156,7 @@ const App: React.FC = () => {
                         healthWeights={healthWeights}
                         healthDailyHabits={healthDailyHabits}
                         healthSettings={healthSettings}
+                        exerciseLogs={exerciseLogs}
                         unidades={unidades}
                         sistemasDetalhes={sistemasDetalhes}
                         workItems={workItems}
@@ -5239,7 +5239,7 @@ const App: React.FC = () => {
                                   {filteredAndSortedTarefas.map((task) => (
                                     <tr
                                       key={task.id}
-                                      onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
+                                      onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
                                       className={`transition-colors cursor-pointer ${isDarkTheme ? 'hover:bg-slate-800/50' : 'hover:bg-slate-50'} ${selectedTaskIds.includes(task.id) ? (isDarkTheme ? 'bg-blue-900/20' : 'bg-blue-50/30') : ''}`}
                                     >
                                       <td className="px-8 py-4 text-center">
@@ -5282,7 +5282,7 @@ const App: React.FC = () => {
                                 {filteredAndSortedTarefas.map((task) => (
                                   <div
                                     key={task.id}
-                                    onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
+                                    onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
                                     className={`p-6 space-y-4 hover:bg-slate-50 transition-colors cursor-pointer ${selectedTaskIds.includes(task.id) ? 'bg-blue-50/30' : ''}`}
                                   >
                                     <div className="flex items-start gap-4">
@@ -5377,7 +5377,7 @@ const App: React.FC = () => {
                                               <RowCard
                                                 task={task}
                                                 isDark={isDarkTheme}
-                                                onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
+                                                onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
                                                 onToggle={handleToggleTarefaStatus}
                                                 onDelete={handleDeleteTarefa}
                                                 onEdit={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
@@ -5427,7 +5427,7 @@ const App: React.FC = () => {
                                               task={task}
                                               isDark={isDarkTheme}
                                               highlighted={label === 'Hoje' && tasks.filter(t => normalizeStatus(t.status) !== 'concluido')[0]?.id === task.id}
-                                              onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
+                                              onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
                                               onToggle={handleToggleTarefaStatus}
                                               onDelete={handleDeleteTarefa}
                                               onEdit={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
@@ -5479,7 +5479,7 @@ const App: React.FC = () => {
                             <RowCard
                               task={task}
                               isDark={isDarkTheme}
-                              onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); }}
+                              onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
                               onToggle={handleToggleTarefaStatus}
                               onDelete={handleDeleteTarefa}
                               onEdit={(t) => { setSelectedTask(t); setTaskModalMode('default'); }}
@@ -5553,6 +5553,9 @@ const App: React.FC = () => {
                     exerciseLogs={exerciseLogs}
                     exerciseSettings={exerciseSettings}
                     onSaveExerciseLog={handleSaveExerciseLog}
+                    telegramReminders={healthTelegramReminders}
+                    onSaveTelegramReminder={handleSaveHealthTelegramReminder}
+                    onDeleteTelegramReminder={handleDeleteHealthTelegramReminder}
                     exams={exams}
                     onAddExam={async (exam, files) => {
                       let poolItems: PoolItem[] = [];
@@ -5602,6 +5605,11 @@ const App: React.FC = () => {
                       showToast("Registro atualizado.", "success");
                     }}
                     isDark={isDarkTheme}
+                    onOpenHealthCopilot={() => {
+                      setCopilotoMode('saude');
+                      setCopilotoAutoStartMic(false);
+                      setIsCopilotoOpen(true);
+                    }}
                   />
                 ) : viewMode === 'ferramentas' ? (
                   <FerramentasView

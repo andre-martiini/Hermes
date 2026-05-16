@@ -13,6 +13,7 @@ export default {
         'on-surface': '#212121',      // Deep Ink
         'primary-tactile': '#73A9E6', // Atmospheric Blue (Operational)
         'accent-tactile': '#FF9D4D',  // Alert Orange
+        'safety-red': '#EF4444',      // Emergency/Health Red
         'highlighter': '#FDE68A',     // Highlighter Yellow
         'border-grid': '#E5E7EB',     // Fine Grid Lines
         'text-main': '#212121',

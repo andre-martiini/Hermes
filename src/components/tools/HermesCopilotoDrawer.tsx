@@ -383,14 +383,14 @@ interface HermesCopilotoDrawerProps {
     isTemporary?: boolean;
     sessionId?: string | null;
     autoStartMic?: boolean;
-    copilotMode?: 'default' | 'finance';
+    copilotMode?: 'default' | 'finance' | 'saude';
 }
 
 type UploadPhase = 'idle' | 'uploading' | 'processing';
 const MOBILE_BREAKPOINT = 768;
 
 export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
-    isOpen, onClose, taskId, systemId, isDark = false, variant = 'drawer', userId, onOpenTask, onOpenTool, activeDocument, isTemporary, sessionId, autoStartMic = false, copilotMode = 'default'
+    isOpen, onClose, taskId, systemId, isDark = false, variant = 'drawer', userId, onOpenTask, onOpenTool, activeDocument, isTemporary, sessionId, autoStartMic = false, copilotMode = 'default' as 'default' | 'finance' | 'saude'
 }) => {
     const [sessions, setSessions] = useState<Session[]>([]);
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -407,6 +407,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const fileInputRef = useRef<HTMLInputElement>(null);
     const toolMenuRef = useRef<HTMLDivElement>(null);
     const isFinancialCopilot = copilotMode === 'finance';
+    const isHealthCopilot = copilotMode === 'saude';
 
     // ── Estado do modal de relatório ─────────────────────────────────────────
     const [reportModalOpen, setReportModalOpen] = useState(false);
@@ -552,7 +553,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             ? {}
             : {
                 userId,
-                title: isFinancialCopilot ? 'Copiloto Financeiro' : 'Nova Conversa',
+                title: isFinancialCopilot ? 'Copiloto Financeiro' : isHealthCopilot ? 'Copiloto de Saude' : 'Nova Conversa',
                 createdAt: Timestamp.now(),
                 taskId: taskId || null,
                 systemId: systemId || null,
@@ -1707,7 +1708,11 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
             {/* Header - Unified Style */}
             <div className={`shrink-0 px-4 py-2 flex items-center justify-between border-b ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
                 <div className="flex items-center gap-2 min-w-0">
-                    {isFinancialCopilot ? (
+                    {isHealthCopilot ? (
+                        <svg className={`w-4 h-4 ${isDark ? 'text-rose-400' : 'text-rose-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                        </svg>
+                    ) : isFinancialCopilot ? (
                         <svg className={`w-4 h-4 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V6m0 10v2m0-2c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
@@ -1718,7 +1723,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                     )}
                     <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2 min-w-0">
                         <span className={`text-[9px] font-black uppercase tracking-widest font-mono ${isDark ? 'text-white/40' : 'text-slate-400'}`}>
-                            {isFinancialCopilot ? 'Copiloto Financeiro' : 'Copiloto Hermes'}
+                            {isHealthCopilot ? 'Copiloto de Saude' : isFinancialCopilot ? 'Copiloto Financeiro' : 'Copiloto Hermes'}
                         </span>
                         {taskId && (
                             <div className="flex items-center gap-1.5 shrink-0">
@@ -1732,13 +1737,22 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
 
                 <div className="flex items-center gap-1.5">
                     {!isTemporary && (
-                        <button
-                            onClick={() => handleCreateSession()}
-                            className={`p-1.5 rounded-none transition-all ${isDark ? 'text-white/50 hover:bg-white/10 hover:text-white' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-900'}`}
-                            title="Nova Conversa"
-                        >
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
-                        </button>
+                        <>
+                            <button
+                                onClick={() => setShowHistory(v => !v)}
+                                className={`p-1.5 rounded-none transition-all ${showHistory ? (isDark ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-900') : (isDark ? 'text-white/50 hover:bg-white/10 hover:text-white' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-900')}`}
+                                title="Histórico de Conversas"
+                            >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            </button>
+                            <button
+                                onClick={() => handleCreateSession()}
+                                className={`p-1.5 rounded-none transition-all ${isDark ? 'text-white/50 hover:bg-white/10 hover:text-white' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-900'}`}
+                                title="Nova Conversa"
+                            >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" /></svg>
+                            </button>
+                        </>
                     )}
                     <button
                         onClick={onClose}

@@ -19,7 +19,27 @@
       "Bash(git -C \"C:/Users/T-GAMER/Documents/gestao-Hermes\" worktree prune)",
       "Bash(python -c \"from google.genai import types; help\\(types.Part.from_bytes\\)\")",
       "Bash(sed -n '3954,3980p' \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\index.tsx\")",
-      "Bash(sed -n '3999,4030p' \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\index.tsx\")"
+      "Bash(sed -n '3999,4030p' \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\index.tsx\")",
+      "Bash(Get-ChildItem -Path \"src\", \"src/components\" -Recurse -Filter \"*.tsx\")",
+      "Bash(Select-Object -First 30)",
+      "Bash(findstr /s \"weights\\\\|habits\\\\|exerciseLogs\\\\|health\" *.ts *.tsx src/**/*.ts src/**/*.tsx)",
+      "Bash(findstr \"collection\\\\|doc\\(\")",
+      "Bash(python3)",
+      "PowerShell($lines = Get-Content \"C:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\functions\\\\main.py\"; $start = 8905; $end = 8935; $lines[$start..$end] | ForEach-Object -Begin { $n = 8906 } -Process { \"${n}: $_\"; $n++ })",
+      "PowerShell($lines = Get-Content \"C:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\functions\\\\main.py\"; $start = 8935; $end = 9010; $lines[$start..$end] | ForEach-Object -Begin { $n = 8936 } -Process { \"${n}: $_\"; $n++ })",
+      "PowerShell(python -c \"import ast; ast.parse\\(open\\(r'C:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\functions\\\\main.py', encoding='utf-8', errors='replace'\\).read\\(\\)\\); print\\('Syntax OK'\\)\" 2>&1)",
+      "PowerShell($lines = Get-Content \"C:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\functions\\\\main.py\"; $start = 8916; $end = 8935; $lines[$start..$end] | ForEach-Object -Begin { $n = 8917 } -Process { \"${n}: $_\"; $n++ })",
+      "PowerShell(Remove-Item \"C:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\fix_check.py\", \"C:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\fix_saude.py\", \"C:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\fix_saude2.py\" -ErrorAction SilentlyContinue; $lines = Get-Content \"C:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\functions\\\\main.py\"; $start = 8916; $end = 8945; $lines[$start..$end] | ForEach-Object -Begin { $n = 8917 } -Process { \"${n}: $_\"; $n++ })",
+      "mcp__plugin_claude-mem_mcp-search__smart_unfold",
+      "Bash(python -c ' *)",
+      "mcp__plugin_claude-mem_mcp-search__search",
+      "mcp__plugin_claude-mem_mcp-search__timeline",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\functions\\\\daily_reset_job.py\")",
+      "Bash(Select-Object -Skip 0 -First 120)",
+      "Bash(Get-Content -Path \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\src\\\\components\\\\ui\\\\SpeedDialMenu.tsx\" -Encoding UTF8)",
+      "Bash(Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\src\\\\components\\\\ui\\\\UIComponents.tsx\" -TotalCount 533 -Tail 120)"
     ]
   }
 }

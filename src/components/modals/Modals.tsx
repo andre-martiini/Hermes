@@ -66,13 +66,13 @@ export const SettingsModal = ({
   onDeleteUnidade: (id: string) => void,
   onUpdateUnidade: (id: string, updates: any) => void,
   onEmitNotification: (title: string, message: string, type: 'info' | 'warning' | 'success' | 'error') => void,
-  initialTab?: 'notifications' | 'context' | 'sistemas' | 'google' | 'pomodoro',
+  initialTab?: 'notifications' | 'context' | 'sistemas' | 'google',
   themeMode: ThemeMode,
   onThemeModeChange: (mode: ThemeMode) => void,
   showConfirm: (title: string, message: string, onConfirm: () => void, onCancel?: () => void) => void
 }) => {
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
-  const [activeTab, setActiveTab] = useState<'notifications' | 'context' | 'sistemas' | 'google' | 'pomodoro'>(initialTab || 'notifications');
+  const [activeTab, setActiveTab] = useState<'notifications' | 'context' | 'sistemas' | 'google'>(initialTab || 'notifications');
   const [newUnidadeNome, setNewUnidadeNome] = useState('');
   const [newKeywordMap, setNewKeywordMap] = useState<{ [key: string]: string }>({});
   const [newCustom, setNewCustom] = useState<Partial<CustomNotification>>({
@@ -144,13 +144,7 @@ export const SettingsModal = ({
             >
               <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" /></svg>
             </button>
-            <button
-              onClick={() => setActiveTab('pomodoro')}
-              className={`flex-1 py-4 rounded-none flex items-center justify-center transition-all ${activeTab === 'pomodoro' ? 'bg-slate-900 text-white border border-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50'}`}
-              title="Pomodoro"
-            >
-              <svg className="w-6 h-6 md:w-8 md:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            </button>
+
         </div>
       </div>
 
@@ -745,78 +739,6 @@ export const SettingsModal = ({
                 </div>
               </div>
             </div>
-          ) : activeTab === 'pomodoro' ? (
-            <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
-              <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
-                <span className="w-2 h-2 bg-rose-500 rounded-full"></span>
-                Configurações do Pomodoro
-              </h4>
-
-              <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-rose-200 transition-all">
-                <div className="flex-1">
-                  <p className="text-sm font-bold text-slate-900 mb-1">Ativar Pomodoro</p>
-                  <p className="text-[11px] text-slate-500 font-medium">Habilitar ciclos de trabalho e descanso na execução</p>
-                </div>
-                <button
-                  onClick={() => setLocalSettings({
-                    ...localSettings,
-                    pomodoro: { ...localSettings.pomodoro!, enabled: !localSettings.pomodoro?.enabled }
-                  })}
-                  className={`w-12 h-6 rounded-full transition-all relative ${localSettings.pomodoro?.enabled ? 'bg-rose-600' : 'bg-slate-300'}`}
-                >
-                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.pomodoro?.enabled ? 'left-7' : 'left-1'}`} />
-                </button>
-              </div>
-
-              {localSettings.pomodoro?.enabled && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 space-y-3">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Tempo de Foco (minutos)</label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="60"
-                      value={localSettings.pomodoro?.focusTime || 10}
-                      onChange={(e) => setLocalSettings({
-                        ...localSettings,
-                        pomodoro: { ...localSettings.pomodoro!, focusTime: Number(e.target.value) }
-                      })}
-                      className="w-full bg-white border border-slate-200 rounded-lg md:rounded-xl px-4 py-3 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-rose-500 outline-none"
-                    />
-                  </div>
-                  <div className="p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 space-y-3">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Tempo de Descanso (minutos)</label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="30"
-                      value={localSettings.pomodoro?.breakTime || 5}
-                      onChange={(e) => setLocalSettings({
-                        ...localSettings,
-                        pomodoro: { ...localSettings.pomodoro!, breakTime: Number(e.target.value) }
-                      })}
-                      className="w-full bg-white border border-slate-200 rounded-lg md:rounded-xl px-4 py-3 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-rose-500 outline-none"
-                    />
-                  </div>
-                </div>
-              )}
-
-              <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-amber-200 transition-all">
-                <div className="flex-1">
-                  <p className="text-sm font-bold text-slate-900 mb-1">Alertas Sonoros</p>
-                  <p className="text-[11px] text-slate-500 font-medium">Emitir bipes discretos nos últimos 3 segundos</p>
-                </div>
-                <button
-                  onClick={() => setLocalSettings({
-                    ...localSettings,
-                    pomodoro: { ...localSettings.pomodoro!, enableBeep: !localSettings.pomodoro?.enableBeep }
-                  })}
-                  className={`w-12 h-6 rounded-full transition-all relative ${localSettings.pomodoro?.enableBeep ? 'bg-amber-600' : 'bg-slate-300'}`}
-                >
-                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.pomodoro?.enableBeep ? 'left-7' : 'left-1'}`} />
-                </button>
-              </div>
-            </div>
           ) : activeTab === 'google' ? (
             <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
               <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
@@ -1261,38 +1183,19 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                 ))}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1 font-mono">Área Temática :: Context</label>
-                  <select
-                    value={formData.area_tematica}
-                    onChange={e => {
-                      setFormData({ ...formData, area_tematica: e.target.value as Categoria });
-                      setAutoClassified(true);
-                    }}
-                    className="w-full bg-slate-100 border border-border-grid rounded-none px-4 py-3 text-xs font-bold text-slate-900 focus:ring-1 focus:ring-slate-900 transition-all font-mono uppercase tracking-widest"
-                  >
-                    <option value="GERAL">Geral</option>
-                    <option value="NÃO CLASSIFICADA">Não Classificada</option>
-                    {unidades.map(u => (
-                      <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex items-end gap-2">
-                  <button
-                    onClick={() => setIsExtraContextOpen(!isExtraContextOpen)}
-                    className={`h-11 flex-1 rounded-none text-[9px] font-black uppercase tracking-widest transition-all font-mono border-2 ${isExtraContextOpen ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-100 text-slate-600 border-border-grid hover:bg-slate-200'}`}
-                  >
-                    Contexto IA
-                  </button>
-                  <button
-                    onClick={() => setIsTranscriptionSelectorOpen(!isTranscriptionSelectorOpen)}
-                    className={`h-11 flex-1 rounded-none text-[9px] font-black uppercase tracking-widest transition-all font-mono border-2 ${isTranscriptionSelectorOpen ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-border-grid hover:bg-slate-100'}`}
-                  >
-                    Vincular Atas
-                  </button>
-                </div>
+              <div className="flex items-end gap-2">
+                <button
+                  onClick={() => setIsExtraContextOpen(!isExtraContextOpen)}
+                  className={`h-11 flex-1 rounded-none text-[9px] font-black uppercase tracking-widest transition-all font-mono border-2 ${isExtraContextOpen ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-100 text-slate-600 border-border-grid hover:bg-slate-200'}`}
+                >
+                  Contexto IA
+                </button>
+                <button
+                  onClick={() => setIsTranscriptionSelectorOpen(!isTranscriptionSelectorOpen)}
+                  className={`h-11 flex-1 rounded-none text-[9px] font-black uppercase tracking-widest transition-all font-mono border-2 ${isTranscriptionSelectorOpen ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-900 border-border-grid hover:bg-slate-100'}`}
+                >
+                  Vincular Atas
+                </button>
               </div>
 
               {isTranscriptionSelectorOpen && (
@@ -1463,17 +1366,39 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                     />
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Status</label>
-                    <select
-                      value={formData.status}
-                      onChange={e => setFormData({ ...formData, status: e.target.value as Status })}
-                      className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
-                    >
-                      <option value="em andamento">Em Andamento</option>
-                      <option value="stand-by">Stand-by</option>
-                      <option value="concluído">Concluído</option>
-                    </select>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Status</label>
+                      <select
+                        value={formData.status}
+                        onChange={e => setFormData({ ...formData, status: e.target.value as Status })}
+                        className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
+                      >
+                        <option value="em andamento">Em Andamento</option>
+                        <option value="stand-by">Stand-by</option>
+                        <option value="concluído">Concluído</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-1">Área Temática</label>
+                      <select
+                        value={formData.area_tematica}
+                        onChange={e => {
+                          setFormData({ ...formData, area_tematica: e.target.value as Categoria });
+                          setAutoClassified(true);
+                        }}
+                        className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
+                      >
+                        <option value="GERAL">Geral</option>
+                        <option value="SAÚDE">Saúde</option>
+                        <option value="FINANCEIRO">Financeiro</option>
+                        <option value="SISTEMA">Sistema</option>
+                        <option value="NÃO CLASSIFICADA">Não Classificada</option>
+                        {unidades.map(u => (
+                          <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
                   {/* Tags Dinâmicas */}
@@ -1825,6 +1750,9 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
                 className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
               >
                 <option value="GERAL">Geral</option>
+                <option value="SAÚDE">Saúde</option>
+                <option value="FINANCEIRO">Financeiro</option>
+                <option value="SISTEMA">Sistema</option>
                 <option value="NÃO CLASSIFICADA">Não Classificada</option>
                 {unidades.map(u => (
                   <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>

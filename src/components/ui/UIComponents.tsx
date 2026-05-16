@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import {
   Tarefa, HermesNotification, WysiwygEditorProps, PlanoTrabalhoItem,
   EntregaInstitucional, AtividadeRealizada, Toast
@@ -230,16 +230,26 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
     return `${parts[2]} ${months[Number(parts[1]) - 1]}`;
   };
 
-  const getTagStyle = (name: string, type: 'category' | 'project') => {
+  const getHighlightClass = (name?: string) => {
+    if (isDark || !name || name === 'NÃO CLASSIFICADA') return '';
     const n = name.toUpperCase();
-    if (type === 'category') {
-      if (n === 'CLC') return 'bg-blue-50 text-blue-600 border-blue-100';
-      if (n === 'SAÚDE' || n === 'SAUDE') return 'bg-rose-50 text-rose-600 border-rose-100';
-      if (n === 'FINANCEIRO' || n === 'FINANCEIRA') return 'bg-emerald-50 text-emerald-600 border-emerald-100';
-      if (n === 'ASSISTÊNCIA' || n.includes('ESTUDANTIL')) return 'bg-purple-50 text-purple-600 border-purple-100';
-    }
+    if (n.includes('CLC')) return 'bg-blue-100/70 px-1 -mx-1 rounded-sm decoration-clone';
+    if (n.includes('SAÚDE') || n.includes('SAUDE')) return 'bg-rose-100/70 px-1 -mx-1 rounded-sm decoration-clone';
+    if (n.includes('FINANCEIRO') || n.includes('FINANCEIRA')) return 'bg-emerald-100/70 px-1 -mx-1 rounded-sm decoration-clone';
+    if (n.includes('ASSISTÊNCIA') || n.includes('ESTUDANTIL')) return 'bg-purple-100/70 px-1 -mx-1 rounded-sm decoration-clone';
+    return '';
+  };
+
+  const getTagStyle = (name: string) => {
+    const n = name.toUpperCase();
+    if (n.includes('CLC')) return 'bg-blue-50 text-blue-600 border-blue-100';
+    if (n.includes('SAÚDE') || n.includes('SAUDE')) return 'bg-rose-50 text-rose-600 border-rose-100';
+    if (n.includes('FINANCEIRO') || n.includes('FINANCEIRA')) return 'bg-emerald-50 text-emerald-600 border-emerald-100';
+    if (n.includes('ASSISTÊNCIA') || n.includes('ESTUDANTIL')) return 'bg-purple-50 text-purple-600 border-purple-100';
     return 'bg-slate-50 text-slate-500 border-slate-100';
   };
+
+  const highlightClass = getHighlightClass(task.area_tematica);
 
   const dateDisplay = formatDateShort(task.data_limite);
 
@@ -296,19 +306,25 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
             </div>
           )}
           <div className={`${highlighted ? `text-[15px] md:text-lg font-black` : `text-[13px] md:text-[15px] font-medium`} leading-snug transition-colors whitespace-normal break-words font-mono ${isCompleted ? 'line-through text-slate-400' : ''}`}>
-            {task.titulo}
+            {highlightClass ? (
+              <span className={highlightClass}>
+                {task.titulo}
+              </span>
+            ) : task.titulo}
           </div>
         </div>
       </div>
 
+
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-2 flex-wrap">
           {task.area_tematica && task.area_tematica !== 'NÃO CLASSIFICADA' && (
-            <span className={`text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded-none border font-mono uppercase ${isDark ? 'bg-white/10 text-white' : getTagStyle(task.area_tematica, 'category')}`}>
+            <span className={`text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded-none border font-mono uppercase ${isDark ? 'bg-white/10 text-white' : getTagStyle(task.area_tematica)}`}>
               {task.area_tematica.replace('SISTEMA:', '').trim()}
             </span>
           )}
         </div>
+
 
         <div className="relative" ref={menuRef}>
           <button 
@@ -320,6 +336,9 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
           >
             <svg className="w-3 h-3 md:w-3.5 md:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
             <span>{dateDisplay} {task.horario_inicio ? `• ${task.horario_inicio}` : ''}</span>
+            {task.auto_data_atualizada && (
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" title="Data atualizada automaticamente" />
+            )}
           </button>
 
           {isEditingDateTime && (
@@ -424,9 +443,20 @@ export const NotificationCenter = ({
           <h3 className="text-[10px] font-black text-on-surface uppercase tracking-widest font-mono">Notificações</h3>
           <p className="text-[8px] text-slate-400 font-black uppercase mt-1 font-mono">Hermes Sys-Core</p>
         </div>
-        <span className="bg-primary-tactile text-white text-[10px] font-black px-2.5 py-1 rounded-none shadow-soft-touch font-mono">
-          {notifications.filter(n => !n.isRead).length}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="bg-primary-tactile text-white text-[10px] font-black px-2.5 py-1 rounded-none shadow-soft-touch font-mono">
+            {notifications.filter(n => !n.isRead).length}
+          </span>
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-700 transition-colors p-1"
+            aria-label="Fechar notificações"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </div>
       <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
         {notifications.length > 0 ? (

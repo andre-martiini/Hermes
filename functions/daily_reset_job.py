@@ -1,4 +1,4 @@
-import datetime
+﻿import datetime
 try:
     import zoneinfo
 except ImportError:
@@ -116,3 +116,29 @@ def daily_wip_reset_and_degradation(event: scheduler_fn.ScheduledEvent):
     else:
         print("[Daily WIP Reset] No tasks to reset.")
         # Trigger normal ritual push if needed
+
+    # Part 3: Auto-advance non-completed tasks with past dates to today
+    # Runs after Parts 1 & 2 so degraded tasks already have empty dates and are excluded naturally
+    active_tasks = tasks_ref.where(
+        filter=firestore.FieldFilter("status", "in", ["em andamento", "stand-by"])
+    ).get()
+
+    batch3 = db.batch()
+    auto_advanced_count = 0
+
+    for task_doc in active_tasks:
+        task_data = task_doc.to_dict()
+        data_limite = task_data.get("data_limite", "")
+        if data_limite and data_limite not in ["-", "0000-00-00"] and data_limite < today_str:
+            batch3.update(task_doc.reference, {
+                "data_limite": today_str,
+                "data_inicio": today_str,
+                "auto_data_atualizada": True,
+            })
+            auto_advanced_count += 1
+
+    if auto_advanced_count > 0:
+        batch3.commit()
+        print(f"[Daily WIP Reset] Auto-advanced {auto_advanced_count} task(s) to today.")
+        if 'summary' in dir():
+            summary += f"\n\U0001f501 {auto_advanced_count} tarefa(s) tiveram a data atualizada automaticamente para hoje."

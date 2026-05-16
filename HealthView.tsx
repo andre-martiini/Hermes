@@ -2,9 +2,10 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { 
     HealthWeight, DailyHabits, HealthSettings, ExerciseLog, 
     ExerciseSettings, PullupPhase, formatDate, formatDateLocalISO, 
-    HealthExam, PoolItem 
+    HealthExam, PoolItem, HealthTelegramReminder
 } from './types';
 import { GoogleHealthService } from './GoogleHealthService';
+import { HealthSummaryCard } from './src/components/HealthSummaryCard';
 
 interface HealthViewProps {
     weights: HealthWeight[];
@@ -17,11 +18,15 @@ interface HealthViewProps {
     exerciseLogs: ExerciseLog[];
     exerciseSettings: ExerciseSettings;
     onSaveExerciseLog: (date: string, data: Partial<ExerciseLog>) => Promise<void>;
+    telegramReminders: HealthTelegramReminder[];
+    onSaveTelegramReminder: (reminder: HealthTelegramReminder) => Promise<void>;
+    onDeleteTelegramReminder: (id: string) => Promise<void>;
     exams: HealthExam[];
     onAddExam: (exam: Omit<HealthExam, 'id' | 'data_criacao' | 'pool_dados'>, files: File[]) => void;
     onDeleteExam: (id: string) => void;
     onUpdateExam: (id: string, updates: Partial<HealthExam>) => void;
     isDark?: boolean;
+    onOpenHealthCopilot?: () => void;
 }
 
 // --- UTILS & CONSTANTS ---
@@ -32,6 +37,58 @@ const PULLUP_PHASE_LABELS: Record<PullupPhase, { name: string; metric: string; g
     assisted: { name: 'Fase 3 — Barra Assistida', metric: 'repetições', gate: 'Meta de avanço: 8 repetições (2 sessões)', tip: 'Use faixa elástica na barra para reduzir o peso corporal.' },
     full: { name: 'Fase 4 — Barra Completa', metric: 'repetições', gate: '', tip: 'Puxada completa do zero até o queixo acima da barra.' },
 };
+
+const SPINE_ROUTINE = [
+    { name: 'Joelho ao peito', timing: 'Manhã', detail: '30s por lado, ainda no leito ou logo após levantar.' },
+    { name: 'Postura da criança', timing: 'Manhã/noite', detail: '1-2 min com respiração diafragmática, sem forçar amplitude.' },
+    { name: 'Gato-vaca', timing: 'Manhã', detail: '10-15 ciclos lentos, sincronizados com a respiração.' },
+    { name: 'Ativação abdominal', timing: 'Manhã/noite', detail: '8-10s por repetição, sem prender a respiração.' },
+    { name: 'Ponte pélvica', timing: 'Treino leve', detail: 'Subida controlada, glúteos ativos e coluna neutra.' },
+    { name: 'Bird-dog', timing: 'Treino leve', detail: 'Movimento lento; a meta é não deixar a pelve girar.' },
+];
+
+const DEFAULT_HEALTH_REMINDERS: HealthTelegramReminder[] = [
+    {
+        id: 'spine_morning',
+        title: 'Rotina lombar',
+        message: 'André, hora da sua rotina lombar. Comece leve: mobilidade, respiração e sem pressa.',
+        time: '05:00',
+        enabled: true,
+        daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+        category: 'spine',
+        telegramOnly: true,
+    },
+    {
+        id: 'lunch_slow',
+        title: 'Almoço com calma',
+        message: 'André, lembre de comer devagar no almoço. Ritmo baixo também é estratégia.',
+        time: '11:45',
+        enabled: true,
+        daysOfWeek: [1, 2, 3, 4, 5],
+        category: 'nutrition',
+        telegramOnly: true,
+    },
+    {
+        id: 'food_window',
+        title: 'Janela alimentar',
+        message: 'André, última janela alimentar chegando. Se for comer, mantenha leve.',
+        time: '17:30',
+        enabled: true,
+        daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+        category: 'nutrition',
+        telegramOnly: true,
+    },
+    {
+        id: 'pain_checkin',
+        title: 'Check-in lombar',
+        message: 'André, check-in rápido: como ficou sua lombar hoje?',
+        time: '21:30',
+        enabled: true,
+        daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+        category: 'pain',
+        telegramOnly: true,
+    },
+];
 
 // --- COMPONENTS ---
 
@@ -86,12 +143,48 @@ const HealthSection = ({ title, children, iconColor, defaultExpanded = true, tec
     );
 };
 
+const NumberEntryCard = ({
+    label,
+    value,
+    unit,
+    placeholder,
+    colorClass,
+    onCommit,
+}: {
+    label: string;
+    value: string | number;
+    unit: string;
+    placeholder: string;
+    colorClass: string;
+    onCommit: (value: number) => void;
+}) => (
+    <div className="bg-slate-50 p-6 border border-border-grid flex flex-col gap-4">
+        <div>
+            <span className={`text-[9px] font-mono font-bold uppercase tracking-widest ${colorClass}`}>// {label}</span>
+            <div className="text-3xl font-mono font-bold mt-1">{value}<span className="text-xs text-slate-400 ml-2">{unit}</span></div>
+        </div>
+        <input
+            type="number"
+            className="bg-white border border-border-grid px-4 py-2 text-xs font-mono font-bold w-full outline-none focus:ring-1 focus:ring-sky-500"
+            placeholder={placeholder}
+            onKeyDown={e => {
+                if (e.key === 'Enter') {
+                    const val = parseInt((e.target as HTMLInputElement).value);
+                    if (Number.isFinite(val)) onCommit(val);
+                    (e.target as HTMLInputElement).value = '';
+                }
+            }}
+        />
+    </div>
+);
+
 // --- MAIN COMPONENT ---
 
 const HealthView: React.FC<HealthViewProps> = ({
     weights, dailyHabits, settings, onUpdateSettings, onAddWeight, onDeleteWeight, 
     onUpdateHabits, exerciseLogs, exerciseSettings, onSaveExerciseLog, exams, 
-    onAddExam, onDeleteExam, onUpdateExam, isDark = false
+    telegramReminders, onSaveTelegramReminder, onDeleteTelegramReminder,
+    onAddExam, onDeleteExam, onUpdateExam, isDark = false, onOpenHealthCopilot
 }) => {
     const [selectedDate, setSelectedDate] = useState<string>(formatDateLocalISO(new Date()));
     const [activeTab, setActiveTab] = useState<'telemetry' | 'archive'>('telemetry');
@@ -104,6 +197,17 @@ const HealthView: React.FC<HealthViewProps> = ({
     const weightDelta = currentWeight - previousWeight;
     
     const todayLog = useMemo(() => exerciseLogs.find(l => l.id === selectedDate) || { id: selectedDate }, [exerciseLogs, selectedDate]);
+    const walkingMinimum = settings.walkingMinimumMinutes ?? 45;
+    const walkingIdeal = settings.walkingIdealMinutes ?? 100;
+    const walkingMinutes = todayLog.walk?.done ?? todayLog.activeMinutes ?? 0;
+    const walkingProgress = Math.min(100, Math.round((walkingMinutes / walkingIdeal) * 100));
+    const activeReminders = useMemo(() => {
+        const byId = new Map(telegramReminders.map(reminder => [reminder.id, reminder]));
+        DEFAULT_HEALTH_REMINDERS.forEach(reminder => {
+            if (!byId.has(reminder.id)) byId.set(reminder.id, reminder);
+        });
+        return [...byId.values()].sort((a, b) => a.time.localeCompare(b.time));
+    }, [telegramReminders]);
     const currentHabits = useMemo(() => (dailyHabits.find(h => h.id === selectedDate) || { 
         id: selectedDate,
         noSugar: false,
@@ -179,6 +283,16 @@ const HealthView: React.FC<HealthViewProps> = ({
 
             {/* 3. MAIN GRID CONTENT */}
             <div className="p-6 md:p-10">
+                {/* HEALTH SUMMARY AI CARD */}
+                <div className="mb-8">
+                    <HealthSummaryCard
+                        weights={weights}
+                        dailyHabits={dailyHabits}
+                        exerciseLogs={exerciseLogs}
+                        settings={settings}
+                        onOpenHealthCopilot={onOpenHealthCopilot}
+                    />
+                </div>
                 {activeTab === 'telemetry' ? (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
                         
@@ -221,10 +335,141 @@ const HealthView: React.FC<HealthViewProps> = ({
                                     ))}
                                 </div>
                             </HealthSection>
+
+                            <HealthSection title="Spine_Routine" techNode="LOMBAR_GUIDE" iconColor="bg-violet-500" defaultExpanded={false}>
+                                <div className="space-y-3">
+                                    {SPINE_ROUTINE.map(item => (
+                                        <div key={item.name} className="border border-border-grid bg-slate-50 p-4">
+                                            <div className="flex items-center justify-between gap-3">
+                                                <span className="text-xs font-mono font-bold text-on-surface uppercase">{item.name}</span>
+                                                <span className="text-[9px] font-mono font-bold text-violet-600 uppercase tracking-widest">{item.timing}</span>
+                                            </div>
+                                            <p className="mt-2 text-xs leading-relaxed text-slate-500">{item.detail}</p>
+                                        </div>
+                                    ))}
+                                    <p className="text-[10px] leading-relaxed text-slate-400 font-mono">
+                                        Guia informativo: faça sem dor aguda, sem prender a respiração e interrompa se houver irradiação, choque ou piora clara.
+                                    </p>
+                                </div>
+                            </HealthSection>
+
+                            <HealthSection title="Telegram_Reminders" techNode="HEALTH_PROMPTS" iconColor="bg-emerald-500" defaultExpanded={false}>
+                                <div className="space-y-3">
+                                    {activeReminders.map(reminder => (
+                                        <div key={reminder.id} className="border border-border-grid bg-slate-50 p-4 flex items-start gap-3">
+                                            <input
+                                                type="checkbox"
+                                                checked={reminder.enabled}
+                                                onChange={e => onSaveTelegramReminder({ ...reminder, enabled: e.target.checked })}
+                                                className="mt-1"
+                                            />
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center justify-between gap-3">
+                                                    <input
+                                                        value={reminder.title}
+                                                        onChange={e => onSaveTelegramReminder({ ...reminder, title: e.target.value })}
+                                                        className="bg-transparent text-xs font-mono font-bold uppercase text-on-surface outline-none w-full"
+                                                    />
+                                                    <input
+                                                        type="time"
+                                                        value={reminder.time}
+                                                        onChange={e => onSaveTelegramReminder({ ...reminder, time: e.target.value })}
+                                                        className="bg-white border border-border-grid px-2 py-1 text-[10px] font-mono font-bold"
+                                                    />
+                                                </div>
+                                                <textarea
+                                                    value={reminder.message}
+                                                    onChange={e => onSaveTelegramReminder({ ...reminder, message: e.target.value })}
+                                                    className="mt-2 w-full bg-white border border-border-grid p-2 text-xs text-slate-600 outline-none min-h-[58px]"
+                                                />
+                                                <div className="mt-2 flex items-center justify-between">
+                                                    <span className="text-[9px] font-mono font-bold uppercase text-slate-400">Telegram only</span>
+                                                    {!DEFAULT_HEALTH_REMINDERS.some(item => item.id === reminder.id) && (
+                                                        <button onClick={() => onDeleteTelegramReminder(reminder.id)} className="text-[9px] font-mono font-bold uppercase text-rose-500">remover</button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    <button
+                                        onClick={() => onSaveTelegramReminder({
+                                            id: `custom_${Date.now()}`,
+                                            title: 'Novo lembrete',
+                                            message: 'André, lembrete de saúde configurado no Hermes.',
+                                            time: '08:00',
+                                            enabled: true,
+                                            daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+                                            category: 'custom',
+                                            telegramOnly: true,
+                                        })}
+                                        className="w-full border border-dashed border-border-grid p-3 text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500 hover:text-on-surface hover:border-on-surface transition-colors"
+                                    >
+                                        Adicionar lembrete Telegram
+                                    </button>
+                                </div>
+                            </HealthSection>
                         </div>
 
                         {/* CENTER COLUMN: TRAINING & TELEMETRY CHARTS */}
                         <div className="lg:col-span-2 space-y-10">
+                            <HealthSection title="Walking_Core" techNode="PRIMARY_METRIC" iconColor="bg-sky-500">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                    <div className="md:col-span-2 bg-slate-50 border border-border-grid p-6">
+                                        <div className="flex items-end justify-between gap-4 mb-4">
+                                            <div>
+                                                <span className="text-[9px] font-mono font-bold text-sky-600 uppercase tracking-widest">// WALKING_MINUTES</span>
+                                                <div className="text-5xl font-mono font-bold mt-1">{walkingMinutes}<span className="text-xs text-slate-400 ml-2">/ {walkingIdeal} MIN</span></div>
+                                            </div>
+                                            <span className="text-[10px] font-mono font-bold uppercase text-slate-400">{todayLog.walk?.steps?.toLocaleString() || 0} passos</span>
+                                        </div>
+                                        <div className="h-3 bg-white border border-border-grid overflow-hidden">
+                                            <div className="h-full bg-sky-500 transition-all" style={{ width: `${walkingProgress}%` }} />
+                                        </div>
+                                        <div className="mt-3 flex items-center justify-between text-[10px] font-mono font-bold uppercase text-slate-400">
+                                            <span>Mínimo: {walkingMinimum} min</span>
+                                            <span>Ideal: {walkingIdeal} min</span>
+                                            <span>{todayLog.walk?.distance?.toFixed(1) || '0.0'} km</span>
+                                        </div>
+                                    </div>
+                                    <div className="bg-slate-50 border border-border-grid p-6 space-y-3">
+                                        <label className="block">
+                                            <span className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest">mínimo</span>
+                                            <input type="number" value={walkingMinimum} onChange={e => onUpdateSettings({ ...settings, walkingMinimumMinutes: parseInt(e.target.value) || 0 })} className="mt-1 w-full bg-white border border-border-grid px-3 py-2 text-xs font-mono font-bold" />
+                                        </label>
+                                        <label className="block">
+                                            <span className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest">ideal</span>
+                                            <input type="number" value={walkingIdeal} onChange={e => onUpdateSettings({ ...settings, walkingIdealMinutes: parseInt(e.target.value) || 0 })} className="mt-1 w-full bg-white border border-border-grid px-3 py-2 text-xs font-mono font-bold" />
+                                        </label>
+                                    </div>
+                                </div>
+                            </HealthSection>
+
+                            <HealthSection title="Pain_Checkin" techNode="LOMBAR_SIGNAL" iconColor="bg-orange-500">
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                    <label className="bg-slate-50 border border-border-grid p-4">
+                                        <span className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest">manhã</span>
+                                        <input type="number" min="0" max="10" value={todayLog.pain?.morning ?? ''} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, morning: parseInt(e.target.value) || 0 } })} className="mt-2 w-full bg-white border border-border-grid px-3 py-2 text-xs font-mono font-bold" />
+                                    </label>
+                                    <label className="bg-slate-50 border border-border-grid p-4">
+                                        <span className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest">noite</span>
+                                        <input type="number" min="0" max="10" value={todayLog.pain?.evening ?? ''} onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, evening: parseInt(e.target.value) || 0 } })} className="mt-2 w-full bg-white border border-border-grid px-3 py-2 text-xs font-mono font-bold" />
+                                    </label>
+                                    <button onClick={() => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, sciatica: !todayLog.pain?.sciatica } })} className={`border border-border-grid p-4 text-left ${todayLog.pain?.sciatica ? 'bg-orange-500 text-white' : 'bg-slate-50 text-on-surface'}`}>
+                                        <span className="text-[9px] font-mono font-bold uppercase tracking-widest">ciática</span>
+                                        <div className="text-xs font-mono font-bold mt-2">{todayLog.pain?.sciatica ? 'SIM' : 'NÃO'}</div>
+                                    </button>
+                                    <button onClick={() => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, crisis: !todayLog.pain?.crisis } })} className={`border border-border-grid p-4 text-left ${todayLog.pain?.crisis ? 'bg-rose-500 text-white' : 'bg-slate-50 text-on-surface'}`}>
+                                        <span className="text-[9px] font-mono font-bold uppercase tracking-widest">crise</span>
+                                        <div className="text-xs font-mono font-bold mt-2">{todayLog.pain?.crisis ? 'SIM' : 'NÃO'}</div>
+                                    </button>
+                                </div>
+                                <textarea
+                                    value={todayLog.pain?.notes || ''}
+                                    onChange={e => onSaveExerciseLog(selectedDate, { pain: { ...todayLog.pain, notes: e.target.value } })}
+                                    placeholder="NOTA_CURTA_OPCIONAL"
+                                    className="mt-4 w-full bg-slate-50 border border-border-grid p-3 text-xs text-slate-600 outline-none min-h-[72px]"
+                                />
+                            </HealthSection>
                             
                             {/* TRAINING GROUNDS */}
                             <HealthSection title="Training_Grounds" techNode="PHYSICAL_OUTPUT" iconColor="bg-rose-500">
@@ -276,6 +521,39 @@ const HealthView: React.FC<HealthViewProps> = ({
                                             />
                                         </div>
                                     </div>
+
+                                    <NumberEntryCard
+                                        label="PLANK"
+                                        value={todayLog.plank?.seconds || 0}
+                                        unit="SEC"
+                                        placeholder="SECONDS"
+                                        colorClass="text-sky-600"
+                                        onCommit={val => onSaveExerciseLog(selectedDate, { plank: { seconds: val } })}
+                                    />
+                                    <NumberEntryCard
+                                        label="BRIDGE"
+                                        value={todayLog.bridge?.reps || 0}
+                                        unit="REPS"
+                                        placeholder="REPS"
+                                        colorClass="text-emerald-600"
+                                        onCommit={val => onSaveExerciseLog(selectedDate, { bridge: { reps: val } })}
+                                    />
+                                    <NumberEntryCard
+                                        label="BIRD_DOG"
+                                        value={todayLog.birdDog?.reps || 0}
+                                        unit="REPS"
+                                        placeholder="REPS"
+                                        colorClass="text-violet-600"
+                                        onCommit={val => onSaveExerciseLog(selectedDate, { birdDog: { reps: val } })}
+                                    />
+                                    <NumberEntryCard
+                                        label="SQUATS"
+                                        value={todayLog.squats?.reps || 0}
+                                        unit="REPS"
+                                        placeholder="REPS"
+                                        colorClass="text-orange-600"
+                                        onCommit={val => onSaveExerciseLog(selectedDate, { squats: { reps: val } })}
+                                    />
                                 </div>
                             </HealthSection>
 

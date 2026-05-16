@@ -48,11 +48,12 @@ export const SpeedDialMenu = ({
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         setOpen(false);
+        if (isNotificationCenterOpen) onCloseNotifications();
       }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, []);
+  }, [isNotificationCenterOpen, onCloseNotifications]);
 
   const actions = [
     {

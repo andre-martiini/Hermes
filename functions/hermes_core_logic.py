@@ -6,6 +6,7 @@ import json
 import html
 import os
 import re
+import base64
 import tempfile
 import threading
 import time
@@ -991,12 +992,15 @@ def _extract_action_search_context_query(text: str) -> str | None:
     lowered = _normalize_for_matching(text).strip()
     if not lowered:
         return None
-    wants_search = any(marker in lowered for marker in (
+    # Long messages (forwarded texts, context info) are never intent commands
+    if len(text.strip()) > 500:
+        return None
+    wants_search = any(re.search(r'\b' + marker + r'\b', lowered) for marker in (
         "pesquisa", "pesquise", "buscar", "busca", "busque",
         "procura", "procure", "localiza", "localize",
     ))
     mentions_action = any(marker in lowered for marker in ("acao", "acoes", "tarefa", "tarefas"))
-    wants_context = "contexto" in lowered and any(marker in lowered for marker in (
+    wants_context = "contexto" in lowered and any(re.search(r'\b' + marker + r'\b', lowered) for marker in (
         "ative", "ativa", "ativar", "entre", "entra", "entrar",
     ))
     if not (wants_search and mentions_action and wants_context):
@@ -1009,6 +1013,8 @@ def _extract_action_lookup_query(text: str) -> str | None:
     """Detects requests that only ask to find/list an action, without locking context."""
     lowered = _normalize_for_matching(text).strip()
     if not lowered:
+        return None
+    if len(text.strip()) > 500:
         return None
     wants_search = any(marker in lowered for marker in (
         "pesquisa", "pesquise", "pesquisar", "buscar", "busca", "busque",
@@ -1500,7 +1506,30 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
             print(f"[TelegramCards] Falha ao resolver sistema do diagnostico: {exc}")
         return ""
 
-    if data == "exit_context":
+    if data.startswith("health_pain:"):
+        parts = data.split(":")
+        pain_date = parts[1] if len(parts) > 1 else ""
+        pain_raw = parts[2] if len(parts) > 2 else ""
+        try:
+            pain_score = max(0, min(10, int(pain_raw)))
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", pain_date):
+                raise ValueError("data inválida")
+            doc_ref = db.collection("health_exercise_logs").document(pain_date)
+            current = doc_ref.get()
+            current_pain = ((current.to_dict() or {}).get("pain") or {}) if current.exists else {}
+            current_pain["evening"] = pain_score
+            current_pain["telegram_checked_at"] = datetime.now(timezone.utc).isoformat()
+            doc_ref.set({"pain": current_pain}, merge=True)
+            _answer_callback_query(token, query_id, f"Dor registrada: {pain_score}/10")
+            response_text = f"✅ Check-in lombar registrado: <b>{pain_score}/10</b> em {pain_date}."
+            _persist_callback_turn(f"Check-in lombar: {pain_score}/10", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+        except Exception as exc:
+            print(f"[HealthCheckin] Falha ao registrar dor: {exc}")
+            _answer_callback_query(token, query_id, "Não consegui registrar.")
+            _send_telegram_message(token, chat_id, "⚠️ Não consegui registrar esse check-in lombar. Tente responder novamente.")
+
+    elif data == "exit_context":
         acao_titulo = session.get("acao_titulo") or "anterior"
         response_text = f"✅ Saindo do contexto <b>{acao_titulo}</b>. Voltando ao modo geral."
         _answer_callback_query(token, query_id, "Contexto liberado.")
@@ -1837,33 +1866,71 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
 # ---------------------------------------------------------------------------
 
 def _transcribe_audio_bytes(audio_bytes: bytes, extension: str, db) -> str:
+    """Transcreve áudio usando Groq (Whisper) com fallback para Gemini."""
     import base64 as _b64
+    import tempfile
+    import os
     keys = _get_api_keys(db)
+    
+    # 1. Tentativa com Groq (Whisper-Large-V3-Turbo) - Alta qualidade para PT-BR
     groq_key = keys.get("groq_api_key")
-    if not groq_key:
-        return "[Transcrição indisponível: chave Groq não configurada]"
-
-    from groq import Groq
-    client = Groq(api_key=groq_key)
-    suffix = extension if extension.startswith(".") else f".{extension}"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(audio_bytes)
-        tmp_path = tmp.name
-    try:
-        with open(tmp_path, "rb") as f:
-            transcription = client.audio.transcriptions.create(
-                file=(os.path.basename(tmp_path), f),
-                model="whisper-large-v3-turbo",
-                response_format="json",
-                language="pt",
-                temperature=0.0,
-            )
-        return transcription.text or ""
-    finally:
+    if groq_key:
         try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
+            from groq import Groq
+            client = Groq(api_key=groq_key)
+            suffix = extension if extension.startswith(".") else f".{extension}"
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                tmp.write(audio_bytes)
+                tmp_path = tmp.name
+            try:
+                with open(tmp_path, "rb") as f:
+                    transcription = client.audio.transcriptions.create(
+                        file=(os.path.basename(tmp_path), f),
+                        model="whisper-large-v3-turbo",
+                        response_format="json",
+                        language="pt",
+                        temperature=0.0,
+                    )
+                if transcription and hasattr(transcription, "text") and transcription.text:
+                    return transcription.text.strip()
+            finally:
+                try:
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                except OSError:
+                    pass
+        except Exception as groq_err:
+            print(f"[Transcription] Groq failed: {groq_err}")
+
+    # 2. Fallback: Gemini (Multimodal)
+    gemini_key = keys.get("gemini_api_key")
+    if gemini_key:
+        try:
+            from google import genai
+            from google.genai import types
+            client = genai.Client(api_key=gemini_key)
+            
+            # Mapeamento básico de extensões para mime-types
+            mime_map = {
+                "ogg": "audio/ogg", "oga": "audio/ogg", "wav": "audio/wav",
+                "mp3": "audio/mpeg", "m4a": "audio/mp4", "flac": "audio/flac"
+            }
+            clean_ext = extension.lower().strip(".")
+            mime_type = mime_map.get(clean_ext, "audio/ogg")
+            
+            response = client.models.generate_content(
+                model="gemini-1.5-flash",
+                contents=[
+                    types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
+                    "Transcreva este áudio literalmente. Responda apenas com o texto transcrito, sem introduções ou explicações."
+                ]
+            )
+            if response and response.text:
+                return response.text.strip()
+        except Exception as gemini_err:
+            print(f"[Transcription] Gemini fallback failed: {gemini_err}")
+
+    return "[Transcrição indisponível: erro nos motores Groq/Gemini]"
 
 
 # ---------------------------------------------------------------------------
@@ -2095,6 +2162,7 @@ def _build_system_instruction_guarded_v2(
         "4. Ao receber perguntas sobre a acao, responda com base nos dados acima.\n"
         "5. Se o usuario pedir para atualizar, criar passos ou registrar progresso, use as ferramentas disponiveis.\n"
         "6. Se o usuario pedir links ou anexos, cite apenas as URLs/DRIVE_FILE_ID listados em Arquivos Disponiveis. Nunca use rotulos clicaveis como 'Acessar Pasta' sem mostrar a URL real.\n"
+        "7. PROIBIDO usar consultar_historico_acoes neste modo — a acao ja esta carregada acima. Use apenas ferramentas de atualizacao (plano, diario, notas).\n"
     )
     return base + acao_section
 
@@ -2405,6 +2473,85 @@ def _send_contextual_response(
     return message_id
 
 
+def _executar_diagnostico_repositorio(db, fc, sistema_id_contexto=None):
+    """Executa a lógica de busca no GitHub para a ferramenta de diagnóstico."""
+    kwargs = dict(fc.args or {})
+    sistema_id = kwargs.get("sistema_id") or sistema_id_contexto
+    caminho = (kwargs.get("caminho_arquivo") or "").strip("/")
+
+    if not sistema_id:
+        return "Erro: sistema_id não informado e não encontrado no contexto atual. Por favor, informe o ID do sistema."
+
+    try:
+        # Busca o repositório principal no documento do sistema
+        doc = db.collection("sistemas").document(sistema_id).get()
+        if not doc.exists:
+            doc = db.collection("sistemas_detalhes").document(sistema_id).get()
+        
+        if not doc.exists:
+            return f"Erro: Sistema '{sistema_id}' não encontrado na base de dados."
+        
+        data_doc = doc.to_dict() or {}
+        repo_url = data_doc.get("repositorio_principal", "").strip()
+        if not repo_url:
+            return f"Erro: O sistema '{sistema_id}' não possui um 'repositorio_principal' configurado."
+        
+        # Parse URL do GitHub (https://github.com/owner/repo)
+        match = re.match(r'https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$', repo_url)
+        if not match:
+            return f"Erro: URL de repositório inválida ou não suportada: {repo_url}"
+        
+        owner, repo = match.group(1), match.group(2)
+        
+        # Credenciais (GitHub Token)
+        github_token = os.environ.get("GITHUB_TOKEN")
+        if not github_token:
+            keys_doc = db.collection("system").document("api_keys").get()
+            github_token = (keys_doc.to_dict() or {}).get("github_token")
+
+        headers = {"Accept": "application/vnd.github.v3+json"}
+        if github_token:
+            headers["Authorization"] = f"token {github_token}"
+        
+        # Chamada à API do GitHub
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{caminho}"
+        resp = _requests.get(api_url, headers=headers, timeout=20)
+        
+        if resp.status_code == 404:
+            return f"Erro: Caminho '{caminho or 'raiz'}' não encontrado no repositório {owner}/{repo}."
+        if resp.status_code != 200:
+            return f"Erro ao acessar GitHub (HTTP {resp.status_code}): {resp.text[:200]}"
+        
+        gh_data = resp.json()
+        if isinstance(gh_data, list):
+            # É um diretório - listar arquivos
+            lines = [f"📂 Arquivos em {owner}/{repo}/{caminho or 'raiz'}:"]
+            for item in gh_data:
+                tipo = "📁 " if item["type"] == "dir" else "📄 "
+                lines.append(f"{tipo}{item['path']}")
+            return "\n".join(lines)
+        else:
+            # É um arquivo - retornar conteúdo
+            content_b64 = gh_data.get("content", "")
+            if not content_b64:
+                return f"Arquivo '{caminho}' está vazio ou não possui conteúdo legível via API."
+            
+            try:
+                # GitHub retorna base64 com quebras de linha
+                content = base64.b64decode(content_b64.replace("\n", "")).decode("utf-8", errors="replace")
+                
+                # Limite de contexto do Gemini (conforme solicitado: ~12.000 caracteres)
+                if len(content) > 12000:
+                    content = content[:12000] + "\n\n[...conteúdo truncado para preservar contexto...]"
+                
+                return f"📄 Conteúdo de {caminho}:\n\n```\n{content}\n```"
+            except Exception as dec_err:
+                return f"Erro ao decodificar conteúdo do arquivo: {dec_err}"
+                
+    except Exception as e:
+        return f"Erro técnico ao processar diagnóstico do repositório: {str(e)}"
+
+
 def _run_gemini_turn(
     db,
     gemini_key: str,
@@ -2414,6 +2561,7 @@ def _run_gemini_turn(
     tools_list: list,
     function_map: dict,
     perf_state: dict | None = None,
+    sistema_id_contexto: str = None,
 ) -> str:
     """Runs a full Gemini multi-turn exchange and returns the final text response."""
     from concurrent.futures import ThreadPoolExecutor
@@ -2444,7 +2592,10 @@ def _run_gemini_turn(
         else:
             try:
                 kwargs = dict(fc.args or {})
-                result = fn(**kwargs)
+                if fc.name == "diagnosticar_repositorio":
+                    result = _executar_diagnostico_repositorio(db, fc, sistema_id_contexto=sistema_id_contexto)
+                else:
+                    result = fn(**kwargs)
                 result_text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
             except Exception as tool_err:
                 result_text = f"Erro ao executar {fc.name}: {tool_err}"
@@ -3167,6 +3318,13 @@ def _process_telegram_message(db, data: dict):
         status: str = None,
     ):
         """Busca ações e tarefas no Hermes. Use status para filtrar por estado (ex: 'em andamento', 'concluída', 'cancelada'). Use data_limite_inicio/fim (YYYY-MM-DD) para filtrar por prazo."""
+        if contexto_ativo == "acao" and acao_snapshot:
+            titulo_acao = acao_snapshot.get("titulo") or request_acao_id or "ação atual"
+            return (
+                f"Contexto trancado na ação '{titulo_acao}'. "
+                "Os dados desta ação já estão carregados no contexto — use-os diretamente. "
+                "Para pesquisar outras ações, o usuário deve sair primeiro com /sair."
+            )
         from tools.busca_grafo import buscar_tarefas
 
         _STOPWORDS_TG = {"de", "a", "o", "que", "e", "do", "da", "em", "um", "uma",
@@ -3626,6 +3784,17 @@ def _process_telegram_message(db, data: dict):
         )
         return f"Proposta financeira gerada. Draft: {draft}\n\n[SISTEMA: Os botões de confirmação serão anexados automaticamente a esta resposta.]"
 
+    def diagnosticar_repositorio(sistema_id: str = None, caminho_arquivo: str = None):
+        """
+        Analisa o código-fonte de um sistema via GitHub. Se caminho_arquivo for omitido, lista os arquivos da raiz.
+        
+        Args:
+          sistema_id: ID do sistema para diagnosticar. Se não informado, usa o contexto atual.
+          caminho_arquivo: Caminho do arquivo específico (ex: 'functions/main.py'). Se vazio, lista a raiz.
+        """
+        # Esta função é um placeholder; a execução real é interceptada em _run_gemini_turn
+        return "[EXECUÇÃO PENDENTE]"
+
     tools_list = [
 
         consultar_historico_acoes,
@@ -3643,6 +3812,7 @@ def _process_telegram_message(db, data: dict):
         registrar_item_financeiro_v2,
         propor_acao_para_confirmacao,
         propor_lancamento_financeiro,
+        diagnosticar_repositorio,
     ]
 
 
@@ -3668,6 +3838,7 @@ def _process_telegram_message(db, data: dict):
             tools_list=tools_list,
             function_map=function_map,
             perf_state=perf_state,
+            sistema_id_contexto=session.get("sistema_id") or (acao_snapshot.get("sistema_id") if acao_snapshot else None),
         )
     except Exception as gemini_err:
         if processing_msg_id:

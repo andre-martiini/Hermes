@@ -141,7 +141,7 @@ def _extract_with_gemini(file_bytes: bytes, api_key: str, prompt: str | None = N
 
     client = genai.Client(api_key=api_key)
     response = client.models.generate_content(
-        model="gemini-3.1-flash-lite-preview",
+        model="gemini-3.1-flash-lite",
         contents=[
             {"mime_type": "application/pdf", "data": file_bytes},
             prompt or DEFAULT_GEMINI_TEXT_PROMPT,

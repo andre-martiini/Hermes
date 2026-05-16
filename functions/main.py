@@ -88,8 +88,8 @@ COPILOT_SOFT_DEADLINE_SEC = 210
 COPILOT_MODEL_TIMEOUT_MS = 70000
 COPILOT_MODEL_RETRY_TIMEOUT_MS = 30000
 COPILOT_TOOL_TIMEOUT_SEC = 45
-COPILOT_CHAT_MODEL = os.environ.get("COPILOT_CHAT_MODEL", "gemini-3.1-flash-lite-preview")
-COPILOT_FALLBACK_MODEL = os.environ.get("COPILOT_FALLBACK_MODEL", "gemini-3.1-flash-lite-preview")
+COPILOT_CHAT_MODEL = os.environ.get("COPILOT_CHAT_MODEL", "gemini-3.1-flash-lite")
+COPILOT_FALLBACK_MODEL = os.environ.get("COPILOT_FALLBACK_MODEL", "gemini-3.1-flash-lite")
 COPILOT_DEADLINE_FALLBACK_TEXT = (
     "O modelo de IA demorou demais para concluir esta resposta e eu interrompi a chamada "
     "antes de estourar o tempo da conversa. Tente dividir o pedido em partes menores, "
@@ -224,7 +224,7 @@ def _perf_log(prefix: str, perf_state: dict, extra: dict | None = None):
 
 GOOGLE_BASE_SCOPES = [
     'https://www.googleapis.com/auth/tasks',
-    'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/gmail.modify',
     'https://www.googleapis.com/auth/calendar',
     'https://www.googleapis.com/auth/drive',
 ]
@@ -270,6 +270,19 @@ def get_google_creds(scopes=None):
 
     creds_data = creds_doc.to_dict()
     stored_scopes = creds_data.get('scopes') or GOOGLE_BASE_SCOPES
+    required_scopes = scopes or GOOGLE_BASE_SCOPES
+    missing_scopes = sorted(set(required_scopes) - set(stored_scopes))
+    if missing_scopes:
+        db.collection('system').document('google_credentials').set({
+            'auth_status': 'reauth_required',
+            'auth_error': 'missing_scopes',
+            'auth_error_message': GOOGLE_REAUTH_MESSAGE,
+            'missing_scopes': missing_scopes,
+            'updated_at': firestore.SERVER_TIMESTAMP
+        }, merge=True)
+        raise GoogleAuthRevokedError(
+            f"{GOOGLE_REAUTH_MESSAGE} Escopos ausentes: {', '.join(missing_scopes)}"
+        )
 
     creds = Credentials(
         token=creds_data.get('token'),
@@ -319,6 +332,25 @@ def get_gmail_service():
     from googleapiclient.discovery import build
 
     return build('gmail', 'v1', credentials=get_google_creds())
+
+
+def archive_gmail_message(service, msg_id, sync_ref=None, logs=None, reason="financeiro"):
+    """Remove o label INBOX depois que o e-mail financeiro foi absorvido pelo Hermes."""
+    try:
+        service.users().messages().modify(
+            userId='me',
+            id=msg_id,
+            body={'removeLabelIds': ['INBOX']}
+        ).execute()
+        if sync_ref is not None and logs is not None:
+            log_to_firestore(sync_ref, logs, f"[GMAIL] E-mail financeiro arquivado ({reason}): {msg_id}")
+        return True
+    except Exception as e:
+        if sync_ref is not None and logs is not None:
+            log_to_firestore(sync_ref, logs, f"[GMAIL] Aviso: nao foi possivel arquivar {msg_id}: {e}")
+        else:
+            print(f"[GMAIL] Aviso: nao foi possivel arquivar {msg_id}: {e}")
+        return False
 
 
 
@@ -1417,7 +1449,9 @@ def sync_pix_emails(service, sync_ref, logs):
 
             msg_id = msg['id']
 
-            if msg_id in processed_ids or msg_id in existing_google_ids: continue
+            if msg_id in processed_ids or msg_id in existing_google_ids:
+                archive_gmail_message(service, msg_id, sync_ref, logs, "pix-ja-processado")
+                continue
 
             
 
@@ -1508,9 +1542,7 @@ def sync_pix_emails(service, sync_ref, logs):
                 if is_duplicate:
 
                     new_processed_ids.append(msg_id)
-
-                    continue
-                    new_processed_ids.append(msg_id)
+                    archive_gmail_message(service, msg_id, sync_ref, logs, "pix-duplicado")
                     continue
 
                 # Salva no banco
@@ -1544,6 +1576,7 @@ def sync_pix_emails(service, sync_ref, logs):
                 
                 new_processed_ids.append(msg_id)
                 log_to_firestore(sync_ref, logs, f"[PIX] Processado: {description} (R$ {amount:.2f})")
+                archive_gmail_message(service, msg_id, sync_ref, logs, "pix-lancado")
 
 
         if new_processed_ids:
@@ -1590,6 +1623,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
         
         # Cache de boletos existentes para permitir duplicatas ou vinculação
         existing_bills_cache = []
+        existing_bill_google_ids = set()
         for b in db.collection('fixed_bills').stream():
             d = b.to_dict()
             existing_bills_cache.append({
@@ -1601,6 +1635,8 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 'isPaid': d.get('isPaid', False),
                 'rubricId': d.get('rubricId')
             })
+            if d.get('google_message_id'):
+                existing_bill_google_ids.add(d['google_message_id'])
 
         # Cache de rubricas para vinculação automática
         rubrics_cache = []
@@ -1617,6 +1653,9 @@ def sync_boletos_gmail(service, sync_ref, logs):
 
         for m_info in messages:
             msg_id = m_info['id']
+            if msg_id in existing_bill_google_ids:
+                archive_gmail_message(service, msg_id, sync_ref, logs, "boleto-ja-lancado")
+                continue
             if msg_id in processed_ids: continue
             
             msg = service.users().messages().get(userId='me', id=msg_id).execute()
@@ -1671,7 +1710,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 content_parts.append(types.Part.from_bytes(data=pdf_data, mime_type="application/pdf"))
             
             try:
-                response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=content_parts)
+                response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=content_parts)
                 res_text = response.text.strip()
                 if "```json" in res_text:
                     res_text = res_text.split("```json")[-1].split("```")[0].strip()
@@ -1717,6 +1756,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
 
                 if is_exact_dup:
                     new_processed_ids.append(msg_id)
+                    archive_gmail_message(service, msg_id, sync_ref, logs, "boleto-duplicado")
                     continue
                 
                 if found_existing_id:
@@ -1741,6 +1781,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
                     db.collection('fixed_bills').document(found_existing_id).update(update_data)
                     log_to_firestore(sync_ref, logs, f"[BOLETO] Vinculado ao card '{data['description']}': R$ {data['amount']}")
                     processed_count += 1
+                    archive_gmail_message(service, msg_id, sync_ref, logs, "boleto-vinculado")
                 else:
                     # BUSCA EM RUBRICAS (Fallback se a IA não retornou rubric_id)
                     matched_rubric_id = rubric_id_from_ai
@@ -1768,6 +1809,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
                     })
                     log_to_firestore(sync_ref, logs, f"[BOLETO] Importado (Novo Card): {data['description']} (R$ {data['amount']})")
                     processed_count += 1
+                    archive_gmail_message(service, msg_id, sync_ref, logs, "boleto-lancado")
                 
                 new_processed_ids.append(msg_id)
 
@@ -2288,7 +2330,91 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
 
 
 
-    # 2. Lembretes de Ações (Specific Task Reminders)
+    # 2. Lembretes de saude enviados somente pelo Telegram.
+    default_health_reminders = [
+        {
+            "id": "spine_morning",
+            "title": "Rotina lombar",
+            "message": "André, hora da sua rotina lombar. Comece leve: mobilidade, respiração e sem pressa.",
+            "time": "05:00",
+            "enabled": True,
+            "daysOfWeek": [0, 1, 2, 3, 4, 5, 6],
+            "category": "spine",
+        },
+        {
+            "id": "lunch_slow",
+            "title": "Almoço com calma",
+            "message": "André, lembre de comer devagar no almoço. Ritmo baixo também é estratégia.",
+            "time": "11:45",
+            "enabled": True,
+            "daysOfWeek": [1, 2, 3, 4, 5],
+            "category": "nutrition",
+        },
+        {
+            "id": "food_window",
+            "title": "Janela alimentar",
+            "message": "André, última janela alimentar chegando. Se for comer, mantenha leve.",
+            "time": "17:30",
+            "enabled": True,
+            "daysOfWeek": [0, 1, 2, 3, 4, 5, 6],
+            "category": "nutrition",
+        },
+        {
+            "id": "pain_checkin",
+            "title": "Check-in lombar",
+            "message": "André, check-in rápido: como ficou sua lombar hoje?",
+            "time": "21:30",
+            "enabled": True,
+            "daysOfWeek": [0, 1, 2, 3, 4, 5, 6],
+            "category": "pain",
+        },
+    ]
+
+    health_reminders_by_id = {item["id"]: item for item in default_health_reminders}
+    try:
+        for reminder_doc in db.collection("health_telegram_reminders").stream():
+            data = reminder_doc.to_dict() or {}
+            data["id"] = data.get("id") or reminder_doc.id
+            health_reminders_by_id[reminder_doc.id] = data
+    except Exception as exc:
+        print(f"[HealthReminders] Falha ao carregar lembretes: {exc}")
+
+    for reminder in health_reminders_by_id.values():
+        reminder_id = str(reminder.get("id") or "").strip()
+        if not reminder_id or not reminder.get("enabled", True):
+            continue
+        if reminder.get("time") != current_time_str:
+            continue
+        days = reminder.get("daysOfWeek")
+        if isinstance(days, list) and days and js_day_of_week not in days:
+            continue
+        sent_id = f"health_telegram_{reminder_id}_{today_str}"
+        if db.collection("system_reminders").document(sent_id).get().exists:
+            continue
+
+        owner_uid = reminder.get("created_by_uid")
+        telegram_chat_id = _resolve_telegram_chat_id_for_uid(db, owner_uid) or _resolve_default_telegram_chat_id(db)
+        if telegram_chat_id:
+            title = (reminder.get("title") or "Lembrete de saúde").strip()
+            message = (reminder.get("message") or "André, lembrete de saúde configurado no Hermes.").strip()
+            keyboard = None
+            if reminder.get("category") == "pain":
+                keyboard = [
+                    [{"text": str(n), "callback_data": f"health_pain:{today_str}:{n}"} for n in range(0, 6)],
+                    [{"text": str(n), "callback_data": f"health_pain:{today_str}:{n}"} for n in range(6, 11)],
+                ]
+            sent = _send_telegram_message_raw_with_keyboard(db, telegram_chat_id, f"{title}\n\n{message}", keyboard)
+            db.collection("system_reminders").document(sent_id).set({
+                "sent_at": now.isoformat(),
+                "sent": bool(sent),
+                "type": "health_telegram",
+                "reminder_id": reminder_id,
+            })
+        else:
+            print(f"[HealthReminders] Nenhum chat_id encontrado para {reminder_id}")
+
+
+    # 3. Lembretes de Ações (Specific Task Reminders)
 
     from google.cloud.firestore import Query
 
@@ -2655,7 +2781,7 @@ def process_vectorization(task_id):
 
                     # Extração de texto via Gemini 1.5 Flash
 
-                    response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=[
+                    response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=[
 
                         "Extraia todo o texto relevante deste documento para indexação. Se for HTML, ignore tags. Se for PDF, faça OCR se necessário.",
 
@@ -2905,7 +3031,7 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
     """
 
     try:
-        response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=prompt)
+        response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=prompt)
         text = response.text
         # Limpeza para garantir JSON puro
         if "```json" in text:
@@ -3676,7 +3802,7 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
         """
 
-        result = gemini_client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=prompt)
+        result = gemini_client.models.generate_content(model="gemini-3.1-flash-lite", contents=prompt)
 
         texto_refinado = result.text
 
@@ -3909,7 +4035,7 @@ def start_file_indexing(item_id, item_data):
 
 
 
-        response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=parts)
+        response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=parts)
 
         res_text = response.text
 
@@ -4601,7 +4727,10 @@ def on_knowledge_item_updated(event: firestore_fn.Event[firestore_fn.Change[fire
 
 
 
-@firestore_fn.on_document_created(document="conhecimento/{itemId}")
+@firestore_fn.on_document_created(
+    document="conhecimento/{itemId}",
+    memory=options.MemoryOption.MB_512,
+)
 
 
 
@@ -5050,7 +5179,7 @@ def _classify_memory_candidate(api_key: str, fato: str, categoria: str) -> dict:
             f"Fato candidato: {fato}"
         )
         response = client.models.generate_content(
-            model="gemini-3.1-flash-lite-preview",
+            model="gemini-3.1-flash-lite",
             contents=prompt
         )
         raw_text = (response.text or "").strip()
@@ -5258,7 +5387,7 @@ def consolidar_memorias_copiloto(event: scheduler_fn.ScheduledEvent):
                 f"Memórias:\n{json.dumps(group, ensure_ascii=False)}"
             )
             response = client.models.generate_content(
-                model="gemini-3.1-flash-lite-preview",
+                model="gemini-3.1-flash-lite",
                 contents=prompt
             )
             raw_text = (response.text or "").strip()
@@ -5389,6 +5518,37 @@ def _send_telegram_message_raw(db, chat_id: str | int | None, text: str):
         return True
     except Exception as exc:
         print(f"[Telegram] Erro ao enviar lembrete: {exc}")
+        return False
+
+
+def _send_telegram_message_raw_with_keyboard(db, chat_id: str | int | None, text: str, inline_keyboard: list | None):
+    if not chat_id or not text:
+        return False
+    try:
+        import requests
+
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
+        bot_token = keys_doc.to_dict().get('telegram_bot_token') if keys_doc.exists else None
+        bot_token = bot_token or os.environ.get('TELEGRAM_BOT_TOKEN')
+        if not bot_token:
+            print("[Telegram] TELEGRAM_BOT_TOKEN nao configurado.")
+            return False
+
+        payload = {"chat_id": str(chat_id), "text": text}
+        if inline_keyboard:
+            payload["reply_markup"] = {"inline_keyboard": inline_keyboard}
+
+        resp = requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json=payload,
+            timeout=10
+        )
+        if not resp.ok:
+            print(f"[Telegram] Falha ao enviar lembrete com botoes: {resp.status_code} {resp.text[:300]}")
+            return False
+        return True
+    except Exception as exc:
+        print(f"[Telegram] Erro ao enviar lembrete com botoes: {exc}")
         return False
 
 
@@ -5628,7 +5788,7 @@ def gerarSlidesIA(req: https_fn.CallableRequest):
 
 
 
-        response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=[
+        response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=[
 
             system_instruction,
 
@@ -6602,7 +6762,7 @@ def processInvoiceOCR(req: https_fn.CallableRequest):
 
 
 
-        response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=parts)
+        response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=parts)
 
         res_text = response.text
 
@@ -6736,7 +6896,7 @@ def transcrever_audio(req: https_fn.CallableRequest):
         Texto: "{texto_bruto}"
         """
 
-        response = gemini_client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=prompt)
+        response = gemini_client.models.generate_content(model="gemini-3.1-flash-lite", contents=prompt)
         texto_refinado = response.text
 
         return {
@@ -6970,7 +7130,7 @@ def askTaskAssistant(req: https_fn.CallableRequest):
         {prompt}
         """
 
-        response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=[system_instruction, full_prompt])
+        response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=[system_instruction, full_prompt])
 
         result = (response.text or "").strip()
         if not result:
@@ -7021,7 +7181,7 @@ def askChatbot(req: https_fn.CallableRequest):
 
         client = genai.Client(api_key=gemini_key)
         response = client.models.generate_content(
-            model="gemini-3.1-flash-lite-preview",
+            model="gemini-3.1-flash-lite",
             contents=[
                 "Você é um assistente de reunião em pt-BR. Responda com objetividade, "
                 "baseando-se no contexto recebido. Se o contexto estiver incompleto, "
@@ -8487,7 +8647,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     skeleton_prompt += f'- Inclua obrigatoriamente: {secoes_customizadas}\n'
 
                 skeleton_resp = client.models.generate_content(
-                    model="gemini-3.1-flash-lite-preview",
+                    model="gemini-3.1-flash-lite",
                     contents=skeleton_prompt
                 )
                 skeleton_text = skeleton_resp.text or ""
@@ -8807,6 +8967,46 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 "Para qualquer número financeiro interno, use consultar_financas_v2 antes de concluir. Não use categorias de lançamentos como base analítica enquanto a classificação estiver em revisão.\n"
                 "Você pode explicar tipos de investimento em caráter educativo, mas não deve prometer rentabilidade, recomendar compra/venda específica ou tratar isso como consultoria financeira regulada.\n"
                 "Quando sugerir próximos passos, escreva como proposta para o usuário avaliar; não crie ações, metas ou lançamentos sem confirmação explícita.\n\n"
+            )
+
+        elif copilot_mode == "saude":
+            mode_context = (
+                "## MODO COPILOTO DE SAÚDE ATIVO\n"
+                "Você está atuando como Copiloto de Saúde do Hermes. Priorize orientações sobre hábitos, exercícios, alimentação, controle de peso, sono e gestão da dor lombar.\n"
+                "Para qualquer métrica de saúde atual, use as ferramentas disponíveis antes de concluir. "
+                "Quando sugerir próximos passos, escreva como proposta para o usuário avaliar; não crie registros, metas ou logs sem confirmação explícita.\n\n"
+                "## PROTOCOLO CLÍNICO PESSOAL DO USUÁRIO\n"
+                "O usuário possui as seguintes condições diagnosticadas e protocolos prescritos:\n\n"
+                "### Diagnósticos\n"
+                "- **Síndrome de Bertolotti**: Megapófise no processo transverso de L5 (LSTV). Pseudoarticulação/fusão com o sacro. Bloqueio cinético L5-S1 > hipermobilidade compensatória em L4-L5. Dor lombar crônica; crises matinais por acúmulo inflamatório durante o sono.\n"
+                "- **DRGE + Esofagite Erosiva Grau A + Hiato diafragmático alargado**: Confirmado endoscopia 18/07/2024. Esfíncter esofágico comprometido por perda do suporte crural.\n\n"
+                "### Rotina matinal de descompressão (antes de qualquer carga axial)\n"
+                "1. Joelho ao peito unilateral: 30s por lado, deitado\n"
+                "2. Postura da criança (Balasana): 1-2 min respiração diafragmática\n"
+                "3. Gato-vaca: 10-15 ciclos lentos sincronizados com respiração\n\n"
+                "### Ergonomia ocupacional\n"
+                "- Não sentar/ficar de pé estático >40-45 min; micro-caminhadas de 2 min entre posturas\n\n"
+                "### Estabilização segmentar (diário)\n"
+                "1. Ativação TrA (drawing-in/bracing): 8-10s isometria x10, sem Valsalva\n"
+                "2. Ponte pélvica (bridging): pelve neutra, TrA + glúteo máximo\n"
+                "3. Bird-dog: quadrúpede, braço + perna opostos, pelve sem rotação\n\n"
+                "### Pilates - restrições rígidas\n"
+                "- PROIBIDOS: The Saw, Rolling Like a Ball, Jackknife, rotações extremas de tronco livre\n"
+                "- PERMITIDOS: rotação torácica pura com pelve fixada (T12 para cima), fortalecimento isométrico de core\n\n"
+                "### Protocolo de caminhada (6-6-6 / Fartlek)\n"
+                "- 5-6x/semana, >100 min totais/dia; SOMENTE superfícies planas\n"
+                "- Zona 1 (5-6 min): aquecimento leve\n"
+                "- Zona 2 (20-40 min): alternar vigoroso 3-5 min + lento 1,5-3 min\n"
+                "- Zona 3 (5-6 min): desaquecimento\n"
+                "- Locais Vitória-ES: Parque Pedra da Cebola, Orla Camburi (domingo Rua de Lazer 5h-13h), Parque Botânico Vale\n\n"
+                "### Dieta anti-refluxo e anti-inflamatória\n"
+                "- EVITAR: frituras, ultraprocessados, café forte, carbonatadas, pimenta, chocolate. Não comer nas 3h antes de deitar.\n"
+                "- FAVORECER: gengibre, aveia, frango grelhado, tofu, azeite extravirgem, abacate, nozes\n"
+                "- Suplemento: Bromelina + Rutosídeo\n\n"
+                "### Sequenciamento alimentar (GLP-1 endógeno)\n"
+                "Ordem: 1) Vegetais/fibras folhosas 2) Proteínas magras 3) Carboidratos complexos em porção limitada\n\n"
+                "### Hábitos rastreados\n"
+                "noSugar, noAlcohol, noSnacks, workout, eatUntil18, eatSlowly. Streak = dias consecutivos com >=4/6 hábitos.\n\n"
             )
 
         system_instruction = (
@@ -9141,7 +9341,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         if _CORRECAO_KEYWORDS.search(prompt):
             try:
                 _intent_resp = client.models.generate_content(
-                    model="gemini-3.1-flash-lite-preview",
+                    model="gemini-3.1-flash-lite",
                     contents=f"Responda só 'CORRECAO' ou 'NORMAL': o usuário está corrigindo um procedimento?\nMensagem: {prompt}",
                     config=types.GenerateContentConfig(
                         http_options=types.HttpOptions(timeout=3000)
@@ -9358,6 +9558,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     _, done = downloader.next_chunk()
                 fh.seek(0)
                 file_bytes = fh.read()
+                fh.close()
+                del fh  # libera o buffer BytesIO imediatamente (evita cópia dupla em memória)
                 local_pdf_text = ""
                 local_pdf_metadata = None
                 local_docx_text = ""
@@ -9383,6 +9585,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
                         tmp.write(file_bytes)
                         tmp_path = tmp.name
+                    del file_bytes  # libera bytes após gravar no disco; File API vai ler do tmp_path
 
                     # 4. Faz upload para a File API do Gemini
                     gemini_file = client.files.upload(
@@ -9393,6 +9596,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         )
                     )
                     os.unlink(tmp_path)
+                else:
+                    del file_bytes  # texto já extraído localmente; bytes brutos não são mais necessários
 
                 # O bloco try/finally abaixo garante que o arquivo seja sempre
                 # deletado da File API do Gemini, mesmo que a extração falhe.
@@ -9476,6 +9681,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                             extraction_text = extraction_text[4:]
 
                     meta = json.loads(extraction_text)
+                    if isinstance(meta, list):
+                        meta = meta[0] if meta else {}
+                    if not isinstance(meta, dict):
+                        meta = {}
                     titulo_doc = meta.get('titulo', real_file_name)
                     natureza_doc = meta.get('natureza', 'Documento')
                     resumo_doc = meta.get('resumo', '')
@@ -10623,7 +10832,7 @@ def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
         3. insight: Um breve comentário seu sobre por que isso é importante ou o que você notou de especial.
         """
 
-        response = client.models.generate_content(model="gemini-3.1-flash-lite-preview", contents=prompt)
+        response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=prompt)
         res_text = response.text
 
         json_match = re.search(r'\{.*\}', res_text, re.DOTALL)
@@ -10784,7 +10993,7 @@ def processar_correcoes_pendentes(event: scheduler_fn.ScheduledEvent) -> None:
                             f'{{\"aprovado\": true_ou_false, \"resumo\": \"motivo em 1 frase\"}}'
                         )
                         _comp_resp    = _evo_client.models.generate_content(
-                            model="gemini-3.1-flash-lite-preview",
+                            model="gemini-3.1-flash-lite",
                             contents=_comp_prompt
                         )
                         _comp_text    = (_comp_resp.text or '').strip()
@@ -11710,7 +11919,7 @@ SNAPSHOT:
     try:
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model="gemini-3.1-flash-lite-preview",
+            model="gemini-3.1-flash-lite",
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.4,
@@ -11747,4 +11956,108 @@ SNAPSHOT:
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.INTERNAL,
             message="Erro ao gerar resumo financeiro."
+        )
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=60)
+def gerarResumoSaude(req: https_fn.CallableRequest):
+    """
+    Gera um diagnóstico estruturado de saúde geral a partir de um snapshot compacto.
+    Chamado apenas quando os dados de saúde mudam (fingerprint diferente).
+    """
+    from google import genai
+    from google.genai import types
+
+    data = req.data or {}
+    snapshot = data.get('snapshot')
+
+    if not snapshot or not isinstance(snapshot, dict):
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="snapshot é obrigatório."
+        )
+
+    api_key = get_gemini_api_key()
+    if not api_key:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+            message="Chave Gemini não configurada."
+        )
+
+    import json
+    import re
+    snapshot_text = json.dumps(snapshot, ensure_ascii=False, indent=2)
+
+    prompt = f"""Você é um coach de saúde pessoal e analista de bem-estar. Analise o snapshot de saúde abaixo e gere um diagnóstico em português.
+
+O snapshot contém dados reais do usuário: biometria (peso e meta), hábitos diários (taxa de adesão por hábito nos últimos 7 e 30 dias, streak), atividade física (média de passos, distância, calorias, dias com meta atingida), sono (média de horas, sono profundo, dias abaixo de 7h) e dor (escala 0-10 matinal/noturna, crises recentes).
+
+Regras obrigatórias:
+- Responda somente JSON válido, sem markdown, sem títulos externos e sem emojis.
+- Não crie tarefas, registros ou qualquer ação dentro do sistema.
+- O campo "actionProposal" deve ser uma proposta textual concreta e específica para o usuário avaliar esta semana.
+- Seja específico com os números mais relevantes do snapshot.
+- Se algum dado estiver ausente (null), ignore essa dimensão na análise.
+- Priorize as dimensões com dados mais completos.
+
+Formato exato:
+{{
+  "status": "critical" | "attention" | "stable" | "strong",
+  "score": 0,
+  "title": "frase curta com o diagnóstico central",
+  "summary": "síntese em 1 ou 2 frases, com números reais do snapshot",
+  "mainRisk": "principal ponto de atenção com números específicos",
+  "positivePoint": "ponto positivo real do período, ou cautela se não houver",
+  "actionProposal": "proposta prática e específica para esta semana, sem executar nada"
+}}
+
+Critérios de status:
+- "critical": peso muito acima da meta E hábitos ruins E sono deteriorado E dor elevada. Ou crise de dor recente com outros indicadores negativos.
+- "attention": desequilíbrio em 2+ dimensões (ex: baixa adesão a hábitos, sono abaixo de 6h na média, peso crescendo consistentemente).
+- "stable": maioria das dimensões controladas, sem deterioração clara, adesão razoável a hábitos.
+- "strong": boa adesão a hábitos (>70% em 30d), peso próximo ou abaixo da meta, sono adequado (>7h média), atividade física regular, dor baixa ou ausente.
+
+SNAPSHOT:
+{snapshot_text}"""
+
+    try:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-3.1-flash-lite",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.35,
+                max_output_tokens=320
+            )
+        )
+        raw_text = (response.text or "").strip()
+        clean_text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text, flags=re.IGNORECASE).strip()
+        analysis = json.loads(clean_text)
+
+        allowed_status = {"critical", "attention", "stable", "strong"}
+        status = analysis.get("status")
+        if status not in allowed_status:
+            status = "attention"
+
+        score = analysis.get("score")
+        try:
+            score = max(0, min(100, int(score)))
+        except Exception:
+            score = None
+
+        normalized = {
+            "status": status,
+            "score": score,
+            "title": str(analysis.get("title") or "Diagnóstico de saúde").strip(),
+            "summary": str(analysis.get("summary") or "").strip(),
+            "mainRisk": str(analysis.get("mainRisk") or "").strip(),
+            "positivePoint": str(analysis.get("positivePoint") or "").strip(),
+            "actionProposal": str(analysis.get("actionProposal") or "").strip(),
+        }
+        return {"analysis": normalized, "summary": normalized["summary"]}
+    except Exception as e:
+        print(f"Erro ao gerar resumo de saúde: {e}")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message="Erro ao gerar resumo de saúde."
         )
