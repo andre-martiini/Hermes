@@ -4675,7 +4675,7 @@ const App: React.FC = () => {
       <div className={`min-h-screen flex flex-col md:flex-row relative transition-colors ${appBgClass}`}>
         {/* Pop-up de Notificação */}
         {activePopup && (
-          <div className="fixed bottom-8 left-4 right-4 md:left-8 md:right-auto z-[200] max-w-sm ml-auto mr-auto md:ml-0 md:mr-0 bg-white rounded-none shadow-[0_30px_60px_rgba(0,0,0,0.25)] border border-border-grid overflow-hidden animate-in slide-in-from-bottom-12 duration-500">
+          <div className={`fixed bottom-8 left-4 right-4 md:left-8 md:right-auto z-[200] max-w-sm ml-auto mr-auto md:ml-0 md:mr-0 rounded-none border overflow-hidden animate-in slide-in-from-bottom-12 duration-500 ${isDarkTheme ? 'bg-slate-900 border-white/10 shadow-[0_30px_60px_rgba(0,0,0,0.7)]' : 'bg-white border-border-grid shadow-[0_30px_60px_rgba(0,0,0,0.25)]'}`}>
             <div className={`h-2 w-full ${activePopup.type === 'success' ? 'bg-emerald-500' :
               activePopup.type === 'warning' ? 'bg-amber-500' :
                 activePopup.type === 'error' ? 'bg-rose-500' : 'bg-blue-600'
@@ -4683,18 +4683,18 @@ const App: React.FC = () => {
             <div className="p-8">
               <div className="flex justify-between items-start mb-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em]">{activePopup.title}</span>
+                  <span className={`text-[10px] font-black uppercase tracking-[0.2em] ${isDarkTheme ? 'text-slate-100' : 'text-slate-900'}`}>{activePopup.title}</span>
                   <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse"></span>
                 </div>
-                <button onClick={() => setActivePopup(null)} className="text-slate-300 hover:text-slate-600 transition-colors p-1">
+                <button onClick={() => setActivePopup(null)} className={`transition-colors p-1 ${isDarkTheme ? 'text-slate-400 hover:text-slate-200' : 'text-slate-300 hover:text-slate-600'}`}>
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
               </div>
-              <p className="text-[11px] text-slate-500 leading-relaxed font-bold">{activePopup.message}</p>
+              <p className={`text-[11px] leading-relaxed font-bold ${isDarkTheme ? 'text-slate-300' : 'text-slate-500'}`}>{activePopup.message}</p>
               <div className="mt-6 flex gap-3">
                 <button
                   onClick={() => setActivePopup(null)}
-                  className="flex-1 px-5 py-3 bg-slate-100 text-slate-500 rounded-none text-[9px] font-black uppercase tracking-widest transition-all hover:bg-slate-200"
+                  className={`flex-1 px-5 py-3 rounded-none text-[9px] font-black uppercase tracking-widest transition-all ${isDarkTheme ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
                 >
                   Entendido
                 </button>
