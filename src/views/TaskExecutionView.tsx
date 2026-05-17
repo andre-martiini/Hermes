@@ -271,7 +271,12 @@ export const TaskExecutionView = ({
       setLocalDataLimite(finalDate);
       showToast("Data de execução ajustada para hoje (não é permitido agendar no passado)", "info");
     }
-    onSave(task.id, { data_limite: finalDate, data_inicio: finalDate });
+    onSave(task.id, {
+      data_limite: finalDate,
+      data_inicio: finalDate,
+      horario_inicio: null as any,
+      horario_fim: null as any
+    });
   };
 
   const handleBlurPrazoFinal = () => {
@@ -1866,7 +1871,7 @@ export const TaskExecutionView = ({
                       <div className="space-y-3">
                         <div>
                           <p className={`${labelCls} mb-1 opacity-60`}>Data de Execução</p>
-                          <input type="date" min={getTodayIso()} value={localDataLimite} onChange={e => setLocalDataLimite(e.target.value)} onBlur={handleBlurDataLimite}
+                          <input type="date" min={getTodayIso()} value={localDataLimite} onChange={e => { setLocalDataLimite(e.target.value); setLocalHorarioInicio(''); setLocalHorarioFim(''); }} onBlur={handleBlurDataLimite}
                             style={{ colorScheme: isDark ? 'dark' : 'light' }}
                             className={`w-full px-3 py-2 rounded-none text-xs font-bold outline-none focus:ring-1 focus:ring-primary-tactile border transition-all font-mono mb-3 ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-border-grid text-slate-900'}`} />
                             

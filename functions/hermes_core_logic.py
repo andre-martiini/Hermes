@@ -1447,6 +1447,13 @@ _CONFIRM_FINANCEIRO_KEYBOARD = [
     ]
 ]
 
+_CONFIRM_WHATSAPP_KEYBOARD = [
+    [
+        {"text": "✅ Confirmar Envio", "callback_data": "confirm_whatsapp"},
+        {"text": "❌ Cancelar", "callback_data": "cancel_whatsapp"}
+    ]
+]
+
 
 
 def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn.Response":
@@ -1854,6 +1861,47 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
         _persist_callback_turn("Botão: cancelar lançamento financeiro", response_text)
         _send_telegram_message(token, chat_id, response_text)
 
+    elif data == "confirm_whatsapp":
+        _answer_callback_query(token, query_id, "Enfileirando mensagem...")
+        pending = session.get("pending_confirmations", {}).get("whatsapp")
+        if not pending:
+            response_text = "⚠️ Nenhuma mensagem de WhatsApp pendente."
+            _persist_callback_turn("Botão: confirmar WhatsApp", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+            return https_fn.Response("OK", status=200)
+
+        try:
+            from tools.schedule_whatsapp_message import schedule_whatsapp_message as _schedule_whatsapp
+            res = _schedule_whatsapp(
+                db,
+                pending.get("contact_number") or "",
+                pending.get("message") or "",
+                pending.get("scheduled_time") or "",
+            )
+
+            session.get("pending_confirmations", {}).pop("whatsapp", None)
+            if session.get("_pending_confirm_type") == "whatsapp":
+                session.pop("_pending_confirm_type", None)
+            _save_session(db, chat_id, session)
+
+            response_text = f"✅ <b>WhatsApp confirmado.</b>\n{html.escape(str(res))}"
+            _persist_callback_turn("Botão: confirmar WhatsApp", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+        except Exception as e:
+            response_text = f"❌ Erro ao enfileirar WhatsApp: {html.escape(str(e))}"
+            _persist_callback_turn("Botão: confirmar WhatsApp", response_text)
+            _send_telegram_message(token, chat_id, response_text)
+
+    elif data == "cancel_whatsapp":
+        _answer_callback_query(token, query_id, "Cancelado.")
+        session.get("pending_confirmations", {}).pop("whatsapp", None)
+        if session.get("_pending_confirm_type") == "whatsapp":
+            session.pop("_pending_confirm_type", None)
+        _save_session(db, chat_id, session)
+        response_text = "❌ Envio de WhatsApp descartado."
+        _persist_callback_turn("Botão: cancelar WhatsApp", response_text)
+        _send_telegram_message(token, chat_id, response_text)
+
     else:
 
         _answer_callback_query(token, query_id)
@@ -2123,6 +2171,7 @@ def _build_system_instruction_guarded_v2(
         "11. PESQUISA DE ACOES: se o usuario pedir para pesquisar/localizar uma acao ou tarefa, use consultar_historico_acoes primeiro. Nao substitua resultado ausente por acervo, email ou internet, salvo se o usuario pedir explicitamente essa ampliacao.\n"
         "12. ACESSO FINANCEIRO: para qualquer dado sobre rendas, contas, metas ou balanco interno, use consultar_financas_v2. Para novos registros, use obrigatoriamente propor_lancamento_financeiro para que o usuário receba os botões de confirmação. Detalhe os valores com precisao absoluta conforme retornado pelo sistema.\n"
         "13. EFICIENCIA: quando precisar de varias consultas independentes, solicite todas na mesma rodada de ferramentas. Evite rodadas sequenciais se uma unica rodada paralela resolver. Nunca chame mais de uma ferramenta de escrita/registro no mesmo turno; proponha uma confirmacao por vez.\n"
+        "14. WHATSAPP: para enviar ou agendar mensagem de WhatsApp, use schedule_whatsapp_message. A ferramenta deve apenas preparar a proposta; o envio real depende de confirmacao por botao.\n"
     )
 
     if not acao_snapshot:
@@ -3803,8 +3852,25 @@ def _process_telegram_message(db, data: dict):
         return "[EXECUÇÃO PENDENTE]"
 
     def schedule_whatsapp_message(contact_number: str, message: str, scheduled_time: str) -> str:
-        from tools.schedule_whatsapp_message import schedule_whatsapp_message as _fn
-        return _fn(db, contact_number, message, scheduled_time)
+        """
+        Prepara uma mensagem de WhatsApp para confirmacao por botoes.
+        O enfileiramento real acontece apenas no callback confirm_whatsapp.
+        """
+        pending_data = {
+            "contact_number": str(contact_number or "").strip(),
+            "message": str(message or "").strip(),
+            "scheduled_time": str(scheduled_time or "").strip(),
+        }
+        session.setdefault("pending_confirmations", {})["whatsapp"] = pending_data
+        session["_pending_confirm_type"] = "whatsapp"
+
+        draft = (
+            f"📲 <b>PROPOSTA DE WHATSAPP</b>\n"
+            f"• Destinatário: {html.escape(pending_data['contact_number'])}\n"
+            f"• Agendamento: {html.escape(pending_data['scheduled_time'])}\n"
+            f"• Mensagem: {html.escape(pending_data['message'][:700])}"
+        )
+        return f"Proposta de WhatsApp gerada. Draft: {draft}\n\n[SISTEMA: Os botões de confirmação serão anexados automaticamente a esta resposta.]"
 
     tools_list = [
 
@@ -3903,6 +3969,8 @@ def _process_telegram_message(db, data: dict):
         inline_keyboard = _CONFIRM_ACAO_KEYBOARD
     elif latest_session.get("_pending_confirm_type") == "financeiro":
         inline_keyboard = _CONFIRM_FINANCEIRO_KEYBOARD
+    elif latest_session.get("_pending_confirm_type") == "whatsapp":
+        inline_keyboard = _CONFIRM_WHATSAPP_KEYBOARD
 
     # --- Send response ---
     # Text goes out first; session is persisted after so it doesn't block the user.

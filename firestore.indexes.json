@@ -25,6 +25,14 @@
       ]
     },
     {
+      "collectionGroup": "whatsapp_outbox",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "scheduled_for", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "indice_artefatos",
       "queryScope": "COLLECTION",
       "fields": [

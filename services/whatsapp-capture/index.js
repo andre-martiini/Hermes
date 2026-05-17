@@ -9,12 +9,14 @@ if (!admin.apps.length) {
 }
 
 const db = admin.firestore();
+const FieldValue = admin.firestore.FieldValue;
 
 const client = new Client({
     authStrategy: new LocalAuth()
 });
 
 let isClientReady = false;
+let isProcessingOutbox = false;
 
 client.on('qr', (qr) => {
     qrcode.generate(qr, { small: true });
@@ -81,13 +83,55 @@ client.on('message', async (message) => {
 
 client.initialize();
 
+async function claimOutboxMessage(doc) {
+    const lockId = `${process.pid}-${Date.now()}-${doc.id}`;
+    const claimed = await db.runTransaction(async (tx) => {
+        const fresh = await tx.get(doc.ref);
+        if (!fresh.exists) {
+            return null;
+        }
+
+        const data = fresh.data();
+        if (data.status !== 'pending') {
+            return null;
+        }
+
+        if (!data.to_number || !data.content) {
+            tx.update(doc.ref, {
+                status: 'failed',
+                error_message: 'Missing to_number or content',
+                failed_at: admin.firestore.Timestamp.now(),
+                updated_at: admin.firestore.Timestamp.now()
+            });
+            return null;
+        }
+
+        tx.update(doc.ref, {
+            status: 'sending',
+            lock_id: lockId,
+            locked_at: admin.firestore.Timestamp.now(),
+            attempts: FieldValue.increment(1),
+            updated_at: admin.firestore.Timestamp.now()
+        });
+
+        return { ...data, lockId };
+    });
+
+    return claimed;
+}
+
 // ACTIVE MODULE: Outbox checking cron job
 cron.schedule('* * * * *', async () => {
     if (!isClientReady) {
         console.log('Skipping cron tick: WhatsApp client not ready.');
         return;
     }
+    if (isProcessingOutbox) {
+        console.log('Skipping cron tick: previous outbox run still active.');
+        return;
+    }
 
+    isProcessingOutbox = true;
     try {
         const now = admin.firestore.Timestamp.now();
 
@@ -95,6 +139,7 @@ cron.schedule('* * * * *', async () => {
         const snapshot = await db.collection('whatsapp_outbox')
             .where('status', '==', 'pending')
             .where('scheduled_for', '<=', now)
+            .limit(25)
             .get();
 
         if (snapshot.empty) {
@@ -102,29 +147,25 @@ cron.schedule('* * * * *', async () => {
         }
 
         for (const doc of snapshot.docs) {
-            const data = doc.data();
-            const toNumber = data.to_number;
-            const content = data.content;
-
-            if (!toNumber || !content) {
-                console.error(`Invalid message data for doc ${doc.id}`);
-                await doc.ref.update({
-                    status: 'failed',
-                    error_message: 'Missing to_number or content'
-                });
+            const data = await claimOutboxMessage(doc);
+            if (!data) {
                 continue;
             }
 
+            const toNumber = data.to_number;
+            const content = data.content;
+
             try {
                 // Ensure the number is formatted correctly (e.g. 5527999999999@c.us)
-                const formattedNumber = toNumber.includes('@c.us') ? toNumber : `${toNumber}@c.us`;
+                const formattedNumber = toNumber.includes('@c.us') || toNumber.includes('@g.us') ? toNumber : `${toNumber}@c.us`;
 
                 await client.sendMessage(formattedNumber, content);
 
                 // Update status to sent
                 await doc.ref.update({
                     status: 'sent',
-                    sent_at: admin.firestore.Timestamp.now()
+                    sent_at: admin.firestore.Timestamp.now(),
+                    updated_at: admin.firestore.Timestamp.now()
                 });
                 console.log(`Message sent to ${toNumber}`);
 
@@ -133,11 +174,15 @@ cron.schedule('* * * * *', async () => {
                 console.error(`Failed to send message to ${toNumber}:`, error);
                 await doc.ref.update({
                     status: 'failed',
-                    error_message: error.message || 'Unknown error'
+                    error_message: error.message || 'Unknown error',
+                    failed_at: admin.firestore.Timestamp.now(),
+                    updated_at: admin.firestore.Timestamp.now()
                 });
             }
         }
     } catch (err) {
         console.error('Error during outbox processing cron tick:', err);
+    } finally {
+        isProcessingOutbox = false;
     }
 });

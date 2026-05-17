@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "sync": "node hermes-sync.js",
-    "test": "vitest run src/utils/destructiveActions.test.ts src/utils/shoppingTransitions.test.ts"
+    "test": "vitest run src/utils/destructiveActions.test.ts src/utils/shoppingTransitions.test.ts",
+    "whatsapp:worker": "npm --prefix services/whatsapp-capture start"
   },
   "dependencies": {
     "@google/genai": "^1.43.0",

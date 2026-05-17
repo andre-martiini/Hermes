@@ -6,8 +6,19 @@ def schedule_whatsapp_message(db, contact_number: str, message: str, scheduled_t
     Agenda ou envia uma mensagem de WhatsApp inserindo na fila do Firestore.
     """
     try:
-        # Convert ISO 8601 string to a datetime object
+        contact_number = str(contact_number or "").strip()
+        message = str(message or "").strip()
+        scheduled_time = str(scheduled_time or "").strip()
+        if not contact_number:
+            raise ValueError("contact_number vazio")
+        if not message:
+            raise ValueError("message vazio")
+        if not scheduled_time:
+            raise ValueError("scheduled_time vazio")
+
         dt = datetime.datetime.fromisoformat(scheduled_time.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
 
         doc_ref = db.collection("whatsapp_outbox").document()
         doc_ref.set({

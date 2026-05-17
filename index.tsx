@@ -2278,8 +2278,8 @@ const App: React.FC = () => {
       await handleUpdateTarefa(task.id, {
         data_limite: todayStr,
         data_inicio: todayStr,
-        horario_inicio: undefined,
-        horario_fim: undefined
+        horario_inicio: null as any,
+        horario_fim: null as any
       }, true);
       showToast("Ação atualizada para hoje!", 'success');
     } catch (err) {
@@ -2604,6 +2604,17 @@ const App: React.FC = () => {
         data_atualizacao: now
       };
       payload = applyStandbyDateRules(payload, previousTask);
+
+      if (previousTask) {
+        const dateChanged = (updates.data_limite && updates.data_limite !== previousTask.data_limite) ||
+                            (updates.data_inicio && updates.data_inicio !== previousTask.data_inicio);
+        const timeExplicitlyUpdated = (Object.prototype.hasOwnProperty.call(updates, 'horario_inicio') && updates.horario_inicio !== undefined) ||
+                                      (Object.prototype.hasOwnProperty.call(updates, 'horario_fim') && updates.horario_fim !== undefined);
+        if (dateChanged && !timeExplicitlyUpdated) {
+          payload.horario_inicio = null;
+          payload.horario_fim = null;
+        }
+      }
       if (Object.prototype.hasOwnProperty.call(payload, 'is_single_day')) {
         delete payload.is_single_day;
       }
