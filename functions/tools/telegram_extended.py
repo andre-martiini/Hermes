@@ -321,6 +321,11 @@ def execute(tool_name: str, slots: dict, db) -> str:
         task_id = str(slots.get("task_id") or "")
         alteracoes = slots.get("alteracoes") or {}
         justificativa = str(slots.get("justificativa") or "")
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if "data_limite" in alteracoes:
+            val = alteracoes["data_limite"]
+            if val and val not in ("-", "0000-00-00") and val < today_str:
+                return f"ERRO|A data de execução não pode ser no passado ({val})."
         allowed_fields = {"titulo", "descricao", "data_limite", "status", "tags", "area_tematica", "tipo_acao", "notas"}
         task_ref = db.collection("tarefas").document(task_id)
         task_doc = task_ref.get()

@@ -1490,6 +1490,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                 </div>
                 <input
                   type="date"
+                  min={formatDateLocalISO(new Date())}
                   value={formData.data_limite}
                   onChange={e => setFormData({ ...formData, data_limite: e.target.value })}
                   className="w-full bg-slate-100 border-none rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
@@ -1506,6 +1507,10 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
             onClick={() => {
               if (!formData.titulo || (!formData.data_limite && formData.status !== 'stand-by')) {
                 showAlert("Atenção", "Preencha o título e o prazo final.");
+                return;
+              }
+              if (formData.data_limite && formData.data_limite < formatDateLocalISO(new Date())) {
+                showAlert("Atenção", "A data de execução não pode ser no passado.");
                 return;
               }
 
@@ -1723,6 +1728,7 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
             </div>
             <input
               type="date"
+              min={formatDateLocalISO(new Date())}
               value={formData.data_limite}
               onChange={e => setFormData({ ...formData, data_limite: e.target.value })}
               className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-sans"
@@ -1767,6 +1773,10 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
             onClick={() => {
               if (!formData.titulo || (!formData.data_limite && formData.status !== 'stand-by')) {
                 showAlert("Atenção", "Preencha o título e o prazo final.");
+                return;
+              }
+              if (formData.data_limite && formData.data_limite < formatDateLocalISO(new Date())) {
+                showAlert("Atenção", "A data de execução não pode ser no passado.");
                 return;
               }
               onSave(task.id, {

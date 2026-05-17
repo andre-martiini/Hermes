@@ -274,6 +274,17 @@ export const TaskExecutionView = ({
     onSave(task.id, { data_limite: finalDate, data_inicio: finalDate });
   };
 
+  const handleBlurPrazoFinal = () => {
+    let finalDate = localPrazoFinal;
+    const today = getTodayIso();
+    if (finalDate && finalDate < today) {
+      finalDate = today;
+      setLocalPrazoFinal(finalDate);
+      showToast("Prazo final ajustado para hoje (não é permitido agendar no passado)", "info");
+    }
+    onSave(task.id, { prazo_final: finalDate });
+  };
+
   const [newFollowUp, setNewFollowUp] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [showPool, setShowPool] = useState(false);
@@ -1860,7 +1871,7 @@ export const TaskExecutionView = ({
                             className={`w-full px-3 py-2 rounded-none text-xs font-bold outline-none focus:ring-1 focus:ring-primary-tactile border transition-all font-mono mb-3 ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-border-grid text-slate-900'}`} />
                             
                           <p className={`${labelCls} mb-1 opacity-60`}>Prazo Final (Opcional)</p>
-                          <input type="date" value={localPrazoFinal} onChange={e => setLocalPrazoFinal(e.target.value)} onBlur={() => onSave(task.id, { prazo_final: localPrazoFinal })}
+                          <input type="date" min={getTodayIso()} value={localPrazoFinal} onChange={e => setLocalPrazoFinal(e.target.value)} onBlur={handleBlurPrazoFinal}
                             style={{ colorScheme: isDark ? 'dark' : 'light' }}
                             className={`w-full px-3 py-2 rounded-none text-xs font-bold outline-none focus:ring-1 focus:ring-primary-tactile border transition-all font-mono ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-border-grid text-slate-900'}`} />
                         </div>

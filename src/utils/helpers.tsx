@@ -106,16 +106,38 @@ export const applyStandbyDateRules = (
     payload.data_inicio = singleDate;
   }
 
+  const todayStr = formatDateLocalISO(new Date());
+  const nextStatus = Object.prototype.hasOwnProperty.call(payload, 'status')
+    ? String(payload.status)
+    : previousTask?.status;
+  const nextStatusNorm = normalizeStatus(nextStatus || '');
+  const isCompletedOrInactive = nextStatusNorm === 'concluido' || nextStatusNorm === 'cancelado' || nextStatusNorm === 'excluido';
+
+  if (!isCompletedOrInactive && (hasDateLimit || hasDateStart)) {
+    if (payload.data_limite && payload.data_limite !== '-' && payload.data_limite !== '0000-00-00') {
+      if (payload.data_limite < todayStr) {
+        payload.data_limite = todayStr;
+        payload.data_inicio = todayStr;
+      }
+    }
+  }
+
+  if (payload.prazo_final && payload.prazo_final !== '-' && payload.prazo_final !== '0000-00-00') {
+    if (payload.prazo_final < todayStr) {
+      payload.prazo_final = todayStr;
+    }
+  }
+
   const dateWasAdded = (hasDateLimit || hasDateStart) && hasValidTaskDate(payload.data_limite || payload.data_inicio);
   if (dateWasAdded && isStandbyStatus(previousTask?.status)) {
     payload.status = 'em andamento';
   }
 
-  const nextStatus = Object.prototype.hasOwnProperty.call(payload, 'status')
+  const finalStatus = Object.prototype.hasOwnProperty.call(payload, 'status')
     ? String(payload.status)
     : previousTask?.status;
 
-  if (isStandbyStatus(nextStatus)) {
+  if (isStandbyStatus(finalStatus)) {
     payload.data_limite = '';
     payload.data_inicio = '';
     payload.horario_inicio = null;

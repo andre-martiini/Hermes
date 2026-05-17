@@ -8519,7 +8519,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
                 now_iso = _dt.now(_tz.utc).isoformat()
                 today_brt = (_dt.now(_tz.utc) + timedelta(hours=-3)).date().isoformat()
-                if not data_limite:
+                if not data_limite or str(data_limite) < today_brt:
                     data_limite = today_brt
                 task_id = str(_uuid.uuid4())[:20]
 
@@ -8899,6 +8899,11 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             """
             try:
                 _ALLOWED_FIELDS = {'titulo', 'descricao', 'data_limite', 'data_inicio', 'horario_inicio', 'horario_fim', 'status', 'tags', 'area_tematica', 'tipo_acao', 'notas'}
+                today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                if 'data_limite' in (alteracoes or {}):
+                    val = alteracoes['data_limite']
+                    if val and val not in ('-', '0000-00-00') and val < today_str:
+                        return f"ERRO|A data de execução não pode ser no passado ({val})."
 
                 def _normalizar_status_acao(valor):
                     if valor is None:
@@ -9024,6 +9029,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 try:
                     from datetime import date as _date
                     start_date = datetime.strptime(nova_data_inicio, "%Y-%m-%d").date()
+                    today_date = datetime.now(timezone.utc).date()
+                    if start_date < today_date:
+                        start_date = today_date
                 except ValueError:
                     return f"ERRO|Formato de data inválido: '{nova_data_inicio}'. Use YYYY-MM-DD."
 
@@ -10254,7 +10262,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             )
             return {
                 "result": clean_text,
-                "kg_nodes": kg_nodes_payload,
+                "kg_nodes": None,
                 "toolInvocation": tool_invocation_data,
                 "suggestedTitle": suggested_title
             }
@@ -10479,6 +10487,11 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
         # mesmo quando a edicao vier de ferramentas/backend que enviam so um campo.
         if 'data_limite' in updates or 'data_inicio' in updates:
             single_date = updates.get('data_limite') or updates.get('data_inicio') or ''
+            today_str = _dt.now(_tz.utc).strftime("%Y-%m-%d")
+            status_val = updates.get('status') or task_data.get('status') or ''
+            if status_val not in ('concluído', 'cancelado', 'excluído') and single_date and single_date not in ('-', '0000-00-00'):
+                if single_date < today_str:
+                    single_date = today_str
             updates['data_limite'] = single_date
             updates['data_inicio'] = single_date
 
@@ -10579,7 +10592,12 @@ def confirmarReagendamentoEmLote(req: https_fn.CallableRequest):
 
             updates = {'data_atualizacao': now_iso}
             if item.get('nova_data_limite'):
-                updates['data_limite'] = item['nova_data_limite']
+                single_date = item['nova_data_limite']
+                today_str = _dt.now(_tz.utc).strftime("%Y-%m-%d")
+                if single_date < today_str:
+                    single_date = today_str
+                item['nova_data_limite'] = single_date
+                updates['data_limite'] = single_date
                 updates['data_inicio'] = item['nova_data_limite']
             if item.get('novo_horario_inicio') is not None:
                 updates['horario_inicio'] = item['novo_horario_inicio']
@@ -11030,7 +11048,7 @@ def processar_correcoes_pendentes(event: scheduler_fn.ScheduledEvent) -> None:
     # Recupera chave Tavily para consenso web
     _tavily_key = ''
     try:
-        _keys_doc = __cached_doc_get(db, 'system', 'api_keys')
+        _keys_doc = _cached_doc_get(_db, 'system', 'api_keys')
         _tavily_key = (_keys_doc.to_dict() or {}).get('tavily_api_key', '')
     except Exception as _key_err:
         print(f"[EvoEngine] Aviso: não foi possível recuperar chave Tavily: {_key_err}")

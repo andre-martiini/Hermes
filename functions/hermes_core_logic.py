@@ -3504,7 +3504,7 @@ def _process_telegram_message(db, data: dict):
         import uuid as _uuid
         now_iso = datetime.now(timezone.utc).isoformat()
         today = (datetime.now(timezone.utc)).strftime("%Y-%m-%d")
-        if not data_limite:
+        if not data_limite or str(data_limite) < today:
             data_limite = today
         task_id = str(_uuid.uuid4())[:20]
         plano_convertido = [
@@ -3603,6 +3603,9 @@ def _process_telegram_message(db, data: dict):
 
             try:
                 start_date = datetime.strptime(nova_data_inicio, "%Y-%m-%d").date()
+                today_date = datetime.now(timezone.utc).date()
+                if start_date < today_date:
+                    start_date = today_date
             except ValueError:
                 return f"ERRO|Formato de data inválido: '{nova_data_inicio}'. Use YYYY-MM-DD."
 
@@ -3732,11 +3735,15 @@ def _process_telegram_message(db, data: dict):
         Gera uma proposta de criação de ação para o usuário confirmar via botões.
         Use esta ferramenta SEMPRE antes de criar uma ação.
         """
+        today_str = (datetime.now(timezone.utc)).strftime("%Y-%m-%d")
+        eff_limit = data_limite or today_str
+        if eff_limit < today_str:
+            eff_limit = today_str
         pending_data = {
             "titulo": titulo,
             "descricao": descricao,
             "area_tematica": area_tematica,
-            "data_limite": data_limite or (datetime.now(timezone.utc)).strftime("%Y-%m-%d"),
+            "data_limite": eff_limit,
             "tipo_acao": tipo_acao,
             "tags": tags or [],
             "notas": notas,
