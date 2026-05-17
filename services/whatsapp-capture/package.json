@@ -1,0 +1,13 @@
+{
+  "name": "whatsapp-capture",
+  "version": "1.0.0",
+  "description": "WhatsApp capture service",
+  "type": "module",
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^11.11.0",
+    "node-cron": "^3.0.3",
+    "whatsapp-web.js": "^1.23.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "schedule_whatsapp_message",
+  "description": "Agenda ou envia uma mensagem de WhatsApp para um contato.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "contact_number": {
+        "type": "string",
+        "description": "Numero do destinatario com DDI e DDD."
+      },
+      "message": {
+        "type": "string",
+        "description": "Conteudo da mensagem."
+      },
+      "scheduled_time": {
+        "type": "string",
+        "description": "Data e hora no formato ISO 8601. Se for envio imediato, envie a hora atual."
+      }
+    },
+    "required": ["contact_number", "message", "scheduled_time"]
+  }
+}
