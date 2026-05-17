@@ -3795,6 +3795,10 @@ def _process_telegram_message(db, data: dict):
         # Esta função é um placeholder; a execução real é interceptada em _run_gemini_turn
         return "[EXECUÇÃO PENDENTE]"
 
+    def schedule_whatsapp_message(contact_number: str, message: str, scheduled_time: str) -> str:
+        from tools.schedule_whatsapp_message import schedule_whatsapp_message as _fn
+        return _fn(db, contact_number, message, scheduled_time)
+
     tools_list = [
 
         consultar_historico_acoes,
@@ -3813,6 +3817,7 @@ def _process_telegram_message(db, data: dict):
         propor_acao_para_confirmacao,
         propor_lancamento_financeiro,
         diagnosticar_repositorio,
+        schedule_whatsapp_message,
     ]
 
 
