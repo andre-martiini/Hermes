@@ -46,9 +46,10 @@ export const SpeedDialMenu = ({
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handleMouseDown = (e: MouseEvent) => {
+    const handleClickOutside = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
-        // Only close if click is not inside the portal (portal backdrop has its own onClick)
+        // Portal renders at document.body (outside ref), so this fires for portal clicks too.
+        // Using 'click' (not 'mousedown') ensures portal button onClick runs first.
         setOpen(false);
         if (isNotificationCenterOpen) onCloseNotifications();
       }
@@ -59,10 +60,10 @@ export const SpeedDialMenu = ({
         if (isNotificationCenterOpen) onCloseNotifications();
       }
     };
-    document.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('click', handleClickOutside);
     document.addEventListener('keydown', handleKeyDown);
     return () => {
-      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('click', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isNotificationCenterOpen, onCloseNotifications]);
@@ -220,7 +221,9 @@ export const SpeedDialMenu = ({
                   }}
                 >
                   <button
+                    type="button"
                     aria-label={action.label}
+                    onClick={(e) => { e.stopPropagation(); action.onClick(); }}
                     className={`relative flex flex-col items-center justify-center w-20 h-20 sm:w-24 sm:h-24 border ${
                       isDark
                         ? 'bg-slate-900 border-slate-800 group-hover:bg-slate-800 group-hover:border-slate-700'
@@ -232,7 +235,7 @@ export const SpeedDialMenu = ({
                   </button>
 
                   <span className={`text-[11px] sm:text-xs font-bold uppercase tracking-wider text-center transition-colors duration-200 select-none ${
-                    isDark ? 'text-slate-400 group-hover:text-white' : 'text-slate-600 group-hover:text-slate-900'
+                    isDark ? 'text-slate-400 group-hover:text-white' : 'text-slate-200 group-hover:text-white'
                   }`}>
                     {action.label}
                   </span>
