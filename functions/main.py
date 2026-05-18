@@ -8738,6 +8738,56 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 print(f"[Copiloto] Erro ao registrar no diário: {_err}")
                 return f"ERRO|{str(_err)}"
 
+        def gerar_imagem(prompt: str, proporcao: str = "1:1"):
+            """
+            Gera uma imagem realista ou artística usando o modelo Imagen do Google.
+            Use esta ferramenta sempre que o usuário pedir para criar, gerar, desenhar ou imaginar uma imagem.
+            Parâmetros:
+            - prompt: descrição detalhada da imagem a ser gerada (em português ou inglês).
+            - proporcao: proporção da imagem. Pode ser "1:1", "16:9", "4:3", "3:4" ou "9:16".
+            Retorna a URL pública da imagem gerada no formato Markdown.
+            """
+            try:
+                import uuid
+                from firebase_admin import storage
+                import os
+                
+                # Gera a imagem usando o Gemini (Nano Banana 2 / 3.1 Flash Image)
+                resp = client.models.generate_images(
+                    model='gemini-3.1-flash-image-preview',
+                    prompt=prompt,
+                    config=types.GenerateImagesConfig(
+                        number_of_images=1,
+                        output_mime_type="image/jpeg",
+                        aspect_ratio=proporcao
+                    )
+                )
+                
+                if getattr(resp, 'generated_images', None) and len(resp.generated_images) > 0:
+                    image_bytes = resp.generated_images[0].image.image_bytes
+                else:
+                    return "ERRO|Não foi possível gerar a imagem."
+                
+                # Upload para Firebase Storage
+                project_id = os.environ.get("GCLOUD_PROJECT") or os.environ.get("GCP_PROJECT") or "gestao-hermes"
+                bucket_name = os.environ.get("FIREBASE_STORAGE_BUCKET") or f"{project_id}.appspot.com"
+                try:
+                    bucket = storage.bucket(bucket_name)
+                except Exception:
+                    bucket = storage.bucket()
+                    
+                file_name = f"imagens_geradas/img_{uuid.uuid4().hex[:8]}.jpg"
+                blob = bucket.blob(file_name)
+                blob.upload_from_string(image_bytes, content_type="image/jpeg")
+                blob.make_public()
+                
+                url = blob.public_url
+                return f"![Imagem Gerada]({url})\n\n*(Imagem gerada via Imagen 3. URL: {url})*"
+            except Exception as e:
+                import traceback
+                print(f"[Copiloto] Erro ao gerar imagem: {e}\n{traceback.format_exc()}")
+                return f"⚠️ Erro ao gerar imagem: {str(e)}"
+
         def gerar_relatorio(
             titulo: str,
             tipo: str,
@@ -9519,6 +9569,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'editar_plano_acao': editar_plano_acao,
             'preparar_edicao_acao': preparar_edicao_acao,
             'registrar_no_diario': registrar_no_diario,
+            'gerar_imagem': gerar_imagem,
             'gerar_relatorio': gerar_relatorio,
             'gerar_rascunho_formulario': gerar_rascunho_formulario,
             'consultar_agenda': consultar_agenda,
@@ -9599,6 +9650,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'editar_plano_acao': editar_plano_acao,
             'preparar_edicao_acao': preparar_edicao_acao,
             'registrar_no_diario': registrar_no_diario,
+            'gerar_imagem': gerar_imagem,
             'gerar_relatorio': gerar_relatorio,
             'gerar_rascunho_formulario': gerar_rascunho_formulario,
             'consultar_agenda': consultar_agenda,
@@ -9635,6 +9687,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     editar_plano_acao,
                     preparar_edicao_acao,
                     registrar_no_diario,
+                    gerar_imagem,
                     gerar_relatorio,
                     gerar_rascunho_formulario,
                     consultar_agenda,

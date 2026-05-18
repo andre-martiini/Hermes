@@ -795,6 +795,24 @@ def _send_telegram_document(token: str, chat_id: str | int, file_bytes: bytes, f
     return bool(resp.ok)
 
 
+def _send_telegram_photo(token: str, chat_id: str | int, photo_url: str, caption: str = "") -> bool:
+    data = {
+        "chat_id": str(chat_id),
+        "photo": photo_url,
+    }
+    if caption:
+        data["caption"] = caption[:1024]
+    resp = _requests.post(
+        f"https://api.telegram.org/bot{token}/sendPhoto",
+        json=data,
+        timeout=120,
+    )
+    if not resp.ok:
+        print(f"[Telegram] sendPhoto failed: {resp.status_code} {resp.text[:500]}")
+    return bool(resp.ok)
+
+
+
 def _get_telegram_file(token: str, file_id: str) -> dict:
     """Calls getFile and returns the file metadata dict."""
     resp = _requests.get(
@@ -3286,7 +3304,15 @@ def _process_telegram_message(db, data: dict):
             if not delegated_text:
                 raise RuntimeError("Motor web nao retornou texto.")
 
-            response_text = _format_web_copilot_text_for_telegram(delegated_text)
+            # Intercept markdown images
+            images_to_send = re.findall(r'!\[.*?\]\((https?://[^\)]+)\)', delegated_text)
+            for img_url in images_to_send:
+                _send_telegram_photo(token, chat_id, img_url)
+            
+            # Clean up the text before sending to telegram
+            clean_delegated_text = re.sub(r'!\[.*?\]\((https?://[^\)]+)\)', '', delegated_text).strip()
+            
+            response_text = _format_web_copilot_text_for_telegram(clean_delegated_text)
             card_text, inline_keyboard = _build_web_copilot_telegram_adaptation(session, delegated, delegated_text)
             if card_text:
                 response_text = f"{response_text}\n{card_text}"
@@ -3974,7 +4000,16 @@ def _process_telegram_message(db, data: dict):
 
     # --- Send response ---
     # Text goes out first; session is persisted after so it doesn't block the user.
-    _send_telegram_session_message(db, token, chat_id, response_text, session=latest_session, inline_keyboard=inline_keyboard)
+    
+    # Intercept markdown images
+    images_to_send = re.findall(r'!\[.*?\]\((https?://[^\)]+)\)', response_text)
+    for img_url in images_to_send:
+        _send_telegram_photo(token, chat_id, img_url)
+    
+    # Clean up the text before sending to telegram
+    clean_response_text = re.sub(r'!\[.*?\]\((https?://[^\)]+)\)', '', response_text).strip()
+    
+    _send_telegram_session_message(db, token, chat_id, clean_response_text, session=latest_session, inline_keyboard=inline_keyboard)
 
     _perf_mark(perf_state, "telegram.text_response")
 
