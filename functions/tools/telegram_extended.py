@@ -317,6 +317,76 @@ def execute(tool_name: str, slots: dict, db) -> str:
         })
         return "OK"
 
+    if tool_name == "agendar_lembrete_acao":
+        task_id = str(slots.get("task_id") or slots.get("id_tarefa") or "").strip()
+        reminder_date = str(slots.get("data") or "").strip()
+        reminder_time = str(slots.get("horario") or slots.get("hora") or "").strip()[:5]
+        custom_message = str(slots.get("texto") or slots.get("message") or "").strip()[:500]
+
+        if not task_id:
+            return "ERRO|Informe o ID da acao para agendar o lembrete."
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", reminder_date):
+            return "ERRO|Data invalida. Use YYYY-MM-DD."
+        if not re.match(r"^\d{2}:\d{2}$", reminder_time):
+            return "ERRO|Horario invalido. Use HH:MM."
+        try:
+            datetime.strptime(f"{reminder_date} {reminder_time}", "%Y-%m-%d %H:%M")
+        except ValueError:
+            return "ERRO|Data ou horario inexistente."
+
+        reminder_at = f"{reminder_date}T{reminder_time}:00"
+        task_ref = db.collection("tarefas").document(task_id)
+        task_doc = task_ref.get()
+        if not task_doc.exists:
+            return f"ERRO|Acao '{task_id}' nao encontrada."
+
+        task_data = task_doc.to_dict() or {}
+        reminders = task_data.get("reminders") if isinstance(task_data.get("reminders"), list) else []
+        normalized = []
+        for idx, reminder in enumerate(reminders):
+            if not isinstance(reminder, dict) or not reminder.get("reminder_at"):
+                continue
+            normalized.append({
+                "id": str(reminder.get("id") or f"legacy-{idx}"),
+                "reminder_at": str(reminder.get("reminder_at")),
+                "reminder_sent": bool(reminder.get("reminder_sent")),
+                "created_at": str(reminder.get("created_at") or reminder.get("reminder_at")),
+                "message": str(reminder.get("message") or "").strip(),
+            })
+        if not normalized and task_data.get("reminder_at"):
+            normalized.append({
+                "id": "legacy-reminder",
+                "reminder_at": str(task_data.get("reminder_at")),
+                "reminder_sent": bool(task_data.get("reminder_sent")),
+                "created_at": str(task_data.get("data_atualizacao") or task_data.get("data_criacao") or task_data.get("reminder_at")),
+                "message": str(task_data.get("reminder_message") or "").strip(),
+            })
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        new_reminder = {
+            "id": str(uuid.uuid4())[:12],
+            "reminder_at": reminder_at,
+            "reminder_sent": False,
+            "created_at": now_iso,
+            "created_by": "telegram",
+        }
+        if custom_message:
+            new_reminder["message"] = custom_message
+        ordered = sorted([*normalized, new_reminder], key=lambda item: item.get("reminder_at") or "")
+        next_pending = next((item for item in ordered if not item.get("reminder_sent")), None)
+        update_payload = {
+            "reminders": ordered,
+            "reminder_at": next_pending.get("reminder_at") if next_pending else None,
+            "reminder_sent": bool(next_pending.get("reminder_sent")) if next_pending else True,
+            "data_atualizacao": now_iso,
+            "acompanhamento": firestore.ArrayUnion([{
+                "data": now_iso,
+                "nota": f"[Telegram Hermes] Lembrete agendado para {reminder_date} {reminder_time}."
+            }]),
+        }
+        task_ref.update(update_payload)
+        return f"OK|{task_id}|{reminder_at}"
+
     if tool_name == "preparar_edicao_acao":
         task_id = str(slots.get("task_id") or "")
         alteracoes = slots.get("alteracoes") or {}

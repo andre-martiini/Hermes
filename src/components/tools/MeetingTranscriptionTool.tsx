@@ -39,6 +39,12 @@ const SHORT_FRAGMENT_WORDS = 6;
 const MAX_GROUPED_WORDS = 64;
 const HISTORY_MAX_ITEMS = 30;
 const HISTORY_STORAGE_KEY = 'hermes_meeting_history_v1';
+const SYSTEM_AUDIO_SILENCE_WARNING_MS = 12000;
+const SYSTEM_AUDIO_ACTIVITY_THRESHOLD = 0.004;
+
+type DisplayMediaTrackSettings = MediaTrackSettings & {
+  displaySurface?: 'application' | 'browser' | 'monitor' | 'window';
+};
 
 const normalizeText = (value: string): string => value.replace(/\s+/g, ' ').trim();
 const countWords = (value: string): number => normalizeText(value).split(' ').filter(Boolean).length;
@@ -111,12 +117,16 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
   const systemWsRef = useRef<WebSocket | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const systemStreamRef = useRef<MediaStream | null>(null);
+  const systemAudioContextRef = useRef<AudioContext | null>(null);
+  const systemAudioMonitorRef = useRef<number | null>(null);
+  const systemAudioMonitorIntervalRef = useRef<number | null>(null);
   const transcriptsEndRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const transcriptsRef = useRef<TranscriptionEntry[]>([]);
   const chatMessagesRef = useRef<ChatMessage[]>([]);
   const meetingStartedAtRef = useRef<Date | null>(null);
   const lastPersistedMeetingIdRef = useRef<string | null>(null);
+  const systemAudioActivityDetectedRef = useRef(false);
 
   const scrollToBottomTranscripts = () => {
     transcriptsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -279,16 +289,96 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
     });
   }, []);
 
+  const stopSystemAudioMonitor = useCallback(() => {
+    if (systemAudioMonitorRef.current !== null) {
+      window.clearTimeout(systemAudioMonitorRef.current);
+      systemAudioMonitorRef.current = null;
+    }
+
+    if (systemAudioMonitorIntervalRef.current !== null) {
+      window.clearInterval(systemAudioMonitorIntervalRef.current);
+      systemAudioMonitorIntervalRef.current = null;
+    }
+
+    if (systemAudioContextRef.current) {
+      systemAudioContextRef.current.close().catch(() => undefined);
+      systemAudioContextRef.current = null;
+    }
+  }, []);
+
+  const startSystemAudioMonitor = useCallback((stream: MediaStream) => {
+    stopSystemAudioMonitor();
+    systemAudioActivityDetectedRef.current = false;
+
+    try {
+      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextClass) return;
+
+      const audioContext = new AudioContextClass();
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 2048;
+
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+      const samples = new Uint8Array(analyser.fftSize);
+      systemAudioContextRef.current = audioContext;
+
+      const inspect = () => {
+        analyser.getByteTimeDomainData(samples);
+        let sum = 0;
+        for (const sample of samples) {
+          const normalized = (sample - 128) / 128;
+          sum += normalized * normalized;
+        }
+        const rms = Math.sqrt(sum / samples.length);
+        if (rms > SYSTEM_AUDIO_ACTIVITY_THRESHOLD) {
+          systemAudioActivityDetectedRef.current = true;
+        }
+      };
+
+      systemAudioMonitorIntervalRef.current = window.setInterval(() => {
+        if (systemAudioActivityDetectedRef.current) {
+          if (systemAudioMonitorIntervalRef.current !== null) {
+            window.clearInterval(systemAudioMonitorIntervalRef.current);
+            systemAudioMonitorIntervalRef.current = null;
+          }
+          return;
+        }
+        inspect();
+      }, 300);
+
+      systemAudioMonitorRef.current = window.setTimeout(() => {
+        if (systemAudioMonitorIntervalRef.current !== null) {
+          window.clearInterval(systemAudioMonitorIntervalRef.current);
+          systemAudioMonitorIntervalRef.current = null;
+        }
+        if (!systemAudioActivityDetectedRef.current) {
+          showToast('Ainda não detectei áudio do Teams. Confirme se a tela inteira foi compartilhada com "Compartilhar áudio do sistema" ativo.', 'info');
+        }
+      }, SYSTEM_AUDIO_SILENCE_WARNING_MS);
+    } catch (error) {
+      console.warn('Não foi possível monitorar o áudio do sistema:', error);
+    }
+  }, [showToast, stopSystemAudioMonitor]);
+
   const stopRecording = useCallback(
     (persistHistory = true) => {
-      if (micRecorderRef.current) micRecorderRef.current.stop();
-      if (systemRecorderRef.current) systemRecorderRef.current.stop();
+      if (micRecorderRef.current && micRecorderRef.current.state !== 'inactive') micRecorderRef.current.stop();
+      if (systemRecorderRef.current && systemRecorderRef.current.state !== 'inactive') systemRecorderRef.current.stop();
 
       if (micWsRef.current) micWsRef.current.close();
       if (systemWsRef.current) systemWsRef.current.close();
 
       if (micStreamRef.current) micStreamRef.current.getTracks().forEach(t => t.stop());
       if (systemStreamRef.current) systemStreamRef.current.getTracks().forEach(t => t.stop());
+      stopSystemAudioMonitor();
+
+      micRecorderRef.current = null;
+      systemRecorderRef.current = null;
+      micWsRef.current = null;
+      systemWsRef.current = null;
+      micStreamRef.current = null;
+      systemStreamRef.current = null;
 
       const ended = new Date();
       setMeetingEndedAt(ended);
@@ -299,25 +389,40 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
         finalizeAndPersistMeetingRef.current?.(ended);
       }
     },
-    [persistCurrentMeetingToHistory]
+    [persistCurrentMeetingToHistory, stopSystemAudioMonitor]
   );
 
   const startRecording = async () => {
-    try {
-      const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const systemStream = await navigator.mediaDevices.getDisplayMedia({
-        audio: { suppressLocalAudioPlayback: false },
-        video: true,
-        systemAudio: 'include',
-      } as DisplayMediaStreamOptions);
+    let micStream: MediaStream | null = null;
+    let systemStream: MediaStream | null = null;
 
-      systemStream.getVideoTracks().forEach(track => track.stop());
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      systemStream = await navigator.mediaDevices.getDisplayMedia({
+        audio: {
+          autoGainControl: false,
+          echoCancellation: false,
+          noiseSuppression: false,
+          suppressLocalAudioPlayback: false,
+        },
+        video: {
+          displaySurface: 'monitor',
+        },
+        systemAudio: 'include',
+        surfaceSwitching: 'exclude',
+      } as DisplayMediaStreamOptions);
 
       if (systemStream.getAudioTracks().length === 0) {
         showToast('Áudio não capturado. Selecione "Tela inteira" e marque "Compartilhar áudio do sistema".', 'error');
         systemStream.getTracks().forEach(track => track.stop());
         micStream.getTracks().forEach(track => track.stop());
         return;
+      }
+
+      const displayTrack = systemStream.getVideoTracks()[0];
+      const displaySettings = displayTrack?.getSettings() as DisplayMediaTrackSettings | undefined;
+      if (displaySettings?.displaySurface && displaySettings.displaySurface !== 'monitor') {
+        showToast('Para reuniões no Teams, prefira "Tela inteira"; janelas individuais normalmente não entregam o áudio do sistema.', 'info');
       }
 
       const startedNow = new Date();
@@ -330,6 +435,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
 
       micStreamRef.current = micStream;
       systemStreamRef.current = systemStream;
+      startSystemAudioMonitor(systemStream);
 
       const wsUrl = 'wss://api.deepgram.com/v1/listen?model=nova-2&language=pt-BR';
       const apiKey = import.meta.env.VITE_DEEPGRAM_API_KEY;
@@ -338,6 +444,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
         showToast('Chave API do Deepgram não configurada.', 'error');
         systemStream.getTracks().forEach(track => track.stop());
         micStream.getTracks().forEach(track => track.stop());
+        stopSystemAudioMonitor();
         return;
       }
 
@@ -388,6 +495,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
 
         if (hasFinalFlag && !isFinal) return;
         if (typeof transcript !== 'string' || !transcript.trim()) return;
+        systemAudioActivityDetectedRef.current = true;
         appendTranscriptEntry('Reunião', transcript, new Date());
       };
 
@@ -401,6 +509,9 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
       showToast('Gravação e transcrição iniciadas.', 'info');
     } catch (err) {
       console.error('Erro ao acessar mídias:', err);
+      if (micStream) micStream.getTracks().forEach(track => track.stop());
+      if (systemStream) systemStream.getTracks().forEach(track => track.stop());
+      stopSystemAudioMonitor();
       showToast('Permissão negada ou hardware indisponível.', 'error');
     }
   };

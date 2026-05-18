@@ -1,7 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
 import { getFunctions } from "firebase/functions";
-import { getMessaging, type Messaging } from "firebase/messaging";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 
@@ -28,23 +27,4 @@ export const db = initializeFirestore(app, {
 
 export const functions = getFunctions(app, "us-central1");
 
-let messagingPromise: Promise<Messaging | null> | null = null;
-
-export const getFirebaseMessaging = async (): Promise<Messaging | null> => {
-  if (typeof window === "undefined") return null;
-
-  if (!messagingPromise) {
-    messagingPromise = import("firebase/messaging")
-      .then(async ({ isSupported }) => {
-        if (!(await isSupported())) return null;
-        return getMessaging(app);
-      })
-      .catch((e) => {
-        console.warn("Firebase Messaging is not supported in this environment.", e);
-        return null;
-      });
-  }
-
-  return messagingPromise;
-};
 export const storage = getStorage(app);

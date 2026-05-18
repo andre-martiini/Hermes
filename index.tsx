@@ -16,10 +16,9 @@ import HealthView from './HealthView';
 import { GoogleHealthService } from './GoogleHealthService';
 import { MeetingTranscriptionTool } from './src/components/tools/MeetingTranscriptionTool';
 import { STATUS_COLORS, PROJECT_COLORS, SLIDES_HISTORY_KEY } from './constants';
-import { db, functions, getFirebaseMessaging, auth, googleProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from './firebase';
+import { db, functions, auth, googleProvider, signInWithPopup, signOut, browserLocalPersistence, browserSessionPersistence, setPersistence } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, onSnapshot, query, orderBy, updateDoc, doc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, writeBatch, getDoc, getDocs, where } from 'firebase/firestore';
-import { getToken, onMessage } from 'firebase/messaging';
 import { httpsCallable } from 'firebase/functions';
 import FinanceView from './FinanceView';
 import DashboardView from './DashboardView';
@@ -2106,82 +2105,6 @@ const App: React.FC = () => {
   const [isHabitsReminderOpen, setIsHabitsReminderOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'notifications' | 'context' | 'sistemas'>('notifications');
   // --- HermesNotification System & App Settings ---
-  // --- Firebase Cloud Messaging (FCM) & Push Notifications ---
-  useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
-    let isCancelled = false;
-    const seenPushIds = new Set<string>();
-    const setupFCM = async () => {
-      if (!user) return;
-      const isLocalhost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
-      if (isLocalhost) {
-        console.log('Push desativado em desenvolvimento local.');
-        return;
-      }
-      try {
-        const messaging = await getFirebaseMessaging();
-        if (isCancelled) return;
-        if (!messaging) {
-          console.log('Push Notifications não suportadas neste navegador.');
-          return;
-        }
-        unsubscribe = onMessage(messaging, (payload) => {
-          console.log('Mensagem PUSH recebida em primeiro plano:', payload);
-          const payloadData = (payload.data || {}) as Record<string, string>;
-          const pushId = payloadData.id || payload.messageId || `${payloadData.link || ''}_${payloadData.title || ''}_${payloadData.message || ''}`;
-          if (seenPushIds.has(pushId)) return;
-          seenPushIds.add(pushId);
-          window.setTimeout(() => seenPushIds.delete(pushId), 15000);
-          const title = payload.notification?.title || payloadData.title || 'Hermes';
-          const message = payload.notification?.body || payloadData.message || '';
-          const newNotif: HermesNotification = {
-            id: pushId,
-            title,
-            message,
-            type: 'info',
-            timestamp: new Date().toISOString(),
-            isRead: false,
-            link: payloadData.link || ""
-          };
-          setNotifications(prev => prev.some(n => n.id === newNotif.id) ? prev : [newNotif, ...prev]);
-          setActivePopup(newNotif);
-        });
-        console.log('Iniciando configuração de Push...');
-        const permission = await Notification.requestPermission();
-        console.log('Permissão de Notificação:', permission);
-        if (permission === 'granted') {
-          // Garante que o service worker está registrado antes de pedir o token
-          const registration = await navigator.serviceWorker.ready;
-          const token = await getToken(messaging, {
-            vapidKey: 'BBXF5bMrAdRIXKGLHXMzsZSREaQoVo2VbVgcJJkA7_qu05v2GOcCqgLRjc54airIqf087t46jvggg7ZdmPzuqiE',
-            serviceWorkerRegistration: registration
-          }).catch(err => {
-            console.error("Erro ao obter FCM Token:", err);
-            return null;
-          });
-          if (token) {
-            console.log('FCM Token obtido com sucesso:', token);
-            await setDoc(doc(db, 'fcm_tokens', token), {
-              token,
-              last_updated: new Date().toISOString(),
-              platform: 'web_pwa',
-              userAgent: navigator.userAgent
-            });
-            console.log('Token persistido no Firestore.');
-          } else {
-            console.warn('FCM Token não foi gerado. Verifique a VAPID Key no Firebase Console.');
-          }
-        }
-      } catch (error) {
-        console.error('Falha crítica no setup do FCM:', error);
-      }
-    };
-    setupFCM();
-    return () => {
-      isCancelled = true;
-      unsubscribe?.();
-    };
-  }, [user]);
   const emitNotification = async (title: string, message: string, type: 'info' | 'warning' | 'success' | 'error' = 'info', link?: string, id?: string) => {
     const newNotif: HermesNotification = {
       id: id || Math.random().toString(36).substr(2, 9),
@@ -2198,18 +2121,10 @@ const App: React.FC = () => {
       return [newNotif, ...prev];
     });
     setActivePopup(newNotif);
-    // 2. Persiste no Firestore para disparar Push Notification via Cloud Function
     try {
-      if (!user) return; // Prevent writing before auth
-      // Usa setDoc com ID específico para evitar duplicados no Firestore
-      // Garante que não há campos undefined
+      if (!user) return;
       const firestoreData = JSON.parse(JSON.stringify(newNotif));
-      // Verifica configurações globais de push
-      const shouldSendPush = appSettings.notifications?.enablePush !== false; // Default true
-      await setDoc(doc(db, 'notificacoes', newNotif.id), {
-        ...firestoreData,
-        sent_to_push: !shouldSendPush // Se não deve enviar, já marca como enviado para a function ignorar
-      });
+      await setDoc(doc(db, 'notificacoes', newNotif.id), firestoreData);
     } catch (err) {
       console.error("Erro ao persistir notificação:", err);
       // Feedback visual do erro para o usuário (agora que estamos validando)
@@ -2314,11 +2229,6 @@ const App: React.FC = () => {
         break;
     }
   };
-  useEffect(() => {
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
-    }
-  }, []);
   // HermesNotification System Triggers (Time-based: Habits, Weigh-in, Task Reminders)
   useEffect(() => {
     const interval = setInterval(() => {

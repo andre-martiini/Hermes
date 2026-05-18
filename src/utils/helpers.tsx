@@ -6,7 +6,6 @@ import { httpsCallable } from 'firebase/functions';
 export const DEFAULT_APP_SETTINGS: AppSettings = {
 
   notifications: {
-    enablePush: true,
     habitsReminder: {
       enabled: true,
       time: "20:00"

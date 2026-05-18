@@ -533,33 +533,6 @@ export const SettingsModal = ({
                 </div>
               </div>
 
-              {/* Canal de Teste Section */}
-              <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500 delay-200">
-                <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em] border-b border-slate-100 pb-2 flex items-center gap-2">
-                  <span className="w-2 h-2 bg-indigo-500 rounded-full"></span>
-                  Conectividade
-                </h4>
-
-                <div className="flex items-center justify-between p-6 bg-slate-50 rounded-none md:rounded-2xl border border-slate-100 group hover:border-indigo-200 transition-all">
-                  <div className="flex-1">
-                    <p className="text-sm font-bold text-slate-900 mb-1">Notificações Push</p>
-                    <p className="text-[11px] text-slate-500 font-medium">Receber alertas no celular (mesmo com app fechado)</p>
-                  </div>
-                  <button
-                    onClick={() => setLocalSettings({
-                      ...localSettings,
-                      notifications: {
-                        ...localSettings.notifications,
-                        enablePush: !localSettings.notifications.enablePush
-                      }
-                    })}
-                    className={`w-12 h-6 rounded-full transition-all relative ${localSettings.notifications.enablePush !== false ? 'bg-indigo-600' : 'bg-slate-300'}`}
-                  >
-                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${localSettings.notifications.enablePush !== false ? 'left-7' : 'left-1'}`} />
-                  </button>
-                </div>
-              </div>
-
             </>
           ) : activeTab === 'context' ? (
             /* Unidades / áreas e Palavras-Chave TAB */

@@ -225,6 +225,7 @@ const TOOL_LABELS: Record<string, string> = {
     atualizar_personalidade: 'Personalidade Ajustada',
     resolver_conflito_procedimento: 'Resolução de Conflito',
     criar_acao_no_sistema: 'Criando Ação',
+    agendar_lembrete_acao: 'Lembrete Agendado',
     editar_plano_acao: 'Ajustando Plano...',
     preparar_edicao_acao: 'Preparando Edição',
     preparar_reagendamento_em_lote: 'Planejando Reagendamento',
@@ -255,6 +256,7 @@ const FIELD_LABELS: Record<string, string> = {
 // Ferramentas de escrita/mutação — recebem estilo verde
 const WRITE_TOOLS = new Set([
     'criar_acao_no_sistema',
+    'agendar_lembrete_acao',
     'editar_plano_acao',
     'preparar_edicao_acao',
     'salvar_memoria_global',
@@ -2820,6 +2822,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                 { key: 'consultar_financas_v2', label: 'Consultar Finanças', desc: 'Acesse balanços, metas e extratos financeiros internos.' },
                                                 { key: 'registrar_item_financeiro_v2', label: 'Registrar Item Financeiro', desc: 'Adiciona novas rendas ou despesas ao sistema.' },
                                                 { key: 'criar_acao_no_sistema', label: 'Criar Ação', desc: 'Cria uma nova ação diretamente no sistema.' },
+                                                { key: 'agendar_lembrete_acao', label: 'Agendar Lembrete', desc: 'Cria lembretes datados para ações.' },
                                                 { key: 'registrar_no_diario', label: 'Registrar no Diário', desc: 'Adiciona uma entrada no diário de bordo.' },
                                                 { key: 'gerar_relatorio', label: 'Gerar Relatório', desc: 'Compila um relatório estruturado.' },
                                                 { key: 'consultar_agenda', label: 'Consultar Agenda', desc: 'Verifica compromissos e eventos do calendário.' },

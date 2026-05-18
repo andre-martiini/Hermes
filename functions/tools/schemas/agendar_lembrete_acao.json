@@ -1,0 +1,26 @@
+{
+  "name": "agendar_lembrete_acao",
+  "description": "Agenda um lembrete para uma acao do Hermes",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "ID da acao. Opcional quando ja existe uma acao em contexto."
+      },
+      "data": {
+        "type": "string",
+        "description": "Data do lembrete no formato YYYY-MM-DD"
+      },
+      "horario": {
+        "type": "string",
+        "description": "Horario do lembrete no formato HH:MM"
+      },
+      "texto": {
+        "type": "string",
+        "description": "Texto personalizado opcional que aparecera no lembrete"
+      }
+    },
+    "required": ["data", "horario"]
+  }
+}

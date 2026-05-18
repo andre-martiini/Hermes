@@ -471,6 +471,7 @@ export const TaskExecutionView = ({
   const [modalInputName, setModalInputName] = useState('');
   const [reminderDate, setReminderDate] = useState('');
   const [reminderTime, setReminderTime] = useState('');
+  const [reminderMessage, setReminderMessage] = useState('');
   const [showReminderHistory, setShowReminderHistory] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<PendingUploadFile[]>([]);
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
@@ -738,6 +739,7 @@ export const TaskExecutionView = ({
 
   const openReminderModal = (reminder?: TaskReminder) => {
     const baseIso = reminder?.reminder_at || nextPendingReminder?.reminder_at;
+    setReminderMessage(reminder?.message || '');
     if (baseIso) {
       const [date, time] = baseIso.split('T');
       setReminderDate(date || '');
@@ -957,6 +959,7 @@ export const TaskExecutionView = ({
             reminder_at: `${reminderDate}T${reminderTime}:00`,
             reminder_sent: false,
             created_at: new Date().toISOString(),
+            ...(reminderMessage.trim() ? { message: reminderMessage.trim() } : {}),
           };
           onSave(task.id, buildReminderPayload([...taskReminders.filter(reminder => reminder.id !== 'legacy-reminder'), newReminder]));
           showToast('Lembrete agendado!', 'success');
@@ -975,6 +978,7 @@ export const TaskExecutionView = ({
     setModalConfig({ ...modalConfig, isOpen: false });
     setModalInputValue('');
     setModalInputName('');
+    setReminderMessage('');
     setPendingFiles([]);
   };
 
@@ -1955,6 +1959,11 @@ export const TaskExecutionView = ({
                                       <p className={`text-[9px] ${reminder.reminder_sent ? mutedText : isDark ? 'text-amber-200' : 'text-amber-700'}`}>
                                         {reminder.reminder_sent ? 'Enviado' : 'Agendado'}
                                       </p>
+                                      {reminder.message && (
+                                        <p className={`mt-0.5 text-[10px] leading-snug line-clamp-2 ${isDark ? 'text-white/55' : 'text-slate-500'}`}>
+                                          {reminder.message}
+                                        </p>
+                                      )}
                                     </div>
                                     <button
                                       onClick={() => handleDeleteReminder(reminder.id)}
@@ -2634,6 +2643,14 @@ export const TaskExecutionView = ({
               <div className="flex flex-col gap-3">
                 <input type="date" value={reminderDate} onChange={e => setReminderDate(e.target.value)} className={`w-full p-3 rounded-none border outline-none ${isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-slate-50 border-border-grid'}`} />
                 <input type="time" value={reminderTime} onChange={e => setReminderTime(e.target.value)} className={`w-full p-3 rounded-none border outline-none ${isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-slate-50 border-border-grid'}`} />
+                <textarea
+                  value={reminderMessage}
+                  onChange={e => setReminderMessage(e.target.value)}
+                  rows={3}
+                  maxLength={500}
+                  placeholder="Texto personalizado do lembrete (opcional)"
+                  className={`w-full p-3 rounded-none border outline-none resize-none text-sm ${isDark ? 'bg-white/5 border-white/10 text-white placeholder:text-white/30' : 'bg-slate-50 border-border-grid text-slate-900 placeholder:text-slate-400'}`}
+                />
               </div>
             )}
             {modalConfig.type === 'confirm_delete' && (
@@ -2655,7 +2672,7 @@ export const TaskExecutionView = ({
             )}
 
             <div className="flex gap-3 mt-6 justify-end">
-              <button onClick={() => { setModalConfig({ ...modalConfig, isOpen: false }); setModalInputValue(''); setModalInputName(''); setPendingFiles([]); }}
+              <button onClick={() => { setModalConfig({ ...modalConfig, isOpen: false }); setModalInputValue(''); setModalInputName(''); setReminderMessage(''); setPendingFiles([]); }}
                 className={`px-4 py-2 font-bold ${isDark ? 'text-white/40' : 'text-slate-400'}`}>Cancelar</button>
               <button onClick={handleModalConfirm}
                 className={`px-6 py-2 rounded-none font-black text-white shadow-lg transition-all ${modalConfig.type === 'confirm_delete' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-blue-600 hover:bg-blue-700'}`}>

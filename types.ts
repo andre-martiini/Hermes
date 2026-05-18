@@ -52,6 +52,7 @@ export interface TaskReminder {
     reminder_at: string; // ISO date string for reminder
     reminder_sent: boolean;
     created_at: string;
+    message?: string;
 }
 
 export interface Tarefa {
@@ -432,7 +433,6 @@ export interface CustomNotification {
 export interface AppSettings {
     googleDriveFolderId?: string;
     notifications: {
-        enablePush: boolean;
         habitsReminder: {
             enabled: boolean;
             time: string; // format "HH:mm"

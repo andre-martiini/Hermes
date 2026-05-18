@@ -41,7 +41,21 @@
       "Bash(Get-Content -Path \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\src\\\\components\\\\ui\\\\SpeedDialMenu.tsx\" -Encoding UTF8)",
       "Bash(Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\src\\\\components\\\\ui\\\\UIComponents.tsx\" -TotalCount 533 -Tail 120)",
       "Bash(Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\src\\\\views\\\\MobileShortcutsView.tsx\")",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\" -Recurse -Filter \"*.tsx\" -o Silent)",
+      "Bash(Select-Object FullName)",
+      "Bash(grep -rn \"setupFCM\\\\|getToken\\\\|onMessage\" \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\" --include=\"*.tsx\" --include=\"*.ts\" ! -path \"*/node_modules/*\" ! -path \"*/dist/*\")",
+      "Bash(grep -rn \"save.*fcm_tokens\\\\|fcm_tokens.*setDoc\\\\|getMessaging\" \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\" --include=\"*.tsx\" --include=\"*.ts\" ! -path \"*/node_modules/*\" ! -path \"*/dist/*\")",
+      "Bash(grep -rn \"android\\\\|Android\\\\|mobile\\\\|PWA\\\\|pwa\" \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\src\" --include=\"*.tsx\" --include=\"*.ts\" ! -path \"*/node_modules/*\")",
+      "PowerShell($lines = Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\functions\\\\main.py\"; $start = 2274; $end = 2295; for \\($i = $start; $i -lt $end -and $i -lt $lines.Count; $i++\\) { \"$\\($i+1\\): $\\($lines[$i]\\)\" })",
+      "PowerShell($lines = Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\functions\\\\main.py\"; $start = 650; $end = 685; for \\($i = $start; $i -lt $end -and $i -lt $lines.Count; $i++\\) { \"$\\($i+1\\): $\\($lines[$i]\\)\" })",
+      "PowerShell($lines = Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\firebase.ts\"; for \\($i = 0; $i -lt $lines.Count; $i++\\) { \"$\\($i+1\\): $\\($lines[$i]\\)\" })",
+      "PowerShell($lines = Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\index.tsx\"; $start = 2108; $end = 2185; for \\($i = $start; $i -lt $end -and $i -lt $lines.Count; $i++\\) { \"$\\($i+1\\): $\\($lines[$i]\\)\" })",
+      "PowerShell($lines = Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\index.tsx\"; $start = 2185; $end = 2225; for \\($i = $start; $i -lt $end -and $i -lt $lines.Count; $i++\\) { \"$\\($i+1\\): $\\($lines[$i]\\)\" })",
+      "PowerShell($lines = Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\index.tsx\"; $start = 2313; $end = 2330; for \\($i = $start; $i -lt $end -and $i -lt $lines.Count; $i++\\) { \"$\\($i+1\\): $\\($lines[$i]\\)\" })",
+      "PowerShell($lines = Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\functions\\\\main.py\"; $start = 2120; $end = 2215; for \\($i = $start; $i -lt $end -and $i -lt $lines.Count; $i++\\) { \"$\\($i+1\\): $\\($lines[$i]\\)\" })",
+      "PowerShell($lines = Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\types.ts\"; $start = 430; $end = 445; for \\($i = $start; $i -lt $end -and $i -lt $lines.Count; $i++\\) { \"$\\($i+1\\): $\\($lines[$i]\\)\" })",
+      "PowerShell($lines = Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\src\\\\utils\\\\helpers.tsx\"; $start = 1; $end = 40; for \\($i = $start; $i -lt $end -and $i -lt $lines.Count; $i++\\) { \"$\\($i+1\\): $\\($lines[$i]\\)\" })"
     ]
   }
 }
