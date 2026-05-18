@@ -8782,12 +8782,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     return "ERRO|Não foi possível gerar a imagem com o modelo Nano Banana 2."
                 
                 # Upload para Firebase Storage
-                project_id = os.environ.get("GCLOUD_PROJECT") or os.environ.get("GCP_PROJECT") or "gestao-hermes"
-                bucket_name = os.environ.get("FIREBASE_STORAGE_BUCKET") or f"{project_id}.appspot.com"
-                try:
-                    bucket = storage.bucket(bucket_name)
-                except Exception:
-                    bucket = storage.bucket()
+                from hermes_core_logic import _get_hermes_storage_bucket
+                bucket = _get_hermes_storage_bucket()
                     
                 file_name = f"imagens_geradas/img_{uuid.uuid4().hex[:8]}.jpg"
                 blob = bucket.blob(file_name)
