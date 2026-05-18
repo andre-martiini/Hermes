@@ -11,7 +11,7 @@ import { NotificationCenter } from '../components/ui/UIComponents';
 import { db, functions } from '../../firebase';
 import { httpsCallable } from 'firebase/functions';
 import { getAuth } from 'firebase/auth';
-import { setDoc, doc, onSnapshot, addDoc, collection, serverTimestamp, deleteDoc } from 'firebase/firestore';
+import { setDoc, doc, onSnapshot, addDoc, collection, serverTimestamp, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
 import { DiarioBordoUI } from './DiarioBordoUI';
 import { SpeedDialMenu } from '../components/ui/SpeedDialMenu';
 import { HermesCopilotoDrawer } from '../components/tools/HermesCopilotoDrawer';
@@ -219,12 +219,30 @@ export const TaskExecutionView = ({
 
       const createTempSession = async () => {
         try {
+          const documentId = focusedFile.driveFileId || focusedFile.nome;
+
+          // Reuse existing focus session for this document if one exists
+          const existingQ = query(
+            collection(db, 'sessoes_copiloto'),
+            where('taskId', '==', task.id),
+            where('isTemporary', '==', true),
+            where('documentId', '==', documentId),
+            orderBy('createdAt', 'desc'),
+            limit(1)
+          );
+          const existingSnap = await getDocs(existingQ);
+          if (!existingSnap.empty) {
+            setTempSessionId(existingSnap.docs[0].id);
+            return;
+          }
+
           const sessRef = await addDoc(collection(db, 'sessoes_copiloto'), {
             title: `[ANÁLISE] ${focusedFile.nome}`,
             userId: copilotoUserId,
             taskId: task.id,
             systemId: currentTaskData.sistema || null,
             isTemporary: true,
+            documentId,
             createdAt: serverTimestamp(),
             lastMessageAt: serverTimestamp()
           });
@@ -1661,11 +1679,8 @@ export const TaskExecutionView = ({
             <div className="flex-1 flex flex-col min-w-0">
               <DocumentViewer
                 file={focusedFile}
-                onClose={async () => {
-                  if (tempSessionId) {
-                    await deleteDoc(doc(db, 'sessoes_copiloto', tempSessionId));
-                    setTempSessionId(null);
-                  }
+                onClose={() => {
+                  setTempSessionId(null);
                   setFocusedFile(null);
                 }}
                 isDark={isDark}
