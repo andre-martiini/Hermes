@@ -2003,14 +2003,33 @@ def _transcribe_audio_bytes(audio_bytes: bytes, extension: str, db) -> str:
 # Media upload to Firebase Storage
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# Storage public URL helper (works with Uniform Bucket-Level Access)
+# ---------------------------------------------------------------------------
+
+def _blob_public_url(blob) -> str:
+    """
+    Returns a public URL for a Firebase Storage blob WITHOUT calling
+    make_public() (which fails when Uniform Bucket-Level Access is enabled).
+    Uses the stable Firebase Storage download URL format.
+    """
+    import urllib.parse
+    bucket_name = blob.bucket.name
+    encoded_name = urllib.parse.quote(blob.name, safe='')
+    return (
+        f"https://firebasestorage.googleapis.com/v0/b/{bucket_name}"
+        f"/o/{encoded_name}?alt=media"
+    )
+
+
 def _upload_to_storage(file_bytes: bytes, file_name: str, mime_type: str, chat_id: str) -> str:
-    """Uploads to Firebase Storage and returns the public URL (gs://)."""
+    """Uploads to Firebase Storage and returns the public URL."""
     bucket = _get_hermes_storage_bucket()
     path = f"telegram_uploads/{chat_id}/{file_name}"
     blob = bucket.blob(path)
     blob.upload_from_string(file_bytes, content_type=mime_type)
-    blob.make_public()
-    return blob.public_url
+    return _blob_public_url(blob)
 
 
 def _store_telegram_media(file_bytes: bytes, file_name: str, mime_type: str, chat_id: str) -> tuple[str | None, str | None]:

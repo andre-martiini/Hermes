@@ -2,7 +2,7 @@
 
 from firebase_functions import firestore_fn, scheduler_fn, options, https_fn, pubsub_fn
 
-from firebase_admin import initialize_app, firestore, messaging, get_app
+from firebase_admin import initialize_app, firestore, get_app
 import json
 import base64
 from datetime import datetime, timedelta, timezone
@@ -672,8 +672,6 @@ def emit_notification_backend(title, message, n_type='info', link=None):
         'isRead': False,
 
         'link': link,
-
-        'sent_to_push': False
 
     })
 
@@ -2205,75 +2203,9 @@ def on_notificacao_created(event: firestore_fn.Event[firestore_fn.DocumentSnapsh
 
             updates['telegram_error'] = 'chat_id_not_configured'
 
-    if notif.get('sent_to_push'):
-
-        if updates:
-
-            event.data.reference.update(updates)
-
-        return
-
-    tokens_docs = db.collection('fcm_tokens').stream()
-    tokens = list({doc.id for doc in tokens_docs if doc.id})
-    if not tokens:
-
-        print("Nenhum token FCM encontrado para enviar push.")
-
-        if updates:
-
-            event.data.reference.update(updates)
-
-        return
-
-    push_message = messaging.MulticastMessage(
-        data={
-            'id': str(notif.get('id', '')),
-            'title': str(title),
-            'message': str(message),
-            'link': str(notif.get('link', '')),
-            'type': str(notif.get('type', 'info'))
-        },
-        tokens=tokens,
-    )
-    try:
-
-        response = messaging.send_each_for_multicast(push_message)
-
-        print(f"Push enviado: {response.success_count} sucesso, {response.failure_count} falha.")
-
-        if response.failure_count > 0:
-
-            bad_tokens = [
-                tokens[idx] for idx, resp in enumerate(response.responses)
-                if not resp.success and resp.exception
-                and "registration-token-not-registered" in str(resp.exception).lower()
-            ]
-
-            if bad_tokens:
-
-                for i in range(0, len(bad_tokens), 500):
-
-                    batch = db.batch()
-
-                    for token in bad_tokens[i:i + 500]:
-
-                        batch.delete(db.collection('fcm_tokens').document(token))
-
-                    batch.commit()
-
-                print(f"Removidos {len(bad_tokens)} tokens FCM inválidos.")
-
-        updates['sent_to_push'] = True
+    if updates:
 
         event.data.reference.update(updates)
-
-    except Exception as e:
-
-        print(f"Erro ao enviar push notification: {str(e)}")
-
-        if updates:
-
-            event.data.reference.update(updates)
 
 
 
@@ -8788,9 +8720,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 file_name = f"imagens_geradas/img_{uuid.uuid4().hex[:8]}.jpg"
                 blob = bucket.blob(file_name)
                 blob.upload_from_string(image_bytes, content_type="image/jpeg")
-                blob.make_public()
                 
-                url = blob.public_url
+                from hermes_core_logic import _blob_public_url
+                url = _blob_public_url(blob)
                 return f"![Imagem Gerada]({url})\n\n*(Imagem gerada via Imagen 3. URL: {url})*"
             except Exception as e:
                 import traceback
