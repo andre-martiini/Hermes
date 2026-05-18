@@ -8753,20 +8753,33 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 import os
                 
                 # Gera a imagem usando o Gemini (Nano Banana 2 / 3.1 Flash Image)
-                resp = client.models.generate_images(
+                config_kwargs = {
+                    "response_modalities": ["IMAGE"],
+                    "image_config": types.ImageConfig(
+                        aspect_ratio=proporcao,
+                        image_size="1K",
+                    ),
+                    "thinking_config": types.ThinkingConfig(thinking_level="MINIMAL")
+                }
+                config = types.GenerateContentConfig(**config_kwargs)
+                
+                resp = client.models.generate_content(
                     model='gemini-3.1-flash-image-preview',
-                    prompt=prompt,
-                    config=types.GenerateImagesConfig(
-                        number_of_images=1,
-                        output_mime_type="image/jpeg",
-                        aspect_ratio=proporcao
-                    )
+                    contents=[prompt],
+                    config=config
                 )
                 
-                if getattr(resp, 'generated_images', None) and len(resp.generated_images) > 0:
-                    image_bytes = resp.generated_images[0].image.image_bytes
-                else:
-                    return "ERRO|Não foi possível gerar a imagem."
+                image_bytes = None
+                if getattr(resp, 'candidates', None) and len(resp.candidates) > 0:
+                    cand = resp.candidates[0]
+                    if getattr(cand, 'content', None) and getattr(cand.content, 'parts', None):
+                        for part in cand.content.parts:
+                            if getattr(part, 'inline_data', None) and getattr(part.inline_data, 'data', None):
+                                image_bytes = part.inline_data.data
+                                break
+
+                if not image_bytes:
+                    return "ERRO|Não foi possível gerar a imagem com o modelo Nano Banana 2."
                 
                 # Upload para Firebase Storage
                 project_id = os.environ.get("GCLOUD_PROJECT") or os.environ.get("GCP_PROJECT") or "gestao-hermes"

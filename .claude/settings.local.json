@@ -40,7 +40,8 @@
       "Bash(Select-Object -Skip 0 -First 120)",
       "Bash(Get-Content -Path \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\src\\\\components\\\\ui\\\\SpeedDialMenu.tsx\" -Encoding UTF8)",
       "Bash(Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\src\\\\components\\\\ui\\\\UIComponents.tsx\" -TotalCount 533 -Tail 120)",
-      "Bash(Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\src\\\\views\\\\MobileShortcutsView.tsx\")"
+      "Bash(Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\src\\\\views\\\\MobileShortcutsView.tsx\")",
+      "Bash(git push *)"
     ]
   }
 }
