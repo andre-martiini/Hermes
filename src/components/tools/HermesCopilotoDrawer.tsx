@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db, functions, auth } from '@/firebase';
 import { httpsCallable } from 'firebase/functions';
-import { collection, onSnapshot, query, orderBy, where, addDoc, doc, updateDoc, setDoc, getDoc, getDocs, writeBatch, deleteDoc, limit, Timestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, where, addDoc, doc, updateDoc, setDoc, getDoc, getDocs, writeBatch, deleteDoc, limit, Timestamp, deleteField } from 'firebase/firestore';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import MermaidBlock from './MermaidBlock';
@@ -852,6 +852,85 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
     const abortProgress = () => {
         progressTransition.current = 'none';
         setProgressWidth(0);
+    };
+
+    const handleAcceptProposedPlan = async (messageId: string, proposedPlan: any[]) => {
+        if (!taskId || !currentSessionId) return;
+
+        try {
+            // Enforce unique IDs and sanitize the proposed plan items
+            const seenIds = new Set<string>();
+            const appliedPlan = proposedPlan.map((item, idx) => {
+                let newId = item.id;
+                if (!newId || String(newId).includes('uuid') || seenIds.has(newId)) {
+                    newId = `plan-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 7)}`;
+                }
+                seenIds.add(newId);
+                return {
+                    id: newId,
+                    text: item.text || '',
+                    completed: !!item.completed
+                };
+            });
+
+            // 1. Fetch current task to update history and plano_acao
+            const taskDocRef = doc(db, 'tarefas', taskId);
+            const taskSnap = await getDoc(taskDocRef);
+            if (taskSnap.exists()) {
+                const taskData = taskSnap.data();
+                const currentPlan = taskData.plano_acao || [];
+                const existingHistory = taskData.plano_acao_historico || [];
+                const updatedHistory = currentPlan.length > 0
+                    ? [...existingHistory.slice(-4), { data: new Date().toISOString(), items: currentPlan }]
+                    : existingHistory;
+
+                const allCompleted = appliedPlan.length > 0 && appliedPlan.every(i => i.completed);
+
+                await updateDoc(taskDocRef, {
+                    plano_acao: appliedPlan,
+                    plano_acao_historico: updatedHistory,
+                    ...(allCompleted && { status: 'concluído' })
+                });
+            }
+
+            // 2. Remove proposedPlan card from the message in sessoes_copiloto/{sessionId}/mensagens/{messageId}
+            const msgDocRef = doc(db, 'sessoes_copiloto', currentSessionId, 'mensagens', messageId);
+            await updateDoc(msgDocRef, {
+                proposedPlan: deleteField()
+            });
+
+            // 3. Add success message entry in sessoes_copiloto
+            await addDoc(collection(db, 'sessoes_copiloto', currentSessionId, 'mensagens'), {
+                role: 'assistant',
+                content: '✅ Plano de ação atualizado com sucesso!',
+                timestamp: Timestamp.now()
+            });
+
+        } catch (err) {
+            console.error('[CopilotoDrawer] Erro ao aceitar plano:', err);
+        }
+    };
+
+    const handleRejectProposedPlan = async (messageId: string) => {
+        if (!currentSessionId) return;
+
+        try {
+            // 1. Remove proposedPlan card from the message
+            const msgDocRef = doc(db, 'sessoes_copiloto', currentSessionId, 'mensagens', messageId);
+            await updateDoc(msgDocRef, {
+                proposedPlan: deleteField()
+            });
+
+            // 2. Add rejection message entry in sessoes_copiloto
+            await addDoc(collection(db, 'sessoes_copiloto', currentSessionId, 'mensagens'), {
+                role: 'assistant',
+                content: '❌ Proposta de plano de ação recusada.',
+                timestamp: Timestamp.now()
+            });
+
+        } catch (err) {
+            console.error('[CopilotoDrawer] Erro ao recusar plano:', err);
+        }
     };
 
     // ── Seleção de arquivo ────────────────────────────────────────────────────
@@ -2150,8 +2229,18 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                     ))}
                                                 </div>
                                                 <div className="flex gap-2">
-                                                    <button className="flex-1 bg-emerald-600 text-white py-2 rounded-none text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all">Aceitar</button>
-                                                    <button className={`flex-1 py-2 rounded-none text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>Recusar</button>
+                                                    <button
+                                                        onClick={() => msg.id && msg.proposedPlan && handleAcceptProposedPlan(msg.id, msg.proposedPlan)}
+                                                        className="flex-1 bg-emerald-600 text-white py-2 rounded-none text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all"
+                                                    >
+                                                        Aceitar
+                                                    </button>
+                                                    <button
+                                                        onClick={() => msg.id && handleRejectProposedPlan(msg.id)}
+                                                        className={`flex-1 py-2 rounded-none text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}
+                                                    >
+                                                        Recusar
+                                                    </button>
                                                 </div>
                                             </div>
                                         )}

@@ -194,10 +194,29 @@ export const TaskExecutionView = ({
 }: TaskExecutionViewProps) => {
 
   // ─── Derived Data ─────────────────────────────────────────────
-  const currentTaskData = useMemo(() =>
-    tarefas.find(t => t.id === task.id) || task,
-    [tarefas, task.id, task]
-  );
+  const currentTaskData = useMemo(() => {
+    const found = tarefas.find(t => t.id === task.id) || task;
+    if (found.plano_acao) {
+      const seenIds = new Set<string>();
+      let hasDuplicates = false;
+      const sanitized = found.plano_acao.map((item, idx) => {
+        let newId = item.id;
+        if (!newId || String(newId).includes('uuid') || seenIds.has(newId)) {
+          newId = `plan-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 7)}`;
+          hasDuplicates = true;
+        }
+        seenIds.add(newId);
+        return { ...item, id: newId };
+      });
+      if (hasDuplicates) {
+        return {
+          ...found,
+          plano_acao: sanitized
+        };
+      }
+    }
+    return found;
+  }, [tarefas, task.id, task]);
 
   // ─── States ───────────────────────────────────────────────────
   const [mobileTab, setMobileTab] = useState<MobileTab>('diario');
@@ -999,7 +1018,18 @@ export const TaskExecutionView = ({
   const handleApplyProposedPlan = (index: number, customPlan?: ActionPlanItem[]) => {
     const msg = chatMessages[index];
     if (!msg || (!msg.proposedPlan && !customPlan)) return;
-    const appliedPlan = customPlan || msg.proposedPlan!;
+    const planToSanitize = customPlan || msg.proposedPlan!;
+
+    // Ensure all applied plan items have unique IDs
+    const seenIds = new Set<string>();
+    const appliedPlan = planToSanitize.map((item, idx) => {
+      let newId = item.id;
+      if (!newId || String(newId).includes('uuid') || seenIds.has(newId)) {
+        newId = `plan-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 7)}`;
+      }
+      seenIds.add(newId);
+      return { ...item, id: newId };
+    });
 
     // Feature 5: salva versão atual no histórico antes de sobrescrever
     const currentPlan = currentTaskData.plano_acao || [];
@@ -1076,7 +1106,22 @@ export const TaskExecutionView = ({
       const proposalMatch = result.match(/\[PROPOSAL\]([\s\S]*?)\[\/PROPOSAL\]/);
       if (proposalMatch) {
         try {
-          proposedPlan = JSON.parse(proposalMatch[1].trim());
+          const parsed = JSON.parse(proposalMatch[1].trim());
+          if (Array.isArray(parsed)) {
+            const seenIds = new Set<string>();
+            proposedPlan = parsed.map((item: any, idx: number) => {
+              let newId = item.id;
+              if (!newId || String(newId).includes('uuid') || seenIds.has(newId)) {
+                newId = `plan-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 7)}`;
+              }
+              seenIds.add(newId);
+              return {
+                id: newId,
+                text: item.text || '',
+                completed: !!item.completed
+              };
+            });
+          }
           result = result.replace(/\[PROPOSAL\][\s\S]*?\[\/PROPOSAL\]/, '').trim();
         } catch (e) {
           console.error("Erro ao processar proposta de plano:", e);
