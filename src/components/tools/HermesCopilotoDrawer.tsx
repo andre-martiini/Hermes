@@ -2154,7 +2154,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                                     const tool = toolsRegistry.find(t => t.id === msg.toolInvocation!.tool_id);
                                                     if (!tool) return <div className="text-red-400 text-sm">Erro: Ferramenta {msg.toolInvocation!.tool_id} não encontrada no catálogo.</div>;
                                                     const ToolComponent = tool.component;
-                                                    return <ToolComponent {...msg.toolInvocation!.parametros} onBack={() => { }} showToast={() => { }} isEmbedded={true} />;
+                                                    return <ToolComponent {...msg.toolInvocation!.parametros} onBack={() => { }} showToast={() => { }} isEmbedded={true} isDark={isDark} />;
                                                 })()}
                                             </div>
                                         )}

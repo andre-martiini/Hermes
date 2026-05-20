@@ -204,7 +204,7 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   };
 
   if (activeTool === 'pop_manager') {
-    return <PopManagerTool onBack={() => setActiveTool(null)} />;
+    return <PopManagerTool onBack={() => setActiveTool(null)} isDark={isDark} />;
   }
 
   if (!activeTool) {

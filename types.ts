@@ -695,6 +695,7 @@ export interface PerfilPessoa {
     google_contact_id?: string;
     google_etag?: string;
     observacoes?: string;
+    resumo_ia?: string;
     avatar_color?: string;
     avatar_initials?: string;
     

@@ -2019,6 +2019,9 @@ def run_full_sync(trigger_reason='unspecified'):
 
             sync_pix_emails(gs, sync_ref, logs)
             
+            # Sincronização de Contatos do Google People API
+            sync_google_contacts_internal(db, sync_ref, logs)
+            
             # Ingestão de Documentos (Acervo Global)
             log_to_firestore(sync_ref, logs, "[SYNC] Verificando novos documentos na Pasta de Deságue (Acervo Global)...", True)
             executar_monitoramento_acervo_global()
@@ -4898,13 +4901,22 @@ def _normalize_pop_text(text: str | None) -> str:
     return re.sub(r"\s+", " ", without_punct).strip()
 
 
+PORTUGUESE_STOPWORDS = {
+    "de", "do", "da", "em", "no", "na", "se", "um", "uma", "os", "as",
+    "com", "para", "por", "dos", "das", "aos", "nos", "nas", "pelo",
+    "pela", "pelos", "pelas", "sem", "sob", "sobre", "o", "a", "e", "ou",
+    "como"
+}
+
+
 def _match_pop_directives(db, prompt: str) -> list[dict]:
     global _POPS_DATA_CACHE
     prompt_norm = _normalize_pop_text(prompt)
     if not prompt_norm:
         return []
 
-    prompt_terms = set(prompt_norm.split())
+    prompt_terms_all = prompt_norm.split()
+    prompt_terms_filtered = {t for t in prompt_terms_all if t not in PORTUGUESE_STOPWORDS}
 
     try:
         now = time.monotonic()
@@ -4936,12 +4948,32 @@ def _match_pop_directives(db, prompt: str) -> list[dict]:
                     if not gatilho_norm:
                         continue
 
-                    gatilho_terms = gatilho_norm.split()
+                    # 1. Substring match
                     if gatilho_norm in prompt_norm:
                         matched_triggers.append(str(gatilho))
                         continue
 
-                    if len(gatilho_terms) > 1 and all(term in prompt_terms for term in gatilho_terms):
+                    # 2. Stop words and partial terms matching (N-1 rule)
+                    gatilho_terms_all = gatilho_norm.split()
+                    gatilho_terms_filtered = [t for t in gatilho_terms_all if t not in PORTUGUESE_STOPWORDS]
+
+                    if not gatilho_terms_filtered:
+                        gatilho_terms_filtered = gatilho_terms_all
+                        compare_against = set(prompt_terms_all)
+                    else:
+                        compare_against = prompt_terms_filtered
+
+                    matching_terms_count = sum(1 for term in gatilho_terms_filtered if term in compare_against)
+                    n_terms = len(gatilho_terms_filtered)
+
+                    if n_terms == 1:
+                        is_match = (matching_terms_count == 1)
+                    elif n_terms == 2:
+                        is_match = (matching_terms_count == 2)
+                    else:
+                        is_match = (matching_terms_count >= n_terms - 1)
+
+                    if is_match:
                         matched_triggers.append(str(gatilho))
                         continue
 
@@ -12412,15 +12444,23 @@ def get_people_service():
     return build('people', 'v1', credentials=get_google_creds())
 
 
-@https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=120)
-def sync_google_contacts(req: https_fn.CallableRequest):
+def sync_google_contacts_internal(db, sync_ref=None, logs=None):
     """
-    Sincroniza contatos do Google People API para a coleção 'perfil_pessoas' no Firestore.
-    Cruza dados usando email, telefone ou o google_contact_id.
+    Sincroniza contatos do Google People API para o Firestore.
+    Otimizado para usar cache em memória e evitar consultas repetitivas no banco de dados.
     """
+    if logs is None:
+        logs = []
+
+    def log_helper(msg):
+        if sync_ref is not None:
+            log_to_firestore(sync_ref, logs, msg, True)
+        else:
+            print(msg)
+
+    log_helper("[SYNC] Iniciando sincronização de contatos do Google...")
+
     try:
-        db = get_db()
-        
         # 1. Obter credenciais e instanciar o People API
         creds = get_google_creds(scopes=['https://www.googleapis.com/auth/contacts'])
         from googleapiclient.discovery import build
@@ -12439,7 +12479,7 @@ def sync_google_contacts(req: https_fn.CallableRequest):
                     personFields='names,emailAddresses,phoneNumbers,biographies,metadata'
                 ).execute()
             except Exception as req_err:
-                print(f"[GOOGLE SYNC] Erro ao chamar Google Connections API: {req_err}")
+                log_helper(f"[SYNC] Erro ao chamar Google Connections API: {req_err}")
                 break
             
             connections.extend(results.get('connections', []))
@@ -12447,7 +12487,26 @@ def sync_google_contacts(req: https_fn.CallableRequest):
             if not next_page_token:
                 break
                 
-        # 3. Processar cada contato
+        # 3. Perfis existentes do Firestore em lote para otimização em memória
+        existing_profiles = []
+        all_docs = db.collection('perfil_pessoas').stream()
+        for doc_snap in all_docs:
+            p_data = doc_snap.to_dict() or {}
+            p_data['id'] = doc_snap.id
+            existing_profiles.append(p_data)
+        
+        # Mapeamentos O(1) para busca rápida
+        by_google_id = {p.get('google_contact_id'): p for p in existing_profiles if p.get('google_contact_id')}
+        by_email = {p.get('email').lower(): p for p in existing_profiles if p.get('email')}
+        
+        by_phone = {}
+        for p in existing_profiles:
+            p_phone = p.get('telefone')
+            if p_phone:
+                clean_p_phone = "".join(c for c in p_phone if c.isdigit())
+                if clean_p_phone:
+                    by_phone[clean_p_phone] = p
+
         stats = {"added": 0, "merged": 0, "errors": 0}
         
         for person in connections:
@@ -12481,51 +12540,39 @@ def sync_google_contacts(req: https_fn.CallableRequest):
                 color_idx = int(hashlib.md5(name.encode('utf-8')).hexdigest(), 16) % len(colors)
                 avatar_color = colors[color_idx]
                 
-                # 4. Verificar se já existe no Firestore
-                doc_ref = None
-                existing_doc = None
+                # 4. Verificar se já existe no Firestore usando busca em memória
+                existing_profile = None
                 
-                # Busca 1: Pelo google_contact_id
-                q_id = db.collection('perfil_pessoas').where('google_contact_id', '==', resource_name).limit(1).get()
-                if q_id:
-                    existing_doc = q_id[0]
+                if resource_name in by_google_id:
+                    existing_profile = by_google_id[resource_name]
                 else:
-                    # Busca 2: Pelo email (se houver)
-                    if email:
-                        q_email = db.collection('perfil_pessoas').where('email', '==', email).limit(1).get()
-                        if q_email:
-                            existing_doc = q_email[0]
+                    if email and email.lower() in by_email:
+                        existing_profile = by_email[email.lower()]
                     
-                    # Busca 3: Pelo telefone (se houver e não encontrou pelo email)
-                    if not existing_doc and phone:
-                        # Normaliza telefone para busca (remove caracteres não-numéricos)
+                    if not existing_profile and phone:
                         clean_phone = "".join(c for c in phone if c.isdigit())
                         if clean_phone:
-                            # stream de amostra para busca flexível
-                            all_people = db.collection('perfil_pessoas').limit(500).stream()
-                            for p_doc in all_people:
-                                p_data = p_doc.to_dict() or {}
-                                p_phone = "".join(c for c in (p_data.get('telefone') or "") if c.isdigit())
-                                if p_phone and (p_phone == clean_phone or p_phone.endswith(clean_phone) or clean_phone.endswith(p_phone)):
-                                    existing_doc = p_doc
-                                    break
+                            if clean_phone in by_phone:
+                                existing_profile = by_phone[clean_phone]
+                            else:
+                                for clean_p_phone, p in by_phone.items():
+                                    if clean_p_phone == clean_phone or clean_p_phone.endswith(clean_phone) or clean_phone.endswith(clean_p_phone):
+                                        existing_profile = p
+                                        break
                 
-                # Montamos os dados a salvar/mesclar
                 now_str = datetime.now(timezone.utc).isoformat()
                 
-                if existing_doc:
+                if existing_profile:
                     # Atualização (Merge)
-                    doc_ref = db.collection('perfil_pessoas').document(existing_doc.id)
-                    existing_data = existing_doc.to_dict() or {}
+                    doc_ref = db.collection('perfil_pessoas').document(existing_profile['id'])
+                    existing_data = existing_profile
                     
-                    # Atualiza apenas campos não preenchidos localmente ou campos específicos do Google
                     update_payload = {
                         "google_contact_id": resource_name,
                         "google_etag": etag,
                         "data_atualizacao": now_str
                     }
                     
-                    # Adiciona 'Contatos do Google' às tags mantendo as existentes
                     tags = existing_data.get('tags') or []
                     if not isinstance(tags, list):
                         tags = [tags]
@@ -12533,7 +12580,6 @@ def sync_google_contacts(req: https_fn.CallableRequest):
                         tags.append('Contatos do Google')
                     update_payload['tags'] = tags
                     
-                    # Mescla outros campos se estiverem vazios no Firestore
                     if not existing_data.get('email') and email:
                         update_payload['email'] = email
                     if not existing_data.get('telefone') and phone:
@@ -12546,10 +12592,14 @@ def sync_google_contacts(req: https_fn.CallableRequest):
                         update_payload['avatar_initials'] = initials
                         
                     doc_ref.update(update_payload)
+                    
+                    # Atualiza em cache
+                    existing_profile.update(update_payload)
                     stats["merged"] += 1
                 else:
                     # Cadastro Novo
                     doc_ref = db.collection('perfil_pessoas').document()
+                    new_id = doc_ref.id
                     new_payload = {
                         "nome": name,
                         "email": email,
@@ -12565,17 +12615,297 @@ def sync_google_contacts(req: https_fn.CallableRequest):
                         "data_atualizacao": now_str
                     }
                     doc_ref.set(new_payload)
+                    new_payload['id'] = new_id
+                    
+                    # Atualiza os índices em cache
+                    by_google_id[resource_name] = new_payload
+                    if email:
+                        by_email[email.lower()] = new_payload
+                    if phone:
+                        clean_phone = "".join(c for c in phone if c.isdigit())
+                        if clean_phone:
+                            by_phone[clean_phone] = new_payload
+                            
                     stats["added"] += 1
                     
             except Exception as item_err:
                 print(f"[GOOGLE SYNC] Erro ao processar contato individual: {item_err}")
                 stats["errors"] += 1
                 
-        return {"success": True, "stats": stats}
+        log_helper(f"[SYNC] Sincronização de contatos concluída: {stats['added']} importados, {stats['merged']} mesclados.")
+        return stats
         
+    except Exception as e:
+        log_helper(f"[SYNC][!] Erro na sincronização de contatos do Google: {e}")
+        return None
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=240)
+def sync_google_contacts(req: https_fn.CallableRequest):
+    """
+    Sincroniza contatos do Google People API para a coleção 'perfil_pessoas' no Firestore.
+    Expõe como Callable Cloud Function.
+    """
+    try:
+        db = get_db()
+        stats = sync_google_contacts_internal(db, None, None)
+        if stats is None:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.INTERNAL,
+                message="Erro durante a sincronização de contatos do Google."
+            )
+        return {"success": True, "stats": stats}
     except Exception as e:
         print(f"Erro na sincronização de contatos do Google: {e}")
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.INTERNAL,
             message=f"Erro na sincronização de contatos do Google: {str(e)}"
+        )
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=120)
+def generate_contact_summary(req: https_fn.CallableRequest):
+    """
+    Gera um resumo do perfil de uma pessoa baseando-se no seu histórico de interações (timeline)
+    utilizando a inteligência artificial do Gemini e grava no campo 'resumo_ia'.
+    """
+    try:
+        db = get_db()
+        data = req.data or {}
+        pessoa_id = data.get("pessoa_id")
+        
+        if not pessoa_id:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+                message="ID da pessoa é obrigatório."
+            )
+            
+        # 1. Recuperar dados do contato
+        contact_ref = db.collection("perfil_pessoas").document(pessoa_id)
+        contact_doc = contact_ref.get()
+        if not contact_doc.exists:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.NOT_FOUND,
+                message="Contato não encontrado."
+            )
+        contact_data = contact_doc.to_dict() or {}
+        
+        # 2. Buscar interações da pessoa (ordenado em memória para evitar a dependência de índice composto)
+        interactions_ref = db.collection("interacoes_pessoas").where("pessoa_id", "==", pessoa_id)
+        interactions = [doc.to_dict() for doc in interactions_ref.stream()]
+        interactions.sort(key=lambda x: x.get("data", ""), reverse=True)
+        interactions = interactions[:100]
+        
+        if not interactions:
+            return {
+                "success": True, 
+                "resumo_ia": "Nenhuma interação registrada ainda para este contato.",
+                "message": "Nenhuma interação cadastrada."
+            }
+            
+        # 3. Consolidar o histórico de interações para o Prompt do Gemini
+        history_lines = []
+        for idx, inter in enumerate(interactions):
+            data_inter = inter.get("data", "Data desconhecida")
+            descricao = inter.get("descricao", "")
+            tipo = inter.get("tipo", "interação")
+            history_lines.append(f"- [{data_inter}] ({tipo}): {descricao}")
+            
+        history_text = "\n".join(history_lines)
+        
+        # 4. Obter a chave do Gemini
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
+        gemini_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+        
+        if not gemini_key:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                message="Chave Gemini não configurada no sistema (system/api_keys)."
+            )
+            
+        # 5. Instanciar o Gemini
+        from google import genai
+        client = genai.Client(api_key=gemini_key)
+        
+        prompt = f"""
+        Você é o HERMES Master IA, assistente inteligente integrado ao sistema de produtividade pessoal do André.
+        Abaixo estão os dados de um contato cadastrado e o histórico de suas interações registradas no sistema (mencionados em tarefas, diários de bordo ou reuniões).
+        
+        NOME DO CONTATO: {contact_data.get('nome')}
+        DETALHES: E-mail: {contact_data.get('email', 'N/A')}, Telefone: {contact_data.get('telefone', 'N/A')}, Tags: {', '.join(contact_data.get('tags', []))}
+        
+        HISTÓRICO DE INTERAÇÕES E MENÇÕES:
+        {history_text}
+        
+        Sua tarefa é analisar o histórico acima e escrever um resumo conciso, executivo e em terceira pessoa em português do Brasil.
+        O resumo deve identificar quem é este contato (ex: se é um fornecedor, colega de trabalho, desenvolvedor, designer, etc.), os principais assuntos ou projetos em que cooperou e o tom/contexto geral das interações.
+        
+        REGRAS IMPORTANTES:
+        - O texto deve ser direto e profissional, com no máximo 3 ou 4 frases curtas.
+        - Não adicione introduções ou saudações ("Aqui está o resumo..."). Retorne apenas o resumo consolidado.
+        - Foque apenas nas interações reais demonstradas no histórico.
+        """
+        
+        response = client.models.generate_content(
+            model="gemini-3.5-flash",
+            contents=prompt
+        )
+        
+        resumo_texto = response.text.strip() if response.text else "Não foi possível gerar o resumo."
+        
+        # 6. Gravar o resumo no Firestore
+        contact_ref.update({
+            "resumo_ia": resumo_texto,
+            "data_atualizacao": datetime.now(timezone.utc).isoformat()
+        })
+        
+        return {
+            "success": True,
+            "resumo_ia": resumo_texto
+        }
+    except Exception as e:
+        print(f"Erro ao gerar resumo do contato por IA: {e}")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=f"Erro ao gerar resumo por IA: {str(e)}"
+        )
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=120)
+def merge_contacts(req: https_fn.CallableRequest):
+    """
+    Mescla múltiplos perfis de contatos secundários em um único perfil principal.
+    Transfere todas as interações e unifica as tags/e-mails/telefones/observações.
+    """
+    try:
+        db = get_db()
+        data = req.data or {}
+        primary_id = data.get("primary_id")
+        secondary_ids = data.get("secondary_ids", [])
+        
+        if not primary_id or not secondary_ids:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+                message="ID do contato principal (primary_id) e IDs secundários (secondary_ids) são obrigatórios."
+            )
+            
+        # 1. Recuperar o contato principal
+        primary_ref = db.collection("perfil_pessoas").document(primary_id)
+        primary_doc = primary_ref.get()
+        if not primary_doc.exists:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.NOT_FOUND,
+                message="Contato principal não encontrado."
+            )
+        primary_data = primary_doc.to_dict() or {}
+        
+        # 2. Recuperar os contatos secundários e extrair informações
+        extra_emails = []
+        extra_phones = []
+        extra_tags = set(primary_data.get("tags") or [])
+        extra_observacoes_lines = []
+        
+        secondary_names = []
+        
+        for sec_id in secondary_ids:
+            sec_ref = db.collection("perfil_pessoas").document(sec_id)
+            sec_doc = sec_ref.get()
+            if not sec_doc.exists:
+                continue
+            sec_data = sec_doc.to_dict() or {}
+            
+            secondary_names.append(sec_data.get("nome", ""))
+            
+            # Adiciona e-mail se for diferente do principal
+            email = sec_data.get("email")
+            if email and email.lower() != (primary_data.get("email") or "").lower():
+                extra_emails.append(email)
+                
+            # Adiciona telefone se for diferente do principal
+            phone = sec_data.get("telefone")
+            if phone and phone.strip() != (primary_data.get("telefone") or "").strip():
+                extra_phones.append(phone)
+                
+            # Combina tags
+            for t in (sec_data.get("tags") or []):
+                extra_tags.add(t)
+                
+            # Observações do secundário
+            obs = sec_data.get("observacoes")
+            if obs and obs.strip():
+                extra_observacoes_lines.append(f"Nota de {sec_data.get('nome')}: {obs.strip()}")
+                
+            # Resumo IA do secundário se houver
+            sec_resumo = sec_data.get("resumo_ia")
+            if sec_resumo and sec_resumo.strip():
+                extra_observacoes_lines.append(f"Resumo IA anterior de {sec_data.get('nome')}: {sec_resumo.strip()}")
+
+        # 3. Atualizar dados do contato principal
+        merged_payload = {
+            "tags": list(extra_tags),
+            "data_atualizacao": datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Se o principal não tem e-mail, define o primeiro secundário disponível
+        if not primary_data.get("email") and extra_emails:
+            merged_payload["email"] = extra_emails.pop(0)
+            
+        # Se o principal não tem telefone, define o primeiro secundário disponível
+        if not primary_data.get("telefone") and extra_phones:
+            merged_payload["telefone"] = extra_phones.pop(0)
+            
+        # Grava os e-mails/telefones extras nas observações para não perder
+        current_obs = primary_data.get("observacoes") or ""
+        obs_parts = []
+        if current_obs.strip():
+            obs_parts.append(current_obs.strip())
+            
+        if extra_emails:
+            obs_parts.append(f"E-mails mesclados adicionais: {', '.join(extra_emails)}")
+        if extra_phones:
+            obs_parts.append(f"Telefones mesclados adicionais: {', '.join(extra_phones)}")
+        if extra_observacoes_lines:
+            obs_parts.extend(extra_observacoes_lines)
+            
+        if obs_parts:
+            merged_payload["observacoes"] = "\n".join(obs_parts)
+            
+        # 4. Transmitir todas as interações dos contatos secundários para o principal
+        total_interactions_moved = 0
+        
+        for sec_id in secondary_ids:
+            interactions_ref = db.collection("interacoes_pessoas").where("pessoa_id", "==", sec_id).stream()
+            for inter_doc in interactions_ref:
+                db.collection("interacoes_pessoas").document(inter_doc.id).update({
+                    "pessoa_id": primary_id
+                })
+                total_interactions_moved += 1
+
+        # 5. Salvar dados consolidados no principal
+        primary_ref.update(merged_payload)
+        
+        # 6. Deletar os perfis secundários
+        for sec_id in secondary_ids:
+            db.collection("perfil_pessoas").document(sec_id).delete()
+            
+        # 7. Registra uma nova interação manual do tipo mesclagem detalhando a ação
+        merge_desc = f"Perfis de {', '.join(secondary_names)} foram mesclados neste contato. {total_interactions_moved} interações transferidas."
+        db.collection("interacoes_pessoas").document().set({
+            "pessoa_id": primary_id,
+            "tipo": "manual",
+            "data": datetime.now(timezone.utc).isoformat(),
+            "descricao": merge_desc,
+            "data_criacao": datetime.now(timezone.utc).isoformat()
+        })
+        
+        return {
+            "success": True,
+            "message": f"Contatos mesclados com sucesso. {total_interactions_moved} interações transferidas.",
+            "primary_id": primary_id
+        }
+    except Exception as e:
+        print(f"Erro ao mesclar contatos: {e}")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=f"Erro ao mesclar contatos: {str(e)}"
         )

@@ -1,4 +1,6 @@
 import React from 'react';
+import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
+import { db } from '../../firebase';
 import { AutoExpandingTextarea, CollapsibleContainer } from '../components/ui/UIComponents';
 import { formatWhatsAppText } from '../utils/helpers';
 import { ensureHttpUrl, parseDiaryRichNote } from '../utils/diaryEntries';
@@ -45,6 +47,89 @@ export const DiarioBordoUI = ({
   const [showFormattingMenu, setShowFormattingMenu] = React.useState(false);
   const [isDragActive, setIsDragActive] = React.useState(false);
   const dragCounterRef = React.useRef(0);
+
+  // Mentions (@) Autocomplete States
+  const [contacts, setContacts] = React.useState<{ id: string; nome: string }[]>([]);
+  const [showMentionSuggestions, setShowMentionSuggestions] = React.useState(false);
+  const [mentionSearch, setMentionSearch] = React.useState('');
+  const [filteredSuggestions, setFilteredSuggestions] = React.useState<{ id: string; nome: string }[]>([]);
+  const [selectedSuggestionIdx, setSelectedSuggestionIdx] = React.useState(0);
+
+  // Fetch people names for mentions
+  React.useEffect(() => {
+    const q = query(collection(db, 'perfil_pessoas'), orderBy('nome', 'asc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map(d => ({ id: d.id, nome: d.data().nome }));
+      setContacts(list);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const checkMentionTrigger = React.useCallback((text: string, selectionEnd: number) => {
+    const textBeforeCaret = text.slice(0, selectionEnd);
+    const lastAtIdx = textBeforeCaret.lastIndexOf('@');
+    
+    if (lastAtIdx === -1) {
+      setShowMentionSuggestions(false);
+      return;
+    }
+
+    const charBeforeAt = lastAtIdx > 0 ? textBeforeCaret[lastAtIdx - 1] : '';
+    if (charBeforeAt && !/\s/.test(charBeforeAt)) {
+      setShowMentionSuggestions(false);
+      return;
+    }
+
+    const searchStr = textBeforeCaret.slice(lastAtIdx + 1);
+    if (searchStr.includes('\n')) {
+      setShowMentionSuggestions(false);
+      return;
+    }
+
+    setMentionSearch(searchStr);
+    setShowMentionSuggestions(true);
+    setSelectedSuggestionIdx(0);
+  }, []);
+
+  React.useEffect(() => {
+    const input = document.getElementById('diary-input') as HTMLTextAreaElement | null;
+    if (input) {
+      checkMentionTrigger(newFollowUp, input.selectionEnd || 0);
+    }
+  }, [newFollowUp, checkMentionTrigger]);
+
+  React.useEffect(() => {
+    if (!showMentionSuggestions) {
+      setFilteredSuggestions([]);
+      return;
+    }
+    const search = mentionSearch.toLowerCase();
+    const filtered = contacts.filter(c => c.nome.toLowerCase().includes(search));
+    setFilteredSuggestions(filtered.slice(0, 8));
+  }, [contacts, mentionSearch, showMentionSuggestions]);
+
+  const insertMention = React.useCallback((contactName: string) => {
+    const input = document.getElementById('diary-input') as HTMLTextAreaElement | null;
+    if (!input) return;
+    
+    const selectionEnd = input.selectionEnd || 0;
+    const textBeforeCaret = newFollowUp.slice(0, selectionEnd);
+    const lastAtIdx = textBeforeCaret.lastIndexOf('@');
+    
+    if (lastAtIdx === -1) return;
+    
+    const textAfterCaret = newFollowUp.slice(selectionEnd);
+    const nextValue = newFollowUp.slice(0, lastAtIdx) + `@${contactName} ` + textAfterCaret;
+    
+    setNewFollowUp(nextValue);
+    setShowMentionSuggestions(false);
+    
+    requestAnimationFrame(() => {
+      input.focus();
+      const caretPos = lastAtIdx + contactName.length + 2;
+      input.setSelectionRange(caretPos, caretPos);
+    });
+  }, [newFollowUp, setNewFollowUp]);
 
   const getDiaryInput = React.useCallback(() => document.getElementById('diary-input') as HTMLTextAreaElement | null, []);
 
@@ -464,6 +549,29 @@ export const DiarioBordoUI = ({
               value={newFollowUp}
               onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setNewFollowUp(e.target.value)}
               onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+                if (showMentionSuggestions && filteredSuggestions.length > 0) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setSelectedSuggestionIdx(prev => (prev + 1) % filteredSuggestions.length);
+                    return;
+                  }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setSelectedSuggestionIdx(prev => (prev - 1 + filteredSuggestions.length) % filteredSuggestions.length);
+                    return;
+                  }
+                  if (e.key === 'Enter' || e.key === 'Tab') {
+                    e.preventDefault();
+                    insertMention(filteredSuggestions[selectedSuggestionIdx].nome);
+                    return;
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setShowMentionSuggestions(false);
+                    return;
+                  }
+                }
+
                 const isMobileDevice = window.innerWidth < 640;
                 if (e.key === 'Enter' && !e.shiftKey && !isMobileDevice) {
                   e.preventDefault();
@@ -495,6 +603,40 @@ export const DiarioBordoUI = ({
                 : 'bg-transparent text-slate-800 placeholder:text-slate-400'
                 }`}
             />
+            {showMentionSuggestions && filteredSuggestions.length > 0 && (
+              <div className={`absolute bottom-full left-0 mb-2 w-64 rounded-none border shadow-2xl overflow-hidden z-[200] ${
+                isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-800'
+              }`}>
+                <div className={`p-2 text-[9px] font-black uppercase tracking-widest border-b ${
+                  isDark ? 'border-slate-800 text-slate-500' : 'border-slate-100 text-slate-400'
+                }`}>
+                  Mencionar Pessoa
+                </div>
+                <div className="max-h-48 overflow-y-auto">
+                  {filteredSuggestions.map((suggestion, idx) => {
+                    const isSelected = idx === selectedSuggestionIdx;
+                    return (
+                      <button
+                        key={suggestion.id}
+                        type="button"
+                        onClick={() => insertMention(suggestion.nome)}
+                        onMouseEnter={() => setSelectedSuggestionIdx(idx)}
+                        className={`w-full text-left px-4 py-2 text-xs font-bold font-mono transition-colors flex items-center gap-2 ${
+                          isSelected 
+                            ? isDark ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-700' 
+                            : isDark ? 'hover:bg-slate-800 text-white/80' : 'hover:bg-slate-50 text-slate-700'
+                        }`}
+                      >
+                        <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black text-white bg-indigo-500`}>
+                          {suggestion.nome.charAt(0).toUpperCase()}
+                        </span>
+                        <span className="truncate">{suggestion.nome}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {newFollowUp.trim() && !isRecording ? (
