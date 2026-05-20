@@ -2,7 +2,7 @@ import json
 
 from core import tracing
 
-_ROUTING_MODEL = "gemini-2.0-flash-lite"
+_ROUTING_MODEL = "gemini-3.5-flash"
 
 _MISSING_PARAM_PROMPTS: dict[str, str] = {
     "query": "O que você quer buscar?",

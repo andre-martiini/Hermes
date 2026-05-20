@@ -87,7 +87,7 @@ SUPPORTED_MIMES = frozenset({
 
 DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 FILE_SEARCH_STORE_MODEL = "models/gemini-embedding-2"
-FILE_SEARCH_QUERY_MODEL = "gemini-3-flash-preview"
+FILE_SEARCH_QUERY_MODEL = "gemini-3.5-flash"
 FILE_SEARCH_WAIT_SECONDS = 90
 
 
@@ -755,7 +755,7 @@ Regras:
 
 Responda:"""
     response = client.models.generate_content(
-        model="gemini-3-flash-preview", contents=prompt
+        model="gemini-3.5-flash", contents=prompt
     )
     raw = (response.text or "").strip()
     match = re.search(r'\[.*?\]', raw, re.DOTALL)
@@ -823,7 +823,7 @@ Regras:
 Responda:"""
 
     response = client.models.generate_content(
-        model="gemini-3-flash-preview", contents=prompt
+        model="gemini-3.5-flash", contents=prompt
     )
     raw = (response.text or "").strip()
 
@@ -958,7 +958,7 @@ Responda APENAS com uma das opções acima, sem mais texto."""
 
         client = _gemini_client(api_key)
         response = client.models.generate_content(
-            model="gemini-3-flash-preview", contents=prompt
+            model="gemini-3.5-flash", contents=prompt
         )
         decision = (response.text or "").strip()
 
@@ -998,7 +998,7 @@ O nó agrupará tarefas com o seguinte tipo de procedimento:
 \"\"\"{summary[:400]}\"\"\"
 Responda APENAS com o título, sem pontuação final. Exemplo: Contratação CLC Dispensa"""
     response = client.models.generate_content(
-        model="gemini-3-flash-preview", contents=prompt
+        model="gemini-3.5-flash", contents=prompt
     )
     title = (response.text or "").strip().strip(".").strip()
     return title[:80] if title else f"Procedimento {area}"
@@ -1031,7 +1031,7 @@ Diário:
 Resumo:"""
 
     summary_response = client.models.generate_content(
-        model="gemini-3-flash-preview", contents=summary_prompt
+        model="gemini-3.5-flash", contents=summary_prompt
     )
     summary = (summary_response.text or "").strip()
     if not summary:
@@ -1246,7 +1246,7 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
         else:
             from google.genai import types
             extract_resp = client.models.generate_content(
-                model="gemini-3-flash-preview",
+                model="gemini-3.5-flash",
                 contents=[
                     "Extraia todo o texto relevante deste documento. "
                     "Ignore cabecalhos repetitivos, rodapes e numeracao de paginas.",
@@ -1269,7 +1269,7 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
     # ── Resumo semântico ─────────────────────────────────────────────────────
     try:
         summary_resp = client.models.generate_content(
-            model="gemini-3-flash-preview",
+            model="gemini-3.5-flash",
             contents=(
                 f"Voce e um analista de documentos corporativos.\n"
                 f"Resuma o objetivo e os principais parametros deste documento "
@@ -1913,7 +1913,7 @@ Consulta: "{query}"
 Responda APENAS com uma das duas palavras: BUSCA_SIMPLES ou SINTESE_PROFUNDA."""
     try:
         response = client.models.generate_content(
-            model="gemini-3-flash-preview", contents=prompt
+            model="gemini-3.5-flash", contents=prompt
         )
         raw = (response.text or "").strip().upper()
         if "SINTESE" in raw:
@@ -2153,7 +2153,7 @@ Resposta:"""
     try:
         client = _gemini_client(api_key)
         response = client.models.generate_content(
-            model="gemini-3-flash-preview", contents=prompt
+            model="gemini-3.5-flash", contents=prompt
         )
         return (response.text or "").strip()
     except Exception as exc:
@@ -2448,3 +2448,179 @@ def get_artefato_raw_text(req: https_fn.CallableRequest):
         "texto_bruto": texto[:ARTEFATO_CHAR_CAP],
         "truncated": truncated,
     }
+
+
+@firestore_fn.on_document_written(document="tarefas/{taskId}", memory=options.MemoryOption.MB_512, timeout_sec=120)
+def on_tarefa_written_extract_people(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot]]):
+    """
+    Gatilho disparado em qualquer criação ou atualização de tarefa.
+    Extrai nomes de pessoas mencionadas usando Gemini e registra as interações.
+    """
+    if not event.data or not event.data.after or not event.data.after.exists:
+        return # Documento deletado, ignora.
+
+    task_data = event.data.after.to_dict() or {}
+    task_id = event.params["taskId"]
+    
+    # Ignora tarefas internas do sistema
+    if task_data.get("area_tematica") == "SISTEMAS":
+        return
+        
+    # Extrai o texto relevante para analisar
+    titulo = task_data.get("titulo") or ""
+    descricao = task_data.get("descricao") or ""
+    
+    # Processa os diários de bordo (acompanhamento)
+    acompanhamentos = task_data.get("acompanhamento") or []
+    diary_texts = []
+    for entry in acompanhamentos:
+        if isinstance(entry, dict):
+            diary_texts.append(entry.get("nota") or "")
+        else:
+            diary_texts.append(str(entry))
+    diary_content = "\n".join(diary_texts)
+    
+    full_text = f"Título: {titulo}\nDescrição: {descricao}\nDiário de Bordo:\n{diary_content}"
+    
+    # Para evitar execuções repetidas desnecessárias (otimização de custo/performance)
+    import hashlib
+    current_hash = hashlib.md5(full_text.encode('utf-8')).hexdigest()
+    if task_data.get("last_processed_people_hash") == current_hash:
+        return # Sem alteração no conteúdo relevante para pessoas
+        
+    db = _get_db()
+    api_key = _get_api_key(db)
+    if not api_key:
+        print(f"[EXTRACAO PESSOAS] API key não encontrada para tarefa {task_id}")
+        return
+        
+    # Chamamos o Gemini para extrair os nomes
+    prompt = f"""Você é um assistente cognitivo especializado em análise de texto corporativo.
+Sua tarefa é analisar o texto de uma tarefa (ações, descrições e diário de bordo) e identificar todos os nomes próprios de pessoas reais mencionadas.
+
+Texto da Tarefa:
+\"\"\"{full_text}\"\"\"
+
+Regras de Extração:
+1. Identifique apenas nomes de pessoas físicas reais (ex: "João Silva", "André", "Profa. Maria").
+2. Ignore nomes de órgãos, empresas, siglas, cargos genéricos isolados ("o presidente", "a CLC") ou objetos.
+3. Para cada pessoa identificada, extraia o fragmento de contexto mais relevante onde o nome foi mencionado (ex: "João entregou as certidões").
+4. Se nenhuma pessoa for mencionada, retorne uma lista vazia.
+5. Responda APENAS com um array JSON contendo objetos com os campos "nome" (apenas o nome da pessoa) e "contexto" (frase ou frase aproximada do texto).
+Exemplo de retorno esperado:
+[
+  {{"nome": "João Silva", "contexto": "João Silva ficou responsável pelo pregão"}},
+  {{"nome": "Carlos", "contexto": "Ligar para Carlos amanhã"}}
+]
+
+Sua resposta em JSON:"""
+
+    try:
+        client = _gemini_client(api_key)
+        response = client.models.generate_content(
+            model="gemini-3.5-flash", contents=prompt
+        )
+        raw_response = (response.text or "").strip()
+        
+        # Faz parse do JSON
+        import re
+        json_match = re.search(r'\[\s*\{.*\}\s*\]', raw_response, re.DOTALL)
+        extracted_people = []
+        if json_match:
+            try:
+                extracted_people = json.loads(json_match.group(0))
+            except Exception as parse_err:
+                print(f"[EXTRACAO PESSOAS] Falha no parse JSON via regex match: {parse_err}")
+        else:
+            # Tenta fazer o parse direto caso não tenha as tags markdown
+            clean_raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_response, flags=re.IGNORECASE).strip()
+            if clean_raw.startswith('[') and clean_raw.endswith(']'):
+                try:
+                    extracted_people = json.loads(clean_raw)
+                except Exception as parse_err:
+                    print(f"[EXTRACAO PESSOAS] Falha no parse JSON direto: {parse_err}")
+                
+        if not extracted_people:
+            # Salva o hash para evitar reprocessar
+            db.collection("tarefas").document(task_id).update({
+                "last_processed_people_hash": current_hash
+            })
+            return
+            
+        now_str = datetime.now(timezone.utc).isoformat()
+        
+        # Processa cada pessoa identificada
+        for p_info in extracted_people:
+            p_name = p_info.get("nome", "").strip()
+            p_context = p_info.get("contexto", "").strip()
+            if not p_name:
+                continue
+                
+            # Busca pessoa existente no Firestore pelo nome
+            q_name = db.collection('perfil_pessoas').where('nome', '==', p_name).limit(1).get()
+            pessoa_id = None
+            
+            if q_name:
+                pessoa_id = q_name[0].id
+            else:
+                # Busca por similaridade simples
+                all_people = db.collection('perfil_pessoas').limit(200).stream()
+                best_match = None
+                p_name_lower = p_name.lower()
+                for p_doc in all_people:
+                    p_data = p_doc.to_dict() or {}
+                    db_name = (p_data.get('nome') or "").lower()
+                    if db_name == p_name_lower or p_name_lower in db_name or db_name in p_name_lower:
+                        best_match = p_doc.id
+                        break
+                if best_match:
+                    pessoa_id = best_match
+                    
+            # Se não encontrou, cria um perfil provisório
+            if not pessoa_id:
+                initials = "".join([part[0].upper() for part in p_name.split() if part])[:2]
+                colors = ["bg-indigo-500", "bg-purple-500", "bg-pink-500", "bg-rose-500", "bg-amber-500", "bg-emerald-500", "bg-teal-500", "bg-cyan-500", "bg-sky-500", "bg-blue-500"]
+                import hashlib as pyhash
+                color_idx = int(pyhash.md5(p_name.encode('utf-8')).hexdigest(), 16) % len(colors)
+                avatar_color = colors[color_idx]
+                
+                new_ref = db.collection('perfil_pessoas').document()
+                new_payload = {
+                    "nome": p_name,
+                    "email": "",
+                    "telefone": "",
+                    "tags": ['Extraído por IA'],
+                    "origem": 'extracao_ia',
+                    "avatar_color": avatar_color,
+                    "avatar_initials": initials,
+                    "data_criacao": now_str,
+                    "data_atualizacao": now_str
+                }
+                new_ref.set(new_payload)
+                pessoa_id = new_ref.id
+                
+            # Cria interacao única
+            context_hash = hashlib.md5(p_context.encode('utf-8')).hexdigest()[:8]
+            interacao_id = f"{task_id}_{pessoa_id}_{context_hash}"
+            
+            inter_ref = db.collection('interacoes_pessoas').document(interacao_id)
+            if not inter_ref.get().exists:
+                inter_ref.set({
+                    "id": interacao_id,
+                    "pessoa_id": pessoa_id,
+                    "tarefa_id": task_id,
+                    "tipo": 'mencao_diario' if 'diário' in p_context.lower() or 'diario' in p_context.lower() else 'mencao_tarefa',
+                    "data": now_str,
+                    "descricao": p_context[:1000],
+                    "link_origem": f"/tarefas?id={task_id}",
+                    "data_criacao": now_str
+                })
+                
+        # Por fim, salva o hash processado na tarefa
+        db.collection("tarefas").document(task_id).update({
+            "last_processed_people_hash": current_hash
+        })
+        print(f"[EXTRACAO PESSOAS] Sucesso ao processar tarefa {task_id}. Pessoas identificadas: {len(extracted_people)}")
+        
+    except Exception as e:
+        print(f"[EXTRACAO PESSOAS] Erro ao extrair nomes da tarefa {task_id}: {e}")

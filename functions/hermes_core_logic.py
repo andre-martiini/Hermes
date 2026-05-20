@@ -32,7 +32,7 @@ _MAX_HISTORY_TURNS = 20
 _MAX_FILE_BYTES = 20 * 1024 * 1024  # 20 MB
 _MAX_INLINE_MEDIA_BYTES = 700 * 1024  # base64 stays safely below Firestore field limit
 _TTS_MODEL_ID = "gemini-3.1-flash-tts-preview"
-_TEXT_MODEL_ID = "gemini-3-flash-preview"
+_TEXT_MODEL_ID = "gemini-3.5-flash"
 _DEFAULT_MALE_VOICE = "Charon"
 _MAX_TTS_TRANSCRIPT_CHARS = 1500
 
@@ -1985,7 +1985,7 @@ def _transcribe_audio_bytes(audio_bytes: bytes, extension: str, db) -> str:
             mime_type = mime_map.get(clean_ext, "audio/ogg")
             
             response = client.models.generate_content(
-                model="gemini-1.5-flash",
+                model="gemini-3.5-flash",
                 contents=[
                     types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
                     "Transcreva este áudio literalmente. Responda apenas com o texto transcrito, sem introduções ou explicações."
@@ -2276,6 +2276,56 @@ def _is_explicit_web_request(text: str) -> bool:
         "fonte oficial",
     ]
     return any(marker in lowered for marker in web_markers)
+
+
+def _extract_document_text(file_bytes: bytes, filename: str, mime_type: str) -> str | None:
+    import io
+    name = filename.lower()
+    mime = mime_type.lower()
+    
+    # Word DOCX
+    if mime == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' or name.endswith('.docx'):
+        try:
+            import mammoth
+            result = mammoth.extract_raw_text(io.BytesIO(file_bytes))
+            return (result.value or "").strip()
+        except Exception as e:
+            print(f"[Parser] Erro DOCX: {e}")
+            
+    # Excel XLSX / XLS
+    elif mime in ('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel') or name.endswith(('.xlsx', '.xls')):
+        try:
+            import pandas as pd
+            df_list = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None)
+            sheets_text = []
+            for sheet_name, df in df_list.items():
+                sheets_text.append(f"ABA: {sheet_name}\n{df.to_csv(index=False)}")
+            return "\n\n".join(sheets_text).strip()
+        except Exception as e:
+            print(f"[Parser] Erro Excel: {e}")
+            
+    # PowerPoint PPTX
+    elif mime == 'application/vnd.openxmlformats-officedocument.presentationml.presentation' or name.endswith('.pptx'):
+        try:
+            from pptx import Presentation
+            prs = Presentation(io.BytesIO(file_bytes))
+            slides_text = []
+            for slide in prs.slides:
+                for shape in slide.shapes:
+                    if hasattr(shape, 'text') and shape.text.strip():
+                        slides_text.append(shape.text.strip())
+            return '\n'.join(slides_text).strip()
+        except Exception as e:
+            print(f"[Parser] Erro PPTX: {e}")
+            
+    # Plain text / CSV
+    elif mime.startswith('text/') or name.endswith(('.txt', '.csv', '.json', '.xml', '.yaml', '.yml', '.md')):
+        try:
+            return file_bytes.decode('utf-8', errors='replace')
+        except Exception as e:
+            print(f"[Parser] Erro Texto: {e}")
+            
+    return None
 
 
 def _is_internal_hermes_request(text: str) -> bool:
@@ -2655,7 +2705,7 @@ def _run_gemini_turn(
     from google.genai import types
 
     client = genai.Client(api_key=gemini_key)
-    model_id = "gemini-3-flash-preview"
+    model_id = "gemini-3.5-flash"
     read_only_parallel_tools = {
         "consultar_historico_acoes",
         "buscar_arquivos_acervo",
@@ -3241,17 +3291,52 @@ def _process_telegram_message(db, data: dict):
     # File/document
     elif file_info and (media_bytes_b64 or media_storage_path):
         import uuid as _uuid
+        import mimetypes
         file_bytes = _load_telegram_media_bytes(media_bytes_b64, media_storage_path)
         if not file_bytes:
             user_parts.append(types.Part(text="[Arquivo recebido mas o conteudo nao foi encontrado]"))
         else:
             fname = file_info.get("file_name") or f"upload_{_uuid.uuid4().hex[:8]}"
             mime = file_info.get("mime_type", "application/octet-stream")
-            user_parts.append(types.Part.from_bytes(data=file_bytes, mime_type=mime))
-            user_parts.append(types.Part(text=(
-                f"[Arquivo recebido]: {fname} ({mime})\n"
-                "Analise este arquivo, identifique o que ele mostra e sugira como ele se relaciona ao contexto atual."
-            )))
+            
+            # Corrigir Mime Type se for genérico ou ausente
+            if mime == "application/octet-stream" or not mime:
+                guessed, _ = mimetypes.guess_type(fname)
+                if guessed:
+                    mime = guessed
+            
+            _GEMINI_NATIVE_MIMES = {
+                # Images
+                'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic', 'image/heif',
+                # Audio
+                'audio/wav', 'audio/mp3', 'audio/mpeg', 'audio/aac', 'audio/flac', 'audio/ogg', 'audio/m4a',
+                # Video
+                'video/mp4', 'video/mpeg', 'video/quicktime', 'video/webm',
+                # Documents
+                'application/pdf', 'text/plain', 'text/csv', 'text/html', 'text/markdown',
+            }
+            
+            if mime in _GEMINI_NATIVE_MIMES:
+                user_parts.append(types.Part.from_bytes(data=file_bytes, mime_type=mime))
+                user_parts.append(types.Part(text=(
+                    f"[Arquivo recebido]: {fname} ({mime})\n"
+                    "Analise este arquivo, identifique o que ele mostra e sugira como ele se relaciona ao contexto atual."
+                )))
+            else:
+                # Tenta extrair texto localmente para formatos não suportados nativamente (Excel, Word, PowerPoint, etc.)
+                extracted_text = _extract_document_text(file_bytes, fname, mime)
+                if extracted_text:
+                    user_parts.append(types.Part(text=(
+                        f"[Conteúdo extraído do arquivo recebido '{fname}']:\n\n{extracted_text}\n\n"
+                        "Analise as informações do documento acima e sugira como elas se relacionam ao contexto atual."
+                    )))
+                else:
+                    # Se não puder extrair e não for nativo, informa o erro de forma limpa
+                    user_parts.append(types.Part(text=(
+                        f"[Arquivo recebido]: {fname} ({mime})\n"
+                        f"⚠️ Nota: O formato deste arquivo não é suportado diretamente e não foi possível extrair seu conteúdo. "
+                        "Por favor, envie o conteúdo em formato compatível (PDF, imagens, planilhas CSV ou texto simples)."
+                    )))
             _perf_mark(perf_state, "telegram.file_upload")
 
     # Text
@@ -3789,6 +3874,21 @@ def _process_telegram_message(db, data: dict):
         except Exception as e:
             return f"Erro: {e}"
 
+    def agendar_lembrete_acao(data: str, horario: str, task_id: str = None, texto: str = ""):
+        """
+        Agenda um lembrete para uma acao do Hermes.
+        data: Data do lembrete no formato YYYY-MM-DD.
+        horario: Horario do lembrete no formato HH:MM.
+        task_id: ID da acao. Opcional quando ja existe uma acao em contexto.
+        texto: Texto personalizado opcional que aparecera no lembrete.
+        """
+        from tools.telegram_extended import execute
+        actual_task_id = task_id or request_acao_id or session.get("current_task_id")
+        if not actual_task_id:
+            return "ERRO|Nenhuma ação ativa em contexto e nenhum task_id foi informado para agendar o lembrete."
+        slots = {"task_id": actual_task_id, "data": data, "horario": horario, "texto": texto}
+        return execute("agendar_lembrete_acao", slots, db)
+
     def consultar_financas_v2(mes: int = None, ano: int = None):
         """Retorna resumo financeiro (balancete, metas, extrato). mes (0-11), ano (YYYY). Se mes for omitido, assume o mes anterior ao atual."""
         from tools.telegram_extended import execute
@@ -3936,6 +4036,7 @@ def _process_telegram_message(db, data: dict):
         propor_lancamento_financeiro,
         diagnosticar_repositorio,
         schedule_whatsapp_message,
+        agendar_lembrete_acao,
     ]
 
 

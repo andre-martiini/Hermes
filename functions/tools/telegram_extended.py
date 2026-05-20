@@ -11,7 +11,7 @@ from firebase_admin import firestore
 
 from pdf_precision import extract_pdf_text_with_fallback, is_pdf_mime_type
 
-_TEXT_MODEL_ID = "gemini-3-flash-preview"
+_TEXT_MODEL_ID = "gemini-3.5-flash"
 
 
 def _get_api_keys(db):

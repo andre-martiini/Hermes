@@ -38,7 +38,7 @@ google_search_tool = types.Tool(
     google_search=types.GoogleSearch()
 )
 
-model_id = "gemini-3.1-flash-lite-preview"
+model_id = "gemini-3.5-flash"
 system_instruction = """
 Você é o HERMES, o braço direito e assistente pessoal de elite do André Araújo Martini.
 Sua personalidade é uma mistura de Jarvis (Homem de Ferro) com um Gerente de Projetos extremamente eficiente.

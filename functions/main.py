@@ -58,6 +58,7 @@ def extract_docx_text(file_bytes: bytes) -> tuple[str, dict]:
 from knowledge_graph import (  # noqa: F401 — registra as Cloud Functions
     on_tarefa_created_kg,
     on_tarefa_concluida_kg,
+    on_tarefa_written_extract_people,
     buscar_procedimento,
     crystallize_task_manual,
     extract_kg_rag_context,
@@ -88,8 +89,8 @@ COPILOT_SOFT_DEADLINE_SEC = 210
 COPILOT_MODEL_TIMEOUT_MS = 70000
 COPILOT_MODEL_RETRY_TIMEOUT_MS = 30000
 COPILOT_TOOL_TIMEOUT_SEC = 45
-COPILOT_CHAT_MODEL = os.environ.get("COPILOT_CHAT_MODEL", "gemini-3.1-flash-lite")
-COPILOT_FALLBACK_MODEL = os.environ.get("COPILOT_FALLBACK_MODEL", "gemini-3.1-flash-lite")
+COPILOT_CHAT_MODEL = os.environ.get("COPILOT_CHAT_MODEL", "gemini-3.5-flash")
+COPILOT_FALLBACK_MODEL = os.environ.get("COPILOT_FALLBACK_MODEL", "gemini-3.5-flash")
 COPILOT_DEADLINE_FALLBACK_TEXT = (
     "O modelo de IA demorou demais para concluir esta resposta e eu interrompi a chamada "
     "antes de estourar o tempo da conversa. Tente dividir o pedido em partes menores, "
@@ -193,7 +194,7 @@ def get_db():
     return firestore.client()
 
 
-DESCRIPTION_SYNTHESIS_MODEL = os.environ.get("DESCRIPTION_SYNTHESIS_MODEL", "gemini-3.1-flash-lite")
+DESCRIPTION_SYNTHESIS_MODEL = os.environ.get("DESCRIPTION_SYNTHESIS_MODEL", "gemini-3.5-flash")
 DESCRIPTION_SYNTHESIS_BATCH_LIMIT = 50
 
 
@@ -360,6 +361,7 @@ GOOGLE_BASE_SCOPES = [
     'https://www.googleapis.com/auth/gmail.modify',
     'https://www.googleapis.com/auth/calendar',
     'https://www.googleapis.com/auth/drive',
+    'https://www.googleapis.com/auth/contacts',
 ]
 
 GOOGLE_FORMS_SCOPES = GOOGLE_BASE_SCOPES + [
@@ -1057,18 +1059,9 @@ def sync_google_tasks_pull(service, sync_ref, logs):
 
             else:
 
-                cat, sys, meta = classify_task(title, g_notes)
+                # Importação desativada a pedido do usuário (criação de tarefas no Google Tasks não gera mais ações no Hermes)
 
-                db.collection('tarefas').add({
-                    'titulo': title, 'projeto': 'GOOGLE', 'google_id': g_id, 'status': status,
-                    'data_criacao': datetime.now().isoformat(), 'data_atualizacao': datetime.now().isoformat() if title_was_normalized else g_updated,
-                    'area_tematica': cat, 'contabilizar_meta': meta, 'notas': g_notes,
-                    'data_limite': g_due if g_due else '-',
-                    'horario_inicio': h_inicio, 'horario_fim': h_fim,
-                    'tipo_acao': 'fast', 'origem': 'manual'
-                })
-
-                log_to_firestore(sync_ref, logs, f"[+] IMPORTADA: {title}")
+                log_to_firestore(sync_ref, logs, f"[PULL] Ignorada importação de nova tarefa '{title}' do Google Tasks (funcionalidade desativada).")
 
     except Exception as e:
 
@@ -1841,7 +1834,7 @@ def sync_boletos_gmail(service, sync_ref, logs):
                 content_parts.append(types.Part.from_bytes(data=pdf_data, mime_type="application/pdf"))
             
             try:
-                response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=content_parts)
+                response = client.models.generate_content(model="gemini-3.5-flash", contents=content_parts)
                 res_text = response.text.strip()
                 if "```json" in res_text:
                     res_text = res_text.split("```json")[-1].split("```")[0].strip()
@@ -2525,6 +2518,34 @@ def check_and_send_reminders(event: scheduler_fn.ScheduledEvent) -> None:
         else:
             print(f"[Telegram] Nenhum chat_id encontrado para lembrete da tarefa {task_doc.id}")
 
+        # Criar lembrete correspondente no Google Tasks
+
+        try:
+            ts = get_tasks_service()
+            results = ts.tasklists().list().execute()
+            tasklist_id = next((item['id'] for item in results.get('items', []) if 'tarefa' in item['title'].lower()), None)
+            if not tasklist_id:
+                default_list = ts.tasklists().get(tasklist='@default').execute()
+                tasklist_id = default_list.get('id')
+            
+            if tasklist_id:
+                reminder_text = due_reminder.get('message') if (due_reminder and due_reminder.get('message')) else t.get('reminder_message')
+                reminder_body = {
+                    'title': f"Lembrete: {title}",
+                    'notes': reminder_text or "Está na hora de realizar esta ação agendada!",
+                }
+                if reminder_iso:
+                    date_part = reminder_iso.split('T')[0]
+                    reminder_body['due'] = f"{date_part}T00:00:00.000Z"
+                    if 'T' in reminder_iso:
+                        time_part = reminder_iso.split('T')[1][:5]
+                        reminder_body['notes'] = f"Horário agendado: {time_part}\n\n" + reminder_body['notes']
+                
+                ts.tasks().insert(tasklist=tasklist_id, body=reminder_body).execute()
+                print(f"[Google Tasks] Lembrete criado para a tarefa {task_doc.id}")
+        except Exception as g_err:
+            print(f"[Google Tasks] Erro ao criar lembrete no Google Tasks: {g_err}")
+
         # Marca como enviado para não repetir
 
         if due_reminder:
@@ -2846,7 +2867,7 @@ def process_vectorization(task_id):
 
                     # Extração de texto via Gemini 1.5 Flash
 
-                    response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=[
+                    response = client.models.generate_content(model="gemini-3.5-flash", contents=[
 
                         "Extraia todo o texto relevante deste documento para indexação. Se for HTML, ignore tags. Se for PDF, faça OCR se necessário.",
 
@@ -3096,7 +3117,7 @@ def generate_task_with_ia(req: https_fn.CallableRequest):
     """
 
     try:
-        response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=prompt)
+        response = client.models.generate_content(model="gemini-3.5-flash", contents=prompt)
         text = response.text
         # Limpeza para garantir JSON puro
         if "```json" in text:
@@ -3867,7 +3888,7 @@ def transcreverAudio(req: https_fn.CallableRequest):
 
         """
 
-        result = gemini_client.models.generate_content(model="gemini-3.1-flash-lite", contents=prompt)
+        result = gemini_client.models.generate_content(model="gemini-3.5-flash", contents=prompt)
 
         texto_refinado = result.text
 
@@ -4100,7 +4121,7 @@ def start_file_indexing(item_id, item_data):
 
 
 
-        response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=parts)
+        response = client.models.generate_content(model="gemini-3.5-flash", contents=parts)
 
         res_text = response.text
 
@@ -5244,7 +5265,7 @@ def _classify_memory_candidate(api_key: str, fato: str, categoria: str) -> dict:
             f"Fato candidato: {fato}"
         )
         response = client.models.generate_content(
-            model="gemini-3.1-flash-lite",
+            model="gemini-3.5-flash",
             contents=prompt
         )
         raw_text = (response.text or "").strip()
@@ -5452,7 +5473,7 @@ def consolidar_memorias_copiloto(event: scheduler_fn.ScheduledEvent):
                 f"Memórias:\n{json.dumps(group, ensure_ascii=False)}"
             )
             response = client.models.generate_content(
-                model="gemini-3.1-flash-lite",
+                model="gemini-3.5-flash",
                 contents=prompt
             )
             raw_text = (response.text or "").strip()
@@ -5853,7 +5874,7 @@ def gerarSlidesIA(req: https_fn.CallableRequest):
 
 
 
-        response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=[
+        response = client.models.generate_content(model="gemini-3.5-flash", contents=[
 
             system_instruction,
 
@@ -6297,7 +6318,7 @@ def diagnosticar_codigo(req: https_fn.CallableRequest):
             )
 
             snip_resp = client.models.generate_content(
-                model="gemini-3-flash-preview",
+                model="gemini-3.5-flash",
                 contents=snippet_prompt,
                 config=types.GenerateContentConfig(response_mime_type="application/json")
             )
@@ -6428,7 +6449,7 @@ def diagnosticar_codigo(req: https_fn.CallableRequest):
                 '{"arquivos": ["path/file1"], "justificativa": "breve explicação"}'
             )
             sel_resp = client.models.generate_content(
-                model="gemini-3-flash-preview",
+                model="gemini-3.5-flash",
                 contents=selection_prompt,
                 config=types.GenerateContentConfig(response_mime_type="application/json")
             )
@@ -6509,7 +6530,7 @@ def diagnosticar_codigo(req: https_fn.CallableRequest):
                 "3. Se for um arquivo novo ou se não houver código para substituir, omita o bloco ou use uma âncora clara."
             )
             diag_resp = client.models.generate_content(
-                model="gemini-3-flash-preview",
+                model="gemini-3.5-flash",
                 contents=diagnosis_prompt,
                 config=types.GenerateContentConfig(response_mime_type="application/json")
             )
@@ -6687,7 +6708,7 @@ def corrigir_sintaxe_mermaid(req: https_fn.CallableRequest):
         )
 
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model='gemini-3.5-flash',
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 temperature=0.1,
@@ -6827,7 +6848,7 @@ def processInvoiceOCR(req: https_fn.CallableRequest):
 
 
 
-        response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=parts)
+        response = client.models.generate_content(model="gemini-3.5-flash", contents=parts)
 
         res_text = response.text
 
@@ -6961,7 +6982,7 @@ def transcrever_audio(req: https_fn.CallableRequest):
         Texto: "{texto_bruto}"
         """
 
-        response = gemini_client.models.generate_content(model="gemini-3.1-flash-lite", contents=prompt)
+        response = gemini_client.models.generate_content(model="gemini-3.5-flash", contents=prompt)
         texto_refinado = response.text
 
         return {
@@ -7195,7 +7216,7 @@ def askTaskAssistant(req: https_fn.CallableRequest):
         {prompt}
         """
 
-        response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=[system_instruction, full_prompt])
+        response = client.models.generate_content(model="gemini-3.5-flash", contents=[system_instruction, full_prompt])
 
         result = (response.text or "").strip()
         if not result:
@@ -7246,7 +7267,7 @@ def askChatbot(req: https_fn.CallableRequest):
 
         client = genai.Client(api_key=gemini_key)
         response = client.models.generate_content(
-            model="gemini-3.1-flash-lite",
+            model="gemini-3.5-flash",
             contents=[
                 "Você é um assistente de reunião em pt-BR. Responda com objetividade, "
                 "baseando-se no contexto recebido. Se o contexto estiver incompleto, "
@@ -7288,6 +7309,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
     request_start_monotonic = time.monotonic()
     prompt = (data.get('prompt') or "").strip()
     task_id = data.get('taskId')
+    task_id_scoped = task_id
     system_id = data.get('systemId')
     session_id = data.get('sessionId')
     drive_file_id = data.get('driveFileId')
@@ -8338,6 +8360,24 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             except Exception as e:
                 return f"Erro ao buscar slot livre: {e}"
 
+        def agendar_lembrete_acao(data: str, horario: str, task_id: str = None, texto: str = ""):
+            """
+            Agenda um lembrete para uma acao do Hermes.
+            data: Data do lembrete no formato YYYY-MM-DD.
+            horario: Horario do lembrete no formato HH:MM.
+            task_id: ID da acao. Opcional quando ja existe uma acao em contexto.
+            texto: Texto personalizado opcional que aparecera no lembrete.
+            """
+            try:
+                from tools.telegram_extended import execute
+                actual_task_id = task_id or task_id_scoped
+                if not actual_task_id:
+                    return "ERRO|Nenhuma ação ativa em contexto e nenhum task_id foi informado para agendar o lembrete."
+                slots = {"task_id": actual_task_id, "data": data, "horario": horario, "texto": texto}
+                return execute("agendar_lembrete_acao", slots, db)
+            except Exception as e:
+                return f"Erro ao agendar lembrete: {e}"
+
         def consultar_financas_v2(mes: int = None, ano: int = None):
             """Retorna resumo financeiro unificado (rendas, obrigações, metas e balancete) para um período. Use mes (0-11) e ano (YYYY)."""
             try:
@@ -8771,7 +8811,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     skeleton_prompt += f'- Inclua obrigatoriamente: {secoes_customizadas}\n'
 
                 skeleton_resp = client.models.generate_content(
-                    model="gemini-3.1-flash-lite",
+                    model="gemini-3.5-flash",
                     contents=skeleton_prompt
                 )
                 skeleton_text = skeleton_resp.text or ""
@@ -9473,7 +9513,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         if _CORRECAO_KEYWORDS.search(prompt):
             try:
                 _intent_resp = client.models.generate_content(
-                    model="gemini-3.1-flash-lite",
+                    model="gemini-3.5-flash",
                     contents=f"Responda só 'CORRECAO' ou 'NORMAL': o usuário está corrigindo um procedimento?\nMensagem: {prompt}",
                     config=types.GenerateContentConfig(
                         http_options=types.HttpOptions(timeout=3000)
@@ -9520,6 +9560,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'consultar_saude': consultar_saude,
             'registrar_item_financeiro_v2': registrar_item_financeiro_v2,
             'calculadora': calculadora,
+            'agendar_lembrete_acao': agendar_lembrete_acao,
         }
 
         # Cria função genérica de acionamento que o loop manual do Python irá ignorar
@@ -9601,6 +9642,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'consultar_saude': consultar_saude,
             'registrar_item_financeiro_v2': registrar_item_financeiro_v2,
             'calculadora': calculadora,
+            'agendar_lembrete_acao': agendar_lembrete_acao,
         }
         # Ferramentas internas que não devem aparecer para o usuário
         _HIDDEN_TOOLS = {'registrar_correcao_procedimento', 'resolver_conflito_memoria'}
@@ -9638,6 +9680,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     consultar_saude,
                     registrar_item_financeiro_v2,
                     calculadora,
+                    agendar_lembrete_acao,
                 ] + dynamic_tools,
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
             ),
@@ -9710,6 +9753,32 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     local_pdf_metadata = pdf_result.get('metadata')
                 elif is_docx_mime_type(real_file_name, real_mime_type):
                     local_docx_text, local_docx_metadata = extract_docx_text(file_bytes)
+                elif real_mime_type == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or real_mime_type == 'application/vnd.ms-excel' or real_file_name.lower().endswith(('.xlsx', '.xls')):
+                    import pandas as _pd
+                    import io as _io
+                    try:
+                        _df_list = _pd.read_excel(_io.BytesIO(file_bytes), sheet_name=None)
+                        _sheets_text = []
+                        for _sheet_name, _df in _df_list.items():
+                            _sheets_text.append(f"ABA: {_sheet_name}\n{_df.to_csv(index=False)}")
+                        local_docx_text = "\n\n".join(_sheets_text).strip()
+                        local_docx_metadata = {"natureza": "planilha_excel", "abas": list(_df_list.keys())}
+                    except Exception as xl_err:
+                        print(f"[Copiloto] Erro ao extrair Excel: {xl_err}")
+                elif real_mime_type == 'application/vnd.openxmlformats-officedocument.presentationml.presentation' or real_file_name.lower().endswith('.pptx'):
+                    from pptx import Presentation as _Presentation
+                    import io as _io
+                    try:
+                        _prs = _Presentation(_io.BytesIO(file_bytes))
+                        _slides_text = []
+                        for _slide in _prs.slides:
+                            for _shape in _slide.shapes:
+                                if hasattr(_shape, 'text') and _shape.text.strip():
+                                    _slides_text.append(_shape.text.strip())
+                        local_docx_text = '\n'.join(_slides_text).strip()
+                        local_docx_metadata = {"natureza": "apresentacao_powerpoint", "slides_count": len(_prs.slides)}
+                    except Exception as ppt_err:
+                        print(f"[Copiloto] Erro ao extrair PowerPoint: {ppt_err}")
 
                 gemini_file = None
                 local_extracted_text = local_pdf_text or local_docx_text
@@ -10977,7 +11046,7 @@ def analisarPadroesCategoriaIA(req: https_fn.CallableRequest):
         3. insight: Um breve comentário seu sobre por que isso é importante ou o que você notou de especial.
         """
 
-        response = client.models.generate_content(model="gemini-3.1-flash-lite", contents=prompt)
+        response = client.models.generate_content(model="gemini-3.5-flash", contents=prompt)
         res_text = response.text
 
         json_match = re.search(r'\{.*\}', res_text, re.DOTALL)
@@ -11138,7 +11207,7 @@ def processar_correcoes_pendentes(event: scheduler_fn.ScheduledEvent) -> None:
                             f'{{\"aprovado\": true_ou_false, \"resumo\": \"motivo em 1 frase\"}}'
                         )
                         _comp_resp    = _evo_client.models.generate_content(
-                            model="gemini-3.1-flash-lite",
+                            model="gemini-3.5-flash",
                             contents=_comp_prompt
                         )
                         _comp_text    = (_comp_resp.text or '').strip()
@@ -12042,7 +12111,7 @@ RESPONDA APENAS COM JSON VÁLIDO (sem markdown):
 Se SEM_INSIGHT: {{"nivel": null, "texto": null, "alvo": null, "plano_proposto": null, "acoes_propostas": null}}"""
 
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-3.5-flash",
             contents=prompt,
             config={"temperature": 0.3, "max_output_tokens": 1024}
         )
@@ -12110,7 +12179,7 @@ def classificarAreaTematica(req: https_fn.CallableRequest) -> dict:
     client = genai.Client(api_key=api_key)
     try:
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-3.5-flash",
             contents=f"Classifique a Area Tematica do seguinte texto como uma de: Saude, Financeira, Nenhuma. Retorne APENAS a palavra correta.\n\nTexto: {texto}",
             config=types.GenerateContentConfig(
                 temperature=0.0,
@@ -12194,7 +12263,7 @@ SNAPSHOT:
     try:
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model="gemini-3.1-flash-lite",
+            model="gemini-3.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.4,
@@ -12298,7 +12367,7 @@ SNAPSHOT:
     try:
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model="gemini-3.1-flash-lite",
+            model="gemini-3.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.35,
@@ -12335,4 +12404,178 @@ SNAPSHOT:
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.INTERNAL,
             message="Erro ao gerar resumo de saúde."
+        )
+
+
+def get_people_service():
+    from googleapiclient.discovery import build
+    return build('people', 'v1', credentials=get_google_creds())
+
+
+@https_fn.on_call(memory=options.MemoryOption.MB_512, timeout_sec=120)
+def sync_google_contacts(req: https_fn.CallableRequest):
+    """
+    Sincroniza contatos do Google People API para a coleção 'perfil_pessoas' no Firestore.
+    Cruza dados usando email, telefone ou o google_contact_id.
+    """
+    try:
+        db = get_db()
+        
+        # 1. Obter credenciais e instanciar o People API
+        creds = get_google_creds(scopes=['https://www.googleapis.com/auth/contacts'])
+        from googleapiclient.discovery import build
+        service = build('people', 'v1', credentials=creds)
+        
+        # 2. Buscar contatos do Google
+        connections = []
+        next_page_token = None
+        
+        while True:
+            try:
+                results = service.people().connections().list(
+                    resourceName='people/me',
+                    pageSize=100,
+                    pageToken=next_page_token,
+                    personFields='names,emailAddresses,phoneNumbers,biographies,metadata'
+                ).execute()
+            except Exception as req_err:
+                print(f"[GOOGLE SYNC] Erro ao chamar Google Connections API: {req_err}")
+                break
+            
+            connections.extend(results.get('connections', []))
+            next_page_token = results.get('nextPageToken')
+            if not next_page_token:
+                break
+                
+        # 3. Processar cada contato
+        stats = {"added": 0, "merged": 0, "errors": 0}
+        
+        for person in connections:
+            try:
+                resource_name = person.get('resourceName') # Ex: people/c1234567890
+                metadata = person.get('metadata', {})
+                etag = metadata.get('sources', [{}])[0].get('etag') or person.get('etag')
+                
+                # Nomes
+                names = person.get('names', [])
+                name = names[0].get('displayName') if names else None
+                if not name:
+                    continue # Contatos sem nome são ignorados
+                    
+                # E-mails
+                emails = [e.get('value') for e in person.get('emailAddresses', []) if e.get('value')]
+                email = emails[0] if emails else ""
+                
+                # Telefones
+                phones = [p.get('value') for p in person.get('phoneNumbers', []) if p.get('value')]
+                phone = phones[0] if phones else ""
+                
+                # Biografias
+                biographies = person.get('biographies', [])
+                bio = biographies[0].get('value') if biographies else ""
+                
+                # Gerar iniciais e cor do avatar
+                initials = "".join([part[0].upper() for part in name.split() if part])[:2]
+                colors = ["bg-indigo-500", "bg-purple-500", "bg-pink-500", "bg-rose-500", "bg-amber-500", "bg-emerald-500", "bg-teal-500", "bg-cyan-500", "bg-sky-500", "bg-blue-500"]
+                import hashlib
+                color_idx = int(hashlib.md5(name.encode('utf-8')).hexdigest(), 16) % len(colors)
+                avatar_color = colors[color_idx]
+                
+                # 4. Verificar se já existe no Firestore
+                doc_ref = None
+                existing_doc = None
+                
+                # Busca 1: Pelo google_contact_id
+                q_id = db.collection('perfil_pessoas').where('google_contact_id', '==', resource_name).limit(1).get()
+                if q_id:
+                    existing_doc = q_id[0]
+                else:
+                    # Busca 2: Pelo email (se houver)
+                    if email:
+                        q_email = db.collection('perfil_pessoas').where('email', '==', email).limit(1).get()
+                        if q_email:
+                            existing_doc = q_email[0]
+                    
+                    # Busca 3: Pelo telefone (se houver e não encontrou pelo email)
+                    if not existing_doc and phone:
+                        # Normaliza telefone para busca (remove caracteres não-numéricos)
+                        clean_phone = "".join(c for c in phone if c.isdigit())
+                        if clean_phone:
+                            # stream de amostra para busca flexível
+                            all_people = db.collection('perfil_pessoas').limit(500).stream()
+                            for p_doc in all_people:
+                                p_data = p_doc.to_dict() or {}
+                                p_phone = "".join(c for c in (p_data.get('telefone') or "") if c.isdigit())
+                                if p_phone and (p_phone == clean_phone or p_phone.endswith(clean_phone) or clean_phone.endswith(p_phone)):
+                                    existing_doc = p_doc
+                                    break
+                
+                # Montamos os dados a salvar/mesclar
+                now_str = datetime.now(timezone.utc).isoformat()
+                
+                if existing_doc:
+                    # Atualização (Merge)
+                    doc_ref = db.collection('perfil_pessoas').document(existing_doc.id)
+                    existing_data = existing_doc.to_dict() or {}
+                    
+                    # Atualiza apenas campos não preenchidos localmente ou campos específicos do Google
+                    update_payload = {
+                        "google_contact_id": resource_name,
+                        "google_etag": etag,
+                        "data_atualizacao": now_str
+                    }
+                    
+                    # Adiciona 'Contatos do Google' às tags mantendo as existentes
+                    tags = existing_data.get('tags') or []
+                    if not isinstance(tags, list):
+                        tags = [tags]
+                    if 'Contatos do Google' not in tags:
+                        tags.append('Contatos do Google')
+                    update_payload['tags'] = tags
+                    
+                    # Mescla outros campos se estiverem vazios no Firestore
+                    if not existing_data.get('email') and email:
+                        update_payload['email'] = email
+                    if not existing_data.get('telefone') and phone:
+                        update_payload['telefone'] = phone
+                    if not existing_data.get('observacoes') and bio:
+                        update_payload['observacoes'] = bio
+                    if not existing_data.get('avatar_color'):
+                        update_payload['avatar_color'] = avatar_color
+                    if not existing_data.get('avatar_initials'):
+                        update_payload['avatar_initials'] = initials
+                        
+                    doc_ref.update(update_payload)
+                    stats["merged"] += 1
+                else:
+                    # Cadastro Novo
+                    doc_ref = db.collection('perfil_pessoas').document()
+                    new_payload = {
+                        "nome": name,
+                        "email": email,
+                        "telefone": phone,
+                        "tags": ['Contatos do Google'],
+                        "origem": 'google_contacts',
+                        "google_contact_id": resource_name,
+                        "google_etag": etag,
+                        "observacoes": bio,
+                        "avatar_color": avatar_color,
+                        "avatar_initials": initials,
+                        "data_criacao": now_str,
+                        "data_atualizacao": now_str
+                    }
+                    doc_ref.set(new_payload)
+                    stats["added"] += 1
+                    
+            except Exception as item_err:
+                print(f"[GOOGLE SYNC] Erro ao processar contato individual: {item_err}")
+                stats["errors"] += 1
+                
+        return {"success": True, "stats": stats}
+        
+    except Exception as e:
+        print(f"Erro na sincronização de contatos do Google: {e}")
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=f"Erro na sincronização de contatos do Google: {str(e)}"
         )

@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 
 export type Status = 'em andamento' | 'stand-by' | 'concluído';
 
@@ -674,9 +674,9 @@ export interface Bolsista {
 export interface PerfilPessoa {
     id: string;
     nome: string;
-    cpf: string;
-    rg: string;
-    dados_bancarios: {
+    cpf?: string;
+    rg?: string;
+    dados_bancarios?: {
         banco: string;
         agencia: string;
         conta: string;
@@ -685,11 +685,33 @@ export interface PerfilPessoa {
     lattes?: string;
     email: string;
     telefone: string;
-    endereco: string;
+    endereco?: string;
     campus?: string;
     curso?: string;
+    
+    // --- Campos de Contatos/Histórico ---
+    tags?: string[];
+    origem?: 'manual' | 'google_contacts' | 'extracao_ia';
+    google_contact_id?: string;
+    google_etag?: string;
+    observacoes?: string;
+    avatar_color?: string;
+    avatar_initials?: string;
+    
     data_criacao: string;
     data_atualizacao: string;
+}
+
+export interface InteracaoPessoa {
+    id: string;
+    pessoa_id: string;
+    tarefa_id?: string;
+    reuniao_id?: string;
+    tipo: 'mencao_tarefa' | 'mencao_diario' | 'reuniao' | 'manual';
+    data: string;
+    descricao: string;
+    link_origem?: string;
+    data_criacao: string;
 }
 
 export interface TipoBolsa {

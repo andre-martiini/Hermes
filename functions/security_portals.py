@@ -312,7 +312,7 @@ Responda SOMENTE com JSON valido, sem markdown, sem explicacoes:
             except Exception as img_err:
                 print(f"Imagem ignorada em matchShoppingItemsAI: {img_err}")
 
-        result = client.models.generate_content(model='gemini-3-flash-preview', contents=content_parts)
+        result = client.models.generate_content(model='gemini-3.5-flash', contents=content_parts)
         parsed = parse_json_response(result.text or '')
         itens = parsed.get('itens') or []
 
@@ -398,7 +398,7 @@ def generatePgdFromDiariesAI(req: https_fn.CallableRequest):
     try:
         genai = get_genai_module()
         client = genai.Client(api_key=gemini_key)
-        result = client.models.generate_content(model='gemini-3-flash-preview', contents=prompt)
+        result = client.models.generate_content(model='gemini-3.5-flash', contents=prompt)
         parsed = parse_json_response(result.text or '')
         return {'registros': parsed.get('registros') or []}
     except Exception as e:
@@ -454,7 +454,7 @@ def generatePgdFromRawTextAI(req: https_fn.CallableRequest):
     try:
         genai = get_genai_module()
         client = genai.Client(api_key=gemini_key)
-        result = client.models.generate_content(model='gemini-3-flash-preview', contents=prompt)
+        result = client.models.generate_content(model='gemini-3.5-flash', contents=prompt)
         parsed = parse_json_response(result.text or '')
         return {'registros': parsed.get('registros') or []}
     except Exception as e:
