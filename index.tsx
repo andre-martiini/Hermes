@@ -59,6 +59,7 @@ import { FerramentasView } from './src/components/tools/FerramentasView';
 import { QuickNoteModal } from './src/components/modals/QuickNoteModal';
 import { SpeedDialMenu } from './src/components/ui/SpeedDialMenu';
 import { HermesCopilotoDrawer } from './src/components/tools/HermesCopilotoDrawer';
+import { HermesGlobalChat } from './src/components/tools/HermesGlobalChat';
 import { generateMarkdown, generateActionsMarkdown, downloadMarkdown } from './src/utils/markdownGenerator';
 import {
   ROOT_ACTIONS_FOLDER_ID,
@@ -4521,11 +4522,31 @@ const App: React.FC = () => {
       entregasSemCadastro: entregaStatus.filter(s => !s.entregaId)
     };
   }, [planosTrabalho, currentYear, currentMonth, pgcEntregas, pgcTasks, atividadesPGC, afastamentos]);
+  const isDarkTheme = themeMode === 'dark' || (themeMode === 'system' && prefersDark);
+  const appBgClass = isDarkTheme ? 'bg-[#191c1c] text-[#f0f1f0]' : 'bg-surface-container-low text-on-surface';
+  const loginPanelClass = isDarkTheme
+    ? 'bg-slate-900 border-white/10 shadow-[0_30px_60px_rgba(0,0,0,0.55)]'
+    : 'bg-white border-border-grid shadow-soft-touch';
+  const loginLogoTileClass = isDarkTheme
+    ? 'bg-slate-950 border-white/10'
+    : 'bg-surface border-border-grid';
+  const loginTitleClass = isDarkTheme ? 'text-slate-100' : 'text-slate-900';
+  const loginMutedClass = isDarkTheme ? 'text-slate-400' : 'text-slate-500';
+  const loginSubtleClass = isDarkTheme ? 'text-slate-500' : 'text-slate-400';
+  const loginPrimaryButtonClass = isDarkTheme
+    ? 'bg-slate-100 text-slate-950 hover:bg-white focus-visible:ring-slate-100'
+    : 'bg-slate-900 text-white hover:bg-slate-800 focus-visible:ring-slate-900';
+  const loginCheckboxClass = isDarkTheme
+    ? 'bg-slate-950 border-slate-700 text-slate-100 focus:ring-slate-100'
+    : 'bg-white border-border-grid text-slate-900 focus:ring-slate-900';
+  const loadingSpinnerClass = isDarkTheme
+    ? 'border-slate-700 border-t-slate-100'
+    : 'border-slate-200 border-t-slate-900';
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className={`min-h-screen flex items-center justify-center ${appBgClass}`}>
         <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+          <div className={`h-12 w-12 animate-spin rounded-none border-4 ${loadingSpinnerClass}`}></div>
           <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Hermes está carregando...</p>
         </div>
       </div>
@@ -4533,18 +4554,18 @@ const App: React.FC = () => {
   }
   if (!user) {
     return (
-      <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center p-6">
-        <div className="bg-white p-12 rounded-none md:rounded-[3rem] shadow-2xl border border-slate-100 max-w-md w-full text-center animate-in zoom-in-95">
-          <div className="w-20 h-20 bg-slate-900 rounded-[2rem] flex items-center justify-center mx-auto mb-8 shadow-xl">
-            <span className="text-white text-3xl font-black">H</span>
+      <div className={`min-h-screen flex flex-col items-center justify-center p-6 transition-colors ${appBgClass}`}>
+        <div className={`w-full max-w-md animate-in zoom-in-95 border p-8 text-center md:p-10 rounded-none ${loginPanelClass}`}>
+          <div className={`mx-auto mb-8 flex h-20 w-20 items-center justify-center border p-3 rounded-none ${loginLogoTileClass}`}>
+            <img src="/logo.png" alt="Hermes" className="h-full w-full object-contain" />
           </div>
-          <h1 className="text-3xl font-black text-slate-900 tracking-tight mb-2">Hermes</h1>
-          <p className="text-slate-500 text-sm font-medium mb-10 leading-relaxed">
-            Bem-vindo ao seu ecossistema de produtividade e gestão Ã  vista.
+          <h1 className={`mb-2 font-mono text-3xl font-black uppercase tracking-tight ${loginTitleClass}`}>Hermes</h1>
+          <p className={`mb-10 text-sm font-medium leading-relaxed ${loginMutedClass}`}>
+            Bem-vindo ao seu ecossistema de produtividade e gestão à vista.
           </p>
           <button
             onClick={handleLogin}
-            className="w-full bg-slate-900 text-white py-5 rounded-none md:rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-2xl shadow-slate-200 hover:bg-blue-600 transition-all active:scale-95 flex items-center justify-center gap-4"
+            className={`flex w-full items-center justify-center gap-4 rounded-none py-4 font-mono text-[10px] font-black uppercase tracking-[0.2em] transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${isDarkTheme ? 'focus-visible:ring-offset-slate-900' : 'focus-visible:ring-offset-white'} ${loginPrimaryButtonClass}`}
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12.48 10.92v3.28h7.84c-.24 1.84-.908 3.152-2.112 4.076-1.028.724-2.48 1.408-5.728 1.408-5.104 0-9.272-4.144-9.272-9.232s4.168-9.232 9.272-9.232c2.808 0 4.58 1.104 5.612 2.056l2.312-2.312c-1.936-1.824-4.52-3.112-7.924-3.112-6.524 0-12 5.424-12 12s5.476 12 12 12c3.552 0 6.228-1.172 8.528-3.564 2.376-2.376 3.128-5.704 3.128-8.32 0-.824-.068-1.552-.2-2.224h-11.456z" />
@@ -4557,29 +4578,27 @@ const App: React.FC = () => {
               id="remember-me"
               checked={rememberMe}
               onChange={(e) => setRememberMe(e.target.checked)}
-              className="w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900 cursor-pointer"
+              className={`h-4 w-4 cursor-pointer rounded-none ${loginCheckboxClass}`}
             />
-            <label htmlFor="remember-me" className="text-[10px] font-black uppercase tracking-widest text-slate-400 cursor-pointer select-none hover:text-slate-600 transition-colors">
+            <label htmlFor="remember-me" className={`cursor-pointer select-none font-mono text-[10px] font-black uppercase tracking-widest transition-colors ${loginSubtleClass} ${isDarkTheme ? 'hover:text-slate-200' : 'hover:text-slate-700'}`}>
               Mantenha-me conectado
             </label>
           </div>
-          <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest mt-8">Secure Authentication via Firebase</p>
+          <p className={`mt-8 font-mono text-[8px] font-black uppercase tracking-widest ${loginSubtleClass}`}>Secure Authentication via Firebase</p>
         </div>
       </div>
     );
   }
   if (isInitialDataLoading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className={`min-h-screen flex items-center justify-center ${appBgClass}`}>
         <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+          <div className={`h-12 w-12 animate-spin rounded-none border-4 ${loadingSpinnerClass}`}></div>
           <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Carregando seus dados...</p>
         </div>
       </div>
     );
   }
-  const isDarkTheme = themeMode === 'dark' || (themeMode === 'system' && prefersDark);
-  const appBgClass = isDarkTheme ? 'bg-[#191c1c] text-[#f0f1f0]' : 'bg-surface-container-low text-on-surface';
   const sidebarClass = isDarkTheme
     ? 'bg-[#191c1c] text-[#f0f1f0] border-r border-white/10'
     : 'bg-surface-container-low text-on-surface border-r border-border-grid';
@@ -7720,14 +7739,12 @@ const App: React.FC = () => {
             />
           )
         }
-        <HermesCopilotoDrawer
+        <HermesGlobalChat
           isOpen={isCopilotoOpen}
           onClose={() => { setIsCopilotoOpen(false); setCopilotoAutoStartMic(false); setCopilotoMode('default'); }}
           autoStartMic={copilotoAutoStartMic}
           copilotMode={copilotoMode}
           isDark={isDarkTheme}
-          taskId={selectedTask?.id || selectedWorkItem?.id}
-          systemId={selectedSystemId || (selectedTask as any)?.sistema_id || selectedWorkItem?.sistema_id}
           userId={user?.uid || ''}
           onOpenTask={async (id) => {
             const task = tarefas.find(t => t.id === id);

@@ -44,6 +44,7 @@ export const SpeedDialMenu = ({
 }: SpeedDialMenuProps) => {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const actionBadgeClass = isDark ? 'border-slate-950' : 'border-white';
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -150,7 +151,7 @@ export const SpeedDialMenu = ({
       label: 'Notificações',
       color: 'text-slate-700',
       badge: notifications.some(n => !n.isRead)
-        ? <span className="absolute top-2.5 right-2.5 w-3 h-3 bg-rose-500 border-2 border-white rounded-full" />
+        ? <span className={`absolute right-2 top-2 h-2.5 w-2.5 border-2 bg-rose-500 rounded-none ${actionBadgeClass}`} />
         : null as React.ReactNode,
       onClick: () => { setOpen(false); onToggleNotifications(); },
       icon: (
@@ -163,7 +164,7 @@ export const SpeedDialMenu = ({
       label: isSyncing ? 'Sincronizando…' : 'Sincronizar',
       color: 'text-slate-700',
       badge: isSyncing
-        ? <span className="absolute top-2.5 right-2.5 w-3 h-3 bg-blue-500 border-2 border-white rounded-full animate-ping" />
+        ? <span className={`absolute right-2 top-2 h-2.5 w-2.5 border-2 bg-blue-500 rounded-none animate-ping ${actionBadgeClass}`} />
         : null as React.ReactNode,
       onClick: () => { setOpen(false); onSync(); },
       icon: (
@@ -187,6 +188,16 @@ export const SpeedDialMenu = ({
   ];
 
   const hasUrgentBadge = notifications.some(n => !n.isRead) || isSyncing;
+  const modalSurfaceClass = isDark
+    ? 'bg-slate-950/90 border-slate-800'
+    : 'bg-surface/95 border-border-grid';
+  const actionButtonBaseClass = 'relative flex items-center justify-center w-16 h-16 sm:w-[72px] sm:h-[72px] border rounded-none shadow-soft-touch transition-all duration-200 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-tactile focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950';
+  const actionButtonThemeClass = isDark
+    ? 'bg-slate-900 border-slate-800 hover:bg-slate-800 hover:border-slate-700'
+    : 'bg-white border-border-grid hover:bg-slate-50 hover:border-slate-300';
+  const actionLabelClass = isDark
+    ? 'text-slate-400 group-hover:text-white'
+    : 'text-slate-500 group-hover:text-slate-900';
 
   return (
     <div
@@ -202,7 +213,7 @@ export const SpeedDialMenu = ({
           onClick={() => setOpen(false)}
         >
           <div
-            className={`grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-x-8 gap-y-12 max-w-4xl p-8 pb-12 rounded-3xl transition-transform duration-300 ${
+            className={`grid w-full max-w-3xl grid-cols-2 gap-4 border p-4 sm:grid-cols-3 sm:p-6 md:grid-cols-5 ${modalSurfaceClass} rounded-none shadow-soft-touch transition-transform duration-300 ${
               open ? 'scale-100 translate-y-0' : 'scale-90 translate-y-4'
             }`}
             onClick={(e) => e.stopPropagation()}
@@ -212,7 +223,7 @@ export const SpeedDialMenu = ({
               return (
                 <div
                   key={action.label}
-                  className="group flex flex-col items-center gap-2.5 cursor-pointer"
+                  className="group flex flex-col items-center gap-2 cursor-pointer"
                   onClick={action.onClick}
                   style={{
                     transform: open ? 'translateY(0) scale(1)' : 'translateY(16px) scale(0.9)',
@@ -224,19 +235,13 @@ export const SpeedDialMenu = ({
                     type="button"
                     aria-label={action.label}
                     onClick={(e) => { e.stopPropagation(); action.onClick(); }}
-                    className={`relative flex flex-col items-center justify-center w-20 h-20 sm:w-24 sm:h-24 border ${
-                      isDark
-                        ? 'bg-slate-900 border-slate-800 group-hover:bg-slate-800 group-hover:border-slate-700'
-                        : 'bg-white border-border-grid group-hover:bg-slate-50 group-hover:border-slate-300'
-                    } ${actionColor} rounded-2xl sm:rounded-3xl shadow-soft-touch group-hover:shadow-2xl group-hover:scale-105 active:scale-95 transition-all duration-300`}
+                    className={`${actionButtonBaseClass} ${actionButtonThemeClass} ${actionColor} group-hover:shadow-lg group-hover:-translate-y-0.5`}
                   >
                     {action.icon}
                     {action.badge}
                   </button>
 
-                  <span className={`text-[11px] sm:text-xs font-bold uppercase tracking-wider text-center transition-colors duration-200 select-none ${
-                    isDark ? 'text-slate-400 group-hover:text-white' : 'text-slate-200 group-hover:text-white'
-                  }`}>
+                  <span className={`min-h-[2.25rem] max-w-[7rem] text-center font-mono text-[9px] font-black uppercase leading-tight tracking-[0.16em] transition-colors duration-200 select-none ${actionLabelClass}`}>
                     {action.label}
                   </span>
                 </div>
@@ -275,7 +280,7 @@ export const SpeedDialMenu = ({
 
         {/* Urgent badge on trigger */}
         {hasUrgentBadge && !open && (
-          <span className={`absolute ${triggerLabel ? '-top-1 -right-1' : 'top-1.5 right-1.5'} w-2 h-2 bg-rose-500 border border-white rounded-full`} />
+          <span className={`absolute ${triggerLabel ? '-top-1 -right-1' : 'right-1.5 top-1.5'} h-2 w-2 border border-white bg-rose-500 rounded-none`} />
         )}
       </button>
 
