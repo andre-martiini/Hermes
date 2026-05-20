@@ -506,8 +506,7 @@ export const TaskExecutionView = ({
   // Proposal editing (Feature 1 & 2)
   const [editingProposal, setEditingProposal] = useState<{ msgIndex: number; items: ActionPlanItem[] } | null>(null);
 
-  // Progressive plan adjustment (Feature 3)
-  const [showPlanSuggestion, setShowPlanSuggestion] = useState(false);
+
 
   // Plan history viewer (Feature 5)
   const [showPlanHistory, setShowPlanHistory] = useState(false);
@@ -749,11 +748,7 @@ export const TaskExecutionView = ({
       showToast('Status atualizado para Concluído!', 'success');
     }
 
-    // Feature 3: sugere revisão do plano restante quando uma etapa é concluída
-    if (newCompleted) {
-      const remaining = updated.filter(i => !i.completed);
-      if (remaining.length > 0) setShowPlanSuggestion(true);
-    }
+
   };
 
   const openReminderModal = (reminder?: TaskReminder) => {
@@ -777,14 +772,7 @@ export const TaskExecutionView = ({
     showToast('Lembrete removido.', 'success');
   };
 
-  // Feature 3: envia mensagem ao copiloto para revisar etapas restantes
-  const handleSuggestPlanAdjustment = () => {
-    const completed = (currentTaskData.plano_acao || []).filter(i => i.completed);
-    const remaining = (currentTaskData.plano_acao || []).filter(i => !i.completed);
-    const msg = `Revisar plano: concluí ${completed.map(i => `"${i.text}"`).join(', ')}. Etapas restantes: ${remaining.map((i, idx) => `${idx + 1}. ${i.text}`).join('; ')}. O plano restante ainda faz sentido ou deve ser ajustado com base no que foi feito?`;
-    setShowPlanSuggestion(false);
-    sendChatMessage(msg);
-  };
+
 
   // ─── Diary Handlers ───────────────────────────────────────────
   const handleAddFollowUp = () => {
@@ -1871,14 +1859,7 @@ export const TaskExecutionView = ({
                         )}
                       </div>
 
-                      {showPlanSuggestion && (
-                        <div className={`mx-3 mb-3 flex items-center gap-2 p-2 rounded-none border ${isDark ? 'bg-blue-500/10 border-blue-500/20' : 'bg-blue-50 border-blue-200'}`}>
-                          <svg className="w-3 h-3 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-                          <span className={`flex-1 text-[9px] ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>Revisar plano com base no progresso?</span>
-                          <button onClick={handleSuggestPlanAdjustment} className="text-[9px] font-black text-blue-400 hover:text-blue-300 uppercase tracking-widest px-2">Sim</button>
-                          <button onClick={() => setShowPlanSuggestion(false)} className={`text-[9px] ${isDark ? 'text-white/30 hover:text-white/50' : 'text-slate-400 hover:text-slate-600'}`}>Ignorar</button>
-                        </div>
-                      )}
+
 
                       {(currentTaskData.plano_acao_historico || []).length > 0 && (
                         <div className="px-3 mb-3">
@@ -2534,7 +2515,7 @@ export const TaskExecutionView = ({
       {showInsightModal && insightState && (
         <div className="fixed inset-0 z-[400] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={handleInsightDiscard} />
-          <div className={`relative w-full max-w-md rounded-none border shadow-2xl p-6 ${isDark ? 'bg-[#0f1724] border-white/10' : 'bg-white border-border-grid'}`}>
+          <div className={`relative w-full max-w-md max-h-[90vh] overflow-y-auto custom-scrollbar rounded-none border shadow-2xl p-6 ${isDark ? 'bg-[#0f1724] border-white/10' : 'bg-white border-border-grid'}`}>
 
             {/* Header */}
             <div className="flex items-center gap-3 mb-5">
