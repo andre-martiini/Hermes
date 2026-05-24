@@ -7,12 +7,6 @@ import tempfile
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
-from google import genai
-
-# Import ppt-master tools
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'ppt_master'))
-from finalize_svg import crop_images_in_svg, embed_icons_in_file, fix_image_aspect_in_svg
-from svg_finalize.embed_icons import DEFAULT_ICONS_DIR
 
 
 def _get_slides_bucket():
@@ -257,6 +251,7 @@ def slideExecutorWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedDa
         if not gemini_key:
             raise Exception("Chave Gemini não configurada.")
 
+        from google import genai
         client = genai.Client(api_key=gemini_key)
 
         # Gerar SVG (Simplificado - o motor real faria o mapping do template)
@@ -358,6 +353,9 @@ def slideFinalizeWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedDa
             file_path = os.path.join(svg_output_dir, os.path.basename(blob.name))
             blob.download_to_filename(file_path)
 
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'ppt_master'))
+        from finalize_svg import crop_images_in_svg, embed_icons_in_file, fix_image_aspect_in_svg
+        from svg_finalize.embed_icons import DEFAULT_ICONS_DIR
         icons_dir = DEFAULT_ICONS_DIR
 
         # 2. Finalize SVGs usando helpers file-based do PPT Master
