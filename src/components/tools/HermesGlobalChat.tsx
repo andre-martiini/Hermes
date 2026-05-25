@@ -203,9 +203,9 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
   const isBlocked = isLoading || uploadPhase !== 'idle' || isProcessingMic || isTranscribing;
   const modeLabel = copilotMode === 'finance' ? 'Financeiro' : copilotMode === 'saude' ? 'Saúde' : 'Global';
 
-  const shellClass = isDark ? 'bg-[#191c1c] text-slate-100' : 'bg-surface-container-low text-slate-900';
+  const shellClass = isDark ? 'bg-[#191c1c] text-slate-100' : 'bg-surface text-slate-900';
   const sidebarClass = isDark ? 'bg-[#151919] border-white/10' : 'bg-white border-border-grid';
-  const panelClass = isDark ? 'bg-[#191c1c] border-white/10' : 'bg-surface-container-low border-border-grid';
+  const panelClass = isDark ? 'bg-[#191c1c] border-white/10' : 'bg-white border-border-grid';
   const raisedClass = isDark ? 'bg-slate-900 border-white/10' : 'bg-white border-border-grid shadow-soft-touch';
   const mutedClass = isDark ? 'text-slate-500' : 'text-slate-400';
   const textSoftClass = isDark ? 'text-slate-300' : 'text-slate-600';
@@ -811,7 +811,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
           </button>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8">
+        <div className={`min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8 ${isDark ? 'bg-[#191c1c]' : 'bg-white'}`}>
           <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col">
             {messages.length === 0 && !isLoading ? (
               <div className="flex flex-1 flex-col justify-center py-10">
@@ -896,7 +896,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
           </div>
         </div>
 
-        <footer className={`shrink-0 border-t px-4 py-4 md:px-8 ${isDark ? 'border-white/10 bg-[#171b1b]' : 'border-border-grid bg-surface-container-low'}`}>
+        <footer className={`shrink-0 border-t px-4 py-4 md:px-8 ${isDark ? 'border-white/10 bg-[#171b1b]' : 'border-border-grid bg-surface'}`}>
           <div className="mx-auto w-full max-w-4xl">
             {footerError && (
               <div className="mb-3 flex items-start gap-2 border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">

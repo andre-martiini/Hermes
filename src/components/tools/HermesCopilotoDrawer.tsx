@@ -1864,7 +1864,7 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 </div>
             </div>
 
-            <div className="flex-1 min-h-0 overflow-hidden flex relative">
+            <div className={`flex-1 min-h-0 overflow-hidden flex relative ${isDark ? 'bg-[#0f0f1a]' : 'bg-white'}`}>
                 {/* History Sidebar */}
                 {showHistory && (
                     <div className={`absolute inset-0 z-10 flex flex-col ${isDark ? 'border-r border-border-grid bg-[#0b1220]' : 'border-r border-border-grid bg-white'}`}>
@@ -1937,8 +1937,8 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                 )}
 
                 {/* Chat Area */}
-                <div className="flex-1 min-h-0 flex flex-col min-w-0 overflow-hidden">
-                    <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-6" style={{ scrollbarWidth: 'thin' }}>
+                <div className={`flex-1 min-h-0 flex flex-col min-w-0 overflow-hidden ${isDark ? 'bg-[#0f0f1a]' : 'bg-white'}`}>
+                    <div className={`flex-1 min-h-0 overflow-y-auto p-6 space-y-6 ${isDark ? 'bg-[#0f0f1a]' : 'bg-white'}`} style={{ scrollbarWidth: 'thin' }}>
                         {messages.length === 0 && !isLoading && (
                             <div className="h-full flex flex-col items-center justify-center pointer-events-none select-none">
                                 <div className={`${isDark ? 'text-white' : 'text-slate-900'} opacity-[0.05] animate-pulse-slow`}>
