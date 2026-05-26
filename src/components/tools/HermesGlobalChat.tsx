@@ -13,6 +13,7 @@ import {
   query,
   setDoc,
   Timestamp,
+  updateDoc,
   where,
   writeBatch,
 } from 'firebase/firestore';
@@ -86,6 +87,36 @@ const QUICK_PROMPTS = [
 type CopilotMode = 'default' | 'finance' | 'saude';
 type UploadPhase = 'idle' | 'uploading' | 'processing';
 
+interface FieldChange {
+  original: string;
+  novo: string;
+  novo_raw?: any;
+}
+
+interface PendingEdit {
+  task_id: string;
+  titulo: string;
+  alteracoes: Record<string, FieldChange>;
+  justificativa: string;
+  snapshot_ts: string;
+  status: 'pending' | 'completed' | 'invalidated' | 'cancelled' | 'error';
+  errorMessage?: string;
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  titulo: 'Título',
+  descricao: 'Descrição',
+  data_limite: 'Prazo',
+  data_inicio: 'Data Início',
+  horario_inicio: 'Horário Início',
+  horario_fim: 'Horário Fim',
+  status: 'Status',
+  tags: 'Tags',
+  area_tematica: 'Área Temática',
+  tipo_acao: 'Tipo de Ação',
+  notas: 'Notas',
+};
+
 interface Session {
   id: string;
   title: string;
@@ -103,6 +134,7 @@ interface Message {
   content: string;
   timestamp: any;
   toolsUsed?: string[];
+  pendingEdit?: PendingEdit;
 }
 
 interface HermesGlobalChatProps {
@@ -190,6 +222,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
+  const [loadingEditId, setLoadingEditId] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -600,6 +633,44 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
     }
   };
 
+  const handleConfirmEdit = async (messageId: string, pendingEdit: PendingEdit) => {
+    if (!currentSessionId || loadingEditId) return;
+    setLoadingEditId(messageId);
+    try {
+      const alteracoes = Object.fromEntries(
+        Object.entries(pendingEdit.alteracoes).map(([campo, change]) => [
+          campo,
+          change.novo_raw !== undefined ? change.novo_raw : change.novo,
+        ]),
+      );
+      const fn = httpsCallable(functions, 'confirmarEdicaoAcao');
+      await fn({
+        sessionId: currentSessionId,
+        messageId,
+        taskId: pendingEdit.task_id,
+        alteracoes,
+        snapshotTs: pendingEdit.snapshot_ts,
+      });
+    } catch (err: any) {
+      setFooterError(err?.message || 'Erro ao confirmar edição.');
+    } finally {
+      setLoadingEditId(null);
+    }
+  };
+
+  const handleCancelEdit = async (messageId: string) => {
+    if (!currentSessionId || loadingEditId) return;
+    setLoadingEditId(messageId);
+    try {
+      const msgRef = doc(db, 'sessoes_copiloto', currentSessionId, 'mensagens', messageId);
+      await updateDoc(msgRef, { 'pendingEdit.status': 'cancelled' });
+    } catch (err: any) {
+      setFooterError(err?.message || 'Erro ao cancelar edição.');
+    } finally {
+      setLoadingEditId(null);
+    }
+  };
+
   const handleCopyMessage = async (key: string, content: string) => {
     try {
       await navigator.clipboard.writeText(content || '');
@@ -876,6 +947,99 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                         <div className="break-words [overflow-wrap:anywhere]">
                           {renderMarkdown(msg, messageKey)}
                         </div>
+                        {msg.pendingEdit && msg.id && (() => {
+                          const pe = msg.pendingEdit!;
+                          const mid = msg.id!;
+                          const isProcessing = loadingEditId === mid;
+
+                          if (pe.status === 'completed') {
+                            return (
+                              <div className={`mt-3 border p-3 ${isDark ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-border-grid bg-emerald-50'}`}>
+                                <p className={`mb-2 flex items-center gap-1.5 font-mono text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>
+                                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                  Edição confirmada
+                                </p>
+                                <p className={`truncate text-[10px] font-semibold ${isDark ? 'text-emerald-200' : 'text-emerald-700'}`}>{pe.titulo}</p>
+                                <div className="mt-1.5 space-y-1">
+                                  {Object.entries(pe.alteracoes).map(([campo, change]) => (
+                                    <div key={campo} className={`flex flex-wrap gap-1 text-[9px] ${isDark ? 'text-emerald-300' : 'text-emerald-600'}`}>
+                                      <span className="font-black">{FIELD_LABELS[campo] ?? campo}:</span>
+                                      <span className="opacity-60 line-through">{change.original || '—'}</span>
+                                      <span>→</span>
+                                      <span className="font-semibold">{change.novo || '—'}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          if (pe.status === 'invalidated' || pe.status === 'error') {
+                            return (
+                              <div className={`mt-3 border p-3 ${isDark ? 'border-rose-500/40 bg-rose-500/10' : 'border-red-200 bg-red-50'}`}>
+                                <p className={`mb-1 flex items-center gap-1.5 font-mono text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-rose-300' : 'text-red-600'}`}>
+                                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                                  {pe.status === 'error' ? 'Erro na edição' : 'Edição bloqueada'}
+                                </p>
+                                <p className={`text-[10px] ${isDark ? 'text-rose-300' : 'text-red-600'}`}>{pe.errorMessage ?? 'Operação indisponível.'}</p>
+                              </div>
+                            );
+                          }
+
+                          if (pe.status === 'cancelled') {
+                            return (
+                              <div className={`mt-3 border p-3 ${isDark ? 'border-white/10 bg-white/5' : 'border-border-grid bg-slate-50'}`}>
+                                <p className={`flex items-center gap-1.5 font-mono text-[10px] font-black uppercase tracking-widest ${mutedClass}`}>
+                                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                  Edição cancelada
+                                </p>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className={`mt-3 border p-3 ${raisedClass}`}>
+                              <p className={`mb-2 flex items-center gap-1.5 font-mono text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
+                                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                Edição pendente
+                              </p>
+                              <p className={`mb-2 truncate text-[10px] font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{pe.titulo}</p>
+                              <div className="mb-3 space-y-1.5">
+                                {Object.entries(pe.alteracoes).map(([campo, change]) => (
+                                  <div key={campo} className="grid grid-cols-[80px_1fr_1fr] gap-1 text-[9px]">
+                                    <span className={`font-black uppercase ${mutedClass}`}>{FIELD_LABELS[campo] ?? campo}</span>
+                                    <span className={`truncate line-through ${mutedClass}`}>{change.original || '—'}</span>
+                                    <span className={`truncate font-semibold ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>{change.novo || '—'}</span>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className={`flex gap-2 border-t pt-2 ${isDark ? 'border-white/10' : 'border-amber-100'}`}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleConfirmEdit(mid, pe)}
+                                  disabled={isProcessing}
+                                  className="inline-flex items-center gap-1.5 bg-emerald-600 px-3 py-1.5 font-mono text-[10px] font-black uppercase tracking-widest text-white shadow-sm transition-all hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {isProcessing ? (
+                                    <span className="h-2.5 w-2.5 animate-spin border-2 border-white/40 border-t-white" />
+                                  ) : (
+                                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                                  )}
+                                  Confirmar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCancelEdit(mid)}
+                                  disabled={isProcessing}
+                                  className={`inline-flex items-center gap-1.5 border px-3 py-1.5 font-mono text-[10px] font-black uppercase tracking-widest shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? 'border-white/10 bg-transparent text-slate-400 hover:bg-white/5 hover:text-slate-200' : 'border-border-grid bg-white text-slate-400 hover:bg-slate-100 hover:text-slate-600'}`}
+                                >
+                                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+                                  Cancelar
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </article>
                     </div>
                   );
