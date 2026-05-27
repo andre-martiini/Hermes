@@ -329,7 +329,6 @@ export const TaskExecutionView = ({
 
   const [newFollowUp, setNewFollowUp] = useState('');
   const [isUploading, setIsUploading] = useState(false);
-  const [showPool, setShowPool] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null!);
 
@@ -530,9 +529,10 @@ export const TaskExecutionView = ({
   const [kgNodesByMsg, setKgNodesByMsg] = useState<Record<number, Array<{ node_id: string; titulo: string; resumo?: string; n_tasks?: number }>>>({});
 
   // Knowledge panel
-  const [showKnowledgePanel, setShowKnowledgePanel] = useState(false);
+  const [showKnowledgePanel, setShowKnowledgePanel] = useState(true);
   const [sessionExtraFiles, setSessionExtraFiles] = useState<{ id: string; name: string; status: 'uploading' | 'ready' | 'error' }[]>([]);
   const [isUploadingExtra, setIsUploadingExtra] = useState(false);
+  const [isContextDropActive, setIsContextDropActive] = useState(false);
   const extraFileInputRef = useRef<HTMLInputElement>(null);
 
   // Audio / transcription
@@ -811,6 +811,13 @@ export const TaskExecutionView = ({
   };
 
   // ─── File Upload ──────────────────────────────────────────────
+  const readFileAsBase64 = (file: File) => new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
   const handleFileUpload = async (files: Array<{ file: File; customName?: string }>) => {
     if (files.length === 0) return [];
     setIsUploading(true);
@@ -819,15 +826,10 @@ export const TaskExecutionView = ({
     try {
       for (const { file, customName } of files) {
         const finalName = getRenamedFileName(file.name, customName);
-        const b64 = await new Promise<string>((res, rej) => {
-          const r = new FileReader();
-          r.onload = () => res((r.result as string).split(',')[1]);
-          r.onerror = rej;
-          r.readAsDataURL(file);
-        });
+        const b64 = await readFileAsBase64(file);
         const result = await uploadFunc({ fileName: finalName, fileContent: b64, mimeType: file.type, folderId: appSettings.googleDriveFolderId });
         const d = result.data as any;
-        const item: PoolItem = { id: Math.random().toString(36).substring(2, 11), tipo: 'arquivo', valor: d.webViewLink, nome: finalName, data_criacao: new Date().toISOString() };
+        const item: PoolItem = { id: Math.random().toString(36).substring(2, 11), tipo: 'arquivo', valor: d.webViewLink, nome: finalName, data_criacao: new Date().toISOString(), drive_file_id: d.fileId };
         uploadedItems.push(item);
       }
       const newEntries = uploadedItems.map(i => ({ data: new Date().toISOString(), nota: buildDiaryRichNote('FILE', i.nome || 'Arquivo', i.valor) }));
@@ -864,6 +866,61 @@ export const TaskExecutionView = ({
     setPendingFiles(selectedFiles.map(createPendingUploadFile));
     setModalConfig({ type: 'file_upload', isOpen: true });
     setShowAttachMenu(false);
+  };
+
+  const processKnowledgeFiles = async (selectedFiles: File[]) => {
+    const files = selectedFiles.filter(file => file.size > 0);
+    if (files.length === 0 || isUploading || isUploadingExtra) return;
+
+    const extraContextId = currentTaskData.extra_context_id || crypto.randomUUID();
+    const tempFiles = files.map(file => ({
+      id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2, 8)}`,
+      name: file.name,
+      status: 'uploading' as const,
+    }));
+
+    setSessionExtraFiles(prev => [...prev, ...tempFiles]);
+    setIsUploadingExtra(true);
+    setShowKnowledgePanel(true);
+
+    try {
+      await handleFileUpload(files.map(file => ({ file, customName: file.name })));
+      const fn = httpsCallable(functions, 'processExtraContextFile');
+
+      for (let i = 0; i < files.length; i += 1) {
+        const file = files[i];
+        const temp = tempFiles[i];
+        try {
+          const fileBase64 = await readFileAsBase64(file);
+          const result = await fn({ fileBase64, filename: file.name, mimeType: file.type, extraContextId });
+          const docId = (result.data as any)?.docId || temp.id;
+          setSessionExtraFiles(prev => prev.map(item => item.id === temp.id ? { ...item, id: docId, status: 'ready' } : item));
+        } catch {
+          setSessionExtraFiles(prev => prev.map(item => item.id === temp.id ? { ...item, status: 'error' } : item));
+        }
+      }
+
+      if (!currentTaskData.extra_context_id) {
+        onSave(task.id, { extra_context_id: extraContextId });
+      }
+      showToast('Conhecimento da ação atualizado.', 'success');
+    } finally {
+      setIsUploadingExtra(false);
+      setIsContextDropActive(false);
+    }
+  };
+
+  const handleKnowledgeInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = event.target.files ? Array.from(event.target.files) : [];
+    event.target.value = '';
+    processKnowledgeFiles(selectedFiles);
+  };
+
+  const handleKnowledgeDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsContextDropActive(false);
+    processKnowledgeFiles(Array.from(event.dataTransfer.files));
   };
 
   // ─── Audio Recording ──────────────────────────────────────────
@@ -2025,7 +2082,7 @@ export const TaskExecutionView = ({
                         <p className={labelCls}>Contexto</p>
                       </div>
                       
-                      <div className="p-4 space-y-6">
+                      <div className="p-4 flex flex-col gap-6">
                         {/* Síntese / Descrição */}
                         {currentTaskData.descricao && (
                           <div className="space-y-2">
@@ -2059,7 +2116,7 @@ export const TaskExecutionView = ({
                         </div>
 
                         {/* Tags Dinâmicas */}
-                        <div className="space-y-3">
+                        <div className="space-y-3 order-last">
                           <div className="flex items-center justify-between">
                             <p className={`${labelCls} opacity-60`}>Tags Dinâmicas</p>
                             <button
@@ -2140,38 +2197,104 @@ export const TaskExecutionView = ({
                           </div>
                         </div>
 
-                        {/* Pool de Dados */}
+                        {/* Conhecimento */}
                         <div className="space-y-3">
-                          <button onClick={() => setShowPool(!showPool)} className="w-full flex items-center gap-2">
-                            <p className={`${labelCls} flex-1 text-left opacity-60`}>Pool de Dados</p>
+                          <button onClick={() => setShowKnowledgePanel(!showKnowledgePanel)} className="w-full flex items-center gap-2">
+                            <p className={`${labelCls} flex-1 text-left opacity-60`}>Conhecimento</p>
                             <span className={`text-[9px] font-bold ${mutedText}`}>{(currentTaskData.pool_dados || []).length}</span>
-                            <svg className={`w-3 h-3 transition-transform ${mutedText} ${showPool ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeWidth="2.5" /></svg>
+                            {(derivedKnowledgeBase || currentTaskData.extra_context_id || (currentTaskData.pool_dados || []).length > 0) && (
+                              <span className="w-1.5 h-1.5 rounded-none bg-emerald-500 shrink-0" />
+                            )}
+                            <svg className={`w-3 h-3 transition-transform ${mutedText} ${showKnowledgePanel ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeWidth="2.5" /></svg>
                           </button>
-                          {showPool && (
-                            <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto">
-                              {(currentTaskData.pool_dados || []).length === 0 ? (
-                                <p className={`text-xs ${mutedText} w-full text-center py-2 italic`}>Nenhum item no pool.</p>
+                          {showKnowledgePanel && (
+                            <div className="space-y-3 animate-in fade-in duration-300">
+                              {derivedKnowledgeBase ? (
+                                <div className={`flex items-center gap-2 px-3 py-2 rounded-none border text-xs font-bold ${isDark ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+                                  <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+                                  <span className="truncate">{derivedKnowledgeBase.emoji || '📚'} {derivedKnowledgeBase.nome}</span>
+                                </div>
                               ) : (
-                                (currentTaskData.pool_dados || []).map(item => (
-                                  <button key={item.id} onClick={() => {
-                                    if (isDesktopViewport) {
-                                      setFocusedFile({ url: item.valor, nome: item.nome || item.valor, tipo: item.tipo === 'arquivo' ? 'file' : 'link', driveFileId: item.drive_file_id });
-                                    } else {
-                                      window.open(item.valor, '_blank');
-                                    }
-                                  }}
-                                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-none border text-[10px] font-bold transition-all ${isDark ? 'bg-white/10 border-white/10 text-white/70 hover:bg-white/20' : 'bg-slate-50 border-slate-100 text-slate-700 hover:bg-blue-50 hover:border-blue-200'}`}>
-                                    <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                                    <span className="truncate max-w-[120px]">{item.nome || item.valor}</span>
-                                  </button>
-                                ))
+                                <p className={`text-[10px] px-1 ${isDark ? 'text-white/30' : 'text-slate-400'}`}>
+                                  Sem base vinculada: defina a Área Temática acima.
+                                </p>
                               )}
+
+                              <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                                {(currentTaskData.pool_dados || []).length === 0 ? (
+                                  <p className={`text-xs ${mutedText} w-full text-center py-2 italic`}>Nenhum arquivo carregado.</p>
+                                ) : (
+                                  (currentTaskData.pool_dados || []).map(item => (
+                                    <button key={item.id} onClick={() => {
+                                      if (isDesktopViewport) {
+                                        setFocusedFile({ url: item.valor, nome: item.nome || item.valor, tipo: item.tipo === 'arquivo' ? 'file' : 'link', driveFileId: item.drive_file_id });
+                                      } else {
+                                        window.open(item.valor, '_blank');
+                                      }
+                                    }}
+                                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-none border text-[10px] font-bold transition-all ${isDark ? 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10' : 'bg-slate-50 border-slate-100 text-slate-700 hover:bg-blue-50 hover:border-blue-200'}`}>
+                                      <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                      <span className="min-w-0 flex-1 truncate text-left">{item.nome || item.valor}</span>
+                                      <span className={`shrink-0 text-[8px] uppercase ${mutedText}`}>{item.tipo}</span>
+                                    </button>
+                                  ))
+                                )}
+                              </div>
+
+                              {sessionExtraFiles.length > 0 && (
+                                <div className="space-y-1">
+                                  {sessionExtraFiles.map(f => (
+                                    <div key={f.id} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-none text-[10px] font-medium border ${f.status === 'ready'
+                                      ? isDark ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                                      : f.status === 'uploading'
+                                        ? isDark ? 'bg-blue-500/10 border-blue-500/20 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-600'
+                                        : isDark ? 'bg-rose-500/10 border-rose-500/20 text-rose-300' : 'bg-rose-50 border-rose-200 text-rose-600'
+                                      }`}>
+                                      {f.status === 'ready' && <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>}
+                                      {f.status === 'uploading' && <svg className="w-3 h-3 shrink-0 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>}
+                                      {f.status === 'error' && <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>}
+                                      <span className="truncate">{f.name}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {currentTaskData.extra_context_id && sessionExtraFiles.length === 0 && (
+                                <p className={`text-[9px] ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                                  Contexto processado vinculado a esta ação.
+                                </p>
+                              )}
+
+                              <div
+                                onDragEnter={(event) => { event.preventDefault(); setIsContextDropActive(true); }}
+                                onDragOver={(event) => { event.preventDefault(); setIsContextDropActive(true); }}
+                                onDragLeave={(event) => { event.preventDefault(); setIsContextDropActive(false); }}
+                                onDrop={handleKnowledgeDrop}
+                                className={`border border-dashed p-4 text-center transition-all ${isContextDropActive
+                                  ? isDark ? 'border-blue-400 bg-blue-500/10 text-blue-200' : 'border-blue-500 bg-blue-50 text-blue-700'
+                                  : isDark ? 'border-white/20 text-white/45 hover:border-blue-400/40 hover:text-blue-300 hover:bg-blue-500/5' : 'border-slate-300 text-slate-400 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50'
+                                  }`}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => extraFileInputRef.current?.click()}
+                                  disabled={isUploading || isUploadingExtra}
+                                  className="w-full flex flex-col items-center justify-center gap-2 disabled:opacity-40"
+                                >
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
+                                  <span className="font-mono text-[10px] font-black uppercase tracking-widest">
+                                    {isUploading || isUploadingExtra ? 'Processando conhecimento...' : 'Adicionar ou arrastar arquivos'}
+                                  </span>
+                                  <span className={`text-[8px] font-bold ${mutedText}`}>Qualquer arquivo aceito</span>
+                                </button>
+                                <input ref={extraFileInputRef} type="file" multiple className="hidden" onChange={handleKnowledgeInputChange} />
+                              </div>
                             </div>
                           )}
                         </div>
 
                         {/* Fontes de Conhecimento */}
-                        <div className="space-y-4">
+                        <div className="hidden">
                           <button onClick={() => setShowKnowledgePanel(!showKnowledgePanel)} className="w-full flex items-center gap-2">
                             <p className={`${labelCls} flex-1 text-left opacity-60`}>Fontes de Conhecimento</p>
                             {(currentTaskData.base_conhecimento || currentTaskData.extra_context_id) && (
@@ -2233,7 +2356,7 @@ export const TaskExecutionView = ({
                                   {isUploadingExtra ? 'Processando…' : 'Adicionar arquivo'}
                                 </button>
                                 <p className={`text-[8px] text-center mt-1 ${mutedText}`}>PDF · DOCX · TXT · MD</p>
-                                <input ref={extraFileInputRef} type="file" accept=".pdf,.docx,.txt,.md" className="hidden" onChange={handleUploadExtraContextFile} />
+                                <input type="file" accept=".pdf,.docx,.txt,.md" className="hidden" onChange={handleUploadExtraContextFile} />
                               </div>
                             </div>
                           )}
