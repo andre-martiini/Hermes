@@ -72,6 +72,14 @@ import { parseDiaryRichNote } from './src/utils/diaryEntries';
 type SortOption = 'date-asc' | 'date-desc' | 'priority-high' | 'priority-low';
 type DateFilter = 'today' | 'week' | 'month';
 type ThemeMode = 'system' | 'dark' | 'light';
+const isLocalAuthBypassEnabled = import.meta.env.DEV && import.meta.env.VITE_BYPASS_AUTH === 'true';
+const localDevUser = {
+  uid: 'local-dev-user',
+  displayName: 'Desenvolvimento Local',
+  email: 'local@hermes.dev',
+  photoURL: null,
+  getIdToken: async () => ''
+} as unknown as User;
 // --- Utilitários ---
 // --- Modais ---
 const getBucketStartDate = (label: string): string => {
@@ -1125,8 +1133,8 @@ const App: React.FC = () => {
   if (pathname.startsWith('/compras-externas')) {
     return <PublicShoppingPortal />;
   }
-  const [user, setUser] = useState<User | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(isLocalAuthBypassEnabled ? localDevUser : null);
+  const [authLoading, setAuthLoading] = useState(!isLocalAuthBypassEnabled);
   const [rememberMe, setRememberMe] = useState(true);
   const [tarefas, setTarefas] = useState<Tarefa[]>([]);
   const [undoStack, setUndoStack] = useState<UndoAction[]>([]);
@@ -1252,6 +1260,11 @@ const App: React.FC = () => {
     console.error(`[Firestore] Listener falhou (${label}):`, err);
   };
   useEffect(() => {
+    if (isLocalAuthBypassEnabled) {
+      setUser(localDevUser);
+      setAuthLoading(false);
+      return;
+    }
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setAuthLoading(false);
@@ -1269,6 +1282,10 @@ const App: React.FC = () => {
     }
   };
   const handleLogout = async () => {
+    if (isLocalAuthBypassEnabled) {
+      showToast("Auth desativada no ambiente local.", "info");
+      return;
+    }
     try {
       await signOut(auth);
       showToast("Sessão encerrada.", "info");

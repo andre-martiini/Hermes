@@ -26,6 +26,7 @@ import { isInternalAppHref, navigateWithinApp } from '../../utils/internalNaviga
 const UPLOAD_ENDPOINT = 'https://us-central1-gestao-hermes.cloudfunctions.net/uploadFileForCopiloto';
 const COPILOTO_CALLABLE_TIMEOUT_MS = 240000;
 const LARGE_PASTE_THRESHOLD = 1500;
+const COMPOSER_MAX_LINES = 8;
 const COPILOTO_SUPPORTED_FILE_EXTENSIONS = [
   '.pdf',
   '.doc',
@@ -303,10 +304,16 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
-    if (!currentSessionId && sessions.length > 0 && !isComposingNewSession) {
-      setCurrentSessionId(sessions[0].id);
-    }
-  }, [isOpen, sessions, currentSessionId, isComposingNewSession]);
+    setIsComposingNewSession(true);
+    setCurrentSessionId(null);
+    setMessages([]);
+    setInput('');
+    setAttachedFile(null);
+    setPastedContext(null);
+    setFooterError(null);
+    setShowTools(false);
+    setShowMobileHistory(false);
+  }, [isOpen]);
 
   useEffect(() => {
     if (!currentSessionId) {
@@ -338,6 +345,21 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
     const timer = setTimeout(() => textareaRef.current?.focus(), 120);
     return () => clearTimeout(timer);
   }, [isOpen, currentSessionId]);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = 'auto';
+    const computedStyle = window.getComputedStyle(textarea);
+    const lineHeight = parseFloat(computedStyle.lineHeight) || 20;
+    const paddingY = parseFloat(computedStyle.paddingTop) + parseFloat(computedStyle.paddingBottom);
+    const maxHeight = lineHeight * COMPOSER_MAX_LINES + paddingY;
+    const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
+
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }, [input, isOpen, attachedFile, pastedContext, isProcessingMic, isTranscribing, isRecording]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -1117,7 +1139,7 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                 }}
                 disabled={isBlocked}
                 placeholder={isRecording ? 'Gravando... clique no microfone para parar' : isProcessingMic || isTranscribing ? 'Transcrevendo áudio...' : attachedFile || pastedContext ? 'Pergunte sobre o contexto anexado...' : 'Mensagem para o Hermes'}
-                className={`max-h-40 min-h-10 flex-1 resize-none bg-transparent px-2 py-2.5 text-sm font-medium leading-5 outline-none disabled:opacity-40 ${isDark ? 'text-slate-100 placeholder:text-slate-600' : 'text-slate-900 placeholder:text-slate-400'}`}
+                className={`min-h-10 flex-1 resize-none overflow-y-hidden bg-transparent px-2 py-2.5 text-sm font-medium leading-5 outline-none disabled:opacity-40 ${isDark ? 'text-slate-100 placeholder:text-slate-600' : 'text-slate-900 placeholder:text-slate-400'}`}
               />
               {(input.trim() || attachedFile || pastedContext) && !isRecording ? (
                 <button type="button" disabled={isBlocked} onClick={() => sendMessage(input)} title="Enviar" className="flex h-10 w-10 shrink-0 items-center justify-center bg-blue-600 text-white transition-all hover:bg-blue-700 disabled:opacity-30">
