@@ -3370,7 +3370,11 @@ def retrieve_extra_context_rag(db, genai, query_text, extra_context_id=None, ite
     return "\n\n".join(context_parts)
 
 
-@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=120)
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=120
+)
 def processExtraContextFile(req: https_fn.CallableRequest):
     """
     Processa um arquivo de contexto extra (PDF ou texto) para uma ação específica.
@@ -3462,6 +3466,38 @@ def processExtraContextFile(req: https_fn.CallableRequest):
             print(f"Erro ao vetorizar contexto extra '{filename}': {e}")
 
     return {'success': True, 'docId': doc_id, 'vectorized': vectorized}
+
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=60
+)
+def criarLembreteNoGoogleTasks(req: https_fn.CallableRequest):
+    """Compatibilidade para funcao legado ainda presente no projeto Firebase."""
+    raise https_fn.HttpsError(
+        code=https_fn.FunctionsErrorCode.UNIMPLEMENTED,
+        message=(
+            "criarLembreteNoGoogleTasks e uma funcao legado sem implementacao "
+            "local atual. Use o fluxo de lembretes sincronizado."
+        )
+    )
+
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=60
+)
+def removerLembreteDoGoogleTasks(req: https_fn.CallableRequest):
+    """Compatibilidade para funcao legado ainda presente no projeto Firebase."""
+    raise https_fn.HttpsError(
+        code=https_fn.FunctionsErrorCode.UNIMPLEMENTED,
+        message=(
+            "removerLembreteDoGoogleTasks e uma funcao legado sem implementacao "
+            "local atual. Use o fluxo de lembretes sincronizado."
+        )
+    )
 
 
 def _sync_github_repo_internal(sistema_id: str, repo_url: str, skip_if_unchanged: bool = False, db=None) -> dict:
