@@ -1,0 +1,21 @@
+{
+  "name": "buscar_contato",
+  "description": "Busca contatos por nome, email ou tag para resolver menções a pessoas no contexto de uma conversa.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "termo": {
+        "type": "string",
+        "description": "Termo de busca (nome, apelido, email ou tag)."
+      },
+      "limite": {
+        "type": "number",
+        "description": "Número máximo de candidatos a retornar.",
+        "default": 5
+      }
+    },
+    "required": [
+      "termo"
+    ]
+  }
+}
