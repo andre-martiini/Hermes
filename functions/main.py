@@ -9242,7 +9242,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 print(f"[Copiloto] Erro em buscar_contato: {_re}")
                 return f"ERRO|{str(_re)}"
 
-        def preparar_vinculo_contatos(task_id: str, mencoes: list):
+        def preparar_vinculo_contatos(task_id: str, mencoes: list[dict]):
             """Prepara payload de confirmação para vincular pessoas a uma tarefa. Não grava nada."""
             try:
                 if not task_id:
