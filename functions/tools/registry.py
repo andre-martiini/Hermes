@@ -36,6 +36,10 @@ _CATALOG: dict[str, str] = {
     "registrar_item_financeiro_v2": "Registra uma nova movimentação (renda ou despesa) no financeiro interno",
     "calculadora": "Calculadora dedicada para calculos matematicos ad-hoc ou projecoes.",
     "schedule_whatsapp_message": "Agenda ou envia uma mensagem de WhatsApp para um contato.",
+    "buscar_contato": "Busca contatos por nome, email ou tag em perfil_pessoas para resolver menções a pessoas",
+    "preparar_vinculo_contatos": "Prepara proposta de vínculo de pessoas a uma tarefa (gera card de confirmação)",
+    "preparar_atualizacao_contato": "Prepara criação ou atualização de contato com novos fatos (gera card de confirmação)",
+    "registrar_interacao_contato": "Registra interação silenciosa no histórico de um contato (sem confirmação)",
 }
 
 _NEEDS_CONFIRMATION: set[str] = {
@@ -52,6 +56,8 @@ _NEEDS_CONFIRMATION: set[str] = {
     "registrar_inscricao_bolsa_publica",
     "registrar_item_financeiro_v2",
     "schedule_whatsapp_message",
+    "preparar_vinculo_contatos",
+    "preparar_atualizacao_contato",
 }
 
 _ASYNC_TOOLS: set[str] = {

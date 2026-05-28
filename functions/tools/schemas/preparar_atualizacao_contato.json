@@ -5,7 +5,8 @@
     "type": "object",
     "properties": {
       "pessoa_id": {
-        "type": ["string", "null"],
+        "type": "string",
+        "nullable": true,
         "description": "ID do contato existente. Use null para propor a criação de um novo contato."
       },
       "nome": {

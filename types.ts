@@ -708,7 +708,8 @@ export interface InteracaoPessoa {
     pessoa_id: string;
     tarefa_id?: string;
     reuniao_id?: string;
-    tipo: 'mencao_tarefa' | 'mencao_diario' | 'reuniao' | 'manual';
+    sessao_copiloto_id?: string;
+    tipo: 'mencao_tarefa' | 'mencao_diario' | 'reuniao' | 'manual' | 'mencao_copiloto';
     data: string;
     descricao: string;
     link_origem?: string;

@@ -9206,6 +9206,129 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 print(f"[Copiloto] Erro em preparar_reagendamento_em_lote: {_re}")
                 return f"ERRO|{str(_re)}"
 
+        def buscar_contato(termo: str, limite: int = 5):
+            """Busca contatos por nome, email ou tag em perfil_pessoas."""
+            try:
+                termo_lower = (termo or "").strip().lower()
+                if not termo_lower:
+                    return "ERRO|Termo de busca vazio."
+                docs = db.collection('perfil_pessoas').limit(500).stream()
+                candidatos = []
+                for d in docs:
+                    pdata = d.to_dict() or {}
+                    nome = (pdata.get('nome') or '').lower()
+                    email = (pdata.get('email') or '').lower()
+                    tags = [str(t).lower() for t in (pdata.get('tags') or [])]
+                    score = 0.0
+                    if nome == termo_lower or email == termo_lower:
+                        score = 1.0
+                    elif termo_lower in nome:
+                        score = 0.8
+                    elif termo_lower in email:
+                        score = 0.7
+                    elif any(termo_lower in t for t in tags):
+                        score = 0.5
+                    if score > 0:
+                        candidatos.append({
+                            'pessoa_id': d.id,
+                            'nome': pdata.get('nome', ''),
+                            'email': pdata.get('email', ''),
+                            'tags': pdata.get('tags', []),
+                            'score': score,
+                        })
+                candidatos.sort(key=lambda x: -x['score'])
+                return json.dumps({'candidatos': candidatos[: max(1, int(limite or 5))]}, ensure_ascii=False)
+            except Exception as _re:
+                print(f"[Copiloto] Erro em buscar_contato: {_re}")
+                return f"ERRO|{str(_re)}"
+
+        def preparar_vinculo_contatos(task_id: str, mencoes: list):
+            """Prepara payload de confirmação para vincular pessoas a uma tarefa. Não grava nada."""
+            try:
+                if not task_id:
+                    return "ERRO|task_id é obrigatório."
+                tdoc = db.collection('tarefas').document(str(task_id)).get()
+                if not tdoc.exists:
+                    return f"ERRO|Tarefa '{task_id}' não encontrada."
+                payload = {
+                    'kind': 'contact_link',
+                    'task_id': task_id,
+                    'task_titulo': (tdoc.to_dict() or {}).get('titulo', ''),
+                    'mencoes': mencoes or [],
+                    'status': 'pending',
+                    'created_at': datetime.now(timezone.utc).isoformat(),
+                }
+                return json.dumps(payload, ensure_ascii=False)
+            except Exception as _re:
+                print(f"[Copiloto] Erro em preparar_vinculo_contatos: {_re}")
+                return f"ERRO|{str(_re)}"
+
+        def preparar_atualizacao_contato(nome: str, campos_novos: dict, justificativa: str, pessoa_id: str = None):
+            """Prepara payload de confirmação para criar/atualizar contato. Não grava nada."""
+            try:
+                if not nome or not (campos_novos or {}):
+                    return "ERRO|nome e campos_novos são obrigatórios."
+                modo = 'update' if pessoa_id else 'create'
+                contato_atual = None
+                if pessoa_id:
+                    pdoc = db.collection('perfil_pessoas').document(str(pessoa_id)).get()
+                    if not pdoc.exists:
+                        return f"ERRO|Contato '{pessoa_id}' não encontrado."
+                    contato_atual = pdoc.to_dict()
+                payload = {
+                    'kind': 'contact_upsert',
+                    'modo': modo,
+                    'pessoa_id': pessoa_id,
+                    'nome': nome,
+                    'contato_atual': contato_atual,
+                    'campos_novos': campos_novos,
+                    'justificativa': justificativa or '',
+                    'status': 'pending',
+                    'created_at': datetime.now(timezone.utc).isoformat(),
+                }
+                return json.dumps(payload, ensure_ascii=False)
+            except Exception as _re:
+                print(f"[Copiloto] Erro em preparar_atualizacao_contato: {_re}")
+                return f"ERRO|{str(_re)}"
+
+        def registrar_interacao_contato(pessoa_id: str, descricao: str, tarefa_id: str = None, sessao_copiloto_id: str = None):
+            """Registra interação silenciosa no histórico de um contato. Grava direto, sem confirmação."""
+            try:
+                if not pessoa_id or not descricao:
+                    return "ERRO|pessoa_id e descricao são obrigatórios."
+                pref = db.collection('perfil_pessoas').document(str(pessoa_id)).get()
+                if not pref.exists:
+                    return f"ERRO|Contato '{pessoa_id}' não encontrado."
+                desc_short = str(descricao)[:280]
+                now_iso = datetime.now(timezone.utc).isoformat()
+                sess_id = sessao_copiloto_id or session_id
+                payload = {
+                    'pessoa_id': str(pessoa_id),
+                    'descricao': desc_short,
+                    'tipo': 'mencao_copiloto',
+                    'data': now_iso,
+                    'data_criacao': now_iso,
+                }
+                if tarefa_id:
+                    payload['tarefa_id'] = str(tarefa_id)
+                if sess_id:
+                    payload['sessao_copiloto_id'] = str(sess_id)
+                # Marca contato com tag Copiloto para aparecer no filtro
+                try:
+                    tags_atuais = (pref.to_dict() or {}).get('tags') or []
+                    if 'Copiloto' not in tags_atuais:
+                        db.collection('perfil_pessoas').document(str(pessoa_id)).update({
+                            'tags': tags_atuais + ['Copiloto']
+                        })
+                except Exception as _tag_err:
+                    print(f"[Copiloto] Aviso: falha ao marcar tag Copiloto em {pessoa_id}: {_tag_err}")
+                new_ref = db.collection('interacoes_pessoas').document()
+                new_ref.set(payload)
+                return json.dumps({'status': 'ok', 'interacao_id': new_ref.id}, ensure_ascii=False)
+            except Exception as _re:
+                print(f"[Copiloto] Erro em registrar_interacao_contato: {_re}")
+                return f"ERRO|{str(_re)}"
+
         # Configuração do Chat com ferramentas
         model_id = COPILOT_CHAT_MODEL
         
@@ -9656,6 +9779,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'registrar_item_financeiro_v2': registrar_item_financeiro_v2,
             'calculadora': calculadora,
             'agendar_lembrete_acao': agendar_lembrete_acao,
+            'buscar_contato': buscar_contato,
+            'preparar_vinculo_contatos': preparar_vinculo_contatos,
+            'preparar_atualizacao_contato': preparar_atualizacao_contato,
+            'registrar_interacao_contato': registrar_interacao_contato,
         }
 
         # Cria função genérica de acionamento que o loop manual do Python irá ignorar
@@ -9738,6 +9865,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'registrar_item_financeiro_v2': registrar_item_financeiro_v2,
             'calculadora': calculadora,
             'agendar_lembrete_acao': agendar_lembrete_acao,
+            'buscar_contato': buscar_contato,
+            'preparar_vinculo_contatos': preparar_vinculo_contatos,
+            'preparar_atualizacao_contato': preparar_atualizacao_contato,
+            'registrar_interacao_contato': registrar_interacao_contato,
         }
         # Ferramentas internas que não devem aparecer para o usuário
         _HIDDEN_TOOLS = {'registrar_correcao_procedimento', 'resolver_conflito_memoria'}
@@ -9776,6 +9907,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     registrar_item_financeiro_v2,
                     calculadora,
                     agendar_lembrete_acao,
+                    buscar_contato,
+                    preparar_vinculo_contatos,
+                    preparar_atualizacao_contato,
+                    registrar_interacao_contato,
                 ] + dynamic_tools,
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
             ),
