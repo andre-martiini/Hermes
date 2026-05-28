@@ -1,0 +1,26 @@
+{
+  "name": "registrar_interacao_contato",
+  "description": "Registra uma interação histórica silenciosa (sem confirmação) no perfil de uma pessoa. Útil para logar menções em conversas ou atividades concluídas.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "pessoa_id": {
+        "type": "string",
+        "description": "ID do contato que recebeu a interação."
+      },
+      "descricao": {
+        "type": "string",
+        "description": "Texto curto descrevendo o ocorrido (máx 280 caracteres)."
+      },
+      "tarefa_id": {
+        "type": "string",
+        "description": "ID da tarefa vinculada, se houver."
+      },
+      "sessao_copiloto_id": {
+        "type": "string",
+        "description": "ID da sessão de chat onde a menção ocorreu."
+      }
+    },
+    "required": ["pessoa_id", "descricao"]
+  }
+}

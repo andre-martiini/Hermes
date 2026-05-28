@@ -1,0 +1,33 @@
+{
+  "name": "preparar_atualizacao_contato",
+  "description": "Propõe a criação de um novo contato ou a atualização de um existente com base em novos fatos revelados na conversa. Gera card de confirmação.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "pessoa_id": {
+        "type": ["string", "null"],
+        "description": "ID do contato existente. Use null para propor a criação de um novo contato."
+      },
+      "nome": {
+        "type": "string",
+        "description": "Nome canônico da pessoa."
+      },
+      "campos_novos": {
+        "type": "object",
+        "properties": {
+          "email": { "type": "string" },
+          "telefone": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "observacao": { "type": "string" },
+          "papel": { "type": "string", "description": "Papel usual desta pessoa (ex: Arquiteto, Fornecedor de TI)." }
+        },
+        "description": "Dicionário com os campos a serem criados ou mesclados."
+      },
+      "justificativa": {
+        "type": "string",
+        "description": "Breve explicação de por que os dados estão sendo sugeridos (ex: 'Usuário mencionou novo email na conversa')."
+      }
+    },
+    "required": ["nome", "campos_novos", "justificativa"]
+  }
+}

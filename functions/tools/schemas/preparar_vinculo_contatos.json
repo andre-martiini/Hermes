@@ -1,0 +1,49 @@
+{
+  "name": "preparar_vinculo_contatos",
+  "description": "Prepara uma proposta de vínculo entre pessoas mencionadas e a tarefa ativa. Gera card de confirmação no frontend.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "ID da tarefa à qual os contatos serão vinculados."
+      },
+      "mencoes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "nome_mencionado": {
+              "type": "string",
+              "description": "O nome ou termo literal usado pelo usuário na conversa."
+            },
+            "pessoa_id_sugerido": {
+              "type": ["string", "null"],
+              "description": "ID do contato sugerido pelo LLM (após busca). Use null se não houver certeza."
+            },
+            "candidatos_alternativos": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "pessoa_id": { "type": "string" },
+                  "nome": { "type": "string" },
+                  "score": { "type": "number" },
+                  "email": { "type": "string" }
+                }
+              },
+              "description": "Lista de candidatos retornados pela busca para permitir escolha manual pelo usuário."
+            },
+            "papel": {
+              "type": "string",
+              "description": "Papel da pessoa na tarefa (ex: responsável, interessado, fornecedor, aprovador).",
+              "default": "interessado"
+            }
+          },
+          "required": ["nome_mencionado", "candidatos_alternativos"]
+        }
+      }
+    },
+    "required": ["task_id", "mencoes"]
+  }
+}

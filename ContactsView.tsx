@@ -3,6 +3,7 @@ import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, order
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from './firebase';
 import { PerfilPessoa, InteracaoPessoa } from './types';
+import { navigateWithinApp } from './src/utils/internalNavigation';
 
 interface ContactsViewProps {
     isDark?: boolean;
@@ -13,6 +14,16 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
     const [selectedContact, setSelectedContact] = useState<PerfilPessoa | null>(null);
     const [timeline, setTimeline] = useState<InteracaoPessoa[]>([]);
     
+    // Auto-select contact from URL
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const contactId = params.get('contactId');
+        if (contactId && contacts.length > 0) {
+            const found = contacts.find(c => c.id === contactId);
+            if (found) setSelectedContact(found);
+        }
+    }, [contacts]);
+
     // UI States
     const [filterTag, setFilterTag] = useState<string>('todos');
     const [searchTerm, setSearchTerm] = useState<string>('');
@@ -274,6 +285,7 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
         // Tag filters
         if (filterTag === 'google' && !(c.tags || []).includes('Contatos do Google')) return false;
         if (filterTag === 'ia' && !(c.tags || []).includes('Extraído por IA')) return false;
+        if (filterTag === 'copiloto' && !(c.tags || []).includes('Copiloto')) return false;
 
         // Search term
         const search = searchTerm.toLowerCase();
@@ -322,7 +334,8 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                     {[
                         { id: 'todos', label: 'Todos' },
                         { id: 'google', label: 'Contatos Google' },
-                        { id: 'ia', label: 'Extraídos por IA' }
+                        { id: 'ia', label: 'Extraídos por IA' },
+                        { id: 'copiloto', label: 'Mencionados no Copiloto' }
                     ].map(tab => (
                         <button
                             key={tab.id}
@@ -599,23 +612,43 @@ const ContactsView: React.FC<ContactsViewProps> = ({ isDark = false }) => {
                                             });
                                             return (
                                                 <div key={item.id || idx} className="relative">
-                                                    <div className={`absolute -left-[23px] top-[3px] w-3 h-3 rounded-none border-[3px] ${isDark ? 'bg-indigo-400 border-slate-900' : 'bg-indigo-600 border-white'}`} />
+                                                    <div className={`absolute -left-[23px] top-[3px] w-3 h-3 rounded-none border-[3px] ${item.tipo === 'mencao_copiloto' ? 'bg-blue-400 border-slate-900' : isDark ? 'bg-indigo-400 border-slate-900' : 'bg-indigo-600 border-white'}`} />
                                                     <div>
                                                         <div className="flex items-center justify-between gap-2">
-                                                            <span className={`text-[9px] font-mono font-black uppercase tracking-wider ${isDark ? 'text-indigo-450' : 'text-indigo-600'}`}>{formattedDate}</span>
-                                                            {item.tarefa_id && (
-                                                                <a 
-                                                                    href={item.link_origem || `/tarefas?id=${item.tarefa_id}`}
-                                                                    onClick={(e) => {
-                                                                        console.log("Navegar para tarefa", item.tarefa_id);
-                                                                    }}
-                                                                    className={`text-[9px] font-black uppercase tracking-widest flex items-center gap-1 ${
-                                                                        isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-800 hover:underline'
-                                                                    }`}
-                                                                >
-                                                                    Ação ↗
-                                                                </a>
-                                                            )}
+                                                            <div className="flex items-center gap-2">
+                                                                <span className={`text-[9px] font-mono font-black uppercase tracking-wider ${isDark ? 'text-indigo-450' : 'text-indigo-600'}`}>{formattedDate}</span>
+                                                                {item.tipo === 'mencao_copiloto' && (
+                                                                    <span className="text-[8px] bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded-none font-black uppercase tracking-widest">IA</span>
+                                                                )}
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                {item.sessao_copiloto_id && (
+                                                                     <button
+                                                                        onClick={() => {
+                                                                            navigateWithinApp(`/copiloto?sessionId=${item.sessao_copiloto_id}`);
+                                                                        }}
+                                                                        className={`text-[9px] font-black uppercase tracking-widest flex items-center gap-1 ${
+                                                                            isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-800 hover:underline'
+                                                                        }`}
+                                                                    >
+                                                                        Sessão ↗
+                                                                    </button>
+                                                                )}
+                                                                {item.tarefa_id && (
+                                                                    <a
+                                                                        href={item.link_origem || `/tarefas?id=${item.tarefa_id}`}
+                                                                        onClick={(e) => {
+                                                                            e.preventDefault();
+                                                                            navigateWithinApp(`/tarefas?task=${item.tarefa_id}`);
+                                                                        }}
+                                                                        className={`text-[9px] font-black uppercase tracking-widest flex items-center gap-1 ${
+                                                                            isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-800 hover:underline'
+                                                                        }`}
+                                                                    >
+                                                                        Ação ↗
+                                                                    </a>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                         <p className={`text-[11px] font-bold mt-1 leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                                                             {item.descricao}

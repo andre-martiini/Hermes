@@ -237,6 +237,10 @@ const TOOL_LABELS: Record<string, string> = {
     encontrar_slot_livre: 'Slot Livre Encontrado',
     consultar_financas_v2: 'Dados Financeiros Consultados',
     registrar_item_financeiro_v2: 'Movimentação Financeira Registrada',
+    buscar_contato: 'Busca de Contatos',
+    preparar_vinculo_contatos: 'Vínculo de Pessoas',
+    preparar_atualizacao_contato: 'Atualização de Contato',
+    registrar_interacao_contato: 'Log de Interação',
 };
 
 const FIELD_LABELS: Record<string, string> = {
