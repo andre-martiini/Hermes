@@ -85,10 +85,11 @@ SYNC_LOCK_DOC_ID = 'sync_lock'
 SYNC_LOCK_STALE_SECONDS = 15 * 60
 MAX_SYNC_PASSES = 3
 COPILOT_FUNCTION_TIMEOUT_SEC = 540
-COPILOT_SOFT_DEADLINE_SEC = 210
+COPILOT_SOFT_DEADLINE_SEC = 300
 COPILOT_MODEL_TIMEOUT_MS = 70000
 COPILOT_MODEL_RETRY_TIMEOUT_MS = 30000
 COPILOT_TOOL_TIMEOUT_SEC = 45
+COPILOT_TOOL_TIMEOUT_ASYNC_SEC = 150
 COPILOT_CHAT_MODEL = os.environ.get("COPILOT_CHAT_MODEL", "gemini-3.5-flash")
 COPILOT_FALLBACK_MODEL = os.environ.get("COPILOT_FALLBACK_MODEL", "gemini-3.5-flash")
 COPILOT_DEADLINE_FALLBACK_TEXT = (
@@ -697,11 +698,28 @@ def log_to_firestore(sync_ref, logs, message, force_update=False):
 
 
 
-    if "ERRO" in message.upper():
+    message_upper = message.upper()
 
-        emit_notification_backend("Erro de Sincronização", message, 'error')
+    if "ERRO" in message_upper:
 
-    elif "[PIX]" in message.upper():
+        # Evita falsos positivos com títulos de tarefas ou descrições que contêm a palavra "erro" (ex: [PULL], [-], [X], [+], [^])
+        is_false_positive = (
+            message_upper.startswith("[PULL]") or
+            message_upper.startswith("[-] ") or
+            message_upper.startswith("[X] ") or
+            message_upper.startswith("[+] ") or
+            message_upper.startswith("[^] ") or
+            message_upper.startswith("[CAL->HERMES]") or
+            message_upper.startswith("[BOLETO]") or
+            message_upper.startswith("[PIX] PROCESSADO") or
+            message_upper.startswith("[GMAIL] E-MAIL FINANCEIRO")
+        )
+
+        if not is_false_positive:
+
+            emit_notification_backend("Erro de Sincronização", message, 'error')
+
+    elif "[PIX]" in message_upper:
 
         emit_notification_backend("Novo Pix Recebido", message, 'success', 'financeiro')
 
@@ -1061,7 +1079,7 @@ def sync_google_tasks_pull(service, sync_ref, logs):
 
                 # Importação desativada a pedido do usuário (criação de tarefas no Google Tasks não gera mais ações no Hermes)
 
-                log_to_firestore(sync_ref, logs, f"[PULL] Ignorada importação de nova tarefa '{title}' do Google Tasks (funcionalidade desativada).")
+                print(f"[PULL] Ignorada importação de nova tarefa '{title}' do Google Tasks (funcionalidade desativada).")
 
     except Exception as e:
 
@@ -7361,7 +7379,7 @@ def askChatbot(req: https_fn.CallableRequest):
 
 @https_fn.on_call(
     cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
-    memory=options.MemoryOption.GB_1,
+    memory=options.MemoryOption.GB_2,
     timeout_sec=COPILOT_FUNCTION_TIMEOUT_SEC
 )
 def askCopilotoHermes(req: https_fn.CallableRequest):
@@ -8890,15 +8908,17 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 else:
                     secoes = ["Sumário Executivo", "Análise", "Dados e Evidências", "Conclusão e Recomendações"]
 
-                # 2. Gera conteúdo por seção com deduplicação progressiva
-                sections_content = {}
-                sections_already_covered = []
+                # 2. Gera conteúdo de todas as seções em paralelo
+                # (chamadas seriais ao Gemini Pro estouravam o COPILOT_TOOL_TIMEOUT_SEC=45s)
+                from concurrent.futures import ThreadPoolExecutor as _RepExecutor
 
-                for secao in secoes:
-                    dedup_hint = ""
-                    if sections_already_covered:
-                        dedup_hint = f"\nASSUNTOS JÁ ABORDADOS (NÃO REPETIR): {', '.join(sections_already_covered)}"
-
+                def _gen_section(secao):
+                    outras = [s for s in secoes if s != secao]
+                    dedup_hint = (
+                        f"\nOUTRAS SEÇÕES DESTE RELATÓRIO (não duplique conteúdo delas, "
+                        f"foque apenas no escopo desta seção): {', '.join(outras)}"
+                        if outras else ""
+                    )
                     section_prompt = (
                         f'Você é um redator técnico sênior escrevendo a seção "{secao}" '
                         f'de um relatório {tipo} intitulado "{titulo}".\n'
@@ -8912,13 +8932,20 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         f'- NÃO inclua o título da seção (será adicionado automaticamente)\n'
                         f'- Entre 150 e 400 palavras\n'
                     )
+                    try:
+                        sect_resp = client.models.generate_content(
+                            model="gemini-3.5-flash",
+                            contents=section_prompt
+                        )
+                        return secao, (sect_resp.text or "*(conteúdo indisponível)*")
+                    except Exception as _sec_err:
+                        print(f"[Copiloto] Falha ao gerar seção '{secao}': {_sec_err}")
+                        return secao, f"*(falha ao gerar esta seção: {_sec_err})*"
 
-                    sect_resp = client.models.generate_content(
-                        model="gemini-3.1-pro-preview",
-                        contents=section_prompt
-                    )
-                    sections_content[secao] = sect_resp.text or "*(conteúdo indisponível)*"
-                    sections_already_covered.append(secao)
+                sections_content = {}
+                with _RepExecutor(max_workers=min(len(secoes) or 1, 7)) as _rep_pool:
+                    for _secao, _content in _rep_pool.map(_gen_section, secoes):
+                        sections_content[_secao] = _content
 
                 # 3. Compila Markdown final
                 tipo_label = tipo.capitalize()
@@ -10228,22 +10255,32 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             _executor = _ThreadPoolExecutor(max_workers=min(len(fcs), 8))
             try:
                 _futures = [_executor.submit(_execute_tool, i, fc) for i, fc in enumerate(fcs)]
-                _tool_wait_sec = min(COPILOT_TOOL_TIMEOUT_SEC, max(5.0, _copilot_remaining_sec() - 75))
+                try:
+                    from tools.registry import is_async as _is_async_tool
+                except Exception:
+                    _is_async_tool = lambda _n: False
+                _batch_has_async = any(_is_async_tool(getattr(fc, 'name', '')) for fc in fcs)
+                _tool_hard_cap = COPILOT_TOOL_TIMEOUT_ASYNC_SEC if _batch_has_async else COPILOT_TOOL_TIMEOUT_SEC
+                _tool_wait_sec = min(_tool_hard_cap, max(5.0, _copilot_remaining_sec() - 75))
                 _done_futures, _pending_futures = _futures_wait(_futures, timeout=_tool_wait_sec)
                 if _pending_futures:
+                    _timed_out_names = [getattr(fcs[_i], 'name', '?') for _i, _f in enumerate(_futures) if _f in _pending_futures]
                     for _pending in _pending_futures:
                         _pending.cancel()
+                    print(f"[Copiloto] Tool timeout após {_tool_wait_sec:.1f}s — ferramentas pendentes: {_timed_out_names}")
+                    _timed_out_label = ", ".join(_timed_out_names) if _timed_out_names else "uma das ferramentas"
                     deadline_fallback_text = (
-                        "Uma das consultas internas demorou demais e eu interrompi o processamento "
-                        "antes que a conversa ficasse travada. Tente pedir primeiro uma lista objetiva "
-                        "dos itens pendentes e, em seguida, solicite a proposta completa."
+                        f"A consulta interna **{_timed_out_label}** demorou mais que o limite "
+                        f"de {int(_tool_wait_sec)}s e eu interrompi o processamento antes que a conversa ficasse travada. "
+                        "Tente refinar o pedido (por exemplo, listar primeiro os itens pendentes de forma objetiva e "
+                        "depois solicitar a proposta completa)."
                     )
                     _perf_mark(perf_state, "web.tool_timeout")
 
                 for _i, _future in enumerate(_futures):
                     _fc = fcs[_i]
                     if _future not in _done_futures:
-                        result = f"Timeout ao executar {getattr(_fc, 'name', 'ferramenta')}: limite de {COPILOT_TOOL_TIMEOUT_SEC}s excedido."
+                        result = f"Timeout ao executar {getattr(_fc, 'name', 'ferramenta')}: limite de {int(_tool_wait_sec)}s excedido."
                         tool_invocation_data_local = None
                     else:
                         result, tool_invocation_data_local = _future.result()
