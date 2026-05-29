@@ -2134,19 +2134,13 @@ const App: React.FC = () => {
       isRead: false,
       link: link || ""
     };
-    // 1. Atualiza estado local para feedback imediato (evita duplicados por ID)
-    setNotifications(prev => {
-      if (prev.some(n => n.id === newNotif.id)) return prev;
-      return [newNotif, ...prev];
-    });
-    setActivePopup(newNotif);
+    // Notificações agora são exclusivas do Telegram, salvamos no Firestore para disparar o webhook
     try {
       if (!user) return;
       const firestoreData = { ...JSON.parse(JSON.stringify(newNotif)), uid: user.uid };
       await setDoc(doc(db, 'notificacoes', newNotif.id), firestoreData);
     } catch (err) {
       console.error("Erro ao persistir notificação:", err);
-      // Feedback visual do erro para o usuário (agora que estamos validando)
       showToast(`Erro no sistema de notificação: ${err}`, "error");
     }
   };
@@ -3651,9 +3645,8 @@ const App: React.FC = () => {
       where('uid', '==', user.uid)
     );
     const unsubscribeNotif = onSnapshot(qNotif, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as HermesNotification));
-      data.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-      setNotifications(data);
+      // Notificações agora são exclusivas do Telegram, limpamos o painel local do sistema
+      setNotifications([]);
     }, (err) => {
       console.error("Erro ao escutar notificações:", err);
     });
