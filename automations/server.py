@@ -1,4 +1,5 @@
 import subprocess
+import sys
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -25,7 +26,7 @@ class PgdData(BaseModel):
 
 def executar_script(nome_script: str):
     try:
-        subprocess.run(["python", nome_script], check=True)
+        subprocess.run([sys.executable, nome_script], check=True)
     except subprocess.CalledProcessError as e:
         print(f"Erro ao executar {nome_script}: {e}")
     except Exception as e:

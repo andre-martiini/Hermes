@@ -38,7 +38,7 @@ def run_nfse_robot(data):
     try:
         # Abrimos com stdin=PIPE para permitir que a ponte envie comandos (como o ENTER do login)
         robot_process = subprocess.Popen([
-            "python", script_path, "--data", json_data
+            sys.executable, script_path, "--data", json_data
         ], stdin=subprocess.PIPE)
         print(f"✅ Robô em execução (PID: {robot_process.pid}). Aguardando conclusão ou interação...")
         return True
