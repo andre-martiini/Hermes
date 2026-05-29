@@ -9017,6 +9017,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             - prompt: descrição detalhada da imagem a ser gerada (em português ou inglês).
             - proporcao: proporção da imagem. Pode ser "1:1", "16:9", "4:3", "3:4" ou "9:16".
             Retorna a URL pública da imagem gerada no formato Markdown.
+            IMPORTANTE: Você DEVE incluir a tag markdown da imagem retornada (ex: ![Imagem Gerada](url)) de forma exata e visível na sua resposta final para que o usuário possa vê-la.
             """
             try:
                 import uuid

@@ -2010,17 +2010,31 @@ def _transcribe_audio_bytes(audio_bytes: bytes, extension: str, db) -> str:
 
 def _blob_public_url(blob) -> str:
     """
-    Returns a public URL for a Firebase Storage blob WITHOUT calling
-    make_public() (which fails when Uniform Bucket-Level Access is enabled).
-    Uses the stable Firebase Storage download URL format.
+    Returns a public URL for a Firebase Storage blob.
+    Generates and patches a Firebase Storage download token metadata to ensure the link is publicly accessible.
     """
     import urllib.parse
+    import uuid
+    
+    token = None
+    if blob.metadata:
+        token = blob.metadata.get("firebaseStorageDownloadTokens")
+        
+    if not token:
+        token = str(uuid.uuid4())
+        metadata = dict(blob.metadata or {})
+        metadata["firebaseStorageDownloadTokens"] = token
+        blob.metadata = metadata
+        try:
+            blob.patch()
+        except Exception as e:
+            print(f"[Storage] Warning: Failed to patch blob metadata for token: {e}")
+            
     bucket_name = blob.bucket.name
     encoded_name = urllib.parse.quote(blob.name, safe='')
-    return (
-        f"https://firebasestorage.googleapis.com/v0/b/{bucket_name}"
-        f"/o/{encoded_name}?alt=media"
-    )
+    if token:
+        return f"https://firebasestorage.googleapis.com/v0/b/{bucket_name}/o/{encoded_name}?alt=media&token={token}"
+    return f"https://firebasestorage.googleapis.com/v0/b/{bucket_name}/o/{encoded_name}?alt=media"
 
 
 def _upload_to_storage(file_bytes: bytes, file_name: str, mime_type: str, chat_id: str) -> str:
