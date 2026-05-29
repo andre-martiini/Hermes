@@ -206,13 +206,13 @@ def _get_hermes_storage_bucket():
         or "gestao-hermes"
     )
     candidates = [
-        os.environ.get("TELEGRAM_MEDIA_BUCKET"),
-        os.environ.get("HERMES_STORAGE_BUCKET"),
         os.environ.get("FIREBASE_STORAGE_BUCKET"),
-        f"{project_id}-telegram-media-us-central1",
-        f"{project_id}-slides-us-central1",
         f"{project_id}.firebasestorage.app",
         f"{project_id}.appspot.com",
+        os.environ.get("TELEGRAM_MEDIA_BUCKET"),
+        os.environ.get("HERMES_STORAGE_BUCKET"),
+        f"{project_id}-telegram-media-us-central1",
+        f"{project_id}-slides-us-central1",
     ]
 
     checked = []
