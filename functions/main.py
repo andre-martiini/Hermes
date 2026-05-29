@@ -2149,6 +2149,9 @@ def _should_mirror_notification_to_telegram(notif: dict) -> bool:
     if title in {"hermes: proxima tarefa", "hermes: encerramento de tarefa"}:
         return True
 
+    if title.startswith("alteracao no sipac:"):
+        return True
+
     # Lembretes especificos de acao ja sao enviados ao Telegram pelo scheduler
     # com mensagem mais detalhada; nao duplicamos via espelhamento generico.
     if title.startswith("lembrete:"):
@@ -7713,7 +7716,217 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 return '{"error": "Timeout ao acessar a Tavily API. Informe ao usuário que a busca demorou demais e tente novamente."}'
             except Exception as web_err:
                 return f'{{"error": "Falha na busca: {str(web_err)}. Informe ao usuário que não foi possível realizar a pesquisa."}}'
+        def consultar_processo_sipac_copiloto(numero_processo: str):
+            """
+            Consulta e retorna informações detalhadas de um processo no SIPAC,
+            incluindo dados gerais, interessados, movimentações recentes e os documentos anexados
+            (com seus respectivos links de visualização pública, se disponíveis).
+            Use esta ferramenta sempre que o usuário fornecer um número de processo do SIPAC ou pedir
+            informações sobre o trâmite, status ou documentos de um processo específico.
+            """
+            try:
+                from hermes_core_logic import _call_web_callable
+                print(f"[Copiloto] Consultando processo SIPAC: {numero_processo}")
+                res = _call_web_callable(
+                    function_name="consultarProcessoSipac",
+                    data={"numeroProcesso": numero_processo},
+                    user_uid=user_uid
+                )
+                
+                lines = []
+                lines.append(f"=== DETALHES DO PROCESSO SIPAC {res.get('numeroProcesso')} ===")
+                lines.append(f"Status: {res.get('status')}")
+                lines.append(f"Unidade Atual: {res.get('unidadeAtual')}")
+                lines.append(f"Natureza: {res.get('natureza')}")
+                lines.append(f"Assunto: {res.get('assuntoCodigo')} - {res.get('assuntoDescricao')}")
+                if res.get('observacao') and res.get('observacao') != 'Não informado':
+                    lines.append(f"Observação: {res.get('observacao')}")
+                lines.append(f"Autuação: {res.get('dataAutuacion')} às {res.get('horarioAutuacion')}")
+                
+                lines.append("\nInteressados:")
+                for i in res.get('interessados', []):
+                    lines.append(f"- {i.get('tipo')}: {i.get('nome')}")
+                    
+                lines.append("\nDocumentos Públicos:")
+                for d in res.get('documentos', []):
+                    url_str = f" | Link: {d.get('url')}" if d.get('url') else " | (Acesso Restrito)"
+                    lines.append(f"- Seq #{d.get('ordem')} - Tipo: {d.get('tipo')} | Data: {d.get('data')} | Origem: {d.get('unidadeOrigem')}{url_str}")
+                    
+                lines.append("\nMovimentações Recentes (Linha do Tempo):")
+                for m in res.get('movimentacoes', [])[:8]:
+                    lines.append(f"- [{m.get('data')} {m.get('horario')}] De {m.get('unidadeOrigem')} para {m.get('unidadeDestino')} | Recebedor: {m.get('usuarioRecebedor') or 'N/A'}")
+                    
+                return "\n".join(lines)
+            except Exception as e:
+                print(f"[Copiloto] Erro ao consultar SIPAC: {e}")
+                return f"⚠️ Erro ao consultar processo {numero_processo} no SIPAC: {str(e)}"
+        def acompanhar_processo_sipac_copiloto(numero_processo: str, acompanhar: bool = True):
+            """
+            Ativa ou desativa o monitoramento/acompanhamento automático de um processo SIPAC no Hermes.
+            Ao ativar, o sistema fará verificações periódicas em background e notificará
+            o usuário no Telegram sempre que houver alguma alteração ou novos documentos.
+            Parâmetros:
+            - numero_processo: número do processo SIPAC.
+            - acompanhar: True para monitorar (padrão), False para parar de monitorar.
+            """
+            from hermes_core_logic import _call_web_callable
+            from firebase_admin import firestore
+            from datetime import datetime, timezone
+            import re as _re
+            
+            try:
+                print(f"[Copiloto] Acompanhar processo SIPAC: {numero_processo} -> {acompanhar}")
+                res = _call_web_callable(
+                    function_name="consultarProcessoSipac",
+                    data={"numeroProcesso": numero_processo},
+                    user_uid=user_uid
+                )
 
+                clean_num = _re.sub(r'[^\d]', '', numero_processo)
+                doc_id = f"{user_uid}_{clean_num}" if user_uid else f"global_{clean_num}"
+                ref = db.collection('sipac_processos').document(doc_id)
+                
+                ref.set({
+                    "acompanhar": acompanhar,
+                    "numeroProcesso": res.get("numeroProcesso", numero_processo),
+                    "uid": user_uid or "global",
+                    "ultimaConsulta": datetime.now(timezone.utc).isoformat(),
+                    **res
+                }, merge=True)
+                
+                status_str = "ATIVADO" if acompanhar else "DESATIVADO"
+                return f"Sucesso: O acompanhamento automático para o processo {numero_processo} foi {status_str}."
+            except Exception as e:
+                print(f"[Copiloto] Erro ao alterar acompanhamento SIPAC: {e}")
+                return f"⚠️ Erro ao alterar acompanhamento para o processo {numero_processo}: {str(e)}"
+
+        def incorporar_documento_especifico_sipac_no_rag_da_acao(numero_processo: str, sequencial: int, task_id: str = None):
+            """
+            Busca e incorpora um documento público específico de um processo SIPAC diretamente no RAG da ação ativa.
+            O documento é identificado pelo seu número sequencial (ordem) no processo.
+            Parâmetros:
+            - numero_processo: número do processo SIPAC
+            - sequencial: número de ordem (sequencial) do documento (ex: 1, 12, 15) que foi identificado via consulta.
+            - task_id: ID da ação/tarefa. Se omitido, usa o taskId da ação ativa.
+            """
+            from hermes_core_logic import _call_web_callable
+            from knowledge_graph import _get_embedding
+            from firebase_admin import firestore
+            import requests
+            
+            target_task_id = task_id or task_id_scoped
+            if not target_task_id:
+                return "ERRO|Nenhuma ação ativa em contexto e nenhum task_id foi fornecido para incorporar o documento."
+
+            try:
+                print(f"[Copiloto] Buscando processo SIPAC para RAG específico: {numero_processo}, doc ordem: {sequencial}")
+                res = _call_web_callable(
+                    function_name="consultarProcessoSipac",
+                    data={"numeroProcesso": numero_processo},
+                    user_uid=user_uid
+                )
+
+                documentos = res.get('documentos', [])
+                if not documentos:
+                    return f"O processo {numero_processo} foi localizado, mas não contém documentos públicos anexados para incorporação."
+
+                # Localiza o documento pelo sequencial (ordem)
+                doc_alvo = None
+                for d in documentos:
+                    try:
+                        if int(d.get('ordem')) == int(sequencial):
+                            doc_alvo = d
+                            break
+                    except (ValueError, TypeError):
+                        continue
+
+                if not doc_alvo:
+                    return f"Não foi possível encontrar o documento sequencial #{sequencial} no processo {numero_processo}."
+
+                url = doc_alvo.get('url')
+                if not url:
+                    return f"O documento sequencial #{sequencial} ({doc_alvo.get('tipo')}) possui acesso restrito e não pode ser incorporado."
+
+                task_ref = db.collection('tarefas').document(target_task_id)
+                task_snap = task_ref.get()
+                if not task_snap.exists:
+                    return f"ERRO|Ação {target_task_id} não encontrada no banco de dados."
+                
+                task_data = task_snap.to_dict() or {}
+                pool_dados = task_data.get('pool_dados', []) or []
+                existing_urls = {item.get('valor') for item in pool_dados if item.get('valor')}
+
+                nome_doc = f"Seq #{doc_alvo.get('ordem')} - {doc_alvo.get('tipo')}"
+                
+                print(f"[Copiloto] Baixando documento do SIPAC: {nome_doc} -> {url}")
+                resp = requests.get(url, timeout=15)
+                if not resp.ok:
+                    return f"Falha ao baixar o documento '{nome_doc}': HTTP {resp.status_code}"
+                
+                file_bytes = resp.content
+                
+                pdf_result = extract_pdf_text_with_fallback(
+                    file_bytes,
+                    f"{nome_doc}.pdf",
+                    api_key=gemini_key,
+                    allow_gemini_fallback=False
+                )
+                doc_text = (pdf_result.get('text') or '').strip()
+                if not doc_text:
+                    try:
+                        doc_text = file_bytes.decode('utf-8', errors='ignore').strip()
+                    except Exception:
+                        pass
+                
+                if not doc_text or len(doc_text) < 50:
+                    return f"Documento '{nome_doc}' vazio ou sem texto legível."
+                    
+                summary_prompt = (
+                    f"Você é um analista jurídico sênior. Resuma de forma concisa e técnica "
+                    f"o seguinte documento do processo SIPAC '{nome_doc}':\n\n"
+                    f"CONTEÚDO:\n{doc_text[:6000]}"
+                )
+                summary_resp = client.models.generate_content(
+                    model="gemini-3.5-flash",
+                    contents=summary_prompt
+                )
+                resumo = (summary_resp.text or "").strip()
+                if not resumo:
+                    resumo = f"Documento público do processo SIPAC {numero_processo} do tipo {doc_alvo.get('tipo')}."
+
+                embedding = _get_embedding(resumo, gemini_key)
+
+                import uuid as _uuid
+                artefato_id = f"sipac_{_uuid.uuid4().hex[:12]}"
+                db.collection('indice_artefatos').document(artefato_id).set({
+                    "nome": f"SIPAC: {nome_doc}",
+                    "url": url,
+                    "tipo_mime": "application/pdf",
+                    "resumo_semantico": resumo,
+                    "embedding": embedding,
+                    "tags": ["SIPAC", doc_alvo.get('tipo', 'Documento')],
+                    "origem": "tarefa",
+                    "task_id": target_task_id,
+                    "acervo_id": None,
+                    "texto_bruto": doc_text[:12000],
+                    "indexed_at": firestore.SERVER_TIMESTAMP
+                })
+                
+                if url not in existing_urls:
+                    pool_dados.append({
+                        "nome": f"SIPAC: {nome_doc}",
+                        "tipo": "arquivo",
+                        "valor": url
+                    })
+                    task_ref.update({"pool_dados": pool_dados})
+                    
+                return (
+                    f"Sucesso: O documento '{nome_doc}' do processo SIPAC {numero_processo} "
+                    f"foi incorporado com sucesso no RAG da Ação [{(task_data.get('titulo') or 'Ação')}]({target_task_id})."
+                )
+            except Exception as e:
+                print(f"[Copiloto] Erro na incorporação de RAG do SIPAC: {e}")
+                return f"ERRO|Erro ao incorporar documento do SIPAC {numero_processo} no RAG: {str(e)}"
 
         def buscar_e_analisar_email(query: str, max_results: int = 5):
             """
@@ -9783,6 +9996,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'preparar_vinculo_contatos': preparar_vinculo_contatos,
             'preparar_atualizacao_contato': preparar_atualizacao_contato,
             'registrar_interacao_contato': registrar_interacao_contato,
+            'consultar_processo_sipac_copiloto': consultar_processo_sipac_copiloto,
+            'incorporar_documento_especifico_sipac_no_rag_da_acao': incorporar_documento_especifico_sipac_no_rag_da_acao,
+            'acompanhar_processo_sipac_copiloto': acompanhar_processo_sipac_copiloto,
         }
 
         # Cria função genérica de acionamento que o loop manual do Python irá ignorar
@@ -9869,6 +10085,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'preparar_vinculo_contatos': preparar_vinculo_contatos,
             'preparar_atualizacao_contato': preparar_atualizacao_contato,
             'registrar_interacao_contato': registrar_interacao_contato,
+            'consultar_processo_sipac_copiloto': consultar_processo_sipac_copiloto,
+            'incorporar_documento_especifico_sipac_no_rag_da_acao': incorporar_documento_especifico_sipac_no_rag_da_acao,
+            'acompanhar_processo_sipac_copiloto': acompanhar_processo_sipac_copiloto,
         }
         # Ferramentas internas que não devem aparecer para o usuário
         _HIDDEN_TOOLS = {'registrar_correcao_procedimento', 'resolver_conflito_memoria'}
@@ -9911,6 +10130,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     preparar_vinculo_contatos,
                     preparar_atualizacao_contato,
                     registrar_interacao_contato,
+                    consultar_processo_sipac_copiloto,
+                    incorporar_documento_especifico_sipac_no_rag_da_acao,
+                    acompanhar_processo_sipac_copiloto,
                 ] + dynamic_tools,
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
             ),

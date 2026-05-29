@@ -6,6 +6,7 @@ import { ChoirRehearsalsTool } from './ChoirRehearsalsTool';
 import { MeetingTranscriptionTool } from './MeetingTranscriptionTool';
 import { DiagnosticoTool } from './DiagnosticoTool';
 import { PopManagerTool } from './PopManagerTool';
+import { SipacTrackingTool } from './SipacTrackingTool';
 
 export interface ToolParameterSchema {
     type: string;
@@ -213,6 +214,27 @@ export const toolsRegistry: ToolMetadata[] = [
             }
         },
         component: PopManagerTool
+    },
+    {
+        id: 'SipacTrackingTool',
+        ui_metadata: {
+            title: 'Acompanhamento SIPAC',
+            description: 'Consulte processos públicos, andamentos e documentos anexos.',
+            icon: 'sipac',
+            category: 'Produtividade',
+            tag: '@SipacTrackingTool'
+        },
+        keys: ['sipac', 'processo', 'acompanhamento sipac', 'processo sipac', 'rastrear processo'],
+        parametersSchema: {
+            type: 'object',
+            properties: {
+                initialProcesso: {
+                    type: 'string',
+                    description: 'O número do processo SIPAC a ser consultado inicialmente.'
+                }
+            }
+        },
+        component: SipacTrackingTool
     }
 ];
 

@@ -1247,7 +1247,7 @@ const App: React.FC = () => {
   const [isImportPlanOpen, setIsImportPlanOpen] = useState(false);
   const [isCompletedTasksOpen, setIsCompletedTasksOpen] = useState(false);
   const [brainstormIdeas, setBrainstormIdeas] = useState<BrainstormIdea[]>([]);
-  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'whatsapp_assistant' | 'diagnostico' | 'pop_manager' | null>(null);
+  const [activeFerramenta, setActiveFerramenta] = useState<'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'whatsapp_assistant' | 'diagnostico' | 'pop_manager' | 'sipac_tracking' | null>(null);
   const [initialDraftId, setInitialDraftId] = useState<string | undefined>(undefined);
   const [initialDiagnosisId, setInitialDiagnosisId] = useState<string | undefined>(undefined);
   const [isBrainstormingAddingText, setIsBrainstormingAddingText] = useState(false);
@@ -2142,7 +2142,7 @@ const App: React.FC = () => {
     setActivePopup(newNotif);
     try {
       if (!user) return;
-      const firestoreData = JSON.parse(JSON.stringify(newNotif));
+      const firestoreData = { ...JSON.parse(JSON.stringify(newNotif)), uid: user.uid };
       await setDoc(doc(db, 'notificacoes', newNotif.id), firestoreData);
     } catch (err) {
       console.error("Erro ao persistir notificação:", err);
@@ -2243,6 +2243,11 @@ const App: React.FC = () => {
       case 'sistemas':
         setActiveModule('acoes');
         setViewMode('sistemas-dev');
+        break;
+      case '@SipacTrackingTool':
+        setActiveModule('acoes');
+        setViewMode('ferramentas');
+        setActiveFerramenta('sipac_tracking');
         break;
       default:
         break;
@@ -3615,7 +3620,7 @@ const App: React.FC = () => {
   const handleDeleteUnidade = async (id: string) => {
     try {
       await deleteDoc(doc(db, 'unidades', id));
-      showToast("Ãrea removida.", 'info');
+      showToast("Ã rea removida.", 'info');
     } catch (err) {
       console.error(err);
       showToast("Erro ao remover área.", 'error');
@@ -3624,7 +3629,7 @@ const App: React.FC = () => {
   const handleUpdateUnidade = async (id: string, updates: any) => {
     try {
       await updateDoc(doc(db, 'unidades', id), updates);
-      showToast("Ãrea atualizada!", 'success');
+      showToast("Ã rea atualizada!", 'success');
     } catch (err) {
       console.error(err);
       showToast("Erro ao atualizar área.", 'error');
@@ -3638,6 +3643,21 @@ const App: React.FC = () => {
       setPlanosTrabalho(data);
     }, handleSnapshotError('planos_trabalho'));
     return () => unsubscribePlanos();
+  }, [user]);
+  useEffect(() => {
+    if (!user) return;
+    const qNotif = query(
+      collection(db, 'notificacoes'),
+      where('uid', '==', user.uid)
+    );
+    const unsubscribeNotif = onSnapshot(qNotif, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as HermesNotification));
+      data.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+      setNotifications(data);
+    }, (err) => {
+      console.error("Erro ao escutar notificações:", err);
+    });
+    return () => unsubscribeNotif();
   }, [user]);
   useEffect(() => {
     if (!user) return;

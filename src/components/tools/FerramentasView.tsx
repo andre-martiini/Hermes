@@ -10,8 +10,9 @@ import { ChoirRehearsalsTool } from './ChoirRehearsalsTool';
 import { MeetingTranscriptionTool } from './MeetingTranscriptionTool';
 import { DiagnosticoTool } from './DiagnosticoTool';
 import { PopManagerTool } from './PopManagerTool';
+import { SipacTrackingTool } from './SipacTrackingTool';
 
-type FerramentaAtiva = 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'diagnostico' | 'pop_manager' | 'whatsapp_assistant' | null;
+type FerramentaAtiva = 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'diagnostico' | 'pop_manager' | 'whatsapp_assistant' | 'sipac_tracking' | null;
 
 interface FerramentasViewProps {
   ideas: BrainstormIdea[];
@@ -146,6 +147,10 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
 
   if (activeTool === 'diagnostico') {
     return <DiagnosticoTool onBack={() => setActiveTool(null)} initialDiagnosisId={initialDiagnosisId} />;
+  }
+
+  if (activeTool === 'sipac_tracking') {
+    return <SipacTrackingTool onBack={() => setActiveTool(null)} isDark={isDark} />;
   }
 
   const startRecording = async () => {
@@ -287,6 +292,16 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
         iconClasses: isDark ? 'text-blue-400 group-hover:bg-blue-600' : 'text-blue-600 group-hover:bg-blue-600',
         lineColor: 'group-hover:bg-blue-500',
         icon: <svg className="w-6 h-6 md:w-7 md:h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+      },
+      {
+        id: 'sipac_tracking',
+        code: 'ID-008',
+        title: 'Acompanhamento SIPAC',
+        desc: 'Consulte processos públicos, andamentos e documentos anexos.',
+        dotColor: 'bg-emerald-500',
+        iconClasses: isDark ? 'text-emerald-400 group-hover:bg-emerald-600' : 'text-emerald-600 group-hover:bg-emerald-600',
+        lineColor: 'group-hover:bg-emerald-500',
+        icon: <svg className="w-6 h-6 md:w-7 md:h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
       }
     ];
 

@@ -1141,13 +1141,12 @@ export const HermesGlobalChat: React.FC<HermesGlobalChatProps> = ({
                 placeholder={isRecording ? 'Gravando... clique no microfone para parar' : isProcessingMic || isTranscribing ? 'Transcrevendo áudio...' : attachedFile || pastedContext ? 'Pergunte sobre o contexto anexado...' : 'Mensagem para o Hermes'}
                 className={`min-h-10 flex-1 resize-none overflow-y-hidden bg-transparent px-2 py-2.5 text-sm font-medium leading-5 outline-none disabled:opacity-40 ${isDark ? 'text-slate-100 placeholder:text-slate-600' : 'text-slate-900 placeholder:text-slate-400'}`}
               />
-              {(input.trim() || attachedFile || pastedContext) && !isRecording ? (
+              <button type="button" disabled={isBlocked && !isRecording} onClick={() => isRecording ? stopRecording() : startRecording()} title={isRecording ? 'Parar gravação' : 'Gravar áudio'} className={`flex h-10 w-10 shrink-0 items-center justify-center transition-all disabled:opacity-30 ${isRecording ? 'bg-rose-600 text-white animate-pulse' : hoverClass}`}>
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 10v2a7 7 0 01-14 0v-2m14 0h2m-16 0H3m9 10v3m-3 0h6" /></svg>
+              </button>
+              {(input.trim() || attachedFile || pastedContext) && !isRecording && (
                 <button type="button" disabled={isBlocked} onClick={() => sendMessage(input)} title="Enviar" className="flex h-10 w-10 shrink-0 items-center justify-center bg-blue-600 text-white transition-all hover:bg-blue-700 disabled:opacity-30">
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                </button>
-              ) : (
-                <button type="button" disabled={isBlocked && !isRecording} onClick={() => isRecording ? stopRecording() : startRecording()} title={isRecording ? 'Parar gravação' : 'Gravar áudio'} className={`flex h-10 w-10 shrink-0 items-center justify-center transition-all disabled:opacity-30 ${isRecording ? 'bg-rose-600 text-white animate-pulse' : hoverClass}`}>
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 10v2a7 7 0 01-14 0v-2m14 0h2m-16 0H3m9 10v3m-3 0h6" /></svg>
                 </button>
               )}
             </div>

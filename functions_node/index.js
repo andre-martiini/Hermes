@@ -9,6 +9,7 @@ const { google } = require('googleapis');
 const { PubSub } = require('@google-cloud/pubsub');
 const { v4: uuidv4 } = require('uuid');
 const Busboy = require('busboy');
+const { scrapeSIPACProcess } = require('./sipacService');
 
 puppeteer.use(StealthPlugin());
 if (admin.apps.length === 0) admin.initializeApp();
@@ -580,3 +581,90 @@ exports.generatePdfFromHtml = functions.runWith({
         if (browser) await browser.close();
     }
 });
+
+exports.consultarProcessoSipac = functions.runWith({
+    timeoutSeconds: 300,
+    memory: '2GB'
+}).https.onCall(async (data, context) => {
+    const userUid = context.auth ? context.auth.uid : (context.rawRequest && context.rawRequest.headers['x-hermes-user-uid']);
+    if (!userUid) {
+        throw new functions.https.HttpsError('unauthenticated', 'O usuário precisa estar autenticado.');
+    }
+
+    const { numeroProcesso } = data;
+    if (!numeroProcesso) {
+        throw new functions.https.HttpsError('invalid-argument', 'O número do processo é obrigatório.');
+    }
+
+    try {
+        console.log(`[consultarProcessoSipac] Iniciando busca para o processo: ${numeroProcesso}`);
+        const result = await scrapeSIPACProcess(numeroProcesso);
+        return result;
+    } catch (error) {
+        console.error('[consultarProcessoSipac Error]', error);
+        throw new functions.https.HttpsError('internal', error.message || 'Erro ao consultar o processo no SIPAC.');
+    }
+});
+
+exports.scheduledSipacSync = functions.runWith({
+    timeoutSeconds: 540,
+    memory: '2GB'
+}).pubsub.schedule('every 2 hours').onRun(async (context) => {
+    console.log('[scheduledSipacSync] Starting background sync for SIPAC tracked processes...');
+    const snapshot = await db.collection('sipac_processos').where('acompanhar', '==', true).get();
+    if (snapshot.empty) {
+        console.log('[scheduledSipacSync] No tracked processes found.');
+        return null;
+    }
+
+    console.log(`[scheduledSipacSync] Found ${snapshot.size} processes to sync.`);
+    const { scrapeSIPACProcess } = require('./sipacService');
+
+    for (const doc of snapshot.docs) {
+        const data = doc.data();
+        const numeroProcesso = data.numeroProcesso;
+        const oldHash = data.snapshot_hash || '';
+        const uid = data.uid;
+
+        console.log(`[scheduledSipacSync] Syncing process ${numeroProcesso} for user ${uid}...`);
+        try {
+            const result = await scrapeSIPACProcess(numeroProcesso);
+
+            if (result.scraping_last_error) {
+                console.warn(`[scheduledSipacSync] Failed to scrape ${numeroProcesso}: ${result.scraping_last_error}`);
+                continue;
+            }
+
+            const newHash = result.snapshot_hash;
+            if (newHash !== oldHash) {
+                console.log(`[scheduledSipacSync] Change detected for process ${numeroProcesso}! Old hash: ${oldHash}, New hash: ${newHash}`);
+
+                await doc.ref.update({
+                    ...result,
+                    ultimaConsulta: new Date().toISOString()
+                });
+
+                const notificationId = `sipac_${numeroProcesso.replace(/[^\d]/g, '')}_${Date.now()}`;
+                const notificationDoc = {
+                    id: notificationId,
+                    title: `Alteração no SIPAC: ${numeroProcesso}`,
+                    message: `O processo foi atualizado. Status: ${result.status}. Localização: ${result.unidadeAtual}.`,
+                    type: 'info',
+                    timestamp: new Date().toISOString(),
+                    isRead: false,
+                    link: '@SipacTrackingTool',
+                    uid: uid
+                };
+
+                await db.collection('notificacoes').doc(notificationId).set(notificationDoc);
+                console.log(`[scheduledSipacSync] Notification created: ${notificationId}`);
+            } else {
+                console.log(`[scheduledSipacSync] No changes for process ${numeroProcesso}.`);
+            }
+        } catch (e) {
+            console.error(`[scheduledSipacSync] Error processing ${numeroProcesso}:`, e);
+        }
+    }
+    return null;
+});
+

@@ -3010,8 +3010,31 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                 />
                             </div>
 
-                            {/* Botão direito: microfone (campo vazio) ou enviar (com texto) */}
-                            {(input.trim() || attachedFile || pastedContext) && !isRecording ? (
+                            {/* Botão de gravação (sempre visível) */}
+                            <button
+                                onClick={() => isRecording ? stopRecording() : startRecording()}
+                                disabled={isBlocked && !isRecording}
+                                title={isRecording ? 'Parar gravação' : 'Gravar Áudio'}
+                                className={`flex h-9 w-9 items-center justify-center rounded-none transition-all active:scale-95 flex-shrink-0 ${
+                                    isRecording
+                                        ? 'bg-red-500 text-white animate-pulse hover:bg-red-600'
+                                        : isDark
+                                            ? 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white'
+                                            : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
+                                } disabled:opacity-30 disabled:cursor-not-allowed`}
+                            >
+                                {isProcessingMic ? (
+                                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                                ) : (
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 10v2a7 7 0 01-14 0v-2m14 0h2m-16 0H3m9 10v3m-3 0h6" />
+                                    </svg>
+                                )}
+                            </button>
+
+                            {/* Botão de envio (visível se houver texto/anexos e não gravando) */}
+                            {(input.trim() || attachedFile || pastedContext) && !isRecording && (
                                 <button
                                     onClick={() => {
                                         if (!currentSessionId) {
@@ -3027,28 +3050,6 @@ export const HermesCopilotoDrawer: React.FC<HermesCopilotoDrawerProps> = ({
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                                     </svg>
-                                </button>
-                            ) : (
-                                <button
-                                    onClick={() => isRecording ? stopRecording() : startRecording()}
-                                    disabled={isBlocked && !isRecording}
-                                    title={isRecording ? 'Parar gravação' : 'Gravar Áudio'}
-                                    className={`flex h-9 w-9 items-center justify-center rounded-none transition-all active:scale-95 flex-shrink-0 ${
-                                        isRecording
-                                            ? 'bg-red-500 text-white animate-pulse hover:bg-red-600'
-                                            : isDark
-                                                ? 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white'
-                                                : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
-                                    } disabled:opacity-30 disabled:cursor-not-allowed`}
-                                >
-                                    {isProcessingMic ? (
-                                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
-                                    ) : (
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 10v2a7 7 0 01-14 0v-2m14 0h2m-16 0H3m9 10v3m-3 0h6" />
-                                        </svg>
-                                    )}
                                 </button>
                             )}
                         </div>
