@@ -1,0 +1,23 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Transcrições longas: cada usuário só acessa a própria pasta.
+    // O binário é efêmero (criado pelo cliente, expurgado pelo backend após processar).
+    match /long_transcriptions/{userId}/{fileName} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null
+                    && request.auth.uid == userId
+                    && (request.resource.contentType.matches('audio/.*')
+                        || request.resource.contentType.matches('video/.*'));
+      allow delete: if request.auth != null && request.auth.uid == userId;
+      allow update: if false;
+    }
+
+    // Demais caminhos: sem acesso direto pelo cliente (backend usa Admin SDK e ignora regras).
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

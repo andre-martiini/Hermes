@@ -1,6 +1,6 @@
 
 
-from firebase_functions import firestore_fn, scheduler_fn, options, https_fn, pubsub_fn
+from firebase_functions import firestore_fn, scheduler_fn, options, https_fn, pubsub_fn, storage_fn
 
 from firebase_admin import initialize_app, firestore, get_app
 import json
@@ -2128,36 +2128,8 @@ def _normalize_notification_title(title: str | None) -> str:
 
 
 def _should_mirror_notification_to_telegram(notif: dict) -> bool:
-    """Mantem o Telegram restrito as categorias importantes e acionaveis."""
-    title = _normalize_notification_title(notif.get('title'))
-
-    exact_titles = {
-        "erro de sincronizacao",
-        "novo pix recebido",
-        "novos boletos",
-        "acoes vencidas",
-        "alerta de orcamento",
-        "auditoria pgd",
-        "apresentacao concluida",
-        "pesquisa concluida",
-        "pesquisa profunda concluida",
-        "pesquisa profunda falhou",
-    }
-    if title in exact_titles:
-        return True
-
-    if title in {"hermes: proxima tarefa", "hermes: encerramento de tarefa"}:
-        return True
-
-    if title.startswith("alteracao no sipac:"):
-        return True
-
-    # Lembretes especificos de acao ja sao enviados ao Telegram pelo scheduler
-    # com mensagem mais detalhada; nao duplicamos via espelhamento generico.
-    if title.startswith("lembrete:"):
-        return False
-
-    return False
+    """Direciona todas as notificações do sistema para o Telegram."""
+    return True
 
 
 def _build_telegram_notification_message(notif: dict) -> str:
@@ -13340,3 +13312,207 @@ def merge_contacts(req: https_fn.CallableRequest):
             code=https_fn.FunctionsErrorCode.INTERNAL,
             message=f"Erro ao mesclar contatos: {str(e)}"
         )
+
+
+_LONG_TRANSCRIPTION_VIDEO_EXTS = {
+    "mp4", "mov", "mkv", "avi", "webm", "m4v", "wmv", "flv", "mpeg", "mpg", "3gp", "ts"
+}
+
+
+@storage_fn.on_object_finalized(
+    region="us-east1",
+    timeout_sec=540,
+    memory=options.MemoryOption.GB_4,
+    cpu=2,
+)
+def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
+    """Transcreve arquivos pesados de áudio/vídeo enviados para `long_transcriptions/{uid}/{id}.{ext}`.
+
+    Fluxo: (vídeo) extrai só o áudio via ffmpeg embutido -> Files API do Gemini ->
+    transcrição literal com gemini-3.5-flash -> grava no Firestore -> expurga o binário original.
+    """
+    import os as _os
+    import time as _time
+    import tempfile as _tempfile
+    import subprocess as _subprocess
+    from firebase_admin import storage as admin_storage
+
+    object_path = (event.data.name or "")
+    if not object_path.startswith("long_transcriptions/"):
+        return  # ignora uploads de outras pastas no mesmo bucket
+
+    # Esperado: long_transcriptions/{userId}/{transcriptionId}.{ext}
+    parts = object_path.split("/")
+    if len(parts) != 3:
+        print(f"[long_transcription] caminho inesperado, ignorando: {object_path}")
+        return
+    _, user_id, file_with_ext = parts
+    transcription_id = file_with_ext.rsplit(".", 1)[0]
+    file_ext = file_with_ext.rsplit(".", 1)[1].lower() if "." in file_with_ext else ""
+
+    db = get_db()
+    doc_ref = db.collection("long_transcriptions").document(transcription_id)
+    snap = doc_ref.get()
+    if not snap.exists:
+        print(f"[long_transcription] doc {transcription_id} inexistente, ignorando.")
+        return
+    data = snap.to_dict() or {}
+
+    # Idempotência: Storage triggers são at-least-once. Só processamos registros 'Enviando'.
+    if data.get("status") != "Enviando":
+        print(f"[long_transcription] {transcription_id} já em '{data.get('status')}', ignorando re-trigger.")
+        return
+    if data.get("userId") and data.get("userId") != user_id:
+        print(f"[long_transcription] userId divergente em {transcription_id}, ignorando.")
+        return
+
+    doc_ref.update({"status": "Processando", "updatedAt": firestore.SERVER_TIMESTAMP})
+
+    from google import genai
+    from google.genai import types
+
+    bucket_name = event.data.bucket
+    local_media_path = None
+    local_audio_path = None
+    gemini_file = None
+    client = None
+
+    try:
+        api_key = get_gemini_api_key()
+        if not api_key:
+            raise RuntimeError("Chave Gemini não configurada em system/api_keys.")
+        client = genai.Client(api_key=api_key)
+
+        # 1. Baixar o binário do Storage para arquivo temporário
+        bucket = admin_storage.bucket(bucket_name)
+        blob = bucket.blob(object_path)
+        suffix = f".{file_ext}" if file_ext else ""
+        fd, local_media_path = _tempfile.mkstemp(suffix=suffix)
+        _os.close(fd)
+        blob.download_to_filename(local_media_path)
+
+        content_type = (event.data.content_type or "").lower()
+        is_video = content_type.startswith("video/") or file_ext in _LONG_TRANSCRIPTION_VIDEO_EXTS
+
+        # 2. Para vídeo: extrair apenas a faixa de áudio (muito mais barato e suporta arquivos longos)
+        if is_video:
+            import imageio_ffmpeg
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+            fd2, local_audio_path = _tempfile.mkstemp(suffix=".m4a")
+            _os.close(fd2)
+            _subprocess.run(
+                [
+                    ffmpeg_exe, "-y", "-i", local_media_path,
+                    "-vn", "-acodec", "aac", "-b:a", "128k", local_audio_path,
+                ],
+                check=True,
+                capture_output=True,
+            )
+            upload_path = local_audio_path
+            upload_mime = "audio/mp4"
+        else:
+            upload_path = local_media_path
+            upload_mime = content_type or "audio/mpeg"
+
+        # 3. Upload via Files API e aguardar o estado ACTIVE
+        gemini_file = client.files.upload(
+            file=upload_path,
+            config=types.UploadFileConfig(mime_type=upload_mime, display_name=data.get("fileName") or transcription_id),
+        )
+        waited = 0
+        while str(getattr(gemini_file.state, "name", gemini_file.state)) == "PROCESSING":
+            if waited >= 240:
+                raise TimeoutError("Files API demorou demais para preparar o áudio (>4min).")
+            _time.sleep(5)
+            waited += 5
+            gemini_file = client.files.get(name=gemini_file.name)
+        final_state = str(getattr(gemini_file.state, "name", gemini_file.state))
+        if final_state == "FAILED":
+            raise RuntimeError("Files API falhou ao processar o arquivo de áudio.")
+
+        # 4. Transcrição literal (sem pós-processamento)
+        prompt = (
+            "Transcreva integral e literalmente o áudio a seguir para texto. "
+            "Inclua tudo o que for falado, na ordem em que ocorre, sem resumir, sem corrigir, "
+            "sem traduzir, sem adicionar comentários, títulos, marcações de tempo ou formatação extra. "
+            "Responda apenas com o texto transcrito."
+        )
+        response = client.models.generate_content(
+            model="gemini-3.5-flash",
+            contents=[
+                types.Content(parts=[
+                    types.Part.from_uri(
+                        file_uri=gemini_file.uri,
+                        mime_type=getattr(gemini_file, "mime_type", None) or upload_mime,
+                    ),
+                    types.Part(text=prompt),
+                ])
+            ],
+            config=types.GenerateContentConfig(
+                temperature=0,
+                max_output_tokens=65536,
+            ),
+        )
+        transcription_raw = (response.text or "").strip()
+        if not transcription_raw:
+            raise RuntimeError("O modelo retornou uma transcrição vazia.")
+
+        # Detecta truncamento por limite de tokens de saída e sinaliza no resultado
+        try:
+            finish_reason = str(getattr(response.candidates[0], "finish_reason", "") or "")
+        except Exception:
+            finish_reason = ""
+        was_truncated = "MAX_TOKENS" in finish_reason.upper()
+
+        doc_ref.update({
+            "status": "Concluído",
+            "transcriptionRaw": transcription_raw,
+            "errorMessage": (
+                "Atenção: a transcrição pode ter sido truncada por exceder o limite de saída do modelo "
+                "(áudio muito longo)."
+                if was_truncated else None
+            ),
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+        print(
+            f"[long_transcription] {transcription_id} concluído "
+            f"({len(transcription_raw)} chars, truncado={was_truncated})."
+        )
+
+    except Exception as e:
+        msg = str(e)
+        stderr = getattr(e, "stderr", None)
+        if stderr:
+            try:
+                msg = f"{msg} | ffmpeg: {stderr.decode('utf-8', 'ignore')[-400:]}"
+            except Exception:
+                pass
+        print(f"[long_transcription] ERRO em {transcription_id}: {msg}")
+        try:
+            doc_ref.update({
+                "status": "Erro",
+                "errorMessage": msg[:1500],
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            })
+        except Exception as e2:
+            print(f"[long_transcription] falha ao gravar status de erro: {e2}")
+
+    finally:
+        # Expurgo: deleta o binário original do Storage independente do resultado
+        try:
+            admin_storage.bucket(bucket_name).blob(object_path).delete()
+        except Exception as e:
+            print(f"[long_transcription] falha ao expurgar {object_path}: {e}")
+        # Deleta o arquivo temporário na Files API do Gemini
+        try:
+            if gemini_file is not None and client is not None:
+                client.files.delete(name=gemini_file.name)
+        except Exception:
+            pass
+        # Limpa temporários locais
+        for _p in (local_media_path, local_audio_path):
+            try:
+                if _p and _os.path.exists(_p):
+                    _os.remove(_p)
+            except Exception:
+                pass

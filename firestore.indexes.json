@@ -25,6 +25,14 @@
       ]
     },
     {
+      "collectionGroup": "long_transcriptions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "whatsapp_outbox",
       "queryScope": "COLLECTION",
       "fields": [

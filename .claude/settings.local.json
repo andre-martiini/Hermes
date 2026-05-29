@@ -55,7 +55,13 @@
       "PowerShell($lines = Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\index.tsx\"; $start = 2313; $end = 2330; for \\($i = $start; $i -lt $end -and $i -lt $lines.Count; $i++\\) { \"$\\($i+1\\): $\\($lines[$i]\\)\" })",
       "PowerShell($lines = Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\functions\\\\main.py\"; $start = 2120; $end = 2215; for \\($i = $start; $i -lt $end -and $i -lt $lines.Count; $i++\\) { \"$\\($i+1\\): $\\($lines[$i]\\)\" })",
       "PowerShell($lines = Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\types.ts\"; $start = 430; $end = 445; for \\($i = $start; $i -lt $end -and $i -lt $lines.Count; $i++\\) { \"$\\($i+1\\): $\\($lines[$i]\\)\" })",
-      "PowerShell($lines = Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\src\\\\utils\\\\helpers.tsx\"; $start = 1; $end = 40; for \\($i = $start; $i -lt $end -and $i -lt $lines.Count; $i++\\) { \"$\\($i+1\\): $\\($lines[$i]\\)\" })"
+      "PowerShell($lines = Get-Content \"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\src\\\\utils\\\\helpers.tsx\"; $start = 1; $end = 40; for \\($i = $start; $i -lt $end -and $i -lt $lines.Count; $i++\\) { \"$\\($i+1\\): $\\($lines[$i]\\)\" })",
+      "PowerShell(python -m py_compile C:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\functions\\\\main.py; if \\($?\\) { python -m py_compile C:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\functions\\\\tools\\\\registry.py } ; \"exit=$LASTEXITCODE\")",
+      "PowerShell(Get-Command python,python3,py -ErrorAction SilentlyContinue)",
+      "Bash(functions/venv/Scripts/python.exe -m py_compile functions/main.py)",
+      "Bash(./venv/Scripts/python.exe -m py_compile main.py)",
+      "Bash(\"C:/Users/T-GAMER/Documents/gestao-Hermes/functions/venv/Scripts/python.exe\" -m py_compile \"C:/Users/T-GAMER/Documents/gestao-Hermes/functions/main.py\")",
+      "Bash(firebase functions:artifacts:setpolicy --location us-east1 --days 3 --force)"
     ]
   }
 }

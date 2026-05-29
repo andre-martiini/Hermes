@@ -26,3 +26,4 @@ nbformat>=5.9.0
 nbconvert>=7.0.0
 pandas
 openpyxl
+imageio-ffmpeg>=0.5.1

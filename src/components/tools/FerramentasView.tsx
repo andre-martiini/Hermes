@@ -11,8 +11,9 @@ import { MeetingTranscriptionTool } from './MeetingTranscriptionTool';
 import { DiagnosticoTool } from './DiagnosticoTool';
 import { PopManagerTool } from './PopManagerTool';
 import { SipacTrackingTool } from './SipacTrackingTool';
+import { LongTranscriptionTool } from './LongTranscriptionTool';
 
-type FerramentaAtiva = 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'diagnostico' | 'pop_manager' | 'whatsapp_assistant' | 'sipac_tracking' | null;
+type FerramentaAtiva = 'brainstorming' | 'slides' | 'shopping' | 'transcription' | 'choir_rehearsals' | 'meeting_transcription' | 'diagnostico' | 'pop_manager' | 'whatsapp_assistant' | 'sipac_tracking' | 'long_transcription' | null;
 
 interface FerramentasViewProps {
   ideas: BrainstormIdea[];
@@ -151,6 +152,10 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
 
   if (activeTool === 'sipac_tracking') {
     return <SipacTrackingTool onBack={() => setActiveTool(null)} isDark={isDark} />;
+  }
+
+  if (activeTool === 'long_transcription') {
+    return <LongTranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} isDark={isDark} />;
   }
 
   const startRecording = async () => {
@@ -302,6 +307,16 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
         iconClasses: isDark ? 'text-emerald-400 group-hover:bg-emerald-600' : 'text-emerald-600 group-hover:bg-emerald-600',
         lineColor: 'group-hover:bg-emerald-500',
         icon: <svg className="w-6 h-6 md:w-7 md:h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+      },
+      {
+        id: 'long_transcription',
+        code: 'ID-009',
+        title: 'Transcrições Longas',
+        desc: 'Envie áudios e vídeos pesados de qualquer tamanho e receba a transcrição bruta.',
+        dotColor: 'bg-purple-500',
+        iconClasses: isDark ? 'text-purple-400 group-hover:bg-purple-600' : 'text-purple-600 group-hover:bg-purple-600',
+        lineColor: 'group-hover:bg-purple-500',
+        icon: <svg className="w-6 h-6 md:w-7 md:h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0-4a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
       }
     ];
 
