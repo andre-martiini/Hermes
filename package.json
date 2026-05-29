@@ -12,10 +12,13 @@
     "whatsapp:worker": "npm --prefix services/whatsapp-capture start"
   },
   "dependencies": {
+    "@ffmpeg/core": "^0.12.10",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "@google/genai": "^1.43.0",
     "@google/generative-ai": "^0.24.1",
     "emoji-picker-react": "^4.18.0",
-    "firebase": "^12.9.0",
+    "firebase": "^12.14.0",
     "firebase-admin": "^13.6.1",
     "groq-sdk": "^0.37.0",
     "html-to-image": "^1.11.13",

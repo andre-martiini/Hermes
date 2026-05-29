@@ -13516,3 +13516,227 @@ def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
                     _os.remove(_p)
             except Exception:
                 pass
+
+@https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=540)
+def transcrever_reuniao_mobile(req: https_fn.CallableRequest):
+    """
+    Transcreve arquivos .ogg pesados de reunião vindos de dispositivos mobile.
+    Recebe o path do arquivo no Storage (ex: gs://...).
+    Usa gemini-3.1-flash-lite-preview para gerar transcrição com timestamps.
+    """
+    from google import genai
+    from google.genai import types
+    import json
+
+    data = req.data or {}
+    storage_path = data.get('storage_path')
+    started_at = data.get('startedAt')
+    ended_at = data.get('endedAt')
+    title = data.get('title')
+
+    if not storage_path:
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT,
+            message="storage_path é obrigatório."
+        )
+
+    db = get_db()
+    try:
+        keys_doc = _cached_doc_get(db, 'system', 'api_keys')
+        api_key = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+        if not api_key:
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.FAILED_PRECONDITION,
+                message="Chave Gemini não configurada."
+            )
+
+        client = genai.Client(api_key=api_key)
+
+        # Usar a Files API para transcrever a partir do Firebase Storage (que é Google Cloud Storage)
+        # Importante: a Files API atualmente aceita upload via arquivo local.
+        # Mas para "gs://", precisamos baixar e usar Files API, ou ver se gemini aceita gs:// (Apenas Vertex AI aceita gs:// de forma nativa).
+        # Vamos baixar o arquivo para /tmp para fazer upload na Files API.
+
+        import os
+        import tempfile
+        from firebase_admin import storage as admin_storage
+
+        bucket_name = storage_path.split("/")[2]
+        object_path = "/".join(storage_path.split("/")[3:])
+
+        bucket = admin_storage.bucket(bucket_name)
+        blob = bucket.blob(object_path)
+
+        fd, local_media_path = tempfile.mkstemp(suffix=".ogg")
+        os.close(fd)
+
+        try:
+            blob.download_to_filename(local_media_path)
+
+            # Upload via Files API
+            gemini_file = client.files.upload(
+                file=local_media_path,
+                config=types.UploadFileConfig(mime_type="audio/ogg", display_name="reuniao_mobile_audio")
+            )
+
+            waited = 0
+            while str(getattr(gemini_file.state, "name", gemini_file.state)) == "PROCESSING":
+                if waited >= 240:
+                    raise TimeoutError("Files API demorou demais.")
+                time.sleep(5)
+                waited += 5
+                gemini_file = client.files.get(name=gemini_file.name)
+
+            if str(getattr(gemini_file.state, "name", gemini_file.state)) == "FAILED":
+                raise RuntimeError("Files API falhou.")
+
+            prompt = (
+                "Transcreva integral e literalmente o áudio desta reunião para texto. "
+                "Inclua o tempo exato (timestamp) aproximado no início de cada trecho. "
+                "O formato esperado é:\n\n"
+                "[00:00:00] Texto falado...\n"
+                "[00:00:15] Mais texto...\n\n"
+                "Sem formatar em JSON. Apenas texto puro com timestamps."
+            )
+
+            response = client.models.generate_content(
+                model="gemini-3.1-flash-lite-preview",
+                contents=[
+                    types.Content(parts=[
+                        types.Part.from_uri(
+                            file_uri=gemini_file.uri,
+                            mime_type="audio/ogg",
+                        ),
+                        types.Part(text=prompt),
+                    ])
+                ],
+                config=types.GenerateContentConfig(
+                    temperature=0.2,
+                    max_output_tokens=65536,
+                ),
+            )
+
+            transcription_raw = (response.text or "").strip()
+
+            # Formatar para Transcripts (simples parser)
+            transcripts = []
+            import re
+            lines = transcription_raw.split('\n')
+            current_time = "00:00:00"
+            for line in lines:
+                if not line.strip(): continue
+                match = re.match(r'^\[(\d{2}:\d{2}:\d{2})\]\s*(.*)', line.strip())
+                if match:
+                    current_time = match.group(1)
+                    text = match.group(2)
+                else:
+                    text = line.strip()
+
+                # Tentativa de transformar tempo em timestamp se tivermos started_at
+                ts_iso = started_at
+                try:
+                    from datetime import datetime, timedelta
+                    st_dt = parse_iso_datetime(started_at)
+                    if st_dt:
+                        h, m, s = map(int, current_time.split(':'))
+                        act_dt = st_dt + timedelta(hours=h, minutes=m, seconds=s)
+                        ts_iso = act_dt.isoformat()
+                except:
+                    pass
+
+                transcripts.append({
+                    "speaker": "Reunião",
+                    "text": text,
+                    "timestamp": ts_iso
+                })
+
+            # Salvar no Firestore
+            meeting_data = {
+                "titulo": title or "Reunião Mobile",
+                "startedAt": started_at,
+                "endedAt": ended_at,
+                "transcripts": transcripts,
+                "transcriptCount": len(transcripts),
+                "chats": [],
+                "chatCount": 0,
+                "data_criacao": firestore.SERVER_TIMESTAMP,
+                "origem": "mobile",
+                "visualizado": False,
+                "storagePath": storage_path
+            }
+
+            doc_ref = db.collection('reunioes').add(meeting_data)
+
+            # Send push notification
+            from firebase_admin import messaging
+            uid = req.auth.uid if req.auth else None
+            # If no specific user, and assuming single-user hermes, we just broadcast to all tokens or specific token in db.
+            # Here we just look for fcm_tokens in user profile
+            if uid:
+                user_doc = db.collection('usuarios').document(uid).get()
+                if user_doc.exists:
+                    fcm_token = user_doc.to_dict().get('fcmToken')
+                    if fcm_token:
+                        try:
+                            message = messaging.Message(
+                                notification=messaging.Notification(
+                                    title='Transcrição Concluída',
+                                    body='Sua reunião mobile foi transcrita com sucesso.',
+                                ),
+                                token=fcm_token,
+                            )
+                            messaging.send(message)
+                        except Exception as e:
+                            print(f"Erro Push FCM: {e}")
+
+            return {"success": True, "meetingId": doc_ref[1].id}
+
+        finally:
+            if os.path.exists(local_media_path):
+                os.remove(local_media_path)
+            try:
+                if 'gemini_file' in locals() and client:
+                    client.files.delete(name=gemini_file.name)
+            except Exception:
+                pass
+
+    except Exception as e:
+        print(f"Erro transcrever_reuniao_mobile: {e}")
+        import traceback
+        traceback.print_exc()
+        raise https_fn.HttpsError(
+            code=https_fn.FunctionsErrorCode.INTERNAL,
+            message=str(e)
+        )
+
+
+@firestore_fn.on_document_updated(document="reunioes/{meetingId}", memory=options.MemoryOption.MB_256)
+def on_reuniao_visualizada(event: firestore_fn.Event[firestore_fn.Change[firestore_fn.DocumentSnapshot]]):
+    """
+    Trigger executado quando o status `visualizado` de uma reunião muda para true.
+    Deleta o arquivo de áudio bruto do Firebase Storage para economia de custos (Housekeeping).
+    """
+    if not event.data or not event.data.after or not event.data.after.exists:
+        return
+
+    after = event.data.after.to_dict() or {}
+    before = event.data.before.to_dict() if event.data.before and event.data.before.exists else {}
+
+    # Verifica se a flag 'visualizado' mudou para true e a origem é mobile
+    if after.get('origem') == 'mobile' and after.get('visualizado') is True and before.get('visualizado') is not True:
+        storage_path = after.get('storagePath')
+        if storage_path and storage_path.startswith('gs://'):
+            from firebase_admin import storage as admin_storage
+            try:
+                bucket_name = storage_path.split("/")[2]
+                object_path = "/".join(storage_path.split("/")[3:])
+
+                bucket = admin_storage.bucket(bucket_name)
+                blob = bucket.blob(object_path)
+                if blob.exists():
+                    blob.delete()
+                    print(f"Housekeeping: Áudio bruto deletado do Storage {storage_path}")
+                else:
+                    print(f"Housekeeping: Arquivo não encontrado no Storage {storage_path}")
+            except Exception as e:
+                print(f"Erro ao deletar áudio do Storage no housekeeping: {e}")

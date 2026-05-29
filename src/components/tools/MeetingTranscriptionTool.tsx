@@ -1,7 +1,10 @@
 ﻿import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { httpsCallable } from 'firebase/functions';
+import { getAuth } from 'firebase/auth';
 import { functions, db } from '@/firebase';
-import { collection, addDoc, getDocs, query, orderBy, limit } from 'firebase/firestore';
+import { collection, addDoc, getDocs, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import * as idbKeyval from 'idb-keyval';
+
 
 export interface TranscriptionEntry {
   id: string;
@@ -361,7 +364,33 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
     }
   }, [showToast, stopSystemAudioMonitor]);
 
+
+  useEffect(() => {
+    // Escutar reuniões recentes para o Housekeeping
+    if (!isMobileMode) return;
+
+    const q = query(collection(db, 'reunioes'), orderBy('data_criacao', 'desc'), limit(10));
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      for (const doc of snapshot.docs) {
+        const data = doc.data();
+        if (data.origem === 'mobile' && data.visualizado === true && data.storagePath) {
+          const idbKeyMatches = data.storagePath.match(/reunioes_mobile\/(reuniao_\d+_audio)\.ogg/);
+          if (idbKeyMatches && idbKeyMatches[1]) {
+             const key = idbKeyMatches[1];
+             const exists = await idbKeyval.get(key);
+             if (exists) {
+               await idbKeyval.del(key);
+               console.log(`[Housekeeping] Deletado áudio local: ${key}`);
+             }
+          }
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, [isMobileMode]);
+
   const stopRecording = useCallback(
+
     (persistHistory = true) => {
       if (micRecorderRef.current && micRecorderRef.current.state !== 'inactive') micRecorderRef.current.stop();
       if (systemRecorderRef.current && systemRecorderRef.current.state !== 'inactive') systemRecorderRef.current.stop();
@@ -392,7 +421,129 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
     [persistCurrentMeetingToHistory, stopSystemAudioMonitor]
   );
 
+
+  const [isMobileMode, setIsMobileMode] = useState(false);
+  const [mobileChunks, setMobileChunks] = useState<Blob[]>([]);
+  const [isMobileProcessing, setIsMobileProcessing] = useState(false);
+  const mobileChunksRef = useRef<Blob[]>([]);
+  const firstChunkTimeRef = useRef<Date | null>(null);
+
+  useEffect(() => {
+    setIsMobileMode(/Mobi|Android|iPhone/i.test(navigator.userAgent));
+  }, []);
+
+  const startRecordingMobile = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true
+      });
+
+      if (stream.getAudioTracks().length === 0) {
+        showToast('Áudio não capturado. Lembre-se de compartilhar o áudio do sistema.', 'error');
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+
+      const startedNow = new Date();
+      setTranscripts([]);
+      setChatMessages([]);
+      setMeetingStartedAt(startedNow);
+      setMeetingEndedAt(null);
+      meetingStartedAtRef.current = startedNow;
+      lastPersistedMeetingIdRef.current = null;
+      firstChunkTimeRef.current = null;
+
+      mobileChunksRef.current = [];
+      setMobileChunks([]);
+
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8,opus' });
+      systemRecorderRef.current = recorder;
+      systemStreamRef.current = stream;
+
+      recorder.ondataavailable = event => {
+        if (event.data.size > 0) {
+          if (!firstChunkTimeRef.current) {
+            firstChunkTimeRef.current = new Date();
+            meetingStartedAtRef.current = firstChunkTimeRef.current;
+            setMeetingStartedAt(firstChunkTimeRef.current);
+          }
+          mobileChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        setIsMobileProcessing(true);
+        const endedAt = new Date();
+        setMeetingEndedAt(endedAt);
+        const blob = new Blob(mobileChunksRef.current, { type: 'video/webm' });
+
+        try {
+          showToast('Processando áudio localmente...', 'info');
+          const { FFmpeg } = await import('@ffmpeg/ffmpeg');
+          const { fetchFile } = await import('@ffmpeg/util');
+
+          const ffmpeg = new FFmpeg();
+          await ffmpeg.load({
+            coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
+            wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm'
+          });
+
+          await ffmpeg.writeFile('input.webm', await fetchFile(blob));
+          await ffmpeg.exec(['-i', 'input.webm', '-vn', '-acodec', 'libvorbis', 'output.ogg']);
+          const fileData = await ffmpeg.readFile('output.ogg');
+          const audioBlob = new Blob([fileData], { type: 'audio/ogg' });
+
+          const idbKey = `reuniao_${meetingStartedAtRef.current?.getTime()}_audio`;
+          await idbKeyval.set(idbKey, audioBlob);
+
+          const auth = getAuth();
+          const token = await auth.currentUser?.getIdToken();
+          const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'gestao-hermes';
+
+          const swRegistration = await navigator.serviceWorker.ready;
+          swRegistration.active?.postMessage({
+            type: 'START_MOBILE_MEETING_UPLOAD',
+            storagePath: `gs://${projectId}.appspot.com/reunioes_mobile/${idbKey}.ogg`,
+            idbKey,
+            startedAt: meetingStartedAtRef.current?.toISOString(),
+            endedAt: endedAt.toISOString(),
+            title: `Reunião Mobile ${meetingStartedAtRef.current?.toLocaleTimeString()}`,
+            token,
+            projectId
+          });
+
+          showToast('Áudio salvo e na fila para transcrição em background.', 'success');
+        } catch (error) {
+          console.error('Erro processando mobile audio:', error);
+          showToast('Erro ao processar o áudio localmente.', 'error');
+        } finally {
+          setIsMobileProcessing(false);
+        }
+      };
+
+      stream.getVideoTracks().forEach(track => {
+        track.onended = () => {
+          if (recorder.state !== 'inactive') recorder.stop();
+          stopRecording(false);
+        };
+      });
+
+      recorder.start(1000);
+      setIsRecording(true);
+      showToast('Gravação iniciada.', 'info');
+
+    } catch (err) {
+      console.error('Erro getDisplayMedia mobile:', err);
+      showToast('Erro ao capturar tela no mobile.', 'error');
+    }
+  };
+
   const startRecording = async () => {
+    if (isMobileMode) {
+      return startRecordingMobile();
+    }
+
     let micStream: MediaStream | null = null;
     let systemStream: MediaStream | null = null;
 
@@ -834,14 +985,18 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
               >
                 {isChatOpen ? 'Minimizar Chat' : 'Abrir Chat'}
               </button>
+
               <button
-                onClick={() => (isRecording ? stopRecording(true) : setShowShareGuide(true))}
-                disabled={isSavingToDrive}
+                onClick={() => (isRecording ? stopRecording(!isMobileMode) : setShowShareGuide(true))}
+                disabled={isSavingToDrive || isMobileProcessing}
                 className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-sm disabled:opacity-50 ${
-                  isRecording ? 'bg-rose-100 text-rose-600 hover:bg-rose-200' : 'bg-slate-900 text-white hover:bg-blue-600'
+                  isRecording || isMobileProcessing ? 'bg-rose-100 text-rose-600 hover:bg-rose-200' : 'bg-slate-900 text-white hover:bg-blue-600'
                 }`}
               >
-                {isRecording ? 'Parar Gravação' : 'Iniciar Gravação'}
+
+
+                {isMobileProcessing ? 'Processando Áudio...' : isRecording ? 'Parar Gravação' : 'Iniciar Gravação'}
+
               </button>
             </div>
           </div>

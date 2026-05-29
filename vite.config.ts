@@ -16,6 +16,10 @@ export default defineConfig(({ mode }) => {
           rewrite: (path) => path.replace(/^\/proxy-functions/, ''),
           secure: false
         }
+      },
+      headers: {
+        'Cross-Origin-Opener-Policy': 'same-origin',
+        'Cross-Origin-Embedder-Policy': 'require-corp',
       }
     },
     plugins: [
@@ -61,7 +65,7 @@ export default defineConfig(({ mode }) => {
         },
         workbox: {
           maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
-          importScripts: ["firebase-messaging-sw.js", "share-target-sw.js"],
+          importScripts: ["firebase-messaging-sw.js", "share-target-sw.js", "upload-sync-sw.js"],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
