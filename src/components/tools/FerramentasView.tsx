@@ -120,15 +120,15 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
   };
 
   if (activeTool === 'slides') {
-    return <SlidesTool onBack={() => setActiveTool(null)} showToast={showToast} initialDraftId={initialDraftId} />;
+    return <SlidesTool onBack={() => setActiveTool(null)} showToast={showToast} initialDraftId={initialDraftId} isDark={isDark} />;
   }
 
   if (activeTool === 'shopping') {
-    return <ShoppingListTool onBack={() => setActiveTool(null)} showToast={showToast} />;
+    return <ShoppingListTool onBack={() => setActiveTool(null)} showToast={showToast} isDark={isDark} />;
   }
 
   if (activeTool === 'transcription') {
-    return <TranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} initialFile={pendingSharedAudioFile} onInitialFileConsumed={onPendingSharedAudioFileConsumed} />;
+    return <TranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} initialFile={pendingSharedAudioFile} onInitialFileConsumed={onPendingSharedAudioFileConsumed} isDark={isDark} />;
   }
 
   if (activeTool === 'choir_rehearsals') {
@@ -139,15 +139,16 @@ export const FerramentasView: React.FC<FerramentasViewProps> = ({
       onUploadFile={onUploadFile}
       initialFile={pendingSharedVideoFile}
       onInitialFileConsumed={onPendingSharedVideoFileConsumed}
+      isDark={isDark}
     />;
   }
 
   if (activeTool === 'meeting_transcription') {
-    return <MeetingTranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} />;
+    return <MeetingTranscriptionTool onBack={() => setActiveTool(null)} showToast={showToast} isDark={isDark} />;
   }
 
   if (activeTool === 'diagnostico') {
-    return <DiagnosticoTool onBack={() => setActiveTool(null)} initialDiagnosisId={initialDiagnosisId} />;
+    return <DiagnosticoTool onBack={() => setActiveTool(null)} initialDiagnosisId={initialDiagnosisId} isDark={isDark} />;
   }
 
   if (activeTool === 'sipac_tracking') {

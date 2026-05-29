@@ -23,6 +23,7 @@ interface ShoppingListToolProps {
   isPurchased?: boolean;
   ordem?: number;
   isEmbedded?: boolean;
+  isDark?: boolean;
 }
 
 interface AssistantMutationPreview {
@@ -57,6 +58,7 @@ export const ShoppingListTool = ({
   isPurchased,
   ordem,
   isEmbedded,
+  isDark = false,
 }: ShoppingListToolProps) => {
   const [items, setItems] = useState<ShoppingItem[]>([]);
   const [view, setView] = useState<'catalog' | 'planning' | 'shopping'>(initialView || 'catalog');
@@ -499,14 +501,14 @@ export const ShoppingListTool = ({
   };
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6 pb-32 px-2 md:px-0">
+    <div className={`animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6 pb-32 px-2 md:px-0`}>
       {assistantPreview && (
-        <div className="bg-amber-50 border border-amber-200 rounded-none-none shadow-none p-5 space-y-4">
+        <div className={`rounded-none-none shadow-none p-5 space-y-4 border ${isDark ? 'bg-amber-950/20 border-amber-900/60' : 'bg-amber-50 border border-amber-200'}`}>
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">Validacao do Copiloto</p>
-              <h3 className="text-lg font-black text-slate-900">{assistantPreview.title}</h3>
-              <p className="text-sm text-slate-600 font-medium mt-1">{assistantPreview.description}</p>
+              <p className={`text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-amber-500' : 'text-amber-700'}`}>Validacao do Copiloto</p>
+              <h3 className={`text-lg font-black ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{assistantPreview.title}</h3>
+              <p className={`text-sm font-medium mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{assistantPreview.description}</p>
             </div>
             <div className={`px-3 py-1 rounded-none-none text-[10px] font-black uppercase tracking-widest ${
               assistantStatus === 'applied'
@@ -515,7 +517,9 @@ export const ShoppingListTool = ({
                   ? 'bg-slate-200 text-slate-500'
                   : assistantStatus === 'error'
                     ? 'bg-rose-100 text-rose-600'
-                    : 'bg-white text-amber-700 border border-amber-200'
+                    : isDark
+                      ? 'bg-slate-800 text-amber-400 border border-slate-700'
+                      : 'bg-white text-amber-700 border border-amber-200'
             }`}>
               {assistantStatus === 'applied' ? 'Aplicado' : assistantStatus === 'cancelled' ? 'Cancelado' : assistantStatus === 'error' ? 'Erro' : 'Pendente'}
             </div>
@@ -523,14 +527,14 @@ export const ShoppingListTool = ({
 
           <div className="space-y-2">
             {assistantPreview.lines.map(line => (
-              <div key={line} className="bg-white/80 rounded-none-none px-4 py-3 text-sm font-semibold text-slate-700">
+              <div key={line} className={`rounded-none-none px-4 py-3 text-sm font-semibold ${isDark ? 'bg-slate-900/80 text-slate-300' : 'bg-white/80 text-slate-700'}`}>
                 {line}
               </div>
             ))}
           </div>
 
           {assistantError && (
-            <div className="bg-rose-50 border border-rose-100 rounded-none-none px-4 py-3 text-sm font-semibold text-rose-600">
+            <div className={`border rounded-none-none px-4 py-3 text-sm font-semibold ${isDark ? 'bg-rose-950/20 border-rose-900/40 text-rose-400' : 'bg-rose-50 border border-rose-100 text-rose-600'}`}>
               {assistantError}
             </div>
           )}
@@ -546,7 +550,7 @@ export const ShoppingListTool = ({
               </button>
               <button
                 onClick={() => setAssistantStatus('cancelled')}
-                className="flex-1 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest text-slate-500 bg-white border border-slate-200 hover:bg-slate-50 transition-all"
+                className={`flex-1 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'bg-slate-800 border border-slate-700 text-slate-350 hover:bg-slate-750' : 'text-slate-505 bg-white border border-slate-200 hover:bg-slate-50'}`}
               >
                 Cancelar
               </button>
@@ -558,28 +562,28 @@ export const ShoppingListTool = ({
       {/* Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
         {!isEmbedded && (
-          <button onClick={onBack} className="w-12 h-12 bg-white rounded-none-none flex items-center justify-center text-slate-400 hover:text-slate-900 border border-slate-200 hover:border-slate-900 transition-all shadow-none">
+          <button onClick={onBack} className={`w-12 h-12 rounded-none-none flex items-center justify-center transition-all shadow-none border ${isDark ? 'bg-slate-900 text-slate-400 hover:text-slate-100 border-slate-800 hover:border-slate-100' : 'bg-white text-slate-400 hover:text-slate-900 border border-slate-200 hover:border-slate-900'}`}>
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
           </button>
         )}
         <div className="flex-1">
-          <h2 className="text-2xl md:text-3xl font-mono font-black uppercase tracking-tight text-slate-900">Lista de Compras</h2>
-          <p className="text-slate-500 font-mono text-xs uppercase font-bold">{items.length} itens cadastrados · {plannedItems.length} planejados</p>
+          <h2 className={`text-2xl md:text-3xl font-mono font-black uppercase tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Lista de Compras</h2>
+          <p className={`font-mono text-xs uppercase font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{items.length} itens cadastrados · {plannedItems.length} planejados</p>
         </div>
         <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
           <button
             onClick={() => setIsPortalConfigOpen(prev => !prev)}
-            className={`h-11 px-3 md:px-4 rounded-none-none border text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${isPortalConfigOpen ? 'bg-slate-900 text-white border-slate-900 shadow-none' : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800 hover:border-slate-300'}`}
+            className={`h-11 px-3 md:px-4 rounded-none-none border text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${isPortalConfigOpen ? (isDark ? 'bg-slate-800 text-white border-slate-700' : 'bg-slate-900 text-white border-slate-900') : (isDark ? 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700' : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800 hover:border-slate-300')}`}
           >
             Portal Externo
           </button>
           {/* Tab selector */}
-          <div className="flex-1 min-w-0 flex bg-slate-100 p-1 rounded-none-none gap-0.5">
+          <div className={`flex-1 min-w-0 flex p-1 rounded-none-none gap-0.5 ${isDark ? 'bg-slate-950' : 'bg-slate-100'}`}>
             {(['catalog', 'planning', 'shopping'] as const).map(tab => {
               const labels: Record<string, string> = { catalog: 'Cadastro', planning: 'Planejar', shopping: 'Comprar' };
               return (
                 <button key={tab} onClick={() => setView(tab)}
-                  className={`flex-1 px-2 md:px-4 py-2.5 rounded-none-none text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all relative ${view === tab ? 'bg-white text-slate-900 shadow-none' : 'text-slate-400 hover:text-slate-600'}`}>
+                  className={`flex-1 px-2 md:px-4 py-2.5 rounded-none-none text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all relative ${view === tab ? (isDark ? 'bg-slate-800 text-white shadow-none' : 'bg-white text-slate-900 shadow-none') : (isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600')}`}>
                   {labels[tab]}
                   {tab === 'planning' && plannedItems.length > 0 && (
                     <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-[8px] font-black w-4 h-4 rounded-none-none flex items-center justify-center">{plannedItems.length}</span>
@@ -595,15 +599,15 @@ export const ShoppingListTool = ({
       </div>
 
       {isPortalConfigOpen && (
-        <div className="bg-white rounded-none-none border border-slate-200 shadow-xl p-6 animate-in fade-in slide-in-from-top-2 duration-300">
-          <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">Portal Externo da Lista</h3>
+        <div className={`rounded-none-none border shadow-xl p-6 animate-in fade-in slide-in-from-top-2 duration-300 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+          <h3 className={`text-[10px] font-black uppercase tracking-widest mb-4 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Portal Externo da Lista</h3>
           <div className="flex flex-col md:flex-row gap-3">
             <input
               type="text"
               readOnly
               value={externalToken}
               placeholder="Nenhum token gerado"
-              className="flex-1 bg-slate-50 border border-slate-200 rounded-none-none px-4 py-3 text-xs font-mono text-slate-700 outline-none"
+              className={`flex-1 rounded-none-none px-4 py-3 text-xs font-mono outline-none border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
             />
             <button onClick={generateExternalToken} className="bg-blue-600 text-white px-4 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all">
               Gerar Token
@@ -615,13 +619,13 @@ export const ShoppingListTool = ({
               readOnly
               value={externalToken ? `${window.location.origin}/compras-externas?token=${externalToken}` : ''}
               placeholder="Link externo aparecerá aqui"
-              className="flex-1 bg-slate-50 border border-slate-200 rounded-none-none px-4 py-3 text-xs font-mono text-slate-700 outline-none"
+              className={`flex-1 rounded-none-none px-4 py-3 text-xs font-mono outline-none border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
             />
             <button onClick={copyExternalLink} className="bg-emerald-600 text-white px-4 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all">
               Copiar Link
             </button>
           </div>
-          <p className="text-[10px] text-slate-400 font-bold mt-3">
+          <p className={`text-[10px] font-bold mt-3 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
             O portal externo compartilha os mesmos itens e status de planejamento/compra em tempo real.
           </p>
         </div>
@@ -631,19 +635,19 @@ export const ShoppingListTool = ({
       {view === 'catalog' && (
         <div className="space-y-6 animate-in fade-in duration-300">
           {/* Add form */}
-          <div className="bg-white rounded-none-none border border-slate-200 shadow-xl p-6 space-y-4">
-            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Novo Item</h3>
+          <div className={`rounded-none-none border shadow-xl p-6 space-y-4 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+            <h3 className={`text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Novo Item</h3>
             <form onSubmit={handleAddItem} className="flex flex-col md:flex-row md:items-center gap-3">
               <input
                 type="text"
                 placeholder="Nome do item..."
-                className="w-full md:flex-[2] bg-slate-50 border border-slate-200 rounded-none-none px-5 py-3 text-slate-800 font-bold outline-none focus:ring-1 focus:ring-slate-400 transition-all"
+                className={`w-full md:flex-[2] rounded-none-none px-5 py-3 font-bold outline-none transition-all border ${isDark ? 'bg-slate-950 border-slate-805 text-slate-100 focus:ring-1 focus:ring-slate-700' : 'bg-slate-50 border-slate-200 text-slate-800 focus:ring-1 focus:ring-slate-400'}`}
                 value={newItemName}
                 onChange={e => setNewItemName(e.target.value)}
                 autoFocus
               />
               <select
-                className="w-full md:flex-1 bg-slate-50 border border-slate-200 rounded-none-none px-4 py-3 text-slate-700 font-bold outline-none focus:ring-1 focus:ring-slate-400 transition-all"
+                className={`w-full md:flex-1 rounded-none-none px-4 py-3 font-bold outline-none transition-all border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-200 focus:ring-1 focus:ring-slate-700' : 'bg-slate-50 border-slate-200 text-slate-700 focus:ring-1 focus:ring-slate-400'}`}
                 value={newItemCategoria}
                 onChange={e => setNewItemCategoria(e.target.value)}
               >
@@ -656,7 +660,7 @@ export const ShoppingListTool = ({
                 <button type="submit" className="bg-blue-600 text-white h-12 w-12 rounded-none-none flex items-center justify-center hover:bg-blue-700 transition-all shadow-none active:scale-95 flex-shrink-0">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
                 </button>
-                <button type="button" onClick={() => setIsImportModalOpen(true)} title="Importar em lote" className="h-12 w-12 rounded-none-none border border-slate-200 flex items-center justify-center text-slate-400 hover:text-blue-500 hover:border-blue-200 transition-all flex-shrink-0">
+                <button type="button" onClick={() => setIsImportModalOpen(true)} title="Importar em lote" className={`h-12 w-12 rounded-none-none border flex items-center justify-center transition-all flex-shrink-0 ${isDark ? 'border-slate-800 text-slate-500 hover:text-blue-400 hover:border-blue-900/50' : 'border-slate-200 text-slate-400 hover:text-blue-500 hover:border-blue-200'}`}>
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0l-4-4m4 4v12" /></svg>
                 </button>
               </div>
@@ -664,15 +668,15 @@ export const ShoppingListTool = ({
           </div>
 
           {/* Search */}
-          <div className="bg-white border border-slate-200 rounded-none-none px-5 py-3 flex items-center gap-3 shadow-none focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+          <div className={`border rounded-none-none px-5 py-3 flex items-center gap-3 shadow-none transition-all ${isDark ? 'bg-slate-900 border-slate-800 focus-within:ring-2 focus-within:ring-blue-950/40' : 'bg-white border-slate-200 focus-within:ring-2 focus-within:ring-blue-100'}`}>
             <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-            <input type="text" placeholder="Buscar no catálogo..." className="flex-1 bg-transparent outline-none text-sm font-bold text-slate-700 placeholder:text-slate-300" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+            <input type="text" placeholder="Buscar no catálogo..." className={`flex-1 bg-transparent outline-none text-sm font-bold placeholder:text-slate-350 ${isDark ? 'text-slate-200 placeholder:text-slate-650' : 'text-slate-700 placeholder:text-slate-300'}`} value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
             {searchTerm && <button onClick={() => setSearchTerm('')} className="text-slate-300 hover:text-slate-500"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg></button>}
           </div>
 
           {/* Catalog list grouped */}
           {Object.keys(groupedCatalog).length === 0 ? (
-            <div className="py-24 text-center text-slate-300">
+            <div className={`py-24 text-center ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>
               <svg className="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" /></svg>
               <p className="font-black uppercase tracking-widest text-sm">Nenhum item cadastrado</p>
               <p className="text-xs font-medium mt-2 opacity-60">Adicione itens acima para começar</p>
@@ -681,27 +685,27 @@ export const ShoppingListTool = ({
             <div className="space-y-4">
               {Object.entries(groupedCatalog).map(([cat, catItems]) => (
                 <div key={cat}>
-                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] pl-2 mb-2">{cat}</h4>
-                  <div className="bg-white rounded-none-none border border-slate-200 shadow-none divide-y divide-slate-200 overflow-hidden">
+                  <h4 className={`text-[10px] font-black uppercase tracking-[0.3em] pl-2 mb-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{cat}</h4>
+                  <div className={`rounded-none-none border shadow-none divide-y overflow-hidden ${isDark ? 'bg-slate-900 border-slate-800 divide-slate-800' : 'bg-white border-slate-200 divide-slate-200'}`}>
                     {catItems.map(item => (
-                      <div key={item.id} className="flex items-center gap-4 px-5 py-4 hover:bg-slate-50 transition-all group">
+                      <div key={item.id} className={`flex items-center gap-4 px-5 py-4 transition-all group ${isDark ? 'hover:bg-slate-850/40' : 'hover:bg-slate-50'}`}>
                         <div className="flex-1 min-w-0">
                           {editingItemId === item.id && editingField === 'nome' ? (
                             <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
                               onBlur={commitEdit} onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') { setEditingItemId(null); setEditingField(null); } }}
-                              className="w-full bg-blue-50 border border-blue-200 rounded-none-none px-3 py-1 text-slate-800 font-bold outline-none" />
+                              className={`w-full rounded-none-none px-3 py-1 font-bold outline-none border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-blue-50 border-blue-200 text-slate-800'}`} />
                           ) : (
-                            <p onClick={() => startEdit(item.id, 'nome', item.nome)} className="font-mono font-bold text-slate-800 cursor-pointer hover:text-blue-600 transition-colors truncate">{item.nome}</p>
+                            <p onClick={() => startEdit(item.id, 'nome', item.nome)} className={`font-mono font-bold cursor-pointer transition-colors truncate ${isDark ? 'text-slate-200 hover:text-blue-400' : 'text-slate-800 hover:text-blue-600'}`}>{item.nome}</p>
                           )}
                           {editingItemId === item.id && editingField === 'categoria' ? (
                             <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
                               onBlur={commitEdit} onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') { setEditingItemId(null); setEditingField(null); } }}
-                              className="mt-0.5 w-32 bg-blue-50 border border-blue-200 rounded-none px-2 py-0.5 text-[10px] font-bold outline-none" />
+                              className={`mt-0.5 w-32 rounded-none px-2 py-0.5 text-[10px] font-bold outline-none border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-blue-50 border-blue-200 text-slate-800'}`} />
                           ) : (
-                            <p onClick={() => startEdit(item.id, 'categoria', item.categoria)} className="text-[10px] font-black text-slate-400 uppercase tracking-widest cursor-pointer hover:text-blue-500 transition-colors mt-0.5">{item.categoria}</p>
+                            <p onClick={() => startEdit(item.id, 'categoria', item.categoria)} className={`text-[10px] font-black uppercase tracking-widest cursor-pointer transition-colors mt-0.5 ${isDark ? 'text-slate-550 hover:text-blue-400' : 'text-slate-400 hover:text-blue-500'}`}>{item.categoria}</p>
                           )}
                         </div>
-                        <button onClick={() => handleDeleteItem(item.id)} className={`opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 rounded-none-none transition-all ${pendingDeleteItemId === item.id ? 'bg-rose-500 text-white shadow-none' : 'text-slate-300 hover:text-rose-500 hover:bg-rose-50'}`}>
+                        <button onClick={() => handleDeleteItem(item.id)} className={`opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 rounded-none-none transition-all ${pendingDeleteItemId === item.id ? 'bg-rose-500 text-white shadow-none' : (isDark ? 'text-slate-600 hover:text-rose-400 hover:bg-rose-950/20' : 'text-slate-300 hover:text-rose-500 hover:bg-rose-50')}`}>
                           {pendingDeleteItemId === item.id ? (
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                           ) : (
@@ -722,18 +726,18 @@ export const ShoppingListTool = ({
       {view === 'planning' && (
         <div className="space-y-6 animate-in fade-in duration-300">
           <div className="flex items-center gap-3">
-            <div className="flex-1 bg-white border border-slate-200 rounded-none-none px-5 py-3 flex items-center gap-3 shadow-none focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+            <div className={`flex-1 border rounded-none-none px-5 py-3 flex items-center gap-3 shadow-none transition-all ${isDark ? 'bg-slate-900 border-slate-800 focus-within:ring-2 focus-within:ring-blue-950/40' : 'bg-white border-slate-200 focus-within:ring-2 focus-within:ring-blue-100'}`}>
               <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-              <input type="text" placeholder="Filtrar itens..." className="flex-1 bg-transparent outline-none text-sm font-bold text-slate-700 placeholder:text-slate-300" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+              <input type="text" placeholder="Filtrar itens..." className={`flex-1 bg-transparent outline-none text-sm font-bold placeholder:text-slate-350 ${isDark ? 'text-slate-200 placeholder:text-slate-655' : 'text-slate-700 placeholder:text-slate-300'}`} value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
             </div>
-            <button onClick={handleClearPlanningClick} title="Limpar planejamento" className={`group h-12 px-3 border rounded-none-none shadow-none flex items-center gap-2 transition-all ${isClearPlanningPending ? 'bg-rose-500 border-rose-600 text-white' : 'bg-white border-slate-200 text-slate-400 hover:text-rose-500 hover:border-rose-200 hover:bg-rose-50'}`}>
+            <button onClick={handleClearPlanningClick} title="Limpar planejamento" className={`group h-12 px-3 border rounded-none-none shadow-none flex items-center gap-2 transition-all ${isClearPlanningPending ? 'bg-rose-500 border-rose-600 text-white' : (isDark ? 'bg-slate-900 border-slate-800 text-slate-500 hover:text-rose-450 hover:border-rose-900/50 hover:bg-rose-950/20' : 'bg-white border-slate-200 text-slate-400 hover:text-rose-500 hover:border-rose-200 hover:bg-rose-50')}`}>
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
               <span className="text-[8px] font-black uppercase tracking-widest">{isClearPlanningPending ? 'Confirma limpeza' : 'Limpar Planejamento'}</span>
             </button>
           </div>
 
           {items.length === 0 ? (
-            <div className="py-24 text-center text-slate-300">
+            <div className={`py-24 text-center ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>
               <p className="font-black uppercase tracking-widest text-sm">Nenhum item no catálogo</p>
               <button onClick={() => setView('catalog')} className="mt-4 text-blue-500 text-[10px] font-black uppercase tracking-widest hover:text-blue-600 transition-colors">Ir para o Cadastro →</button>
             </div>
@@ -741,33 +745,33 @@ export const ShoppingListTool = ({
             <div className="space-y-4">
               {Object.entries(groupedCatalog).map(([cat, catItems]) => (
                 <div key={cat}>
-                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] pl-2 mb-2">{cat}</h4>
-                  <div className="bg-white rounded-none-none border border-slate-200 shadow-none divide-y divide-slate-200 overflow-hidden">
+                  <h4 className={`text-[10px] font-black uppercase tracking-[0.3em] pl-2 mb-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{cat}</h4>
+                  <div className={`rounded-none-none border shadow-none divide-y overflow-hidden ${isDark ? 'bg-slate-900 border-slate-800 divide-slate-800' : 'bg-white border-slate-200 divide-slate-200'}`}>
                     {catItems.map(item => (
-                      <div key={item.id} className={`flex items-center gap-4 px-5 py-4 transition-all ${item.isPlanned ? 'bg-blue-50/40' : 'hover:bg-slate-50'}`}>
+                      <div key={item.id} className={`flex items-center gap-4 px-5 py-4 transition-all ${item.isPlanned ? (isDark ? 'bg-blue-950/15' : 'bg-blue-50/40') : (isDark ? 'hover:bg-slate-850/40' : 'hover:bg-slate-50')}`}>
                         <button onClick={() => togglePlanned(item.id)}
-                          className={`w-8 h-8 rounded-none-none flex items-center justify-center transition-all flex-shrink-0 ${item.isPlanned ? 'bg-blue-600 text-white shadow-none shadow-none' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>
+                          className={`w-8 h-8 rounded-none-none flex items-center justify-center transition-all flex-shrink-0 ${item.isPlanned ? 'bg-blue-600 text-white shadow-none' : (isDark ? 'bg-slate-800 text-slate-500 hover:bg-slate-750' : 'bg-slate-100 text-slate-400 hover:bg-slate-200')}`}>
                           {item.isPlanned
                             ? <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                            : <div className="w-2 h-2 bg-slate-400 rounded-none-none" />}
+                            : <div className={`w-2 h-2 rounded-none-none ${isDark ? 'bg-slate-600' : 'bg-slate-400'}`} />}
                         </button>
-                        <span className={`flex-1 font-bold text-sm ${item.isPlanned ? 'text-slate-900' : 'text-slate-400'}`}>{item.nome}</span>
+                        <span className={`flex-1 font-bold text-sm ${item.isPlanned ? (isDark ? 'text-slate-100' : 'text-slate-900') : (isDark ? 'text-slate-500' : 'text-slate-400')}`}>{item.nome}</span>
                         {item.isPlanned && (
-                          <div className="flex items-center gap-2 bg-white border border-blue-100 rounded-none-none px-3 py-1.5 shadow-none">
+                          <div className={`flex items-center gap-2 border rounded-none-none px-3 py-1.5 shadow-none ${isDark ? 'bg-slate-950 border-slate-850' : 'bg-white border-blue-100'}`}>
                             <button onClick={() => updateQuantidade(item.id, String(Math.max(0.5, parseFloat(item.quantidade || '1') - (parseFloat(item.quantidade || '1') % 1 === 0 ? 1 : 0.5))))}
-                              className="w-6 h-6 rounded-none-none bg-slate-100 text-slate-600 font-black flex items-center justify-center hover:bg-blue-100 transition-all text-sm leading-none">−</button>
+                              className={`w-6 h-6 rounded-none-none font-black flex items-center justify-center transition-all text-sm leading-none ${isDark ? 'bg-slate-800 text-slate-300 hover:bg-blue-950' : 'bg-slate-100 text-slate-600 hover:bg-blue-100'}`}>−</button>
                             {editingItemId === item.id && editingField === 'quantidade' ? (
                               <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
                                 onBlur={commitEdit} onKeyDown={e => { if (e.key === 'Enter') commitEdit(); }}
-                                className="w-12 text-center bg-transparent text-slate-800 font-black text-sm outline-none" />
+                                className="w-12 text-center bg-transparent text-slate-200 font-black text-sm outline-none" />
                             ) : (
                               <span onClick={() => startEdit(item.id, 'quantidade', item.quantidade)}
-                                className="w-10 text-center text-slate-800 font-black text-sm cursor-pointer hover:text-blue-600 transition-colors">
-                                {item.quantidade} <span className="text-slate-400 font-medium text-[10px]">{item.unit}</span>
+                                className={`w-10 text-center font-black text-sm cursor-pointer transition-colors ${isDark ? 'text-slate-200 hover:text-blue-400' : 'text-slate-800 hover:text-blue-600'}`}>
+                                {item.quantidade} <span className={`font-medium text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{item.unit}</span>
                               </span>
                             )}
                             <button onClick={() => updateQuantidade(item.id, String(parseFloat(item.quantidade || '1') + (parseFloat(item.quantidade || '1') % 1 === 0 ? 1 : 0.5)))}
-                              className="w-6 h-6 rounded-none-none bg-slate-100 text-slate-600 font-black flex items-center justify-center hover:bg-blue-100 transition-all text-sm leading-none">+</button>
+                              className={`w-6 h-6 rounded-none-none font-black flex items-center justify-center transition-all text-sm leading-none ${isDark ? 'bg-slate-800 text-slate-300 hover:bg-blue-950' : 'bg-slate-100 text-slate-600 hover:bg-blue-100'}`}>+</button>
                           </div>
                         )}
                       </div>
@@ -781,7 +785,7 @@ export const ShoppingListTool = ({
           {plannedItems.length > 0 && (
             <div className="sticky bottom-6">
               <button onClick={() => setView('shopping')}
-                className="w-full bg-blue-600 text-white py-4 rounded-none-none font-black uppercase tracking-widest text-sm shadow-none shadow-none hover:bg-blue-700 transition-all active:scale-[0.98] flex items-center justify-center gap-3">
+                className="w-full bg-blue-600 text-white py-4 rounded-none-none font-black uppercase tracking-widest text-sm shadow-none hover:bg-blue-700 transition-all active:scale-[0.98] flex items-center justify-center gap-3">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
                 Ir às Compras · {plannedItems.length} itens
               </button>
@@ -794,45 +798,45 @@ export const ShoppingListTool = ({
       {view === 'shopping' && (
         <div className="space-y-6 animate-in fade-in duration-300">
           {/* Progress bar */}
-          <div className="bg-white rounded-none-none border border-slate-200 shadow-xl p-6">
+          <div className={`rounded-none-none border shadow-xl p-6 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-xl font-black text-slate-900">Comprando</h3>
-                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-0.5">{purchasedCount} de {plannedItems.length} comprados</p>
+                <h3 className={`text-xl font-black ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Comprando</h3>
+                <p className={`text-[10px] font-black uppercase tracking-widest mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{purchasedCount} de {plannedItems.length} comprados</p>
               </div>
-              <button onClick={() => setIsFinalizingConfirmOpen(true)} className="bg-emerald-500 text-white px-6 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-none shadow-none">Finalizar</button>
+              <button onClick={() => setIsFinalizingConfirmOpen(true)} className="bg-emerald-500 text-white px-6 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-none">Finalizar</button>
             </div>
-            <div className="w-full bg-slate-100 rounded-none-none h-2 overflow-hidden">
+            <div className={`w-full rounded-none-none h-2 overflow-hidden ${isDark ? 'bg-slate-950' : 'bg-slate-100'}`}>
               <div className="bg-emerald-500 h-2 rounded-none-none transition-all duration-500"
                 style={{ width: plannedItems.length > 0 ? `${(purchasedCount / plannedItems.length) * 100}%` : '0%' }} />
             </div>
           </div>
 
           {plannedItems.length === 0 ? (
-            <div className="py-24 text-center text-slate-300">
+            <div className={`py-24 text-center ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>
               <p className="font-black uppercase tracking-widest text-sm">Lista vazia</p>
               <button onClick={() => setView('planning')} className="mt-4 text-blue-500 text-[10px] font-black uppercase tracking-widest hover:text-blue-600 transition-colors">Ir para o Planejamento →</button>
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="bg-white rounded-none-none border border-slate-200 shadow-xl overflow-hidden">
-                <div className="divide-y divide-slate-200">
+              <div className={`rounded-none-none border shadow-xl overflow-hidden ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                <div className={`divide-y ${isDark ? 'divide-slate-800' : 'divide-slate-200'}`}>
                   {pendingShoppingItems.map(item => (
                     <div
                       key={item.id}
                       onClick={() => togglePurchased(item.id)}
-                      className={`flex items-center gap-5 px-6 py-5 cursor-pointer transition-all duration-300 select-none hover:bg-slate-50 ${exitingPurchasedIds.includes(item.id) ? 'bg-emerald-50 opacity-40 scale-[0.98]' : ''}`}
+                      className={`flex items-center gap-5 px-6 py-5 cursor-pointer transition-all duration-300 select-none ${exitingPurchasedIds.includes(item.id) ? (isDark ? 'bg-emerald-950/20 opacity-40 scale-[0.98]' : 'bg-emerald-50 opacity-40 scale-[0.98]') : (isDark ? 'hover:bg-slate-850/40' : 'hover:bg-slate-50')}`}
                     >
-                      <div className="w-10 h-10 rounded-none-none flex items-center justify-center transition-all flex-shrink-0 bg-slate-100 text-slate-400">
+                      <div className={`w-10 h-10 rounded-none-none flex items-center justify-center transition-all flex-shrink-0 ${isDark ? 'bg-slate-950 text-slate-505' : 'bg-slate-100 text-slate-400'}`}>
                         <div className="w-3 h-3 border-2 border-current rounded-none-none" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-lg font-mono font-black uppercase tracking-tight text-slate-900">{item.nome}</p>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{item.categoria}</p>
+                        <p className={`text-lg font-mono font-black uppercase tracking-tight ${isDark ? 'text-slate-200' : 'text-slate-900'}`}>{item.nome}</p>
+                        <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{item.categoria}</p>
                       </div>
                       <div className="text-right flex-shrink-0">
-                        <span className="text-lg font-mono font-bold text-blue-600">{item.quantidade}</span>
-                        <span className="text-slate-400 font-mono text-[10px] uppercase font-bold ml-1">{item.unit}</span>
+                        <span className={`text-lg font-mono font-bold ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>{item.quantidade}</span>
+                        <span className={`font-mono text-[10px] uppercase font-bold ml-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{item.unit}</span>
                       </div>
                     </div>
                   ))}
@@ -844,15 +848,15 @@ export const ShoppingListTool = ({
                 </div>
               </div>
 
-              <div className="bg-white rounded-none-none border border-slate-200 shadow-xl overflow-hidden">
+              <div className={`rounded-none-none border shadow-xl overflow-hidden ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                 <button
                   type="button"
                   onClick={() => setIsPurchasedSectionOpen(prev => !prev)}
-                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors"
+                  className={`w-full px-6 py-4 flex items-center justify-between transition-colors ${isDark ? 'hover:bg-slate-850/40' : 'hover:bg-slate-50'}`}
                 >
                   <div className="text-left">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Comprados</p>
-                    <p className="text-sm font-black text-slate-900">{purchasedShoppingItems.length} itens</p>
+                    <p className={`text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Comprados</p>
+                    <p className={`text-sm font-black ${isDark ? 'text-slate-200' : 'text-slate-900'}`}>{purchasedShoppingItems.length} itens</p>
                   </div>
                   <svg className={`w-5 h-5 text-slate-400 transition-transform ${isPurchasedSectionOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
@@ -860,23 +864,23 @@ export const ShoppingListTool = ({
                 </button>
 
                 {isPurchasedSectionOpen && (
-                  <div className="divide-y divide-slate-200 border-t border-slate-200">
+                  <div className={`divide-y ${isDark ? 'divide-slate-800 border-t border-slate-800' : 'divide-slate-200 border-t border-slate-200'}`}>
                     {purchasedShoppingItems.map(item => (
                       <div
                         key={item.id}
                         onClick={() => togglePurchased(item.id)}
-                        className="flex items-center gap-5 px-6 py-5 cursor-pointer transition-all duration-300 select-none bg-slate-50/70 hover:bg-slate-100/70"
+                        className={`flex items-center gap-5 px-6 py-5 cursor-pointer transition-all duration-300 select-none ${isDark ? 'bg-slate-900/40 hover:bg-slate-850/50' : 'bg-slate-50/70 hover:bg-slate-100/70'}`}
                       >
-                        <div className="w-10 h-10 rounded-none-none flex items-center justify-center transition-all flex-shrink-0 bg-emerald-500 text-white shadow-none shadow-none">
+                        <div className="w-10 h-10 rounded-none-none flex items-center justify-center transition-all flex-shrink-0 bg-emerald-500 text-white shadow-none">
                           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-base font-mono font-bold uppercase tracking-tight line-through text-slate-400">{item.nome}</p>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{item.categoria}</p>
+                          <p className={`text-base font-mono font-bold uppercase tracking-tight line-through ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{item.nome}</p>
+                          <p className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? 'text-slate-550' : 'text-slate-400'}`}>{item.categoria}</p>
                         </div>
                         <div className="text-right flex-shrink-0">
-                          <span className="text-lg font-mono font-bold text-slate-300">{item.quantidade}</span>
-                          <span className="text-slate-400 font-mono text-[10px] uppercase font-bold ml-1">{item.unit}</span>
+                          <span className={`text-lg font-mono font-bold ${isDark ? 'text-slate-650' : 'text-slate-300'}`}>{item.quantidade}</span>
+                          <span className={`font-mono text-[10px] uppercase font-bold ml-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{item.unit}</span>
                         </div>
                       </div>
                     ))}
@@ -896,26 +900,26 @@ export const ShoppingListTool = ({
       {/* Import Modal */}
       {isImportModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-lg rounded-none-none shadow-none overflow-hidden animate-in zoom-in-95 duration-300">
-            <div className="p-8 border-b border-slate-200 flex items-center justify-between">
+          <div className={`w-full max-w-lg rounded-none-none shadow-none overflow-hidden border animate-in zoom-in-95 duration-300 ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200'}`}>
+            <div className={`p-8 border-b flex items-center justify-between ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
               <div>
-                <h3 className="text-2xl font-black text-slate-900 tracking-tight">Importação em Lote</h3>
-                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">Um item por linha · Nome|Categoria (opcional)</p>
+                <h3 className={`text-2xl font-black tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Importação em Lote</h3>
+                <p className={`text-[10px] font-black uppercase tracking-widest mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Um item por linha · Nome|Categoria (opcional)</p>
               </div>
-              <button onClick={() => setIsImportModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-none-none transition-colors">
+              <button onClick={() => setIsImportModalOpen(false)} className={`p-2 rounded-none-none transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}>
                 <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
             <div className="p-8 space-y-4">
               <textarea autoFocus
-                className="w-full bg-slate-50 border border-slate-200 rounded-none-none p-6 text-slate-800 font-bold leading-relaxed outline-none focus:ring-1 focus:ring-slate-400 transition-all min-h-[260px] resize-none"
+                className={`w-full p-6 font-bold leading-relaxed outline-none transition-all min-h-[260px] resize-none border ${isDark ? 'bg-slate-950 border-slate-850 text-slate-100 focus:ring-1 focus:ring-slate-700' : 'bg-slate-50 border-slate-200 text-slate-800 focus:ring-1 focus:ring-slate-400'}`}
                 placeholder={"Exemplo:\nArroz|Grãos e Cereais\nFeijão|Grãos e Cereais\nLeite|Laticínios\nSabão|Limpeza"}
                 value={importText}
                 onChange={e => setImportText(e.target.value)}
               />
               <div className="flex gap-4">
-                <button onClick={() => setIsImportModalOpen(false)} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-none-none transition-all">Cancelar</button>
-                <button onClick={handleBatchImport} className="flex-[2] py-4 bg-blue-600 text-white rounded-none-none text-[10px] font-black uppercase tracking-widest shadow-none shadow-none hover:bg-blue-700 transition-all">
+                <button onClick={() => setIsImportModalOpen(false)} className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest rounded-none-none transition-all ${isDark ? 'text-slate-400 hover:bg-slate-800' : 'text-slate-400 hover:bg-slate-50'}`}>Cancelar</button>
+                <button onClick={handleBatchImport} className="flex-[2] py-4 bg-blue-600 text-white rounded-none-none text-[10px] font-black uppercase tracking-widest shadow-none hover:bg-blue-700 transition-all">
                   Importar {importText.split('\n').filter(l => l.trim()).length} Itens
                 </button>
               </div>
@@ -926,11 +930,11 @@ export const ShoppingListTool = ({
 
       {isFinalizingConfirmOpen && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-md rounded-none-none p-6 space-y-4 shadow-none">
-            <h3 className="text-lg font-black text-slate-900">Finalizar Compras</h3>
-            <p className="text-sm text-slate-500 font-medium">Isto limpará os itens planejados/comprados desta rodada. Continuar?</p>
+          <div className={`w-full max-w-md rounded-none-none p-6 space-y-4 shadow-none border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200'}`}>
+            <h3 className={`text-lg font-black ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Finalizar Compras</h3>
+            <p className={`text-sm font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Isto limpará os itens planejados/comprados desta rodada. Continuar?</p>
             <div className="flex gap-3">
-              <button onClick={() => setIsFinalizingConfirmOpen(false)} className="flex-1 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest text-slate-500 bg-slate-100 hover:bg-slate-200 transition-all">Cancelar</button>
+              <button onClick={() => setIsFinalizingConfirmOpen(false)} className={`flex-1 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest transition-all ${isDark ? 'text-slate-400 bg-slate-800 hover:bg-slate-750' : 'text-slate-505 bg-slate-100 hover:bg-slate-200'}`}>Cancelar</button>
               <button onClick={async () => { await finalizeShopping(); setIsFinalizingConfirmOpen(false); }} className="flex-1 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest text-white bg-emerald-600 hover:bg-emerald-700 transition-all">Confirmar</button>
             </div>
           </div>

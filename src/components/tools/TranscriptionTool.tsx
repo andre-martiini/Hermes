@@ -1,4 +1,4 @@
-﻿import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/firebase';
 
@@ -9,6 +9,7 @@ interface TranscriptionToolProps {
   isEmbedded?: boolean;
   initialFile?: File | null;
   onInitialFileConsumed?: () => void;
+  isDark?: boolean;
 }
 
 const TRANSCRIPTION_HISTORY_KEY = 'hermes_transcription_history';
@@ -24,7 +25,7 @@ interface TranscriptionHistoryEntry {
 
 type ThemeMode = 'light' | 'dark' | 'system';
 
-export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, showToast, initialText, isEmbedded, initialFile, onInitialFileConsumed }) => {
+export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, showToast, initialText, isEmbedded, initialFile, onInitialFileConsumed, isDark = false }) => {
   const [file, setFile] = useState<File | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -198,7 +199,7 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
     }
   };
 
-  const isDarkTheme = themeMode === 'dark' || (themeMode === 'system' && prefersDark);
+  const isDarkTheme = isDark || themeMode === 'dark' || (themeMode === 'system' && prefersDark);
   const panelClass = isDarkTheme
     ? 'bg-[#121826] border-slate-700/80 text-slate-100 shadow-[0_20px_60px_rgba(2,6,23,0.45)]'
     : 'bg-white border-slate-200 text-slate-900 shadow-none md:shadow-xl';
@@ -226,17 +227,20 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
   const historyItemClass = isDarkTheme
     ? 'bg-slate-900/70 border-slate-700 hover:border-blue-400'
     : 'bg-white border-slate-200 hover:border-blue-400';
+  const buttonPrimaryClass = isDarkTheme
+    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+    : 'bg-slate-900 hover:bg-blue-600 text-white';
 
   return (
     <div className={`animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6 md:space-y-8 ${isEmbedded ? 'pb-10' : 'pb-24 md:pb-32'}`}>
       {/* Header */}
       <div className="flex items-start gap-3 md:gap-6 mb-2 md:mb-4">
-        <button onClick={onBack} className="w-11 h-11 md:w-12 md:h-12 bg-white rounded-none-none md:rounded-none-none flex items-center justify-center text-slate-400 hover:text-slate-900 border border-slate-200 hover:border-slate-900 transition-all shadow-none shrink-0">
+        <button onClick={onBack} className={`w-11 h-11 md:w-12 md:h-12 rounded-none flex items-center justify-center transition-all shadow-none shrink-0 border ${isDarkTheme ? 'bg-slate-900 text-slate-400 hover:text-slate-100 border-slate-800 hover:border-slate-100' : 'bg-white text-slate-400 hover:text-slate-900 border border-slate-200 hover:border-slate-900'}`}>
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
         </button>
         <div className="flex-1 min-w-0 pt-1">
-          <h2 className="text-2xl md:text-3xl font-black text-slate-50 tracking-tighter leading-none">Transcrição de Áudio</h2>
-          <p className="mt-2 text-slate-300 font-mono text-xs uppercase font-bold md:text-base leading-relaxed max-w-2xl">Transcreva áudios do WhatsApp e outros formatos com IA.</p>
+          <h2 className={`text-2xl md:text-3xl font-black tracking-tighter leading-none ${isDarkTheme ? 'text-slate-100' : 'text-slate-900'}`}>Transcrição de Áudio</h2>
+          <p className={`mt-2 font-mono text-xs uppercase font-bold md:text-base leading-relaxed max-w-2xl ${isDarkTheme ? 'text-slate-400' : 'text-slate-500'}`}>Transcreva áudios do WhatsApp e outros formatos com IA.</p>
         </div>
       </div>
 
@@ -284,13 +288,13 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
                        >
                          Remover
                        </button>
-                       <button
-                         onClick={handleTranscribe}
-                         disabled={isProcessing}
-                         className={`flex-1 px-5 py-3 bg-slate-900 text-white rounded-none-none md:rounded-none-none text-[10px] font-black uppercase tracking-widest shadow-none hover:bg-blue-600 transition-all ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
-                       >
-                         {isProcessing ? 'Processando...' : 'Transcrever Agora'}
-                       </button>
+                        <button
+                          onClick={handleTranscribe}
+                          disabled={isProcessing}
+                          className={`flex-1 px-5 py-3 rounded-none-none md:rounded-none-none text-[10px] font-black uppercase tracking-widest shadow-none transition-all ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''} ${buttonPrimaryClass}`}
+                        >
+                          {isProcessing ? 'Processando...' : 'Transcrever Agora'}
+                        </button>
                      </div>
                   </>
                 ) : (
@@ -387,7 +391,7 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
                   <div className="flex gap-2">
                     <button
                       onClick={() => loadFromHistory(entry)}
-                      className="flex-1 py-2 bg-slate-900 text-white text-[9px] font-black uppercase tracking-widest rounded-none-none hover:bg-blue-600 transition-all"
+                      className={`flex-1 py-2 text-[9px] font-black uppercase tracking-widest rounded-none-none transition-all ${buttonPrimaryClass}`}
                     >
                       Ver Detalhes
                     </button>

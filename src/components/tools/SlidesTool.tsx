@@ -13,6 +13,7 @@ interface SlidesToolProps {
   initialDraftId?: string;
   initialRascunho?: string;
   isEmbedded?: boolean;
+  isDark?: boolean;
 }
 
 const mapFirestoreSlide = (s: any) => ({
@@ -24,7 +25,7 @@ const mapFirestoreSlide = (s: any) => ({
   prompt_imagem: s.sugestao_imagem ?? '',
 });
 
-export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initialDraftId, initialRascunho, isEmbedded }) => {
+export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initialDraftId, initialRascunho, isEmbedded, isDark = false }) => {
   const [user, setUser] = useState<User | null>(() => auth.currentUser);
   const [rascunho, setRascunho] = useState(initialRascunho || '');
   const [qtdSlides, setQtdSlides] = useState(5);
@@ -261,19 +262,19 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8 pb-32">
       {/* Header com toggle */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b pb-6 border-slate-200">
+      <div className={`flex flex-col md:flex-row md:items-center justify-between gap-6 border-b pb-6 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
         <div className="flex items-center gap-4">
-          <button onClick={onBack} className="p-3 border rounded-none bg-white border-slate-200 text-slate-400 hover:text-slate-900 transition-colors">
+          <button onClick={onBack} className={`p-3 border rounded-none transition-colors ${isDark ? 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white' : 'bg-white border-slate-200 text-slate-400 hover:text-slate-900'}`}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
           </button>
           <div>
             <p className="text-[10px] font-mono font-black text-orange-500 uppercase tracking-widest mb-1">MODULE: SLIDES_GENERATOR</p>
-            <h3 className="text-xl font-mono font-black uppercase tracking-tight text-slate-900">Gerador de Slides IA</h3>
+            <h3 className={`text-xl font-mono font-black uppercase tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Gerador de Slides IA</h3>
           </div>
         </div>
-        <div className="flex bg-slate-100 p-1 rounded-none border border-slate-200">
-          <button onClick={() => setView('editor')} className={`px-5 py-2 rounded-none text-[10px] font-black uppercase tracking-widest font-mono transition-all ${view === 'editor' ? 'bg-slate-900 text-white' : 'text-slate-400 hover:text-slate-600'}`}>Editor</button>
-          <button onClick={() => setView('history')} className={`px-5 py-2 rounded-none text-[10px] font-black uppercase tracking-widest font-mono transition-all flex items-center gap-2 ${view === 'history' ? 'bg-slate-900 text-white' : 'text-slate-400 hover:text-slate-600'}`}>
+        <div className={`flex p-1 rounded-none border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 p-1 rounded-none border border-slate-200'}`}>
+          <button onClick={() => setView('editor')} className={`px-5 py-2 rounded-none text-[10px] font-black uppercase tracking-widest font-mono transition-all ${view === 'editor' ? (isDark ? 'bg-slate-850 text-white border border-slate-700' : 'bg-slate-900 text-white') : (isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-400 hover:text-slate-600')}`}>Editor</button>
+          <button onClick={() => setView('history')} className={`px-5 py-2 rounded-none text-[10px] font-black uppercase tracking-widest font-mono transition-all flex items-center gap-2 ${view === 'history' ? (isDark ? 'bg-slate-850 text-white border border-slate-700' : 'bg-slate-900 text-white') : (isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-400 hover:text-slate-600')}`}>
             Histórico
             {history.length > 0 && <span className="bg-orange-500 text-white text-[8px] font-mono font-black px-1.5 py-0.5 rounded-none">{history.length}</span>}
           </button>
@@ -288,7 +289,7 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
             <div className="mb-8 space-y-3">
               <h3 className="text-[10px] font-mono font-black uppercase tracking-widest text-slate-400 ml-1">Jobs de Processamento em Nuvem</h3>
               {jobs.map(job => (
-                <div key={job.id} className="bg-white rounded-none border border-slate-200 p-6 flex flex-col gap-4 shadow-none relative overflow-hidden">
+                <div key={job.id} className={`rounded-none border p-6 flex flex-col gap-4 shadow-none relative overflow-hidden ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                   {job.status === 'processing' && <div className="absolute top-0 left-0 w-full h-1 bg-orange-100"><div className="h-full bg-orange-500 animate-pulse w-1/2"></div></div>}
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
@@ -302,7 +303,7 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
                         )}
                       </div>
                       <div>
-                        <p className="text-xs font-mono font-bold text-slate-900 uppercase">{job.tema ? job.tema.slice(0, 40) + '...' : 'Apresentação'}</p>
+                        <p className={`text-xs font-mono font-bold uppercase ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{job.tema ? job.tema.slice(0, 40) + '...' : 'Apresentação'}</p>
                         <p className="text-[10px] font-mono font-bold text-slate-400 mt-0.5">
                           {job.status === 'processing'
                             ? `Processando... ${getElapsed(job.timestamp)}`
@@ -317,7 +318,7 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
                         <button
                           onClick={() => handleCancelJob(job.id)}
                           disabled={cancellingJobId === job.id}
-                          className="px-3 py-2 bg-rose-50 text-rose-500 rounded-none border border-rose-200 text-[9px] font-mono font-black uppercase tracking-widest hover:bg-rose-100 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                          className={`px-3 py-2 rounded-none text-[9px] font-mono font-black uppercase tracking-widest transition-colors flex items-center gap-1.5 disabled:opacity-50 ${isDark ? 'bg-rose-950/20 text-rose-450 border border-rose-900/50 hover:bg-rose-900/30' : 'bg-rose-50 text-rose-500 border border-rose-200 hover:bg-rose-100'}`}
                           title="Cancelar job"
                         >
                           {cancellingJobId === job.id
@@ -328,7 +329,7 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
                         </button>
                       )}
                       {job.driveLink && (
-                        <a href={job.driveLink} target="_blank" rel="noopener noreferrer" className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-none border border-emerald-200 text-[9px] font-mono font-black uppercase tracking-widest hover:bg-emerald-100 transition-colors flex items-center gap-2">
+                        <a href={job.driveLink} target="_blank" rel="noopener noreferrer" className={`px-4 py-2 rounded-none text-[9px] font-mono font-black uppercase tracking-widest transition-colors flex items-center gap-2 ${isDark ? 'bg-emerald-950/20 text-emerald-450 border border-emerald-900/50 hover:bg-emerald-900/30' : 'bg-emerald-50 text-emerald-600 border border-emerald-200 hover:bg-emerald-100'}`}>
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
                           Abrir no Drive
                         </a>
@@ -357,25 +358,25 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
           ) : (
             <div className="space-y-3">
               {history.map(entry => (
-                <div key={entry.id} className={`bg-white rounded-none border p-6 flex items-center gap-6 shadow-none hover:bg-slate-50 transition-all group ${currentHistoryId === entry.id ? 'border-orange-300' : 'border-slate-100'}`}>
-                  <div className="w-16 h-12 bg-slate-900 rounded-none flex-shrink-0 flex items-center justify-center">
+                <div key={entry.id} className={`rounded-none border p-6 flex items-center gap-6 shadow-none transition-all group ${isDark ? 'bg-slate-900 border-slate-800 hover:bg-slate-800/50' : 'bg-white border-slate-200 hover:bg-slate-50'} ${currentHistoryId === entry.id ? 'border-orange-500/85 ring-1 ring-orange-500/30' : ''}`}>
+                  <div className="w-16 h-12 bg-slate-950 rounded-none flex-shrink-0 flex items-center justify-center border border-white/5">
                     <span className="text-[8px] font-mono font-black text-white/60 uppercase">{entry.slides.length}s</span>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-mono font-bold text-slate-900 truncate leading-tight uppercase">{entry.title}</p>
-                    <p className="text-[10px] font-mono font-bold text-slate-400 mt-0.5">
+                    <p className={`text-sm font-mono font-bold truncate leading-tight uppercase ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{entry.title}</p>
+                    <p className={`text-[10px] font-mono font-bold mt-0.5 ${isDark ? 'text-slate-450' : 'text-slate-400'}`}>
                       {entry.slides.length} slides &nbsp;•&nbsp;
                       {new Date(entry.createdAt).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     </p>
-                    {entry.rascunho && <p className="text-[10px] text-slate-300 font-mono mt-1 truncate">{entry.rascunho.slice(0, 80)}...</p>}
+                    {entry.rascunho && <p className={`text-[10px] font-mono mt-1 truncate ${isDark ? 'text-slate-500' : 'text-slate-350'}`}>{entry.rascunho.slice(0, 80)}...</p>}
                   </div>
                   <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                     {currentHistoryId === entry.id && <span className="text-[8px] font-mono font-black text-orange-500 uppercase tracking-widest mr-2">Ativa</span>}
-                    <button onClick={() => loadFromHistory(entry)} title="Carregar e editar" className="flex items-center gap-1.5 px-4 py-2 bg-slate-900 text-white rounded-none text-[9px] font-mono font-black uppercase tracking-widest hover:bg-slate-700 transition-all">
+                    <button onClick={() => loadFromHistory(entry)} title="Carregar e editar" className="flex items-center gap-1.5 px-4 py-2 bg-slate-900 text-white rounded-none text-[9px] font-mono font-black uppercase tracking-widest hover:bg-slate-700 transition-all border border-white/5">
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                       Editar
                     </button>
-                    <button onClick={() => { if (pendingDeleteHistoryId === entry.id) { setPendingDeleteHistoryId(null); deleteFromHistory(entry.id); } else { setPendingDeleteHistoryId(entry.id); window.setTimeout(() => setPendingDeleteHistoryId((current) => (current === entry.id ? null : current)), 3500); } }} title="Excluir" className={`p-2 rounded-none transition-all border ${pendingDeleteHistoryId === entry.id ? 'bg-rose-500 text-white border-rose-600' : 'text-slate-300 hover:text-rose-500 border-slate-100 hover:bg-rose-50'}`}>
+                    <button onClick={() => { if (pendingDeleteHistoryId === entry.id) { setPendingDeleteHistoryId(null); deleteFromHistory(entry.id); } else { setPendingDeleteHistoryId(entry.id); window.setTimeout(() => setPendingDeleteHistoryId((current) => (current === entry.id ? null : current)), 3500); } }} title="Excluir" className={`p-2 rounded-none transition-all border ${pendingDeleteHistoryId === entry.id ? 'bg-rose-500 text-white border-rose-600' : isDark ? 'text-slate-500 hover:text-rose-450 border-slate-800 hover:bg-rose-950/20' : 'text-slate-300 hover:text-rose-500 border-slate-100 hover:bg-rose-50'}`}>
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                     </button>
                   </div>
@@ -409,17 +410,17 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
       {view === 'editor' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="space-y-6">
-            <div className="bg-white p-8 rounded-none border border-slate-200 shadow-none space-y-6">
+            <div className={`p-8 rounded-none border shadow-none space-y-6 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
               <div>
                 <label className="block text-[10px] font-mono font-black uppercase tracking-widest text-slate-400 mb-3 ml-1">Conteúdo Base (Texto Bruto)</label>
-                <AutoExpandingTextarea className="w-full bg-slate-50 border border-slate-200 rounded-none p-6 text-slate-800 font-mono font-bold leading-relaxed outline-none focus:ring-1 focus:ring-slate-400 transition-all min-h-[300px]"
+                <AutoExpandingTextarea className={`w-full border rounded-none p-6 font-mono font-bold leading-relaxed outline-none focus:ring-1 transition-all min-h-[300px] ${isDark ? 'bg-slate-950 border-slate-800 text-slate-100 focus:ring-slate-700' : 'bg-slate-50 border-slate-200 text-slate-850 focus:ring-slate-400'}`}
                   placeholder="Cole aqui o texto, atas de reunião, artigos ou tópicos que deseja transformar em slides..."
                   value={rascunho} onChange={e => setRascunho(e.target.value)} />
               </div>
               <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-6">
                 <div className="flex-1">
                   <label className="block text-[10px] font-mono font-black uppercase tracking-widest text-slate-400 mb-3 ml-1">Quantidade de Slides</label>
-                  <input type="number" min="1" max="20" className="w-full bg-slate-50 border border-slate-200 rounded-none p-4 text-slate-800 font-mono font-black outline-none focus:ring-1 focus:ring-slate-400 transition-all" value={qtdSlides} onChange={e => setQtdSlides(parseInt(e.target.value))} />
+                  <input type="number" min="1" max="20" className={`w-full border rounded-none p-4 font-mono font-black outline-none focus:ring-1 transition-all ${isDark ? 'bg-slate-950 border-slate-800 text-slate-100 focus:ring-slate-700' : 'bg-slate-50 border-slate-200 text-slate-850 focus:ring-slate-400'}`} value={qtdSlides} onChange={e => setQtdSlides(parseInt(e.target.value))} />
                 </div>
                 <button onClick={handleGenerate} disabled={isGenerating} className={`flex-[2] h-14 bg-slate-900 text-white rounded-none font-mono font-black uppercase tracking-widest text-xs flex items-center justify-center gap-3 transition-all hover:bg-slate-800 active:scale-95 disabled:opacity-50 disabled:grayscale ${isGenerating ? 'animate-pulse' : ''}`}>
                   {isGenerating ? (<><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-none animate-spin"></div>Processando...</>) : (<><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>Gerar Apresentação</>)}
@@ -428,14 +429,14 @@ export const SlidesTool: React.FC<SlidesToolProps> = ({ onBack, showToast, initi
             </div>
 
             {presentation && (
-              <div className="bg-white p-5 rounded-none border border-slate-200 shadow-none flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <div className={`p-5 rounded-none border shadow-none flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300 ${isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'}`}>
                 <div>
-                  <p className="text-xs font-mono font-black uppercase text-slate-900">{presentation.slides?.length} slides gerados</p>
+                  <p className={`text-xs font-mono font-black uppercase ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{presentation.slides?.length} slides gerados</p>
                   <p className="text-[10px] text-slate-400 font-mono">Clique em qualquer título ou tópico para editar</p>
                 </div>
                 <div className="flex gap-3">
                   <button onClick={() => { const t = presentation.slides.map((s: any) => `${s.titulo}\n${(s.topicos || []).join('\n')}`).join('\n\n'); navigator.clipboard.writeText(t); showToast("Conteúdo copiado!", "success"); }}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-600 rounded-none text-[9px] font-mono font-black uppercase tracking-widest hover:bg-slate-200 transition-all border border-slate-200">
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-none text-[9px] font-mono font-black uppercase tracking-widest transition-all border ${isDark ? 'bg-slate-850 text-slate-300 border-slate-750 hover:bg-slate-800' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}>
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                     Copiar Tudo
                   </button>

@@ -4769,7 +4769,7 @@ const App: React.FC = () => {
                 ) : (
                   <>
                     {user?.photoURL ? (
-                      <img src={user.photoURL} alt="Profile" className="w-10 h-10 rounded-xl border border-white/10" />
+                      <img src={user.photoURL} alt="Profile" crossOrigin="anonymous" className="w-10 h-10 rounded-xl border border-white/10" />
                     ) : (
                       <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center font-black text-xs text-white border border-white/10">
                         {user?.displayName ? user.displayName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'A'}
