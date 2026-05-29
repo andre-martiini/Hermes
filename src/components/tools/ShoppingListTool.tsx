@@ -501,14 +501,14 @@ export const ShoppingListTool = ({
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6 pb-32 px-2 md:px-0">
       {assistantPreview && (
-        <div className="bg-amber-50 border border-amber-200 rounded-[2rem] shadow-sm p-5 space-y-4">
+        <div className="bg-amber-50 border border-amber-200 rounded-none-none shadow-none p-5 space-y-4">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">Validacao do Copiloto</p>
               <h3 className="text-lg font-black text-slate-900">{assistantPreview.title}</h3>
               <p className="text-sm text-slate-600 font-medium mt-1">{assistantPreview.description}</p>
             </div>
-            <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
+            <div className={`px-3 py-1 rounded-none-none text-[10px] font-black uppercase tracking-widest ${
               assistantStatus === 'applied'
                 ? 'bg-emerald-100 text-emerald-700'
                 : assistantStatus === 'cancelled'
@@ -523,14 +523,14 @@ export const ShoppingListTool = ({
 
           <div className="space-y-2">
             {assistantPreview.lines.map(line => (
-              <div key={line} className="bg-white/80 rounded-xl px-4 py-3 text-sm font-semibold text-slate-700">
+              <div key={line} className="bg-white/80 rounded-none-none px-4 py-3 text-sm font-semibold text-slate-700">
                 {line}
               </div>
             ))}
           </div>
 
           {assistantError && (
-            <div className="bg-rose-50 border border-rose-100 rounded-xl px-4 py-3 text-sm font-semibold text-rose-600">
+            <div className="bg-rose-50 border border-rose-100 rounded-none-none px-4 py-3 text-sm font-semibold text-rose-600">
               {assistantError}
             </div>
           )}
@@ -540,13 +540,13 @@ export const ShoppingListTool = ({
               <button
                 onClick={applyAssistantAction}
                 disabled={!canConfirmAssistantAction}
-                className="flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="flex-1 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 Confirmar alteracao
               </button>
               <button
                 onClick={() => setAssistantStatus('cancelled')}
-                className="flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-500 bg-white border border-slate-200 hover:bg-slate-50 transition-all"
+                className="flex-1 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest text-slate-500 bg-white border border-slate-200 hover:bg-slate-50 transition-all"
               >
                 Cancelar
               </button>
@@ -558,34 +558,34 @@ export const ShoppingListTool = ({
       {/* Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
         {!isEmbedded && (
-          <button onClick={onBack} className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-400 hover:text-slate-900 border border-slate-200 hover:border-slate-900 transition-all shadow-sm">
+          <button onClick={onBack} className="w-12 h-12 bg-white rounded-none-none flex items-center justify-center text-slate-400 hover:text-slate-900 border border-slate-200 hover:border-slate-900 transition-all shadow-none">
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
           </button>
         )}
         <div className="flex-1">
-          <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tighter">Lista de Compras</h2>
-          <p className="text-slate-500 font-medium text-sm">{items.length} itens cadastrados · {plannedItems.length} planejados</p>
+          <h2 className="text-2xl md:text-3xl font-mono font-black uppercase tracking-tight text-slate-900">Lista de Compras</h2>
+          <p className="text-slate-500 font-mono text-xs uppercase font-bold">{items.length} itens cadastrados · {plannedItems.length} planejados</p>
         </div>
         <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
           <button
             onClick={() => setIsPortalConfigOpen(prev => !prev)}
-            className={`h-11 px-3 md:px-4 rounded-2xl border text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${isPortalConfigOpen ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800 hover:border-slate-300'}`}
+            className={`h-11 px-3 md:px-4 rounded-none-none border text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${isPortalConfigOpen ? 'bg-slate-900 text-white border-slate-900 shadow-none' : 'bg-white text-slate-500 border-slate-200 hover:text-slate-800 hover:border-slate-300'}`}
           >
             Portal Externo
           </button>
           {/* Tab selector */}
-          <div className="flex-1 min-w-0 flex bg-slate-100 p-1 rounded-2xl gap-0.5">
+          <div className="flex-1 min-w-0 flex bg-slate-100 p-1 rounded-none-none gap-0.5">
             {(['catalog', 'planning', 'shopping'] as const).map(tab => {
               const labels: Record<string, string> = { catalog: 'Cadastro', planning: 'Planejar', shopping: 'Comprar' };
               return (
                 <button key={tab} onClick={() => setView(tab)}
-                  className={`flex-1 px-2 md:px-4 py-2.5 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all relative ${view === tab ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
+                  className={`flex-1 px-2 md:px-4 py-2.5 rounded-none-none text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all relative ${view === tab ? 'bg-white text-slate-900 shadow-none' : 'text-slate-400 hover:text-slate-600'}`}>
                   {labels[tab]}
                   {tab === 'planning' && plannedItems.length > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">{plannedItems.length}</span>
+                    <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-[8px] font-black w-4 h-4 rounded-none-none flex items-center justify-center">{plannedItems.length}</span>
                   )}
                   {tab === 'shopping' && purchasedCount > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-emerald-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">{purchasedCount}</span>
+                    <span className="absolute -top-1 -right-1 bg-emerald-500 text-white text-[8px] font-black w-4 h-4 rounded-none-none flex items-center justify-center">{purchasedCount}</span>
                   )}
                 </button>
               );
@@ -595,7 +595,7 @@ export const ShoppingListTool = ({
       </div>
 
       {isPortalConfigOpen && (
-        <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl p-6 animate-in fade-in slide-in-from-top-2 duration-300">
+        <div className="bg-white rounded-none-none border border-slate-200 shadow-xl p-6 animate-in fade-in slide-in-from-top-2 duration-300">
           <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">Portal Externo da Lista</h3>
           <div className="flex flex-col md:flex-row gap-3">
             <input
@@ -603,9 +603,9 @@ export const ShoppingListTool = ({
               readOnly
               value={externalToken}
               placeholder="Nenhum token gerado"
-              className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs font-mono text-slate-700 outline-none"
+              className="flex-1 bg-slate-50 border border-slate-200 rounded-none-none px-4 py-3 text-xs font-mono text-slate-700 outline-none"
             />
-            <button onClick={generateExternalToken} className="bg-blue-600 text-white px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all">
+            <button onClick={generateExternalToken} className="bg-blue-600 text-white px-4 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all">
               Gerar Token
             </button>
           </div>
@@ -615,9 +615,9 @@ export const ShoppingListTool = ({
               readOnly
               value={externalToken ? `${window.location.origin}/compras-externas?token=${externalToken}` : ''}
               placeholder="Link externo aparecerá aqui"
-              className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs font-mono text-slate-700 outline-none"
+              className="flex-1 bg-slate-50 border border-slate-200 rounded-none-none px-4 py-3 text-xs font-mono text-slate-700 outline-none"
             />
-            <button onClick={copyExternalLink} className="bg-emerald-600 text-white px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all">
+            <button onClick={copyExternalLink} className="bg-emerald-600 text-white px-4 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all">
               Copiar Link
             </button>
           </div>
@@ -631,19 +631,19 @@ export const ShoppingListTool = ({
       {view === 'catalog' && (
         <div className="space-y-6 animate-in fade-in duration-300">
           {/* Add form */}
-          <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl p-6 space-y-4">
+          <div className="bg-white rounded-none-none border border-slate-200 shadow-xl p-6 space-y-4">
             <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Novo Item</h3>
             <form onSubmit={handleAddItem} className="flex flex-col md:flex-row md:items-center gap-3">
               <input
                 type="text"
                 placeholder="Nome do item..."
-                className="w-full md:flex-[2] bg-slate-50 border border-slate-100 rounded-2xl px-5 py-3 text-slate-800 font-bold outline-none focus:ring-2 focus:ring-blue-100 transition-all"
+                className="w-full md:flex-[2] bg-slate-50 border border-slate-200 rounded-none-none px-5 py-3 text-slate-800 font-bold outline-none focus:ring-1 focus:ring-slate-400 transition-all"
                 value={newItemName}
                 onChange={e => setNewItemName(e.target.value)}
                 autoFocus
               />
               <select
-                className="w-full md:flex-1 bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-slate-700 font-bold outline-none focus:ring-2 focus:ring-blue-100 transition-all"
+                className="w-full md:flex-1 bg-slate-50 border border-slate-200 rounded-none-none px-4 py-3 text-slate-700 font-bold outline-none focus:ring-1 focus:ring-slate-400 transition-all"
                 value={newItemCategoria}
                 onChange={e => setNewItemCategoria(e.target.value)}
               >
@@ -653,10 +653,10 @@ export const ShoppingListTool = ({
                 <option value="Nova...">+ Nova categoria</option>
               </select>
               <div className="flex items-center gap-3">
-                <button type="submit" className="bg-blue-600 text-white h-12 w-12 rounded-2xl flex items-center justify-center hover:bg-blue-700 transition-all shadow-lg active:scale-95 flex-shrink-0">
+                <button type="submit" className="bg-blue-600 text-white h-12 w-12 rounded-none-none flex items-center justify-center hover:bg-blue-700 transition-all shadow-none active:scale-95 flex-shrink-0">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
                 </button>
-                <button type="button" onClick={() => setIsImportModalOpen(true)} title="Importar em lote" className="h-12 w-12 rounded-2xl border border-slate-200 flex items-center justify-center text-slate-400 hover:text-blue-500 hover:border-blue-200 transition-all flex-shrink-0">
+                <button type="button" onClick={() => setIsImportModalOpen(true)} title="Importar em lote" className="h-12 w-12 rounded-none-none border border-slate-200 flex items-center justify-center text-slate-400 hover:text-blue-500 hover:border-blue-200 transition-all flex-shrink-0">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0l-4-4m4 4v12" /></svg>
                 </button>
               </div>
@@ -664,7 +664,7 @@ export const ShoppingListTool = ({
           </div>
 
           {/* Search */}
-          <div className="bg-white border border-slate-100 rounded-2xl px-5 py-3 flex items-center gap-3 shadow-sm focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+          <div className="bg-white border border-slate-200 rounded-none-none px-5 py-3 flex items-center gap-3 shadow-none focus-within:ring-2 focus-within:ring-blue-100 transition-all">
             <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
             <input type="text" placeholder="Buscar no catálogo..." className="flex-1 bg-transparent outline-none text-sm font-bold text-slate-700 placeholder:text-slate-300" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
             {searchTerm && <button onClick={() => setSearchTerm('')} className="text-slate-300 hover:text-slate-500"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg></button>}
@@ -682,26 +682,26 @@ export const ShoppingListTool = ({
               {Object.entries(groupedCatalog).map(([cat, catItems]) => (
                 <div key={cat}>
                   <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] pl-2 mb-2">{cat}</h4>
-                  <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm divide-y divide-slate-50 overflow-hidden">
+                  <div className="bg-white rounded-none-none border border-slate-200 shadow-none divide-y divide-slate-200 overflow-hidden">
                     {catItems.map(item => (
                       <div key={item.id} className="flex items-center gap-4 px-5 py-4 hover:bg-slate-50 transition-all group">
                         <div className="flex-1 min-w-0">
                           {editingItemId === item.id && editingField === 'nome' ? (
                             <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
                               onBlur={commitEdit} onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') { setEditingItemId(null); setEditingField(null); } }}
-                              className="w-full bg-blue-50 border border-blue-200 rounded-lg px-3 py-1 text-slate-800 font-bold outline-none" />
+                              className="w-full bg-blue-50 border border-blue-200 rounded-none-none px-3 py-1 text-slate-800 font-bold outline-none" />
                           ) : (
-                            <p onClick={() => startEdit(item.id, 'nome', item.nome)} className="font-bold text-slate-800 cursor-pointer hover:text-blue-600 transition-colors truncate">{item.nome}</p>
+                            <p onClick={() => startEdit(item.id, 'nome', item.nome)} className="font-mono font-bold text-slate-800 cursor-pointer hover:text-blue-600 transition-colors truncate">{item.nome}</p>
                           )}
                           {editingItemId === item.id && editingField === 'categoria' ? (
                             <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
                               onBlur={commitEdit} onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') { setEditingItemId(null); setEditingField(null); } }}
-                              className="mt-0.5 w-32 bg-blue-50 border border-blue-200 rounded px-2 py-0.5 text-[10px] font-bold outline-none" />
+                              className="mt-0.5 w-32 bg-blue-50 border border-blue-200 rounded-none px-2 py-0.5 text-[10px] font-bold outline-none" />
                           ) : (
                             <p onClick={() => startEdit(item.id, 'categoria', item.categoria)} className="text-[10px] font-black text-slate-400 uppercase tracking-widest cursor-pointer hover:text-blue-500 transition-colors mt-0.5">{item.categoria}</p>
                           )}
                         </div>
-                        <button onClick={() => handleDeleteItem(item.id)} className={`opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 rounded-xl transition-all ${pendingDeleteItemId === item.id ? 'bg-rose-500 text-white shadow-md' : 'text-slate-300 hover:text-rose-500 hover:bg-rose-50'}`}>
+                        <button onClick={() => handleDeleteItem(item.id)} className={`opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 rounded-none-none transition-all ${pendingDeleteItemId === item.id ? 'bg-rose-500 text-white shadow-none' : 'text-slate-300 hover:text-rose-500 hover:bg-rose-50'}`}>
                           {pendingDeleteItemId === item.id ? (
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                           ) : (
@@ -722,11 +722,11 @@ export const ShoppingListTool = ({
       {view === 'planning' && (
         <div className="space-y-6 animate-in fade-in duration-300">
           <div className="flex items-center gap-3">
-            <div className="flex-1 bg-white border border-slate-100 rounded-2xl px-5 py-3 flex items-center gap-3 shadow-sm focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+            <div className="flex-1 bg-white border border-slate-200 rounded-none-none px-5 py-3 flex items-center gap-3 shadow-none focus-within:ring-2 focus-within:ring-blue-100 transition-all">
               <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
               <input type="text" placeholder="Filtrar itens..." className="flex-1 bg-transparent outline-none text-sm font-bold text-slate-700 placeholder:text-slate-300" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
             </div>
-            <button onClick={handleClearPlanningClick} title="Limpar planejamento" className={`group h-12 px-3 border rounded-2xl shadow-sm flex items-center gap-2 transition-all ${isClearPlanningPending ? 'bg-rose-500 border-rose-600 text-white' : 'bg-white border-slate-100 text-slate-400 hover:text-rose-500 hover:border-rose-200 hover:bg-rose-50'}`}>
+            <button onClick={handleClearPlanningClick} title="Limpar planejamento" className={`group h-12 px-3 border rounded-none-none shadow-none flex items-center gap-2 transition-all ${isClearPlanningPending ? 'bg-rose-500 border-rose-600 text-white' : 'bg-white border-slate-200 text-slate-400 hover:text-rose-500 hover:border-rose-200 hover:bg-rose-50'}`}>
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
               <span className="text-[8px] font-black uppercase tracking-widest">{isClearPlanningPending ? 'Confirma limpeza' : 'Limpar Planejamento'}</span>
             </button>
@@ -742,20 +742,20 @@ export const ShoppingListTool = ({
               {Object.entries(groupedCatalog).map(([cat, catItems]) => (
                 <div key={cat}>
                   <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] pl-2 mb-2">{cat}</h4>
-                  <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm divide-y divide-slate-50 overflow-hidden">
+                  <div className="bg-white rounded-none-none border border-slate-200 shadow-none divide-y divide-slate-200 overflow-hidden">
                     {catItems.map(item => (
                       <div key={item.id} className={`flex items-center gap-4 px-5 py-4 transition-all ${item.isPlanned ? 'bg-blue-50/40' : 'hover:bg-slate-50'}`}>
                         <button onClick={() => togglePlanned(item.id)}
-                          className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all flex-shrink-0 ${item.isPlanned ? 'bg-blue-600 text-white shadow-md shadow-blue-200' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>
+                          className={`w-8 h-8 rounded-none-none flex items-center justify-center transition-all flex-shrink-0 ${item.isPlanned ? 'bg-blue-600 text-white shadow-none shadow-none' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>
                           {item.isPlanned
                             ? <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
-                            : <div className="w-2 h-2 bg-slate-400 rounded-full" />}
+                            : <div className="w-2 h-2 bg-slate-400 rounded-none-none" />}
                         </button>
                         <span className={`flex-1 font-bold text-sm ${item.isPlanned ? 'text-slate-900' : 'text-slate-400'}`}>{item.nome}</span>
                         {item.isPlanned && (
-                          <div className="flex items-center gap-2 bg-white border border-blue-100 rounded-xl px-3 py-1.5 shadow-sm">
+                          <div className="flex items-center gap-2 bg-white border border-blue-100 rounded-none-none px-3 py-1.5 shadow-none">
                             <button onClick={() => updateQuantidade(item.id, String(Math.max(0.5, parseFloat(item.quantidade || '1') - (parseFloat(item.quantidade || '1') % 1 === 0 ? 1 : 0.5))))}
-                              className="w-6 h-6 rounded-lg bg-slate-100 text-slate-600 font-black flex items-center justify-center hover:bg-blue-100 transition-all text-sm leading-none">−</button>
+                              className="w-6 h-6 rounded-none-none bg-slate-100 text-slate-600 font-black flex items-center justify-center hover:bg-blue-100 transition-all text-sm leading-none">−</button>
                             {editingItemId === item.id && editingField === 'quantidade' ? (
                               <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
                                 onBlur={commitEdit} onKeyDown={e => { if (e.key === 'Enter') commitEdit(); }}
@@ -767,7 +767,7 @@ export const ShoppingListTool = ({
                               </span>
                             )}
                             <button onClick={() => updateQuantidade(item.id, String(parseFloat(item.quantidade || '1') + (parseFloat(item.quantidade || '1') % 1 === 0 ? 1 : 0.5)))}
-                              className="w-6 h-6 rounded-lg bg-slate-100 text-slate-600 font-black flex items-center justify-center hover:bg-blue-100 transition-all text-sm leading-none">+</button>
+                              className="w-6 h-6 rounded-none-none bg-slate-100 text-slate-600 font-black flex items-center justify-center hover:bg-blue-100 transition-all text-sm leading-none">+</button>
                           </div>
                         )}
                       </div>
@@ -781,7 +781,7 @@ export const ShoppingListTool = ({
           {plannedItems.length > 0 && (
             <div className="sticky bottom-6">
               <button onClick={() => setView('shopping')}
-                className="w-full bg-blue-600 text-white py-4 rounded-[2rem] font-black uppercase tracking-widest text-sm shadow-2xl shadow-blue-200 hover:bg-blue-700 transition-all active:scale-[0.98] flex items-center justify-center gap-3">
+                className="w-full bg-blue-600 text-white py-4 rounded-none-none font-black uppercase tracking-widest text-sm shadow-none shadow-none hover:bg-blue-700 transition-all active:scale-[0.98] flex items-center justify-center gap-3">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
                 Ir às Compras · {plannedItems.length} itens
               </button>
@@ -794,16 +794,16 @@ export const ShoppingListTool = ({
       {view === 'shopping' && (
         <div className="space-y-6 animate-in fade-in duration-300">
           {/* Progress bar */}
-          <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl p-6">
+          <div className="bg-white rounded-none-none border border-slate-200 shadow-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-xl font-black text-slate-900">Comprando</h3>
                 <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-0.5">{purchasedCount} de {plannedItems.length} comprados</p>
               </div>
-              <button onClick={() => setIsFinalizingConfirmOpen(true)} className="bg-emerald-500 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-100">Finalizar</button>
+              <button onClick={() => setIsFinalizingConfirmOpen(true)} className="bg-emerald-500 text-white px-6 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-none shadow-none">Finalizar</button>
             </div>
-            <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-              <div className="bg-emerald-500 h-2 rounded-full transition-all duration-500"
+            <div className="w-full bg-slate-100 rounded-none-none h-2 overflow-hidden">
+              <div className="bg-emerald-500 h-2 rounded-none-none transition-all duration-500"
                 style={{ width: plannedItems.length > 0 ? `${(purchasedCount / plannedItems.length) * 100}%` : '0%' }} />
             </div>
           </div>
@@ -815,24 +815,24 @@ export const ShoppingListTool = ({
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl overflow-hidden">
-                <div className="divide-y divide-slate-50">
+              <div className="bg-white rounded-none-none border border-slate-200 shadow-xl overflow-hidden">
+                <div className="divide-y divide-slate-200">
                   {pendingShoppingItems.map(item => (
                     <div
                       key={item.id}
                       onClick={() => togglePurchased(item.id)}
                       className={`flex items-center gap-5 px-6 py-5 cursor-pointer transition-all duration-300 select-none hover:bg-slate-50 ${exitingPurchasedIds.includes(item.id) ? 'bg-emerald-50 opacity-40 scale-[0.98]' : ''}`}
                     >
-                      <div className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all flex-shrink-0 bg-slate-100 text-slate-400">
-                        <div className="w-3 h-3 border-2 border-current rounded-full" />
+                      <div className="w-10 h-10 rounded-none-none flex items-center justify-center transition-all flex-shrink-0 bg-slate-100 text-slate-400">
+                        <div className="w-3 h-3 border-2 border-current rounded-none-none" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-lg font-black tracking-tight text-slate-900">{item.nome}</p>
+                        <p className="text-lg font-mono font-black uppercase tracking-tight text-slate-900">{item.nome}</p>
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{item.categoria}</p>
                       </div>
                       <div className="text-right flex-shrink-0">
-                        <span className="text-xl font-black text-blue-600">{item.quantidade}</span>
-                        <span className="text-slate-400 font-medium text-xs ml-1">{item.unit}</span>
+                        <span className="text-lg font-mono font-bold text-blue-600">{item.quantidade}</span>
+                        <span className="text-slate-400 font-mono text-[10px] uppercase font-bold ml-1">{item.unit}</span>
                       </div>
                     </div>
                   ))}
@@ -844,7 +844,7 @@ export const ShoppingListTool = ({
                 </div>
               </div>
 
-              <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl overflow-hidden">
+              <div className="bg-white rounded-none-none border border-slate-200 shadow-xl overflow-hidden">
                 <button
                   type="button"
                   onClick={() => setIsPurchasedSectionOpen(prev => !prev)}
@@ -860,23 +860,23 @@ export const ShoppingListTool = ({
                 </button>
 
                 {isPurchasedSectionOpen && (
-                  <div className="divide-y divide-slate-50 border-t border-slate-100">
+                  <div className="divide-y divide-slate-200 border-t border-slate-200">
                     {purchasedShoppingItems.map(item => (
                       <div
                         key={item.id}
                         onClick={() => togglePurchased(item.id)}
                         className="flex items-center gap-5 px-6 py-5 cursor-pointer transition-all duration-300 select-none bg-slate-50/70 hover:bg-slate-100/70"
                       >
-                        <div className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all flex-shrink-0 bg-emerald-500 text-white shadow-md shadow-emerald-200">
+                        <div className="w-10 h-10 rounded-none-none flex items-center justify-center transition-all flex-shrink-0 bg-emerald-500 text-white shadow-none shadow-none">
                           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-lg font-black tracking-tight line-through text-slate-400">{item.nome}</p>
+                          <p className="text-base font-mono font-bold uppercase tracking-tight line-through text-slate-400">{item.nome}</p>
                           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{item.categoria}</p>
                         </div>
                         <div className="text-right flex-shrink-0">
-                          <span className="text-xl font-black text-slate-300">{item.quantidade}</span>
-                          <span className="text-slate-400 font-medium text-xs ml-1">{item.unit}</span>
+                          <span className="text-lg font-mono font-bold text-slate-300">{item.quantidade}</span>
+                          <span className="text-slate-400 font-mono text-[10px] uppercase font-bold ml-1">{item.unit}</span>
                         </div>
                       </div>
                     ))}
@@ -896,26 +896,26 @@ export const ShoppingListTool = ({
       {/* Import Modal */}
       {isImportModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-            <div className="p-8 border-b border-slate-100 flex items-center justify-between">
+          <div className="bg-white w-full max-w-lg rounded-none-none shadow-none overflow-hidden animate-in zoom-in-95 duration-300">
+            <div className="p-8 border-b border-slate-200 flex items-center justify-between">
               <div>
                 <h3 className="text-2xl font-black text-slate-900 tracking-tight">Importação em Lote</h3>
                 <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">Um item por linha · Nome|Categoria (opcional)</p>
               </div>
-              <button onClick={() => setIsImportModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+              <button onClick={() => setIsImportModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-none-none transition-colors">
                 <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
             <div className="p-8 space-y-4">
               <textarea autoFocus
-                className="w-full bg-slate-50 border border-slate-100 rounded-[1.5rem] p-6 text-slate-800 font-bold leading-relaxed outline-none focus:ring-4 focus:ring-blue-100 transition-all min-h-[260px] resize-none"
+                className="w-full bg-slate-50 border border-slate-200 rounded-none-none p-6 text-slate-800 font-bold leading-relaxed outline-none focus:ring-1 focus:ring-slate-400 transition-all min-h-[260px] resize-none"
                 placeholder={"Exemplo:\nArroz|Grãos e Cereais\nFeijão|Grãos e Cereais\nLeite|Laticínios\nSabão|Limpeza"}
                 value={importText}
                 onChange={e => setImportText(e.target.value)}
               />
               <div className="flex gap-4">
-                <button onClick={() => setIsImportModalOpen(false)} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-2xl transition-all">Cancelar</button>
-                <button onClick={handleBatchImport} className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all">
+                <button onClick={() => setIsImportModalOpen(false)} className="flex-1 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-50 rounded-none-none transition-all">Cancelar</button>
+                <button onClick={handleBatchImport} className="flex-[2] py-4 bg-blue-600 text-white rounded-none-none text-[10px] font-black uppercase tracking-widest shadow-none shadow-none hover:bg-blue-700 transition-all">
                   Importar {importText.split('\n').filter(l => l.trim()).length} Itens
                 </button>
               </div>
@@ -926,12 +926,12 @@ export const ShoppingListTool = ({
 
       {isFinalizingConfirmOpen && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-md rounded-[2rem] p-6 space-y-4 shadow-2xl">
+          <div className="bg-white w-full max-w-md rounded-none-none p-6 space-y-4 shadow-none">
             <h3 className="text-lg font-black text-slate-900">Finalizar Compras</h3>
             <p className="text-sm text-slate-500 font-medium">Isto limpará os itens planejados/comprados desta rodada. Continuar?</p>
             <div className="flex gap-3">
-              <button onClick={() => setIsFinalizingConfirmOpen(false)} className="flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-500 bg-slate-100 hover:bg-slate-200 transition-all">Cancelar</button>
-              <button onClick={async () => { await finalizeShopping(); setIsFinalizingConfirmOpen(false); }} className="flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-white bg-emerald-600 hover:bg-emerald-700 transition-all">Confirmar</button>
+              <button onClick={() => setIsFinalizingConfirmOpen(false)} className="flex-1 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest text-slate-500 bg-slate-100 hover:bg-slate-200 transition-all">Cancelar</button>
+              <button onClick={async () => { await finalizeShopping(); setIsFinalizingConfirmOpen(false); }} className="flex-1 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest text-white bg-emerald-600 hover:bg-emerald-700 transition-all">Confirmar</button>
             </div>
           </div>
         </div>

@@ -16,25 +16,26 @@ def preencher_ponto_eletronico():
     
     try:
         # -------------------------------------------------------------
-        # 1. CÁLCULO E SELEÇÃO DO MÊS ANTERIOR
+        # 1. CÁLCULO E SELEÇÃO DO MÊS ALVO
         # -------------------------------------------------------------
         hoje = datetime.date.today()
         primeiro_dia_mes_atual = hoje.replace(day=1)
         ultimo_dia_mes_anterior = primeiro_dia_mes_atual - datetime.timedelta(days=1)
 
-        ultimo_dia_mes_atual = calendar.monthrange(hoje.year, hoje.month)[1]
-        if hoje.day == ultimo_dia_mes_atual:
-            mes_anterior = hoje.month
-            print(f"Último dia do mês detectado ({hoje}). Registrando ponto do mês atual.")
+        # Se estiver na segunda quinzena (dia >= 15), registra o mês atual
+        if hoje.day >= 15:
+            mes_alvo = hoje.month
+            print(f"Segunda quinzena detectada ({hoje.day}/_). Registrando ponto do mês atual ({mes_alvo}).")
         else:
-            mes_anterior = ultimo_dia_mes_anterior.month
+            mes_alvo = ultimo_dia_mes_anterior.month
+            print(f"Primeira quinzena detectada ({hoje.day}/_). Registrando ponto do mês anterior ({mes_alvo}).")
 
         select_mes_el = espera.until(EC.presence_of_element_located((
             By.XPATH, "//select[contains(@id, 'mes') or contains(@name, 'mes') or contains(@id, 'Mes') or contains(@name, 'Mes')]"
         )))
         
-        Select(select_mes_el).select_by_value(str(mes_anterior))
-        print(f"Mês {mes_anterior} selecionado.")
+        Select(select_mes_el).select_by_value(str(mes_alvo))
+        print(f"Mês {mes_alvo} selecionado.")
         
         btn_buscar = driver.find_element(By.XPATH, "//input[@value='Buscar'] | //button[contains(text(), 'Buscar')]")
         btn_buscar.click()

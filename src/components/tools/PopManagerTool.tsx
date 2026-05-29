@@ -127,11 +127,11 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack, initialS
   };
 
   return (
-    <div className={`flex flex-col h-full rounded-3xl overflow-hidden shadow-sm border ${isDark ? 'bg-slate-900 border-slate-700/50' : 'bg-white border-slate-200'}`}>
+    <div className={`flex flex-col h-full rounded-none-3xl overflow-hidden shadow-none border ${isDark ? 'bg-slate-900 border-slate-700/50' : 'bg-white border-slate-200'}`}>
       <div className={`p-6 md:p-8 border-b shrink-0 ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-slate-50 border-slate-200'}`}>
         <div className="flex items-center gap-4 mb-4">
           {onBack && !isEmbedded && (
-            <button onClick={onBack} className={`p-2 rounded-xl transition-colors ${isDark ? 'text-slate-400 hover:text-white hover:bg-slate-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}>
+            <button onClick={onBack} className={`p-2 rounded-none-none transition-colors ${isDark ? 'text-slate-400 hover:text-white hover:bg-slate-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}>
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
             </button>
           )}
@@ -147,13 +147,13 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack, initialS
 
       <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-8">
         {errorMessage && (
-          <div className={`rounded-2xl border px-4 py-3 text-sm font-medium ${isDark ? 'border-red-900/50 bg-red-900/20 text-red-400' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+          <div className={`rounded-none-none border px-4 py-3 text-sm font-medium ${isDark ? 'border-red-900/50 bg-red-900/20 text-red-400' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
             {errorMessage}
           </div>
         )}
 
         {/* Formulário de Criação/Edição */}
-        <div className={`p-6 rounded-2xl border shadow-sm ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200'}`}>
+        <div className={`p-6 rounded-none-none border shadow-none ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200'}`}>
           <h3 className={`text-lg font-bold mb-4 ${isDark ? 'text-white' : 'text-slate-800'}`}>{editingId ? 'Editar POP' : 'Novo POP'}</h3>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -164,7 +164,7 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack, initialS
                 value={titulo}
                 onChange={(e) => setTitulo(e.target.value)}
                 required
-                className={`w-full p-3 border rounded-xl focus:ring-2 outline-none transition-colors ${isDark ? 'bg-slate-900/50 border-slate-700 text-white focus:ring-cyan-500/50 placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 focus:ring-blue-500 placeholder-slate-400'}`}
+                className={`w-full p-3 border rounded-none-none focus:ring-1 outline-none transition-colors ${isDark ? 'bg-slate-900/50 border-slate-700 text-white focus:ring-cyan-500/50 placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 focus:ring-blue-500 placeholder-slate-400'}`}
               />
             </div>
             <div>
@@ -175,7 +175,7 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack, initialS
                 value={gatilhos}
                 onChange={(e) => setGatilhos(e.target.value)}
                 required
-                className={`w-full p-3 border rounded-xl focus:ring-2 outline-none transition-colors ${isDark ? 'bg-slate-900/50 border-slate-700 text-white focus:ring-cyan-500/50 placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 focus:ring-blue-500 placeholder-slate-400'}`}
+                className={`w-full p-3 border rounded-none-none focus:ring-1 outline-none transition-colors ${isDark ? 'bg-slate-900/50 border-slate-700 text-white focus:ring-cyan-500/50 placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 focus:ring-blue-500 placeholder-slate-400'}`}
               />
             </div>
             <div>
@@ -185,7 +185,7 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack, initialS
                 value={instrucao}
                 onChange={(e) => setInstrucao(e.target.value)}
                 required
-                className={`w-full p-3 border rounded-xl h-32 resize-none focus:ring-2 outline-none transition-colors ${isDark ? 'bg-slate-900/50 border-slate-700 text-white focus:ring-cyan-500/50 placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 focus:ring-blue-500 placeholder-slate-400'}`}
+                className={`w-full p-3 border rounded-none-none h-32 resize-none focus:ring-1 outline-none transition-colors ${isDark ? 'bg-slate-900/50 border-slate-700 text-white focus:ring-cyan-500/50 placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 focus:ring-blue-500 placeholder-slate-400'}`}
               />
             </div>
 
@@ -193,7 +193,7 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack, initialS
               <button
                 type="submit"
                 disabled={saving}
-                className={`font-bold py-3 px-6 rounded-xl transition-colors ${isDark ? 'bg-cyan-600 hover:bg-cyan-500 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
+                className={`font-bold py-3 px-6 rounded-none-none transition-colors ${isDark ? 'bg-cyan-600 hover:bg-cyan-500 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
               >
                 {saving ? 'Salvando...' : editingId ? 'Atualizar POP' : 'Salvar POP'}
               </button>
@@ -201,7 +201,7 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack, initialS
                 <button
                   type="button"
                   onClick={resetForm}
-                  className={`font-bold py-3 px-6 rounded-xl transition-colors ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}
+                  className={`font-bold py-3 px-6 rounded-none-none transition-colors ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}
                 >
                   Cancelar
                 </button>
@@ -212,17 +212,17 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack, initialS
 
         {/* Lista de POPs */}
         <div>
-          <h3 className={`text-lg font-bold mb-4 border-b pb-2 ${isDark ? 'text-white border-slate-700/50' : 'text-slate-800 border-slate-100'}`}>POPs Cadastrados</h3>
+          <h3 className={`text-lg font-bold mb-4 border-b pb-2 ${isDark ? 'text-white border-slate-700/50' : 'text-slate-800 border-slate-200'}`}>POPs Cadastrados</h3>
           {loading ? (
              <div className={`text-center py-8 font-medium animate-pulse ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Carregando POPs...</div>
           ) : pops.length === 0 ? (
-            <div className={`text-center py-8 rounded-2xl border border-dashed ${isDark ? 'bg-slate-800/30 border-slate-700' : 'bg-slate-50 border-slate-300'}`}>
+            <div className={`text-center py-8 rounded-none-none border border-dashed ${isDark ? 'bg-slate-800/30 border-slate-700' : 'bg-slate-50 border-slate-300'}`}>
               <p className={`font-medium ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>Nenhum POP cadastrado.</p>
             </div>
           ) : (
             <div className="grid gap-4">
               {pops.map((pop) => (
-                <div key={pop.id} className={`border rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow group ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200'}`}>
+                <div key={pop.id} className={`border rounded-none-none p-5 shadow-none hover:shadow-none transition-shadow group ${isDark ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200'}`}>
                   <div className="flex justify-between items-start mb-3">
                     <h4 className={`font-bold text-lg ${isDark ? 'text-white' : 'text-slate-800'}`}>{pop.titulo}</h4>
                     <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -236,12 +236,12 @@ export const PopManagerTool: React.FC<PopManagerToolProps> = ({ onBack, initialS
                   </div>
                   <div className="flex flex-wrap gap-2 mb-3">
                     {pop.gatilhos.map((g, i) => (
-                      <span key={i} className={`text-xs font-bold px-2 py-1 rounded-md ${isDark ? 'bg-cyan-900/30 text-cyan-400' : 'bg-blue-50 text-blue-700'}`}>
+                      <span key={i} className={`text-xs font-bold px-2 py-1 rounded-none-none ${isDark ? 'bg-cyan-900/30 text-cyan-400' : 'bg-blue-50 text-blue-700'}`}>
                         {g}
                       </span>
                     ))}
                   </div>
-                  <div className={`p-3 rounded-xl border ${isDark ? 'bg-slate-900/50 border-slate-700/50' : 'bg-slate-50 border-slate-100'}`}>
+                  <div className={`p-3 rounded-none-none border ${isDark ? 'bg-slate-900/50 border-slate-700/50' : 'bg-slate-50 border-slate-200'}`}>
                     <p className={`text-sm font-mono whitespace-pre-wrap line-clamp-3 group-hover:line-clamp-none transition-all ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                       {pop.instrucao_sistema}
                     </p>

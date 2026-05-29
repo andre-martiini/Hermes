@@ -226,7 +226,7 @@ export const LongTranscriptionTool = ({ onBack, showToast, isDark = false }: Lon
         <div className="flex items-center gap-4 mb-6">
           <button
             onClick={onBack}
-            className={`w-12 h-12 rounded-none flex items-center justify-center border transition-all ${
+            className={`w-12 h-12 rounded-none-none flex items-center justify-center border transition-all ${
               isDark
                 ? 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-100 hover:border-blue-500'
                 : 'bg-white border-slate-200 text-slate-400 hover:text-slate-900 hover:border-slate-900'
@@ -252,7 +252,7 @@ export const LongTranscriptionTool = ({ onBack, showToast, isDark = false }: Lon
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
           onClick={() => fileInputRef.current?.click()}
-          className={`cursor-pointer border-2 border-dashed rounded-none p-10 text-center transition-all mb-8 ${
+          className={`cursor-pointer border-2 border-dashed rounded-none-none p-10 text-center transition-all mb-8 ${
             dragOver
               ? 'border-blue-500 bg-blue-500/5'
               : isDark
@@ -290,7 +290,7 @@ export const LongTranscriptionTool = ({ onBack, showToast, isDark = false }: Lon
         {loadingHistory ? (
           <p className={`text-xs font-mono ${textMuted} py-8 text-center`}>Carregando...</p>
         ) : history.length === 0 ? (
-          <div className={`border rounded-none p-10 text-center ${cardBg}`}>
+          <div className={`border rounded-none-none p-10 text-center ${cardBg}`}>
             <p className={`text-[10px] font-mono font-black uppercase tracking-[0.2em] ${textMuted}`}>Nenhuma transcrição ainda</p>
           </div>
         ) : (
@@ -302,7 +302,7 @@ export const LongTranscriptionTool = ({ onBack, showToast, isDark = false }: Lon
                 <div
                   key={item.id}
                   onClick={() => isDone && setSelected(item)}
-                  className={`border rounded-none p-4 transition-all ${cardBg} ${
+                  className={`border rounded-none-none p-4 transition-all ${cardBg} ${
                     isDone ? 'cursor-pointer hover:border-blue-400' : ''
                   }`}
                 >
@@ -314,7 +314,7 @@ export const LongTranscriptionTool = ({ onBack, showToast, isDark = false }: Lon
                       </p>
                     </div>
                     <span
-                      className={`shrink-0 text-[9px] font-mono font-black uppercase tracking-widest px-2.5 py-1 border rounded-none ${statusStyles(
+                      className={`shrink-0 text-[9px] font-mono font-black uppercase tracking-widest px-2.5 py-1 border rounded-none-none ${statusStyles(
                         item.status,
                         isDark,
                       )}`}
@@ -325,7 +325,7 @@ export const LongTranscriptionTool = ({ onBack, showToast, isDark = false }: Lon
 
                   {item.status === 'Enviando' && typeof progress === 'number' && (
                     <div className="mt-3">
-                      <div className={`h-1.5 w-full rounded-none overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}>
+                      <div className={`h-1.5 w-full rounded-none-none overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}>
                         <div className="h-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />
                       </div>
                       <p className={`text-[9px] font-mono ${textMuted} mt-1`}>{progress}% enviado</p>
@@ -354,7 +354,7 @@ export const LongTranscriptionTool = ({ onBack, showToast, isDark = false }: Lon
       {selected && (
         <div className="fixed inset-0 z-50 flex justify-end">
           <div className="absolute inset-0 bg-black/40" onClick={() => setSelected(null)} />
-          <div className={`relative w-full max-w-2xl h-full overflow-y-auto shadow-2xl ${isDark ? 'bg-slate-900' : 'bg-white'}`}>
+          <div className={`relative w-full max-w-2xl h-full overflow-y-auto shadow-none ${isDark ? 'bg-slate-900' : 'bg-white'}`}>
             <div className={`sticky top-0 z-10 flex items-center justify-between gap-4 p-5 border-b ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
               <div className="min-w-0">
                 <p className={`text-[9px] font-mono font-black text-blue-500 uppercase tracking-widest`}>Transcrição bruta</p>
@@ -363,7 +363,7 @@ export const LongTranscriptionTool = ({ onBack, showToast, isDark = false }: Lon
               <div className="flex items-center gap-2 shrink-0">
                 <button
                   onClick={() => copyText(selected.transcriptionRaw || '')}
-                  className="bg-blue-600 text-white h-9 px-3 flex items-center gap-1.5 rounded-none hover:bg-blue-700 transition-all font-mono text-[10px] font-black uppercase tracking-widest"
+                  className="bg-blue-600 text-white h-9 px-3 flex items-center gap-1.5 rounded-none-none hover:bg-blue-700 transition-all font-mono text-[10px] font-black uppercase tracking-widest"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
@@ -372,7 +372,7 @@ export const LongTranscriptionTool = ({ onBack, showToast, isDark = false }: Lon
                 </button>
                 <button
                   onClick={() => setSelected(null)}
-                  className={`h-9 w-9 flex items-center justify-center rounded-none border ${
+                  className={`h-9 w-9 flex items-center justify-center rounded-none-none border ${
                     isDark ? 'border-slate-700 text-slate-400 hover:text-slate-100' : 'border-slate-200 text-slate-400 hover:text-slate-900'
                   }`}
                   aria-label="Fechar"

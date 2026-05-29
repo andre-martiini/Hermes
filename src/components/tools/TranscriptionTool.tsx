@@ -201,7 +201,7 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
   const isDarkTheme = themeMode === 'dark' || (themeMode === 'system' && prefersDark);
   const panelClass = isDarkTheme
     ? 'bg-[#121826] border-slate-700/80 text-slate-100 shadow-[0_20px_60px_rgba(2,6,23,0.45)]'
-    : 'bg-white border-slate-200 text-slate-900 shadow-sm md:shadow-xl';
+    : 'bg-white border-slate-200 text-slate-900 shadow-none md:shadow-xl';
   const softPanelClass = isDarkTheme
     ? 'bg-[#0f1724] border-slate-800 text-slate-100'
     : 'bg-slate-50 border-slate-200 text-slate-900';
@@ -216,7 +216,7 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
   const secondaryTextClass = isDarkTheme ? 'text-slate-300' : 'text-slate-500';
   const tertiaryTextClass = isDarkTheme ? 'text-slate-400' : 'text-slate-400';
   const subtleTextClass = isDarkTheme ? 'text-slate-500' : 'text-slate-300';
-  const borderSoftClass = isDarkTheme ? 'border-slate-800' : 'border-slate-100';
+  const borderSoftClass = isDarkTheme ? 'border-slate-800' : 'border-slate-200';
   const buttonNeutralClass = isDarkTheme
     ? 'border-slate-600 bg-slate-900/70 text-slate-300 hover:bg-slate-800 hover:text-white'
     : 'border-slate-200 text-slate-500 hover:text-rose-500 hover:bg-rose-50';
@@ -231,12 +231,12 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
     <div className={`animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6 md:space-y-8 ${isEmbedded ? 'pb-10' : 'pb-24 md:pb-32'}`}>
       {/* Header */}
       <div className="flex items-start gap-3 md:gap-6 mb-2 md:mb-4">
-        <button onClick={onBack} className="w-11 h-11 md:w-12 md:h-12 bg-white rounded-2xl md:rounded-[1.6rem] flex items-center justify-center text-slate-400 hover:text-slate-900 border border-slate-200 hover:border-slate-900 transition-all shadow-sm shrink-0">
+        <button onClick={onBack} className="w-11 h-11 md:w-12 md:h-12 bg-white rounded-none-none md:rounded-none-none flex items-center justify-center text-slate-400 hover:text-slate-900 border border-slate-200 hover:border-slate-900 transition-all shadow-none shrink-0">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
         </button>
         <div className="flex-1 min-w-0 pt-1">
           <h2 className="text-2xl md:text-3xl font-black text-slate-50 tracking-tighter leading-none">Transcrição de Áudio</h2>
-          <p className="mt-2 text-slate-300 font-medium text-sm md:text-base leading-relaxed max-w-2xl">Transcreva áudios do WhatsApp e outros formatos com IA.</p>
+          <p className="mt-2 text-slate-300 font-mono text-xs uppercase font-bold md:text-base leading-relaxed max-w-2xl">Transcreva áudios do WhatsApp e outros formatos com IA.</p>
         </div>
       </div>
 
@@ -249,7 +249,7 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
                 onDragLeave={() => setDragOver(false)}
                 onDrop={handleDrop}
-                className={`border-2 md:border-4 border-dashed rounded-[2rem] md:rounded-[2.5rem] px-5 py-8 md:p-10 transition-all flex flex-col items-center justify-center text-center gap-4 md:gap-5 min-h-[320px] md:min-h-[300px] relative shadow-sm ${
+                className={`border-2 md:border-4 border-dashed rounded-none-none md:rounded-none-none px-5 py-8 md:p-10 transition-all flex flex-col items-center justify-center text-center gap-4 md:gap-5 min-h-[320px] md:min-h-[300px] relative shadow-none ${
                   dragOver ? uploadDragClass : uploadIdleClass
                 }`}
               >
@@ -267,7 +267,7 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
 
                 {file ? (
                   <>
-                     <div className={`w-16 h-16 md:w-20 md:h-20 rounded-full flex items-center justify-center ${isDarkTheme ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-100 text-emerald-600'}`}>
+                     <div className={`w-16 h-16 md:w-20 md:h-20 rounded-none-none flex items-center justify-center ${isDarkTheme ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-100 text-emerald-600'}`}>
                         <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
                      </div>
                      <div className="min-w-0 w-full">
@@ -280,14 +280,14 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
                      <div className="flex flex-col sm:flex-row w-full gap-3 mt-2">
                        <button
                          onClick={() => { setFile(null); setAudioUrl(null); setTranscription(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
-                         className={`flex-1 px-5 py-3 rounded-xl md:rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border ${buttonNeutralClass}`}
+                         className={`flex-1 px-5 py-3 rounded-none-none md:rounded-none-none text-[10px] font-black uppercase tracking-widest transition-all border ${buttonNeutralClass}`}
                        >
                          Remover
                        </button>
                        <button
                          onClick={handleTranscribe}
                          disabled={isProcessing}
-                         className={`flex-1 px-5 py-3 bg-slate-900 text-white rounded-xl md:rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-600 transition-all ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                         className={`flex-1 px-5 py-3 bg-slate-900 text-white rounded-none-none md:rounded-none-none text-[10px] font-black uppercase tracking-widest shadow-none hover:bg-blue-600 transition-all ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
                        >
                          {isProcessing ? 'Processando...' : 'Transcrever Agora'}
                        </button>
@@ -295,7 +295,7 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
                   </>
                 ) : (
                   <>
-                    <div className={`w-16 h-16 md:w-20 md:h-20 rounded-full flex items-center justify-center ${isDarkTheme ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-400'}`}>
+                    <div className={`w-16 h-16 md:w-20 md:h-20 rounded-none-none flex items-center justify-center ${isDarkTheme ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-400'}`}>
                        <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
                     </div>
                     <div className="space-y-1">
@@ -303,20 +303,20 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
                       <p className={`text-sm md:text-base font-medium ${secondaryTextClass}`}>Ou clique para selecionar (MP3, OGG, WAV, MP4)</p>
                       <p className={`text-xs md:text-sm font-semibold mt-2 ${tertiaryTextClass}`}>Você também pode colar (`Ctrl+V`) o arquivo direto.</p>
                     </div>
-                    <label className={`w-full sm:w-auto px-6 py-3 border rounded-xl md:rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer select-none text-center ${fileButtonClass}`}><input type="file" className="hidden" accept="audio/*,video/mp4,video/mpeg" onChange={(e) => { if (e.target.files && e.target.files.length > 0) handleFileSelection(e.target.files[0]); }} />Selecionar Arquivo</label>
+                    <label className={`w-full sm:w-auto px-6 py-3 border rounded-none-none md:rounded-none-none text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer select-none text-center ${fileButtonClass}`}><input type="file" className="hidden" accept="audio/*,video/mp4,video/mpeg" onChange={(e) => { if (e.target.files && e.target.files.length > 0) handleFileSelection(e.target.files[0]); }} />Selecionar Arquivo</label>
                   </>
                 )}
               </div>
             </div>
 
             {/* Result Area */}
-            <div className={`p-5 md:p-8 rounded-[2rem] md:rounded-[2.5rem] border flex flex-col min-h-[360px] md:h-[600px] ${panelClass}`}>
+            <div className={`p-5 md:p-8 rounded-none-none md:rounded-none-none border flex flex-col min-h-[360px] md:h-[600px] ${panelClass}`}>
                <div className="flex items-center justify-between gap-3 mb-5 md:mb-6">
                  <h3 className={`text-xl font-black ${titleClass}`}>Resultado</h3>
                  {transcription && (
                    <button
                      onClick={() => copyToClipboard()}
-                     className="flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all shrink-0"
+                     className="flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-600 rounded-none-none text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all shrink-0"
                    >
                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                      Copiar
@@ -347,16 +347,16 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
         </div>
 
         {/* History Area */}
-        <div className={`p-5 md:p-8 rounded-[2rem] md:rounded-[2.5rem] border flex flex-col min-h-[280px] md:h-[600px] lg:h-auto ${softPanelClass}`}>
+        <div className={`p-5 md:p-8 rounded-none-none md:rounded-none-none border flex flex-col min-h-[280px] md:h-[600px] lg:h-auto ${softPanelClass}`}>
           <div className="flex items-center justify-between mb-6">
             <h3 className={`text-xl font-black ${titleClass}`}>Histórico</h3>
-            <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full shadow-sm ${isDarkTheme ? 'bg-slate-900 text-slate-300' : 'bg-white text-slate-400'}`}>{history.length}</span>
+            <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-none-none shadow-none ${isDarkTheme ? 'bg-slate-900 text-slate-300' : 'bg-white text-slate-400'}`}>{history.length}</span>
           </div>
 
           <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-4">
             {history.length > 0 ? (
               history.map(entry => (
-                <div key={entry.id} className={`p-4 rounded-xl md:rounded-2xl border transition-all group relative ${historyItemClass}`}>
+                <div key={entry.id} className={`p-4 rounded-none-none md:rounded-none-none border transition-all group relative ${historyItemClass}`}>
                   <div className="flex justify-between items-start mb-2">
                     <div className="flex-1 min-w-0 pr-8">
                       <p className={`text-sm font-black truncate ${primaryTextClass}`}>{entry.fileName}</p>
@@ -374,7 +374,7 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
                         setPendingDeleteHistoryId(null);
                         deleteFromHistory(entry.id);
                       }}
-                      className={`absolute top-4 right-4 rounded-lg p-1 transition-colors ${pendingDeleteHistoryId === entry.id ? 'bg-rose-500 text-white' : isDarkTheme ? 'text-slate-500 hover:text-rose-300' : 'text-slate-300 hover:text-rose-500'}`}
+                      className={`absolute top-4 right-4 rounded-none-none p-1 transition-colors ${pendingDeleteHistoryId === entry.id ? 'bg-rose-500 text-white' : isDarkTheme ? 'text-slate-500 hover:text-rose-300' : 'text-slate-300 hover:text-rose-500'}`}
                     >
                       {pendingDeleteHistoryId === entry.id ? (
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
@@ -387,13 +387,13 @@ export const TranscriptionTool: React.FC<TranscriptionToolProps> = ({ onBack, sh
                   <div className="flex gap-2">
                     <button
                       onClick={() => loadFromHistory(entry)}
-                      className="flex-1 py-2 bg-slate-900 text-white text-[9px] font-black uppercase tracking-widest rounded-lg hover:bg-blue-600 transition-all"
+                      className="flex-1 py-2 bg-slate-900 text-white text-[9px] font-black uppercase tracking-widest rounded-none-none hover:bg-blue-600 transition-all"
                     >
                       Ver Detalhes
                     </button>
                     <button
                       onClick={() => copyToClipboard(entry.refined)}
-                      className={`px-3 py-2 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all ${isDarkTheme ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      className={`px-3 py-2 text-[9px] font-black uppercase tracking-widest rounded-none-none transition-all ${isDarkTheme ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                     >
                       Copiar
                     </button>

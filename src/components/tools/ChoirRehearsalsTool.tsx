@@ -173,15 +173,15 @@ export const ChoirRehearsalsTool: React.FC<{
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8 pb-32">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-6">
-          <button onClick={onBack} className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-400 hover:text-slate-900 border border-slate-200 hover:border-slate-900 transition-all shadow-sm">
+          <button onClick={onBack} className="w-12 h-12 bg-white rounded-none-none flex items-center justify-center text-slate-400 hover:text-slate-900 border border-slate-200 hover:border-slate-900 transition-all shadow-none">
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
           </button>
           <div className="flex-1">
-            <h2 className="text-3xl font-black text-slate-900 tracking-tighter">Ensaios do Coral</h2>
+            <h2 className="text-3xl font-mono font-black uppercase tracking-tight text-slate-900">Ensaios do Coral</h2>
             <p className="text-slate-500 font-medium">Repertório, tags e multimédia</p>
           </div>
         </div>
-        <button onClick={() => { setSelectedMusica(null); setTitulo(''); setTags([]); setObservacoes(''); setIsModalOpen(true); }} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg transition-colors flex items-center gap-2">
+        <button onClick={() => { setSelectedMusica(null); setTitulo(''); setTags([]); setObservacoes(''); setIsModalOpen(true); }} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-none-none font-black text-[10px] uppercase tracking-widest shadow-none transition-colors flex items-center gap-2">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4"/></svg>
             Nova Música
         </button>
@@ -189,17 +189,17 @@ export const ChoirRehearsalsTool: React.FC<{
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* List */}
-        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm h-[600px] flex flex-col">
+        <div className="bg-white p-6 rounded-none-none border border-slate-200 shadow-none h-[600px] flex flex-col">
           <h3 className="text-lg font-black text-slate-900 mb-4 px-2">Repertório</h3>
           <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 pr-2">
              {musicas.map(m => (
-               <div key={m.id} onClick={() => setSelectedMusica(m)} className={`p-4 rounded-2xl border transition-all cursor-pointer ${selectedMusica?.id === m.id ? 'border-blue-500 bg-blue-50 shadow-md' : 'border-slate-100 bg-white hover:border-blue-200 hover:shadow-sm'}`}>
+               <div key={m.id} onClick={() => setSelectedMusica(m)} className={`p-4 rounded-none-none border transition-all cursor-pointer ${selectedMusica?.id === m.id ? 'border-blue-500 bg-blue-50 shadow-none' : 'border-slate-200 bg-white hover:border-blue-200 hover:shadow-none'}`}>
                  <h4 className="font-bold text-slate-900">{m.titulo}</h4>
                  <div className="flex flex-wrap gap-1 mt-2">
                    {m.tags.slice(0,3).map(t => (
-                     <span key={t} className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-md text-[9px] font-bold uppercase tracking-wider">{t}</span>
+                     <span key={t} className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-none-none text-[9px] font-bold uppercase tracking-wider">{t}</span>
                    ))}
-                   {m.tags.length > 3 && <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-md text-[9px] font-bold uppercase tracking-wider">+{m.tags.length - 3}</span>}
+                   {m.tags.length > 3 && <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-none-none text-[9px] font-bold uppercase tracking-wider">+{m.tags.length - 3}</span>}
                  </div>
                </div>
              ))}
@@ -212,13 +212,13 @@ export const ChoirRehearsalsTool: React.FC<{
         {/* Details View */}
         <div className="lg:col-span-2">
            {currentViewItem ? (
-             <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-xl space-y-8 h-[600px] flex flex-col">
+             <div className="bg-white p-8 rounded-none-none border border-slate-200 shadow-xl space-y-8 h-[600px] flex flex-col">
                <div className="flex items-start justify-between">
                  <div>
                    <h3 className="text-3xl font-black text-slate-900">{currentViewItem.titulo}</h3>
                    <div className="flex flex-wrap gap-2 mt-3">
                      {currentViewItem.tags.map(t => (
-                       <span key={t} className="px-3 py-1 bg-blue-50 text-blue-600 rounded-lg text-[10px] font-black uppercase tracking-widest">{t}</span>
+                       <span key={t} className="px-3 py-1 bg-blue-50 text-blue-600 rounded-none-none text-[10px] font-black uppercase tracking-widest">{t}</span>
                      ))}
                    </div>
                  </div>
@@ -229,10 +229,10 @@ export const ChoirRehearsalsTool: React.FC<{
                        setTags(currentViewItem.tags);
                        setObservacoes(currentViewItem.observacoes || '');
                        setIsModalOpen(true);
-                   }} className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition-all">
+                   }} className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-none-none transition-all">
                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                    </button>
-                   <button onClick={() => handleDelete(currentViewItem.id)} className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl transition-all">
+                   <button onClick={() => handleDelete(currentViewItem.id)} className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-none-none transition-all">
                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                    </button>
                  </div>
@@ -257,8 +257,8 @@ export const ChoirRehearsalsTool: React.FC<{
                      
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                          {currentViewItem.arquivos?.map(arquivo => (
-                             <div key={arquivo.id} className="p-4 rounded-2xl bg-slate-50 border border-slate-100 flex gap-3 block hover:border-blue-300 transition-colors">
-                                 <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center shrink-0">
+                             <div key={arquivo.id} className="p-4 rounded-none-none bg-slate-50 border border-slate-200 flex gap-3 block hover:border-blue-300 transition-colors">
+                                 <div className="w-10 h-10 bg-white rounded-none-none shadow-none flex items-center justify-center shrink-0">
                                      {arquivo.tipo === 'audio' ? <svg className="w-5 h-5 text-purple-500" fill="currentColor" viewBox="0 0 24 24"><path d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg> : <svg className="w-5 h-5 text-emerald-500" fill="currentColor" viewBox="0 0 24 24"><path d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>}
                                  </div>
                                  <div className="flex-1 min-w-0">
@@ -275,7 +275,7 @@ export const ChoirRehearsalsTool: React.FC<{
                              </div>
                          ))}
                          {(!currentViewItem.arquivos || currentViewItem.arquivos.length === 0) && (
-                             <div className="col-span-full p-6 rounded-2xl border-2 border-dashed border-slate-200 text-center text-slate-400">
+                             <div className="col-span-full p-6 rounded-none-none border-2 border-dashed border-slate-200 text-center text-slate-400">
                                  Nenhum arquivo anexado.
                              </div>
                          )}
@@ -284,7 +284,7 @@ export const ChoirRehearsalsTool: React.FC<{
                </div>
              </div>
            ) : (
-             <div className="bg-slate-50/50 rounded-[2.5rem] border border-slate-200 flex flex-col items-center justify-center text-center p-12 h-[600px] opacity-60">
+             <div className="bg-slate-50/50 rounded-none-none border border-slate-200 flex flex-col items-center justify-center text-center p-12 h-[600px] opacity-60">
                 <svg className="w-20 h-20 text-slate-300 mb-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
                 <h3 className="text-2xl font-black text-slate-900 mb-2">Selecione uma Música</h3>
                 <p className="text-slate-500 font-medium">Escolha uma música na lista ao lado para ver e editar detalhes, ou adicione uma nova.</p>
@@ -295,20 +295,20 @@ export const ChoirRehearsalsTool: React.FC<{
 
       {isModalOpen && (
         <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/60 animate-in fade-in">
-          <div className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl p-8 animate-in zoom-in-95">
+          <div className="bg-white w-full max-w-2xl rounded-none-none shadow-none p-8 animate-in zoom-in-95">
             <h3 className="text-2xl font-black text-slate-900 mb-6">{selectedMusica ? 'Editar Música' : 'Nova Música'}</h3>
             
             <div className="space-y-6">
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Título da Música *</label>
-                <input type="text" value={titulo} onChange={e => setTitulo(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 mt-1" placeholder="Ex: Noite de Paz" />
+                <input type="text" value={titulo} onChange={e => setTitulo(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-none-none px-4 py-3 text-sm font-bold text-slate-900 outline-none focus:ring-1 focus:ring-blue-500 mt-1" placeholder="Ex: Noite de Paz" />
               </div>
               
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Tags (Aperte Enter)</label>
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-2 flex flex-wrap gap-2 focus-within:ring-2 focus-within:ring-blue-500 mt-1">
+                <div className="bg-slate-50 border border-slate-200 rounded-none-none p-2 flex flex-wrap gap-2 focus-within:ring-2 focus-within:ring-blue-500 mt-1">
                    {tags.map(t => (
-                       <span key={t} className="flex items-center gap-1 bg-white border border-slate-200 px-3 py-1 rounded-lg text-xs font-bold text-slate-700">
+                       <span key={t} className="flex items-center gap-1 bg-white border border-slate-200 px-3 py-1 rounded-none-none text-xs font-bold text-slate-700">
                            {t}
                            <button onClick={(e) => { e.preventDefault(); setTags(tags.filter(xt => xt !== t)); }} className="text-slate-400 hover:text-rose-500 text-lg leading-none">&times;</button>
                        </span>
@@ -325,13 +325,13 @@ export const ChoirRehearsalsTool: React.FC<{
 
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Observações / Letra</label>
-                <textarea rows={5} value={observacoes} onChange={e => setObservacoes(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 custom-scrollbar mt-1" placeholder="Letra da música, notas sobre andamento e dinâmica..." />
+                <textarea rows={5} value={observacoes} onChange={e => setObservacoes(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-none-none px-4 py-3 text-sm font-medium text-slate-900 outline-none focus:ring-1 focus:ring-blue-500 custom-scrollbar mt-1" placeholder="Letra da música, notas sobre andamento e dinâmica..." />
               </div>
             </div>
 
             <div className="flex gap-4 mt-8">
-                <button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 text-[10px] font-black uppercase text-slate-400 hover:bg-slate-50 rounded-2xl transition-colors">Cancelar</button>
-                <button onClick={handleSave} className="flex-1 bg-blue-600 text-white py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-blue-700 transition-colors">Salvar Música</button>
+                <button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 text-[10px] font-black uppercase text-slate-400 hover:bg-slate-50 rounded-none-none transition-colors">Cancelar</button>
+                <button onClick={handleSave} className="flex-1 bg-blue-600 text-white py-4 rounded-none-none text-[10px] font-black uppercase tracking-widest shadow-none hover:bg-blue-700 transition-colors">Salvar Música</button>
             </div>
           </div>
         </div>
@@ -340,10 +340,10 @@ export const ChoirRehearsalsTool: React.FC<{
       {/* Attachment Modal */}
       {isAttachmentModalOpen && currentViewItem && (
         <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/60 animate-in fade-in backdrop-blur-sm">
-          <div className="bg-white w-full max-w-3xl rounded-[2.5rem] shadow-2xl p-8 animate-in zoom-in-95 flex flex-col max-h-[85vh]">
+          <div className="bg-white w-full max-w-3xl rounded-none-none shadow-none p-8 animate-in zoom-in-95 flex flex-col max-h-[85vh]">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-2xl font-black text-slate-900 tracking-tight">Anexar a "{currentViewItem.titulo}"</h3>
-              <button onClick={() => setIsAttachmentModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-400 hover:text-slate-600 transition-colors">
+              <button onClick={() => setIsAttachmentModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-none-none text-slate-400 hover:text-slate-600 transition-colors">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
@@ -356,11 +356,11 @@ export const ChoirRehearsalsTool: React.FC<{
                   value={searchTermKB}
                   onChange={(e) => setSearchTermKB(e.target.value)}
                   placeholder="Pesquisar na base de conhecimento..."
-                  className="w-full bg-slate-50 border border-slate-200 text-sm font-bold text-slate-900 rounded-xl pl-10 pr-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full bg-slate-50 border border-slate-200 text-sm font-bold text-slate-900 rounded-none-none pl-10 pr-4 py-3 outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
               
-              <label className={`shrink-0 bg-slate-900 text-white hover:bg-slate-800 px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2 ${isUploading ? 'opacity-50 pointer-events-none' : ''}`}>
+              <label className={`shrink-0 bg-slate-900 text-white hover:bg-slate-800 px-6 py-3 rounded-none-none text-[10px] font-black uppercase tracking-widest shadow-none transition-all cursor-pointer flex items-center justify-center gap-2 ${isUploading ? 'opacity-50 pointer-events-none' : ''}`}>
                 <input 
                   type="file" 
                   className="hidden" 
@@ -393,15 +393,15 @@ export const ChoirRehearsalsTool: React.FC<{
               </label>
             </div>
 
-            <div className="flex-1 overflow-y-auto custom-scrollbar border border-slate-100 rounded-2xl bg-slate-50 p-2">
+            <div className="flex-1 overflow-y-auto custom-scrollbar border border-slate-200 rounded-none-none bg-slate-50 p-2">
               {knowledgeItems
                 .filter(kb => !currentViewItem.arquivos?.some(a => a.id === kb.id))
                 .filter(kb => !kb.is_folder)
                 .filter(kb => searchTermKB ? kb.titulo.toLowerCase().includes(searchTermKB.toLowerCase()) : true)
                 .map(kb => (
-                <div key={kb.id} className="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-xl mb-2 hover:border-blue-200 transition-colors">
+                <div key={kb.id} className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-none-none mb-2 hover:border-blue-200 transition-colors">
                   <div className="flex items-center gap-3 overflow-hidden">
-                    <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
+                    <div className="w-8 h-8 rounded-none-none bg-slate-100 flex items-center justify-center shrink-0">
                       <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
                     </div>
                     <div className="truncate">
@@ -409,7 +409,7 @@ export const ChoirRehearsalsTool: React.FC<{
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{kb.tipo_arquivo || 'desconhecido'}</p>
                     </div>
                   </div>
-                  <button onClick={() => handleAttachItem(kb)} className="shrink-0 p-2 text-blue-600 hover:bg-blue-50 rounded-lg text-xs font-black uppercase tracking-widest transition-colors ml-4">
+                  <button onClick={() => handleAttachItem(kb)} className="shrink-0 p-2 text-blue-600 hover:bg-blue-50 rounded-none-none text-xs font-black uppercase tracking-widest transition-colors ml-4">
                     Selecionar
                   </button>
                 </div>
@@ -425,8 +425,8 @@ export const ChoirRehearsalsTool: React.FC<{
       )}
       {sharedVideoWizard === 'options' && (
         <div className="fixed inset-0 z-[400] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in">
-           <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl p-10 text-center animate-in zoom-in-95">
-               <div className="w-24 h-24 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center mx-auto mb-6">
+           <div className="bg-white w-full max-w-lg rounded-none-none shadow-none p-10 text-center animate-in zoom-in-95">
+               <div className="w-24 h-24 bg-purple-100 text-purple-600 rounded-none-none flex items-center justify-center mx-auto mb-6">
                  <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
                </div>
                <h3 className="text-3xl font-black text-slate-900 mb-2">Vídeo Recebido</h3>
@@ -438,13 +438,13 @@ export const ChoirRehearsalsTool: React.FC<{
                       setSelectedMusica(null); 
                       setTitulo(''); setTags([]); setObservacoes(''); 
                       setIsModalOpen(true);
-                  }} className="w-full bg-blue-600 hover:bg-blue-700 text-white px-6 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg transition-colors">
+                  }} className="w-full bg-blue-600 hover:bg-blue-700 text-white px-6 py-4 rounded-none-none font-black text-xs uppercase tracking-widest shadow-none transition-colors">
                       Criar Nova Música
                   </button>
-                  <button onClick={() => setSharedVideoWizard('pick_music')} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 px-6 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-colors">
+                  <button onClick={() => setSharedVideoWizard('pick_music')} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 px-6 py-4 rounded-none-none font-black text-xs uppercase tracking-widest transition-colors">
                       Vincular Música Existente
                   </button>
-                  <button onClick={() => { setSharedVideoWizard(null); setIncomingSharedFile(null); }} className="w-full bg-transparent text-slate-400 hover:text-rose-500 px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-colors mt-4">
+                  <button onClick={() => { setSharedVideoWizard(null); setIncomingSharedFile(null); }} className="w-full bg-transparent text-slate-400 hover:text-rose-500 px-6 py-4 rounded-none-none font-black text-[10px] uppercase tracking-widest transition-colors mt-4">
                       Cancelar Submissão
                   </button>
                </div>
@@ -454,18 +454,18 @@ export const ChoirRehearsalsTool: React.FC<{
 
       {sharedVideoWizard === 'pick_music' && (
         <div className="fixed inset-0 z-[400] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in">
-           <div className="bg-white w-full max-w-xl rounded-[2.5rem] shadow-2xl p-8 animate-in zoom-in-95 flex flex-col max-h-[80vh]">
+           <div className="bg-white w-full max-w-xl rounded-none-none shadow-none p-8 animate-in zoom-in-95 flex flex-col max-h-[80vh]">
                <h3 className="text-2xl font-black text-slate-900 mb-6">Selecione a Música</h3>
                <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-2">
                  {musicas.map(m => (
-                    <button key={m.id} onClick={() => handleProcessSharedVideo(m.id)} className="w-full text-left p-4 rounded-2xl border border-slate-100 hover:border-blue-300 hover:bg-blue-50 transition-colors flex items-center justify-between">
+                    <button key={m.id} onClick={() => handleProcessSharedVideo(m.id)} className="w-full text-left p-4 rounded-none-none border border-slate-200 hover:border-blue-300 hover:bg-blue-50 transition-colors flex items-center justify-between">
                        <span className="font-bold text-slate-900">{m.titulo}</span>
                        <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7"/></svg>
                     </button>
                  ))}
                  {musicas.length === 0 && <p className="text-center text-slate-400 font-bold py-10">Nenhuma música cadastrada.</p>}
                </div>
-               <button onClick={() => setSharedVideoWizard('options')} className="mt-6 w-full py-4 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-colors">Voltar</button>
+               <button onClick={() => setSharedVideoWizard('options')} className="mt-6 w-full py-4 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-none-none font-black text-[10px] uppercase tracking-widest transition-colors">Voltar</button>
            </div>
         </div>
       )}
