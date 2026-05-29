@@ -789,27 +789,27 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
       <div className="flex items-center gap-6 mb-8 flex-shrink-0">
         <button
           onClick={onBack}
-          className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-400 hover:text-slate-900 border border-slate-200 hover:border-slate-900 transition-all shadow-sm"
+          className="w-12 h-12 bg-white rounded-none-none flex items-center justify-center text-slate-400 hover:text-slate-900 border border-slate-200 hover:border-slate-900 transition-all shadow-none"
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" />
           </svg>
         </button>
         <div className="flex-1">
-          <h2 className="text-3xl font-black text-slate-900 tracking-tighter">Transcrição de Reuniões</h2>
+          <h2 className="text-3xl font-mono font-black uppercase tracking-tight text-slate-900">Transcrição de Reuniões</h2>
           <p className="text-slate-500 font-medium">Capture e interaja com o áudio da sua reunião em tempo real via IA.</p>
         </div>
       </div>
 
       <div className="flex-1 min-h-[600px]">
-        <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-xl flex flex-col overflow-hidden h-full">
-          <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0 gap-3">
+        <div className="bg-white rounded-none-none border border-slate-200 shadow-xl flex flex-col overflow-hidden h-full">
+          <div className="p-6 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0 gap-3">
             <h3 className="text-xl font-black text-slate-900 flex items-center gap-2">
               Transcrição
               {isRecording && (
                 <span className="flex h-3 w-3 relative ml-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-none-none bg-rose-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-none-none h-3 w-3 bg-rose-500"></span>
                 </span>
               )}
             </h3>
@@ -817,27 +817,27 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
               <button
                 onClick={handleCopyMeetingContent}
                 disabled={transcripts.length === 0 && chatMessages.length === 0}
-                className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-40"
+                className="px-4 py-2 rounded-none-none text-[10px] font-black uppercase tracking-widest transition-all shadow-none bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-40"
               >
                 Copiar Conteúdo
               </button>
               <button
                 onClick={handleFinalizeAndSaveToDrive}
                 disabled={isSavingToDrive || (transcripts.length === 0 && chatMessages.length === 0)}
-                className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm bg-emerald-100 text-emerald-700 hover:bg-emerald-200 disabled:opacity-40"
+                className="px-4 py-2 rounded-none-none text-[10px] font-black uppercase tracking-widest transition-all shadow-none bg-emerald-100 text-emerald-700 hover:bg-emerald-200 disabled:opacity-40"
               >
                 {isSavingToDrive ? 'Salvando...' : 'Finalizar e Salvar no Drive'}
               </button>
               <button
                 onClick={() => setIsChatOpen(prev => !prev)}
-                className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                className="px-4 py-2 rounded-none-none text-[10px] font-black uppercase tracking-widest transition-all shadow-none bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
               >
                 {isChatOpen ? 'Minimizar Chat' : 'Abrir Chat'}
               </button>
               <button
                 onClick={() => (isRecording ? stopRecording(true) : setShowShareGuide(true))}
                 disabled={isSavingToDrive}
-                className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-sm disabled:opacity-50 ${
+                className={`px-6 py-2 rounded-none-none text-xs font-black uppercase tracking-widest transition-all shadow-none disabled:opacity-50 ${
                   isRecording ? 'bg-rose-100 text-rose-600 hover:bg-rose-200' : 'bg-slate-900 text-white hover:bg-blue-600'
                 }`}
               >
@@ -847,7 +847,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
           </div>
 
           {meetingHistory.length > 0 && (
-            <div className="px-6 py-4 border-b border-slate-100 bg-white">
+            <div className="px-6 py-4 border-b border-slate-200 bg-white">
               <button
                 onClick={() => setIsHistoryOpen(prev => !prev)}
                 className="w-full flex items-center justify-between text-left"
@@ -866,12 +866,12 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
                     const started = new Date(entry.startedAt);
                     const ended = new Date(entry.endedAt);
                     return (
-                      <div key={entry.id} className="border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-3">
+                      <div key={entry.id} className="border border-slate-200 rounded-none-none p-3 flex items-center justify-between gap-3">
                         <div className="min-w-0">
                           <p className="text-xs font-black text-slate-800 truncate flex items-center gap-1">
                             {entry.titulo || `${started.toLocaleDateString('pt-BR')} ${started.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`}
                             {isTitleGenerating && entry.id === meetingStartedAt?.toISOString() && (
-                              <span className="w-3 h-3 border border-slate-300 border-t-blue-500 rounded-full animate-spin inline-block ml-1" />
+                              <span className="w-3 h-3 border border-slate-300 border-t-blue-500 rounded-none-none animate-spin inline-block ml-1" />
                             )}
                           </p>
                           <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
@@ -881,13 +881,13 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
                         <div className="flex items-center gap-2 shrink-0">
                           <button
                             onClick={() => handleCopyHistoryEntry(entry)}
-                            className="px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest bg-slate-100 text-slate-700 hover:bg-slate-200"
+                            className="px-3 py-2 rounded-none-none text-[10px] font-black uppercase tracking-widest bg-slate-100 text-slate-700 hover:bg-slate-200"
                           >
                             Copiar
                           </button>
                           <button
                             onClick={() => handleLoadHistoryEntry(entry)}
-                            className="px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest bg-blue-50 text-blue-700 hover:bg-blue-100"
+                            className="px-3 py-2 rounded-none-none text-[10px] font-black uppercase tracking-widest bg-blue-50 text-blue-700 hover:bg-blue-100"
                           >
                             Carregar
                           </button>
@@ -920,8 +920,8 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
                     {t.speaker} • {t.timestamp.toLocaleTimeString()}
                   </span>
                   <div
-                    className={`px-4 py-3 rounded-2xl max-w-[85%] ${
-                      t.speaker === 'Você' ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-slate-100 text-slate-800 rounded-tl-sm'
+                    className={`px-4 py-3 rounded-none-none max-w-[85%] ${
+                      t.speaker === 'Você' ? 'bg-blue-600 text-white rounded-none-tr-sm' : 'bg-slate-100 text-slate-800 rounded-none-tl-sm'
                     }`}
                   >
                     <p className="text-sm font-medium">{t.text}</p>
@@ -935,8 +935,8 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
       </div>
 
       {isChatOpen ? (
-        <div className="absolute bottom-4 right-4 md:bottom-6 md:right-6 z-30 w-[calc(100%-2rem)] sm:w-[420px] h-[68%] min-h-[340px] max-h-[560px] bg-white rounded-3xl border border-slate-200 shadow-2xl flex flex-col overflow-hidden">
-          <div className="p-4 border-b border-slate-100 bg-slate-50 shrink-0 flex items-center justify-between">
+        <div className="absolute bottom-4 right-4 md:bottom-6 md:right-6 z-30 w-[calc(100%-2rem)] sm:w-[420px] h-[68%] min-h-[340px] max-h-[560px] bg-white rounded-none-3xl border border-slate-200 shadow-none flex flex-col overflow-hidden">
+          <div className="p-4 border-b border-slate-200 bg-slate-50 shrink-0 flex items-center justify-between">
             <div>
               <h3 className="text-base font-black text-slate-900">Chatbot Assistente</h3>
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
@@ -945,7 +945,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
             </div>
             <button
               onClick={() => setIsChatOpen(false)}
-              className="w-9 h-9 rounded-xl border border-slate-200 text-slate-500 hover:text-slate-900 hover:border-slate-300 transition-all"
+              className="w-9 h-9 rounded-none-none border border-slate-200 text-slate-500 hover:text-slate-900 hover:border-slate-300 transition-all"
               aria-label="Minimizar chat"
               title="Minimizar chat"
             >
@@ -975,10 +975,10 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
                     {msg.role === 'user' ? 'Você' : 'Assistente'} • {msg.timestamp.toLocaleTimeString()}
                   </span>
                   <div
-                    className={`px-4 py-3 rounded-2xl max-w-[90%] ${
+                    className={`px-4 py-3 rounded-none-none max-w-[90%] ${
                       msg.role === 'user'
-                        ? 'bg-emerald-600 text-white rounded-tr-sm'
-                        : 'bg-slate-100 text-slate-800 rounded-tl-sm border border-slate-200'
+                        ? 'bg-emerald-600 text-white rounded-none-tr-sm'
+                        : 'bg-slate-100 text-slate-800 rounded-none-tl-sm border border-slate-200'
                     }`}
                   >
                     <p className="text-sm font-medium whitespace-pre-wrap">{msg.content}</p>
@@ -988,17 +988,17 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
             )}
             {isChatting && (
               <div className="flex flex-col items-start mt-4">
-                <div className="px-4 py-3 rounded-2xl bg-slate-100 text-slate-500 rounded-tl-sm border border-slate-200 flex items-center gap-2 w-16 justify-center">
-                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span>
-                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></span>
-                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></span>
+                <div className="px-4 py-3 rounded-none-none bg-slate-100 text-slate-500 rounded-none-tl-sm border border-slate-200 flex items-center gap-2 w-16 justify-center">
+                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-none-none animate-bounce"></span>
+                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-none-none animate-bounce" style={{ animationDelay: '0.2s' }}></span>
+                  <span className="w-1.5 h-1.5 bg-slate-400 rounded-none-none animate-bounce" style={{ animationDelay: '0.4s' }}></span>
                 </div>
               </div>
             )}
             <div ref={chatEndRef} />
           </div>
 
-          <div className="p-4 bg-white border-t border-slate-100 shrink-0">
+          <div className="p-4 bg-white border-t border-slate-200 shrink-0">
             <div className="flex gap-2">
               <input
                 type="text"
@@ -1007,12 +1007,12 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
                 onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
                 placeholder="Pergunte sobre a reunião..."
                 disabled={isChatting}
-                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-50"
+                className="flex-1 bg-slate-50 border border-slate-200 rounded-none-none px-4 py-3 text-sm font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all disabled:opacity-50"
               />
               <button
                 onClick={handleSendMessage}
                 disabled={isChatting || !chatInput.trim()}
-                className="bg-slate-900 text-white p-3 rounded-xl hover:bg-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                className="bg-slate-900 text-white p-3 rounded-none-none hover:bg-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 12h14M12 5l7 7-7 7" />
@@ -1024,7 +1024,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
       ) : (
         <button
           onClick={() => setIsChatOpen(true)}
-          className="absolute bottom-4 right-4 md:bottom-6 md:right-6 z-30 bg-slate-900 text-white rounded-2xl px-5 py-3 shadow-xl hover:bg-blue-600 transition-all text-xs font-black uppercase tracking-widest"
+          className="absolute bottom-4 right-4 md:bottom-6 md:right-6 z-30 bg-slate-900 text-white rounded-none-none px-5 py-3 shadow-xl hover:bg-blue-600 transition-all text-xs font-black uppercase tracking-widest"
         >
           Chat da Reunião
         </button>
@@ -1032,7 +1032,7 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
 
       {showShareGuide && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full mx-4 p-8 flex flex-col gap-6">
+          <div className="bg-white rounded-none-3xl shadow-none max-w-md w-full mx-4 p-8 flex flex-col gap-6">
             <div>
               <h3 className="text-2xl font-black text-slate-900 tracking-tight mb-1">Como compartilhar o áudio</h3>
               <p className="text-slate-500 text-sm font-medium">Siga esses passos no diálogo que vai abrir para capturar o áudio da sua reunião.</p>
@@ -1040,21 +1040,21 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
 
             <ol className="flex flex-col gap-4">
               <li className="flex items-start gap-3">
-                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-slate-900 text-white text-xs font-black flex items-center justify-center mt-0.5">1</span>
+                <span className="flex-shrink-0 w-7 h-7 rounded-none-none bg-slate-900 text-white text-xs font-black flex items-center justify-center mt-0.5">1</span>
                 <div>
                   <p className="font-bold text-slate-900 text-sm">Selecione "Tela inteira"</p>
                   <p className="text-slate-500 text-xs mt-0.5">Não escolha a janela do Teams — escolha a aba <strong>Tela inteira</strong> para que o áudio do sistema fique disponível.</p>
                 </div>
               </li>
               <li className="flex items-start gap-3">
-                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-slate-900 text-white text-xs font-black flex items-center justify-center mt-0.5">2</span>
+                <span className="flex-shrink-0 w-7 h-7 rounded-none-none bg-slate-900 text-white text-xs font-black flex items-center justify-center mt-0.5">2</span>
                 <div>
                   <p className="font-bold text-slate-900 text-sm">Ative "Compartilhar áudio do sistema"</p>
                   <p className="text-slate-500 text-xs mt-0.5">Marque a opção na parte inferior do diálogo antes de clicar em Compartilhar.</p>
                 </div>
               </li>
               <li className="flex items-start gap-3">
-                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-slate-900 text-white text-xs font-black flex items-center justify-center mt-0.5">3</span>
+                <span className="flex-shrink-0 w-7 h-7 rounded-none-none bg-slate-900 text-white text-xs font-black flex items-center justify-center mt-0.5">3</span>
                 <div>
                   <p className="font-bold text-slate-900 text-sm">Clique em "Compartilhar"</p>
                   <p className="text-slate-500 text-xs mt-0.5">A gravação começa automaticamente após o compartilhamento.</p>
@@ -1062,20 +1062,20 @@ export const MeetingTranscriptionTool: React.FC<MeetingTranscriptionToolProps> =
               </li>
             </ol>
 
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-xs text-amber-800 font-medium">
+            <div className="bg-amber-50 border border-amber-200 rounded-none-none px-4 py-3 text-xs text-amber-800 font-medium">
               <strong>Dica para Teams:</strong> O Teams desktop bloqueia o áudio quando apenas a janela é compartilhada. Compartilhe a tela inteira para contornar essa restrição.
             </div>
 
             <div className="flex gap-3">
               <button
                 onClick={() => setShowShareGuide(false)}
-                className="flex-1 px-4 py-3 rounded-2xl text-sm font-black uppercase tracking-widest bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all"
+                className="flex-1 px-4 py-3 rounded-none-none text-sm font-black uppercase tracking-widest bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all"
               >
                 Cancelar
               </button>
               <button
                 onClick={() => { setShowShareGuide(false); startRecording(); }}
-                className="flex-1 px-4 py-3 rounded-2xl text-sm font-black uppercase tracking-widest bg-slate-900 text-white hover:bg-blue-600 transition-all"
+                className="flex-1 px-4 py-3 rounded-none-none text-sm font-black uppercase tracking-widest bg-slate-900 text-white hover:bg-blue-600 transition-all"
               >
                 Entendido, iniciar
               </button>

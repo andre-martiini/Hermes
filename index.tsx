@@ -2860,7 +2860,7 @@ const App: React.FC = () => {
         if (task) {
           setSelectedTask(task);
           if (task.area_tematica === 'CLC') setViewMode('licitacoes');
-          else if (task.area_tematica === 'ASSISTÃŠNCIA') setViewMode('assistencia');
+          else if (task.area_tematica === 'ASSISTÃŠNCIA' || task.area_tematica === 'ASSISTÊNCIA') setViewMode('assistencia');
           else setViewMode('gallery');
           setActiveModule('acoes');
         } else {
@@ -3446,7 +3446,7 @@ const App: React.FC = () => {
         google_id: "", // Sinaliza que precisa de PUSH
         data_atualizacao: new Date().toISOString(),
         projeto: 'Google Tasks',
-        contabilizar_meta: inputData.area_tematica === 'CLC' || inputData.area_tematica === 'ASSISTÃŠNCIA',
+        contabilizar_meta: inputData.area_tematica === 'CLC' || (inputData.area_tematica === 'ASSISTÃŠNCIA' || inputData.area_tematica === 'ASSISTÊNCIA'),
         acompanhamento: [],
         entregas_relacionadas: []
       }, null);
@@ -4158,7 +4158,7 @@ const App: React.FC = () => {
     standBy: tarefas.filter(t => normalizeStatus(t.status) === 'stand-by').length,
     concluidas: tarefas.filter(t => normalizeStatus(t.status) === 'concluido').length,
     clc: tarefas.filter(t => t.area_tematica === 'CLC' && normalizeStatus(t.status) !== 'concluido').length,
-    assistencia: tarefas.filter(t => t.area_tematica === 'ASSISTÃŠNCIA' && normalizeStatus(t.status) !== 'concluido').length,
+    assistencia: tarefas.filter(t => (t.area_tematica === 'ASSISTÃŠNCIA' || t.area_tematica === 'ASSISTÊNCIA') && normalizeStatus(t.status) !== 'concluido').length,
     geral: tarefas.filter(t => t.area_tematica === 'GERAL' && normalizeStatus(t.status) !== 'concluido').length,
     semTag: tarefas.filter(t => (t.area_tematica === 'NÃO CLASSIFICADA' || !t.area_tematica) && normalizeStatus(t.status) !== 'concluido' && t.status !== 'excluído' as any).length,
   }), [tarefas]);
@@ -4379,7 +4379,7 @@ const App: React.FC = () => {
       const cat = norm(t.area_tematica);
       // Identificadores das unidades PGD/PGC - Pelo PROJETO ou CATEGORIA
       const isCLC = proj.includes('CLC') || cat === 'CLC';
-      const isASSIST = proj.includes('ASSIST') || proj.includes('ESTUDANTIL') || cat.includes('ASSISTENCIA');
+      const isASSIST = proj.includes('ASSIST') || proj.includes('ESTUDANTIL') || cat.includes('ASSIST');
       const isPgcUnit = isCLC || isASSIST;
       // Verifica se está vinculada a qualquer entrega institucional
       const linkedIds = Array.isArray(t.entregas_relacionadas) ? t.entregas_relacionadas.filter(id => !!id) : [];
@@ -4413,9 +4413,9 @@ const App: React.FC = () => {
     const currentDeliveryIds = pgcEntregas.map(e => e.id);
     const norm = (val: any) => (val || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
     return pgcTasks.filter(t => {
-      // Regra 1: Deve ser da categoria CLC ou ASSISTÃŠNCIA
-      const isCLC = t.area_tematica === 'CLC' || (t.projeto && norm(t.projeto).includes('CLC'));
-      const isAssist = t.area_tematica === 'ASSISTÃŠNCIA' || (t.projeto && (norm(t.projeto).includes('ASSIST') || norm(t.projeto).includes('ESTUDANTIL')));
+      // Regra 1: Deve ser da categoria CLC ou ASSISTÊNCIA
+      const isCLC = norm(t.area_tematica) === 'CLC' || (t.projeto && norm(t.projeto).includes('CLC'));
+      const isAssist = norm(t.area_tematica).includes('ASSIST') || (t.projeto && (norm(t.projeto).includes('ASSIST') || norm(t.projeto).includes('ESTUDANTIL')));
       if (!isCLC && !isAssist) return false;
       // Regra de Filtro por Data (Visualização Diária)
       // Se estiver na visão de dia, mostra APENAS o que está agendado para aquele dia específico

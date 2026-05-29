@@ -33,7 +33,6 @@ interface DiarioBordoUIProps {
   isUploading: boolean;
   notifications?: any[];
   handleProcessAudio?: (audioBlob: Blob) => void;
-  onFocusFile?: (file: { url: string; nome: string; tipo: 'link' | 'file' | 'image'; driveFileId?: string }) => void;
 }
 
 export const DiarioBordoUI = ({
@@ -41,7 +40,7 @@ export const DiarioBordoUI = ({
   isRecording, startRecording, stopRecording, isProcessingTranscription, showAttachMenu, setShowAttachMenu,
   fileInputRef, handleFileUploadInput, handleDroppedFiles, setModalConfig, applyFormatting, isDark,
   diaryEndRef, handleDiaryScroll, handleEditDiaryEntry, handleDeleteDiaryEntry, isUploading,
-  notifications = [], handleProcessAudio, onFocusFile
+  notifications = [], handleProcessAudio
 }: DiarioBordoUIProps) => {
   const [showEmojiPicker, setShowEmojiPicker] = React.useState(false);
   const [showFormattingMenu, setShowFormattingMenu] = React.useState(false);
@@ -234,13 +233,6 @@ export const DiarioBordoUI = ({
       const nome = richEntry.name || richEntry.value;
       return (
         <a href={url} target="_blank" rel="noreferrer"
-          onClick={(e) => {
-            if (onFocusFile) {
-              e.preventDefault();
-              const dMatch = url.match(/\/d\/([a-zA-Z0-9_-]{10,})/);
-              onFocusFile({ url, nome, tipo: 'link', driveFileId: dMatch ? dMatch[1] : undefined });
-            }
-          }}
           className={`group flex items-center gap-2 p-2 rounded-none border transition-all ${isDark ? 'bg-white/5 border-border-grid hover:bg-white/10' : 'bg-blue-50/50 border-border-grid hover:bg-blue-50'}`}>
           <div className={`w-8 h-8 rounded-none flex items-center justify-center shrink-0 ${isDark ? 'bg-white/10 text-white' : 'bg-blue-200 text-blue-600'}`}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
@@ -294,13 +286,6 @@ export const DiarioBordoUI = ({
 
       return (
         <a href={url} target="_blank" rel="noreferrer"
-          onClick={(e) => {
-            if (onFocusFile) {
-              e.preventDefault();
-              const dMatch = url.match(/\/d\/([a-zA-Z0-9_-]{10,})/) || url.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
-              onFocusFile({ url, nome, tipo: isImage ? 'image' : 'file', driveFileId: dMatch ? dMatch[1] : undefined });
-            }
-          }}
           className={`group flex flex-col p-2 rounded-none border transition-all ${isDark ? 'bg-white/5 border-border-grid hover:bg-white/10' : 'bg-amber-50/50 border-border-grid hover:bg-amber-50'} overflow-hidden max-w-sm`}>
           {isImage && (
             <div className="w-full h-32 md:h-48 mb-2 bg-slate-900 rounded-none overflow-hidden flex items-center justify-center">

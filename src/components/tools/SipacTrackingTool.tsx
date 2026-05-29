@@ -252,7 +252,7 @@ export const SipacTrackingTool: React.FC<SipacTrackingToolProps> = ({ onBack, is
       {/* Header */}
       <div className={`flex items-center justify-between px-6 py-4 border-b shrink-0 ${isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}`}>
         <div className="flex items-center gap-3">
-          <button onClick={onBack} className={`p-2 rounded-lg transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-slate-100' : 'hover:bg-slate-100 text-slate-500 hover:text-slate-950'}`}>
+          <button onClick={onBack} className={`p-2 rounded-none-none transition-colors ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-slate-100' : 'hover:bg-slate-100 text-slate-500 hover:text-slate-950'}`}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
@@ -279,7 +279,7 @@ export const SipacTrackingTool: React.FC<SipacTrackingToolProps> = ({ onBack, is
               <button
                 key={idx}
                 onClick={() => { setProtocolo(item.numeroProcesso); handleSearch(item.numeroProcesso); }}
-                className={`w-full text-left p-3 rounded-none border transition-all flex flex-col gap-1.5 ${
+                className={`w-full text-left p-3 rounded-none-none border transition-all flex flex-col gap-1.5 ${
                   isDark
                     ? 'bg-slate-900 border-slate-800 hover:bg-slate-800 hover:border-slate-700'
                     : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300'
@@ -287,7 +287,7 @@ export const SipacTrackingTool: React.FC<SipacTrackingToolProps> = ({ onBack, is
               >
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-xs font-black tracking-tight">{item.numeroProcesso}</span>
-                  <span className={`text-[8px] font-mono font-black px-1.5 py-0.5 uppercase tracking-wider rounded ${getStatusColorClasses(item.status)}`}>
+                  <span className={`text-[8px] font-mono font-black px-1.5 py-0.5 uppercase tracking-wider rounded-none ${getStatusColorClasses(item.status)}`}>
                     {item.status}
                   </span>
                 </div>
@@ -308,7 +308,7 @@ export const SipacTrackingTool: React.FC<SipacTrackingToolProps> = ({ onBack, is
         {/* Painel Central - Conteúdo */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {/* Caixa de Busca */}
-          <div className={`p-6 rounded-none border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+          <div className={`p-6 rounded-none-none border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
             <h4 className="text-xs font-mono font-black uppercase tracking-widest text-slate-400 mb-3">Buscar Novo Processo</h4>
             <div className="flex flex-col sm:flex-row gap-3">
               <input
@@ -317,7 +317,7 @@ export const SipacTrackingTool: React.FC<SipacTrackingToolProps> = ({ onBack, is
                 value={protocolo}
                 onChange={handleInputChange}
                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                className={`flex-1 font-mono text-sm px-4 py-3 rounded-none border outline-none transition-all ${
+                className={`flex-1 font-mono text-sm px-4 py-3 rounded-none-none border outline-none transition-all ${
                   isDark
                     ? 'bg-slate-950 border-slate-800 focus:border-emerald-500 text-slate-100 placeholder:text-slate-600'
                     : 'bg-slate-50 border-slate-200 focus:border-emerald-600 text-slate-800 placeholder:text-slate-300'
@@ -326,7 +326,7 @@ export const SipacTrackingTool: React.FC<SipacTrackingToolProps> = ({ onBack, is
               <button
                 onClick={() => handleSearch()}
                 disabled={loading || !protocolo.trim()}
-                className={`h-[46px] px-6 rounded-none font-mono text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50`}
+                className={`h-[46px] px-6 rounded-none-none font-mono text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50`}
               >
                 {loading ? (
                   <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -354,7 +354,7 @@ export const SipacTrackingTool: React.FC<SipacTrackingToolProps> = ({ onBack, is
 
           {/* Estado de Espera Inicial */}
           {!processData && !loading && (
-            <div className={`py-20 text-center border-2 border-dashed rounded-none ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+            <div className={`py-20 text-center border-2 border-dashed rounded-none-none ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
               <svg className="w-10 h-10 text-slate-400 mx-auto mb-3" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.375c1.08 0 1.958-.88 1.958-1.958V13.5m-3.375 5.25h4.875c.621 0 1.125-.504 1.125-1.125v-9.75c0-.621-.504-1.125-1.125-1.125h-9.75c-.621 0-1.125.504-1.125 1.125v9.75c0 .621.504 1.125 1.125 1.125z" />
               </svg>
@@ -367,7 +367,7 @@ export const SipacTrackingTool: React.FC<SipacTrackingToolProps> = ({ onBack, is
           {processData && (
             <div className="space-y-6 animate-in fade-in duration-300">
               {/* Card Dados Gerais */}
-              <div className={`p-6 rounded-none border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+              <div className={`p-6 rounded-none-none border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                 <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
                   <h4 className="text-xs font-mono font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
                     <svg className="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -434,7 +434,7 @@ export const SipacTrackingTool: React.FC<SipacTrackingToolProps> = ({ onBack, is
                   </div>
                   <div>
                     <span className="block text-[9px] font-mono font-black text-slate-400 uppercase tracking-wider">Status Oficial</span>
-                    <span className={`inline-flex font-mono text-[10px] font-black px-2 py-0.5 uppercase tracking-wide rounded ${getStatusColorClasses(processData.status)}`}>
+                    <span className={`inline-flex font-mono text-[10px] font-black px-2 py-0.5 uppercase tracking-wide rounded-none ${getStatusColorClasses(processData.status)}`}>
                       {processData.status}
                     </span>
                   </div>
@@ -458,7 +458,7 @@ export const SipacTrackingTool: React.FC<SipacTrackingToolProps> = ({ onBack, is
               </div>
 
               {/* Assunto e Observação */}
-              <div className={`p-6 rounded-none border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+              <div className={`p-6 rounded-none-none border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                 <h4 className="text-xs font-mono font-black uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2">
                   <svg className="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
@@ -481,7 +481,7 @@ export const SipacTrackingTool: React.FC<SipacTrackingToolProps> = ({ onBack, is
                     </div>
                   )}
                   {processData.observacao && processData.observacao !== 'Não informado' && (
-                    <div className={`p-4 border ${isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50 border-slate-100'}`}>
+                    <div className={`p-4 border ${isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                       <span className="block text-[9px] font-mono font-black text-amber-500 uppercase tracking-wider mb-1">Nota Complementar / Observação</span>
                       <p className="text-xs italic text-slate-700 dark:text-slate-300 font-medium">"{processData.observacao}"</p>
                     </div>
@@ -491,7 +491,7 @@ export const SipacTrackingTool: React.FC<SipacTrackingToolProps> = ({ onBack, is
 
               {/* Interessados */}
               {processData.interessados && processData.interessados.length > 0 && (
-                <div className={`p-6 rounded-none border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+                <div className={`p-6 rounded-none-none border ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
                   <h4 className="text-xs font-mono font-black uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2">
                     <svg className="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -519,7 +519,7 @@ export const SipacTrackingTool: React.FC<SipacTrackingToolProps> = ({ onBack, is
                     Acervo de Documentos Públicos ({processData.documentos.length})
                   </h4>
 
-                  <div className={`border rounded-none overflow-hidden ${isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}`}>
+                  <div className={`border rounded-none-none overflow-hidden ${isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}`}>
                     <div className="overflow-x-auto">
                       <table className="w-full text-left border-collapse">
                         <thead>
@@ -544,7 +544,7 @@ export const SipacTrackingTool: React.FC<SipacTrackingToolProps> = ({ onBack, is
                                     href={doc.url}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 font-mono text-[9px] font-black uppercase tracking-wider transition-all rounded ${
+                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 font-mono text-[9px] font-black uppercase tracking-wider transition-all rounded-none ${
                                       isDark 
                                         ? 'bg-slate-800 hover:bg-emerald-600 text-slate-100' 
                                         : 'bg-slate-100 hover:bg-emerald-600 hover:text-white text-slate-700'
@@ -582,7 +582,7 @@ export const SipacTrackingTool: React.FC<SipacTrackingToolProps> = ({ onBack, is
                     {processData.movimentacoes.map((mov, idx) => (
                       <div key={idx} className="relative pl-6">
                         {/* Dot */}
-                        <div className={`absolute left-0 top-1.5 w-4 h-4 rounded-full border-4 ${
+                        <div className={`absolute left-0 top-1.5 w-4 h-4 rounded-none-none border-4 ${
                           isDark ? 'border-slate-900' : 'border-white'
                         } ${
                           idx === processData.movimentacoes.length - 1
@@ -599,7 +599,7 @@ export const SipacTrackingTool: React.FC<SipacTrackingToolProps> = ({ onBack, is
                             </span>
                             <div className="flex items-center gap-2">
                               {mov.urgente && mov.urgente.toLowerCase().includes('sim') && (
-                                <span className="text-[8px] font-mono font-black bg-rose-600 text-white px-1.5 py-0.5 rounded tracking-widest animate-bounce">
+                                <span className="text-[8px] font-mono font-black bg-rose-600 text-white px-1.5 py-0.5 rounded-none tracking-widest animate-bounce">
                                   URGENTE
                                 </span>
                               )}
@@ -622,7 +622,7 @@ export const SipacTrackingTool: React.FC<SipacTrackingToolProps> = ({ onBack, is
                               <span className="text-[11px] font-black text-emerald-600 dark:text-emerald-400 uppercase leading-snug">{mov.unidadeDestino}</span>
                             </div>
                             {mov.usuarioRecebedor && (
-                              <div className="mt-2 sm:mt-0 p-2 bg-slate-50 dark:bg-slate-950/60 border dark:border-slate-800 rounded-none text-[9px] text-slate-500 flex flex-col">
+                              <div className="mt-2 sm:mt-0 p-2 bg-slate-50 dark:bg-slate-950/60 border dark:border-slate-800 rounded-none-none text-[9px] text-slate-500 flex flex-col">
                                 <span className="text-[7px] text-slate-400 font-black uppercase tracking-tight">Recebido em {mov.dataRecebimento} por</span>
                                 <span className="font-bold uppercase tracking-tight">{mov.usuarioRecebedor}</span>
                               </div>
