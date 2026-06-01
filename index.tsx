@@ -1924,6 +1924,11 @@ const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<'dashboard' | 'gallery' | 'pgc' | 'licitacoes' | 'assistencia' | 'sistemas' | 'finance' | 'saude' | 'ferramentas' | 'sistemas-dev' | 'knowledge' | 'services' | 'rag-bases' | 'concluidas'>('dashboard');
   const [selectedTask, setSelectedTask] = useState<Tarefa | null>(null);
   const [isSidebarRetracted, setIsSidebarRetracted] = useState(false);
+  const [isCreatingSystem, setIsCreatingSystem] = useState(false);
+  const [newSystemName, setNewSystemName] = useState('');
+  const [newSystemRepo, setNewSystemRepo] = useState('');
+  const [newSystemDocs, setNewSystemDocs] = useState('');
+  const [isSavingSystem, setIsSavingSystem] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem('hermes-theme-mode');
     if (saved === 'dark' || saved === 'light' || saved === 'system') return saved;
@@ -1934,6 +1939,9 @@ const App: React.FC = () => {
   const [isFinanceSettingsOpen, setIsFinanceSettingsOpen] = useState(false);
   // Modal Mode State
   const [taskModalMode, setTaskModalMode] = useState<'default' | 'edit' | 'execute'>('default');
+  useEffect(() => {
+    setIsCreatingSystem(false);
+  }, [viewMode, selectedSystemId]);
   // Reset modal mode when selected task is cleared
   useEffect(() => {
     if (!selectedTask) {
@@ -2930,6 +2938,71 @@ const App: React.FC = () => {
       console.error(err);
       showToast("Erro ao atualizar sistema.", "error");
     }
+  };
+  const handleCreateSystem = async () => {
+    if (!newSystemName.trim()) {
+      showToast("Por favor, digite o nome do sistema.", "error");
+      return;
+    }
+    const cleanName = newSystemName.trim();
+    setIsSavingSystem(true);
+    try {
+      // 1. Add to unidades collection
+      const docRef = await addDoc(collection(db, 'unidades'), {
+        nome: `SISTEMA: ${cleanName}`,
+        palavras_chave: []
+      });
+
+      // 2. Initialize details in sistemas_detalhes collection
+      const systemId = docRef.id;
+      const initialDetails: Partial<Sistema> = {
+        id: systemId,
+        nome: cleanName,
+        status: 'ideia',
+        data_criacao: new Date().toISOString(),
+        data_atualizacao: new Date().toISOString()
+      };
+      if (newSystemRepo.trim()) {
+        initialDetails.repositorio_principal = newSystemRepo.trim();
+      }
+      if (newSystemDocs.trim()) {
+        initialDetails.link_documentacao = newSystemDocs.trim();
+      }
+
+      await setDoc(doc(db, 'sistemas_detalhes', systemId), initialDetails);
+
+      showToast(`Sistema "${cleanName}" registrado com sucesso!`, "success");
+
+      // Reset form & state
+      setNewSystemName('');
+      setNewSystemRepo('');
+      setNewSystemDocs('');
+      setIsCreatingSystem(false);
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao registrar sistema.", "error");
+    } finally {
+      setIsSavingSystem(false);
+    }
+  };
+  const handleDeleteSystem = async (id: string, name: string) => {
+    showConfirm(
+      "Confirmar Exclusão de Sistema",
+      `Deseja realmente remover o sistema "${name}"? Isso excluirá permanentemente suas configurações e registros associados.`,
+      async () => {
+        try {
+          await deleteDoc(doc(db, 'unidades', id));
+          await deleteDoc(doc(db, 'sistemas_detalhes', id));
+          showToast(`Sistema "${name}" removido com sucesso.`, "info");
+          if (selectedSystemId === id) {
+            setSelectedSystemId(null);
+          }
+        } catch (err) {
+          console.error("Erro ao deletar sistema:", err);
+          showToast("Erro ao remover sistema.", "error");
+        }
+      }
+    );
   };
   const handleSyncGithubRepo = async (sistemaId: string, repoUrl: string) => {
     if (!repoUrl) {
@@ -4987,7 +5060,7 @@ const App: React.FC = () => {
                       </nav>
                     )}
                   </div>
-                  {viewMode === 'sistemas-dev' && !selectedSystemId && (
+                  {viewMode === 'sistemas-dev' && !selectedSystemId && !isCreatingSystem && (
                     <div className="flex items-center gap-3">
                       <button
                         onClick={handleCopyBacklog}
@@ -4998,8 +5071,7 @@ const App: React.FC = () => {
                       </button>
                       <button
                         onClick={() => {
-                          setSettingsTab('sistemas');
-                          setIsSettingsModalOpen(true);
+                          setIsCreatingSystem(true);
                         }}
                         className="bg-slate-900 text-white px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center gap-2"
                       >
@@ -5852,7 +5924,87 @@ const App: React.FC = () => {
                   </div>
                 ) : viewMode === 'sistemas-dev' ? (
                   <div className="animate-in fade-in duration-500 pb-20 font-mono">
-                    {!selectedSystemId ? (
+                    {isCreatingSystem ? (
+                      /* NEW SYSTEM FORM */
+                      <div className="space-y-4">
+                        <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between border-b-4 border-slate-900 pb-6">
+                          <div>
+                            <h3 className="text-2xl font-black uppercase tracking-tighter">SYS_REGISTRY::CREATE_NODE</h3>
+                            <div className="flex items-center gap-3 mt-1">
+                              <div className="w-2 h-2 bg-violet-500 animate-pulse" />
+                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em]">REGISTER_NEW_CORE_SYSTEM</p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => setIsCreatingSystem(false)}
+                            className="flex items-center gap-2 text-slate-500 hover:text-slate-800 font-bold text-xs uppercase tracking-widest transition-colors w-fit border-2 border-slate-900 bg-white px-4 py-2 hover:bg-slate-50 shadow-[4px_4px_0px_rgba(15,23,42,1)]"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+                            Voltar para Lista
+                          </button>
+                        </div>
+
+                        <div className="border-4 border-slate-900 bg-white shadow-[8px_8px_0px_rgba(15,23,42,1)] p-6 md:p-8 max-w-2xl mx-auto space-y-6">
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Nome do Sistema</label>
+                            <input
+                              type="text"
+                              placeholder="NOME_DO_SISTEMA (ex: Hermes, Portal Web, API REST)"
+                              value={newSystemName}
+                              onChange={e => setNewSystemName(e.target.value)}
+                              className="w-full bg-slate-50 border-2 border-slate-900 px-6 py-4 text-xs font-black uppercase tracking-widest outline-none focus:bg-slate-100 transition-all placeholder:text-slate-300"
+                              disabled={isSavingSystem}
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Repositório Principal (Opcional)</label>
+                            <input
+                              type="text"
+                              placeholder="https://github.com/usuario/repositorio"
+                              value={newSystemRepo}
+                              onChange={e => setNewSystemRepo(e.target.value)}
+                              className="w-full bg-slate-50 border-2 border-slate-900 px-6 py-4 text-xs font-black tracking-widest outline-none focus:bg-slate-100 transition-all placeholder:text-slate-300"
+                              disabled={isSavingSystem}
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Link de Documentação (Opcional)</label>
+                            <input
+                              type="text"
+                              placeholder="https://..."
+                              value={newSystemDocs}
+                              onChange={e => setNewSystemDocs(e.target.value)}
+                              className="w-full bg-slate-50 border-2 border-slate-900 px-6 py-4 text-xs font-black tracking-widest outline-none focus:bg-slate-100 transition-all placeholder:text-slate-300"
+                              disabled={isSavingSystem}
+                            />
+                          </div>
+
+                          <div className="flex gap-4 pt-4">
+                            <button
+                              onClick={() => setIsCreatingSystem(false)}
+                              className="flex-1 py-4 border-2 border-slate-900 text-slate-500 hover:bg-slate-50 rounded-none text-[10px] font-black uppercase tracking-widest transition-colors"
+                              disabled={isSavingSystem}
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              onClick={handleCreateSystem}
+                              className="flex-1 bg-slate-900 text-white py-4 border-2 border-slate-900 rounded-none text-[10px] font-black uppercase tracking-widest shadow-[4px_4px_0px_rgba(15,23,42,1)] hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
+                              disabled={isSavingSystem}
+                            >
+                              {isSavingSystem ? (
+                                <>
+                                  <svg className="w-3.5 h-3.5 animate-spin text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+                                  Processando...
+                                </>
+                              ) : 'Registrar Sistema'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : !selectedSystemId ? (
                       /* TABLE VIEW */
                       (() => {
                         const sistemasUnits = unidades.filter(u => u.nome.startsWith('SISTEMA:'));
@@ -5895,7 +6047,9 @@ const App: React.FC = () => {
                                   <tr className="bg-slate-900 text-white border-b-4 border-slate-900">
                                     <th className="px-6 py-5 text-[10px] font-black uppercase tracking-[0.3em]">Kernel_ID</th>
                                     <th className="px-6 py-5 text-[10px] font-black uppercase tracking-[0.3em] text-center">Active_Actions</th>
+                                    <th className="px-6 py-5 text-[10px] font-black uppercase tracking-[0.3em] text-center">Resources</th>
                                     <th className="px-6 py-5 text-[10px] font-black uppercase tracking-[0.3em] text-right">Last_Sync</th>
+                                    <th className="px-6 py-5 text-[10px] font-black uppercase tracking-[0.3em] text-center">Excluir</th>
                                   </tr>
                                 </thead>
                                                                 <tbody>
@@ -5936,6 +6090,77 @@ const App: React.FC = () => {
                                             <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest mt-1">ACTIONS</span>
                                           </div>
                                         </td>
+                                        <td className="px-6 py-6 text-center" onClick={(e) => e.stopPropagation()}>
+                                          <div className="flex items-center justify-center gap-3">
+                                            {/* Repo */}
+                                            {sysD?.repositorio_principal ? (
+                                              <a
+                                                href={sysD.repositorio_principal}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="p-2 bg-slate-900 text-white hover:bg-slate-800 border border-slate-700 rounded transition-all hover:scale-105"
+                                                title={`Repositório: ${sysD.repositorio_principal}`}
+                                              >
+                                                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" /></svg>
+                                              </a>
+                                            ) : (
+                                              <span className="p-2 text-slate-300 border border-slate-100 rounded opacity-20" title="Sem Repositório">
+                                                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" /></svg>
+                                              </span>
+                                            )}
+
+                                            {/* Docs */}
+                                            {sysD?.link_documentacao ? (
+                                              <a
+                                                href={sysD.link_documentacao}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="p-2 bg-violet-100 text-violet-600 hover:bg-violet-200 border border-violet-200 rounded transition-all hover:scale-105"
+                                                title={`Documentação: ${sysD.link_documentacao}`}
+                                              >
+                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                              </a>
+                                            ) : (
+                                              <span className="p-2 text-slate-300 border border-slate-100 rounded opacity-20" title="Sem Documentação">
+                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                              </span>
+                                            )}
+
+                                            {/* AI Studio */}
+                                            {sysD?.link_google_ai_studio ? (
+                                              <a
+                                                href={sysD.link_google_ai_studio}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="p-2 bg-blue-100 text-blue-600 hover:bg-blue-200 border border-blue-200 rounded transition-all hover:scale-105"
+                                                title={`Google AI Studio: ${sysD.link_google_ai_studio}`}
+                                              >
+                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                              </a>
+                                            ) : (
+                                              <span className="p-2 text-slate-300 border border-slate-100 rounded opacity-20" title="Sem AI Studio">
+                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                              </span>
+                                            )}
+
+                                            {/* Hospedado (App) */}
+                                            {sysD?.link_hospedado ? (
+                                              <a
+                                                href={sysD.link_hospedado}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="p-2 bg-emerald-100 text-emerald-600 hover:bg-emerald-200 border border-emerald-200 rounded transition-all hover:scale-105"
+                                                title={`Hospedagem: ${sysD.link_hospedado}`}
+                                              >
+                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
+                                              </a>
+                                            ) : (
+                                              <span className="p-2 text-slate-300 border border-slate-100 rounded opacity-20" title="Sem Link de Hospedagem">
+                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" /></svg>
+                                              </span>
+                                            )}
+                                          </div>
+                                        </td>
                                         <td className="px-6 py-6 text-right">
                                           <p className="text-[11px] font-black text-slate-900">
                                             {sysD?.data_atualizacao ? new Date(sysD.data_atualizacao).toLocaleDateString('pt-BR') : 'NEVER'}
@@ -5943,6 +6168,20 @@ const App: React.FC = () => {
                                           <p className="text-[8px] font-bold text-slate-400 uppercase mt-0.5 tracking-tighter">
                                             SYNC_TIMESTAMP
                                           </p>
+                                        </td>
+                                        <td className="px-6 py-6 text-center">
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleDeleteSystem(unit.id, systemName);
+                                            }}
+                                            className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-colors"
+                                            title="Excluir Sistema"
+                                          >
+                                            <svg className="w-4 h-4 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                          </button>
                                         </td>
                                       </tr>
                                     );
@@ -6034,6 +6273,18 @@ const App: React.FC = () => {
                                               </div>
                                               <p className="text-[10px] font-bold text-slate-500 mt-1">{currentStatusTheme.helper}</p>
                                               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1.5">{ajustesPendentesCount} demanda{ajustesPendentesCount !== 1 ? 's' : ''} aberta{ajustesPendentesCount !== 1 ? 's' : ''}</p>
+                                            </div>
+                                            <div>
+                                              <button
+                                                onClick={() => handleDeleteSystem(unit.id, systemName)}
+                                                className="flex items-center gap-2 px-4 py-2 border-2 border-rose-600 bg-white hover:bg-rose-50 text-rose-600 text-[10px] font-black uppercase tracking-widest transition-all shadow-[4px_4px_0px_rgba(225,29,72,1)] hover:-translate-y-0.5 active:translate-y-0"
+                                                title="Excluir Sistema"
+                                              >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                </svg>
+                                                Excluir Sistema
+                                              </button>
                                             </div>
                                           </div>
                                           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 w-full">

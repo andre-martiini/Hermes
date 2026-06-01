@@ -12898,26 +12898,12 @@ SNAPSHOT:
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                response_schema=types.Schema(
-                    type=types.Type.OBJECT,
-                    properties={
-                        "status": types.Schema(type=types.Type.STRING, enum=["critical", "attention", "stable", "strong"]),
-                        "score": types.Schema(type=types.Type.INTEGER),
-                        "title": types.Schema(type=types.Type.STRING),
-                        "summary": types.Schema(type=types.Type.STRING),
-                        "mainRisk": types.Schema(type=types.Type.STRING),
-                        "positivePoint": types.Schema(type=types.Type.STRING),
-                        "actionProposal": types.Schema(type=types.Type.STRING),
-                    },
-                    required=["status", "score", "title", "summary", "mainRisk", "positivePoint", "actionProposal"],
-                ),
                 temperature=0.4,
                 max_output_tokens=300
             )
         )
         raw_text = (response.text or "").strip()
-        clean_text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text, flags=re.IGNORECASE).strip()
-        analysis = json.loads(clean_text)
+        analysis = json.loads(raw_text)
 
         allowed_status = {"critical", "attention", "stable", "strong"}
         status = analysis.get("status")
@@ -12942,6 +12928,8 @@ SNAPSHOT:
         return {"analysis": normalized, "summary": normalized["summary"]}
     except Exception as e:
         print(f"Erro ao gerar resumo financeiro: {e}")
+        if 'response' in locals() and response:
+            print(f"DEBUG - raw_text: {response.text}")
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.INTERNAL,
             message="Erro ao gerar resumo financeiro."
@@ -13016,26 +13004,12 @@ SNAPSHOT:
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                response_schema=types.Schema(
-                    type=types.Type.OBJECT,
-                    properties={
-                        "status": types.Schema(type=types.Type.STRING, enum=["critical", "attention", "stable", "strong"]),
-                        "score": types.Schema(type=types.Type.INTEGER),
-                        "title": types.Schema(type=types.Type.STRING),
-                        "summary": types.Schema(type=types.Type.STRING),
-                        "mainRisk": types.Schema(type=types.Type.STRING),
-                        "positivePoint": types.Schema(type=types.Type.STRING),
-                        "actionProposal": types.Schema(type=types.Type.STRING),
-                    },
-                    required=["status", "score", "title", "summary", "mainRisk", "positivePoint", "actionProposal"],
-                ),
                 temperature=0.35,
                 max_output_tokens=320
             )
         )
         raw_text = (response.text or "").strip()
-        clean_text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text, flags=re.IGNORECASE).strip()
-        analysis = json.loads(clean_text)
+        analysis = json.loads(raw_text)
 
         allowed_status = {"critical", "attention", "stable", "strong"}
         status = analysis.get("status")
@@ -13060,6 +13034,8 @@ SNAPSHOT:
         return {"analysis": normalized, "summary": normalized["summary"]}
     except Exception as e:
         print(f"Erro ao gerar resumo de saúde: {e}")
+        if 'response' in locals() and response:
+            print(f"DEBUG - raw_text: {response.text}")
         raise https_fn.HttpsError(
             code=https_fn.FunctionsErrorCode.INTERNAL,
             message="Erro ao gerar resumo de saúde."
