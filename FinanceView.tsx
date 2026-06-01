@@ -45,6 +45,7 @@ interface FinanceViewProps {
     isSettingsOpen: boolean;
     setIsSettingsOpen: (isOpen: boolean) => void;
     onOpenFinancialCopilot?: () => void;
+    isDark?: boolean;
 }
 
 const FinanceSection = ({ title, children, defaultExpanded = true, disableCollapse = false }: { title: string, children: React.ReactNode, defaultExpanded?: boolean, disableCollapse?: boolean }) => {
@@ -138,7 +139,8 @@ const FinanceView = ({
     setActiveTab,
     isSettingsOpen,
     setIsSettingsOpen,
-    onOpenFinancialCopilot
+    onOpenFinancialCopilot,
+    isDark = false
 }: FinanceViewProps) => {
 
     // Transaction States
@@ -440,7 +442,7 @@ const FinanceView = ({
     };
 
     return (
-        <div className="animate-in space-y-0 md:space-y-8 pb-32 pt-10">
+        <div className={`animate-in space-y-0 md:space-y-8 pb-32 pt-10 ${isDark ? 'finance-view-dark' : ''}`}>
             {/* Header & Tabs removidos - agora no Header global */}
 
             {isSettingsOpen && (

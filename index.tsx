@@ -5721,6 +5721,7 @@ const App: React.FC = () => {
                   />
                 ) : viewMode === 'finance' ? (
                   <FinanceView
+                    isDark={isDarkTheme}
                     transactions={financeTransactions}
                     goals={(() => {
                       const totalSavings = fixedBills

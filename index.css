@@ -450,3 +450,238 @@ body {
 .actions-view-dark .shadow-2xl {
   --tw-shadow-color: rgba(0, 0, 0, 0.5) !important;
 }
+
+/* Finance module dark-mode surface fixes */
+.finance-view-dark {
+  color: #e2e8f0;
+}
+
+.finance-view-dark .bg-white,
+.finance-view-dark .bg-slate-50,
+.finance-view-dark .bg-slate-50\/30,
+.finance-view-dark .bg-slate-50\/50,
+.finance-view-dark .bg-slate-50\/70,
+.finance-view-dark .bg-slate-50\/80,
+.finance-view-dark .bg-surface {
+  background-color: #0f172a !important;
+}
+
+.finance-view-dark .bg-slate-100,
+.finance-view-dark .bg-slate-200,
+.finance-view-dark .bg-slate-200\/50 {
+  background-color: #1e293b !important;
+}
+
+.finance-view-dark .bg-on-surface {
+  background-color: #1e293b !important;
+  color: #f8fafc !important;
+}
+
+.finance-view-dark .text-surface {
+  color: #cbd5e1 !important;
+}
+
+/* Projected balance card states in dark mode */
+.finance-view-dark div.bg-on-surface.text-surface {
+  background-color: rgba(6, 95, 70, 0.2) !important;
+  border-color: rgba(52, 211, 153, 0.35) !important;
+}
+
+.finance-view-dark div.bg-on-surface.text-surface > div {
+  color: #34d399 !important;
+}
+
+.finance-view-dark div.bg-accent-tactile.text-white {
+  background-color: rgba(159, 18, 57, 0.2) !important;
+  border-color: rgba(244, 63, 94, 0.35) !important;
+}
+
+.finance-view-dark div.bg-accent-tactile.text-white > div {
+  color: #f43f5e !important;
+}
+
+.finance-view-dark .text-on-surface {
+  color: #e2e8f0 !important;
+}
+
+.finance-view-dark .text-slate-900,
+.finance-view-dark .text-slate-800,
+.finance-view-dark .text-slate-700 {
+  color: #e2e8f0 !important;
+}
+
+.finance-view-dark .text-slate-600,
+.finance-view-dark .text-slate-500 {
+  color: #cbd5e1 !important;
+}
+
+.finance-view-dark .text-slate-400,
+.finance-view-dark .text-slate-300 {
+  color: #94a3b8 !important;
+}
+
+.finance-view-dark .text-blue-600 {
+  color: #60a5fa !important;
+}
+
+.finance-view-dark .text-emerald-600 {
+  color: #34d399 !important;
+}
+
+.finance-view-dark .border-border-grid,
+.finance-view-dark .border-slate-50,
+.finance-view-dark .border-slate-100,
+.finance-view-dark .border-slate-200 {
+  border-color: #1e293b !important;
+}
+
+.finance-view-dark .border-slate-800,
+.finance-view-dark .border-slate-800\/90 {
+  border-color: #334155 !important;
+}
+
+.finance-view-dark .border-slate-900 {
+  border-color: #e2e8f0 !important;
+}
+
+.finance-view-dark .border-white {
+  border-color: #0b1120 !important;
+}
+
+.finance-view-dark input,
+.finance-view-dark textarea,
+.finance-view-dark select {
+  background-color: #020617 !important;
+  border-color: #334155 !important;
+  color: #f8fafc !important;
+}
+
+.finance-view-dark input::placeholder,
+.finance-view-dark textarea::placeholder {
+  color: #64748b !important;
+}
+
+.finance-view-dark thead {
+  background-color: #111827 !important;
+}
+
+.finance-view-dark tr:hover,
+.finance-view-dark .hover\:bg-white:hover,
+.finance-view-dark .hover\:bg-slate-50:hover,
+.finance-view-dark .hover\:bg-slate-100:hover,
+.finance-view-dark .hover\:bg-slate-200:hover,
+.finance-view-dark .hover\:bg-blue-50:hover,
+.finance-view-dark .hover\:bg-emerald-50:hover {
+  background-color: rgba(30, 41, 59, 0.72) !important;
+}
+
+.finance-view-dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+.finance-view-dark .divide-border-grid > :not([hidden]) ~ :not([hidden]),
+.finance-view-dark .divide-slate-50 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #1e293b !important;
+}
+
+/* FinancialHealthCard status-specific backgrounds in dark mode */
+.finance-view-dark .bg-rose-50 {
+  background-color: rgba(159, 18, 57, 0.18) !important;
+}
+.finance-view-dark .bg-amber-50 {
+  background-color: rgba(146, 64, 14, 0.18) !important;
+}
+.finance-view-dark .bg-sky-50 {
+  background-color: rgba(12, 74, 110, 0.2) !important;
+}
+.finance-view-dark .bg-emerald-50 {
+  background-color: rgba(6, 95, 70, 0.18) !important;
+}
+
+/* FinancialHealthCard status-specific text colors in dark mode */
+.finance-view-dark :is(.text-rose-950, .text-rose-950\/85) {
+  color: #ffe4e6 !important;
+}
+.finance-view-dark :is(.text-rose-800\/65, .text-rose-700\/70) {
+  color: #fda4af !important;
+}
+
+.finance-view-dark :is(.text-amber-950, .text-amber-950\/85) {
+  color: #fef3c7 !important;
+}
+.finance-view-dark :is(.text-amber-850, .text-amber-800\/65, .text-amber-700\/75) {
+  color: #fcd34d !important;
+}
+
+.finance-view-dark :is(.text-sky-950, .text-sky-950\/85) {
+  color: #e0f2fe !important;
+}
+.finance-view-dark :is(.text-sky-800\/65, .text-sky-700\/70) {
+  color: #7dd3fc !important;
+}
+
+.finance-view-dark :is(.text-emerald-950, .text-emerald-950\/85) {
+  color: #d1fae5 !important;
+}
+.finance-view-dark :is(.text-emerald-800\/65, .text-emerald-700\/70) {
+  color: #6ee7b7 !important;
+}
+
+/* FinancialHealthCard borders in dark mode */
+.finance-view-dark :is(.border-rose-300, .border-rose-200) {
+  border-color: rgba(244, 63, 94, 0.4) !important;
+}
+.finance-view-dark :is(.border-amber-300, .border-amber-200) {
+  border-color: rgba(245, 158, 11, 0.4) !important;
+}
+.finance-view-dark :is(.border-sky-300, .border-sky-200) {
+  border-color: rgba(14, 165, 233, 0.4) !important;
+}
+.finance-view-dark :is(.border-emerald-300, .border-emerald-200) {
+  border-color: rgba(16, 185, 129, 0.4) !important;
+}
+
+/* FinancialHealthCard buttons & components hover fixes */
+.finance-view-dark button[class*="bg-white/60"] {
+  background-color: rgba(255, 255, 255, 0.15) !important;
+}
+.finance-view-dark button[class*="bg-white/60"]:hover {
+  background-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+/* Specific translucent cards for finance overview & obligations total boxes */
+.finance-view-dark .bg-emerald-50\/50 {
+  background-color: rgba(6, 95, 70, 0.25) !important;
+}
+.finance-view-dark .bg-amber-50\/50 {
+  background-color: rgba(146, 64, 14, 0.25) !important;
+}
+.finance-view-dark .bg-rose-50\/50 {
+  background-color: rgba(159, 18, 57, 0.25) !important;
+}
+
+/* Specific text contrasts for overview total boxes */
+.finance-view-dark .text-emerald-700 {
+  color: #34d399 !important;
+}
+.finance-view-dark .text-emerald-650,
+.finance-view-dark .text-emerald-600\/60 {
+  color: rgba(110, 231, 183, 0.6) !important;
+}
+.finance-view-dark .text-amber-700 {
+  color: #fbbf24 !important;
+}
+.finance-view-dark .text-amber-600 {
+  color: #fcd34d !important;
+}
+.finance-view-dark .text-amber-650,
+.finance-view-dark .text-amber-600\/60 {
+  color: rgba(252, 211, 77, 0.6) !important;
+}
+.finance-view-dark .text-rose-700 {
+  color: #f43f5e !important;
+}
+.finance-view-dark .text-rose-600 {
+  color: #fda4af !important;
+}
+.finance-view-dark .text-rose-650,
+.finance-view-dark .text-rose-600\/60 {
+  color: rgba(253, 164, 175, 0.6) !important;
+}
