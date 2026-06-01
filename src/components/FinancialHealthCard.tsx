@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { db, functions } from '../../firebase';
+import { db, functions, auth } from '../../firebase';
 import { FinanceTransaction, FinanceGoal, FinanceSettings, FixedBill, IncomeEntry } from '../../types';
 
 type FinancialHealthStatus = 'critical' | 'attention' | 'stable' | 'strong';
@@ -31,7 +31,6 @@ interface FinancialHealthCardProps {
     onOpenFinancialCopilot?: () => void;
 }
 
-const CACHE_DOC = doc(db, 'finance_health_summary', 'config');
 const CACHE_SCHEMA_VERSION = 'financial-health-v2-structured-no-categories';
 
 const STATUS_STYLES: Record<FinancialHealthStatus, {
@@ -246,9 +245,14 @@ export function FinancialHealthCard(props: FinancialHealthCardProps) {
         if (lastFingerprintRef.current === fingerprint) return;
         lastFingerprintRef.current = fingerprint;
 
+        const uid = auth.currentUser?.uid || 'anonymous';
+        const monthKey = `${props.currentYear}-${String(props.currentMonth + 1).padStart(2, '0')}`;
+        const cacheDocRef = doc(db, 'finance_health_summary', `${uid}_${monthKey}`);
+
         async function refresh() {
+            setLoading(true);
             try {
-                const snap = await getDoc(CACHE_DOC);
+                const snap = await getDoc(cacheDocRef);
                 if (snap.exists()) {
                     const cached = snap.data() as {
                         analysis?: FinancialHealthAnalysis;
@@ -258,16 +262,16 @@ export function FinancialHealthCard(props: FinancialHealthCardProps) {
                     };
                     if (cached.fingerprint === fingerprint && cached.schemaVersion === CACHE_SCHEMA_VERSION) {
                         setAnalysis(normalizeAnalysis(cached.analysis ?? cached.summary));
+                        setLoading(false);
                         return;
                     }
                 }
 
-                setLoading(true);
                 const fn = httpsCallable<{ snapshot: object }, { analysis?: FinancialHealthAnalysis; summary?: string }>(functions, 'gerarResumoFinanceiro', { timeout: 60000 });
                 const result = await fn({ snapshot: buildSnapshot(props) });
                 const newAnalysis = normalizeAnalysis(result.data.analysis ?? result.data.summary);
 
-                await setDoc(CACHE_DOC, {
+                await setDoc(cacheDocRef, {
                     analysis: newAnalysis,
                     summary: newAnalysis.summary,
                     fingerprint,

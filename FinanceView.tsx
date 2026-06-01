@@ -380,6 +380,13 @@ const FinanceView = ({
         }
     }, billSort.direction);
 
+    // Concluídos (pagos) vão para o final da fila automaticamente
+    visibleBills.sort((a, b) => {
+        if (a.isPaid && !b.isPaid) return 1;
+        if (!a.isPaid && b.isPaid) return -1;
+        return 0;
+    });
+
     const incomeReceivedTotal = currentMonthIncomeEntries
         .filter(entry => entry.isReceived)
         .reduce((acc, curr) => acc + curr.amount, 0);
@@ -1504,58 +1511,7 @@ const FinanceView = ({
                                 }
                             </div>
 
-                            {/* Rendas Efetivadas (Compactas) Industrial */}
-                            <div className="space-y-4">
-                                {incomeEntries
-                                    .filter(e => e.month === currentMonth && e.year === currentYear)
-                                    .map(entry => {
-                                        const prevEntry = incomeEntries.find(e =>
-                                            e.description === entry.description &&
-                                            e.month === (currentMonth === 0 ? 11 : currentMonth - 1) &&
-                                            e.year === (currentMonth === 0 ? currentYear - 1 : currentYear)
-                                        );
-                                        const diff = prevEntry ? entry.amount - prevEntry.amount : 0;
 
-                                        return (
-                                            <div key={entry.id} className="bg-white p-5 rounded-none border border-border-grid shadow-none flex items-center justify-between group hover:bg-slate-50 transition-all">
-                                                <div className="flex items-center gap-6">
-                                                    <div className="w-10 h-10 rounded-none bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 font-mono font-bold text-xs">
-                                                        ACK
-                                                    </div>
-                                                    <div>
-                                                        <div className="text-[8px] font-mono font-bold text-emerald-600/50 uppercase tracking-widest mb-1">{entry.category || 'INCOME'} // NODE</div>
-                                                        <div className="text-sm font-mono font-bold text-on-surface leading-none uppercase tracking-tight">{entry.description}</div>
-                                                        <div className="text-[9px] text-slate-400 font-mono font-bold mt-2 flex items-center gap-3">
-                                                            ETA: DAY_{entry.day}
-                                                            <span className={`px-2 py-0.5 rounded-none text-[8px] font-mono font-bold uppercase tracking-widest border ${entry.isReceived ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-amber-50 text-amber-600 border-amber-100'}`}>
-                                                                {entry.isReceived ? 'CONFIRMED' : 'IN_TRANSIT'}
-                                                            </span>
-                                                            {diff !== 0 && (
-                                                                <span className={`text-[8px] font-mono font-bold ${diff > 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                                                    {diff > 0 ? '▲' : '▼'} BRL {Math.abs(diff).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <div className="flex items-center gap-6">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={entry.isReceived}
-                                                        onChange={() => onUpdateIncomeEntry({ ...entry, isReceived: !entry.isReceived })}
-                                                        className="w-4 h-4 rounded-none border-border-grid text-emerald-600 focus:ring-0 bg-transparent"
-                                                        title={entry.isReceived ? 'Marcar como nao recebido' : 'Marcar como recebido'}
-                                                    />
-                                                    <div className="text-xl font-mono font-bold text-emerald-600 tracking-tighter">BRL {entry.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                                                    <button onClick={() => handleTwoStepDelete(`income_entry_${entry.id}`, () => onDeleteIncomeEntry(entry.id))} className={`p-2 rounded-soft-touch transition-all opacity-0 group-hover:opacity-100 border ${pendingDeleteKey === `income_entry_${entry.id}` ? 'bg-rose-500 text-white opacity-100 border-rose-600' : 'text-slate-200 border-transparent hover:text-rose-400 hover:border-rose-900/30'}`}>
-                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        );
-                                    })
-                                }
-                            </div>
                         </div>
                     </FinanceSection>
 

@@ -1,6 +1,6 @@
 import { HealthWeight, ExerciseLog } from './types';
 
-const CLIENT_ID = "1003307358410-o3tbms16qbisurm47vb667plt3c27n1g.apps.googleusercontent.com";
+const CLIENT_ID = (import.meta.env?.VITE_GOOGLE_CLIENT_ID as string) || "1003307358410-o3tbms16qbisurm47vb667plt3c27n1g.apps.googleusercontent.com";
 const TOKEN_STORAGE_KEY = 'hermes_google_health_token';
 const GOOGLE_FIT_ESTIMATED_STEPS_SOURCE = 'derived:com.google.step_count.delta:com.google.android.gms:estimated_steps';
 const PREFERRED_STEP_SOURCE_LABEL = 'health_platform';

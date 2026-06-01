@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { db, functions } from '../../firebase';
+import { db, functions, auth } from '../../firebase';
 import { HealthWeight, DailyHabits, HealthSettings, ExerciseLog } from '../../types';
 
 type HealthStatus = 'critical' | 'attention' | 'stable' | 'strong';
@@ -25,7 +25,6 @@ interface HealthSummaryCardProps {
     onOpenHealthCopilot?: () => void;
 }
 
-const CACHE_DOC = doc(db, 'health_summary', 'config');
 const CACHE_SCHEMA_VERSION = 'health-summary-v1';
 
 const STATUS_STYLES: Record<HealthStatus, {
@@ -250,21 +249,25 @@ export function HealthSummaryCard(props: HealthSummaryCardProps) {
         if (lastFingerprintRef.current === fingerprint) return;
         lastFingerprintRef.current = fingerprint;
 
+        const uid = auth.currentUser?.uid || 'anonymous';
+        const cacheDocRef = doc(db, 'health_summary', `${uid}`);
+
         async function refresh() {
+            setLoading(true);
             try {
-                const snap = await getDoc(CACHE_DOC);
+                const snap = await getDoc(cacheDocRef);
                 if (snap.exists()) {
                     const cached = snap.data() as { analysis?: HealthAnalysis; summary?: string; fingerprint: string; schemaVersion?: string };
                     if (cached.fingerprint === fingerprint && cached.schemaVersion === CACHE_SCHEMA_VERSION) {
                         setAnalysis(normalizeAnalysis(cached.analysis ?? cached.summary));
+                        setLoading(false);
                         return;
                     }
                 }
-                setLoading(true);
                 const fn = httpsCallable<{ snapshot: object }, { analysis?: HealthAnalysis; summary?: string }>(functions, 'gerarResumoSaude', { timeout: 60000 });
                 const result = await fn({ snapshot: buildSnapshot(props) });
                 const newAnalysis = normalizeAnalysis(result.data.analysis ?? result.data.summary);
-                await setDoc(CACHE_DOC, {
+                await setDoc(cacheDocRef, {
                     analysis: newAnalysis,
                     summary: newAnalysis.summary,
                     fingerprint,

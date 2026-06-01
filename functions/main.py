@@ -9537,20 +9537,209 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
         mode_context = ""
         if copilot_mode == "finance":
+            # 1. Fetch config settings for emergency reserve
+            reserva_emergencia_atual = 0.0
+            reserva_emergencia_alvo = 0.0
+            try:
+                settings_doc = db.collection("finance_settings").document("config").get()
+                if settings_doc.exists:
+                    settings_dict = settings_doc.to_dict() or {}
+                    reserva_emergencia_atual = float(settings_dict.get("emergencyReserveCurrent", 0.0))
+                    reserva_emergencia_alvo = float(settings_dict.get("emergencyReserveTarget", 0.0))
+            except Exception as e:
+                print(f"[Copiloto Finance] Erro ao buscar settings: {e}")
+
+            # 2. Fetch goals
+            goals_list = []
+            try:
+                goals_snap = db.collection("finance_goals").stream()
+                for doc in goals_snap:
+                    g = doc.to_dict() or {}
+                    g["id"] = doc.id
+                    goals_list.append(g)
+                goals_list.sort(key=lambda x: x.get("priority", 99))
+            except Exception as e:
+                print(f"[Copiloto Finance] Erro ao buscar goals: {e}")
+
+            # 3. Fetch bills (all)
+            bills_list = []
+            try:
+                bills_snap = db.collection("fixed_bills").stream()
+                for doc in bills_snap:
+                    b = doc.to_dict() or {}
+                    b["id"] = doc.id
+                    bills_list.append(b)
+                bills_list.sort(key=lambda x: (x.get("year", 0), x.get("month", 0)), reverse=True)
+            except Exception as e:
+                print(f"[Copiloto Finance] Erro ao buscar bills: {e}")
+
+            # 4. Fetch active income entries
+            income_list = []
+            try:
+                income_snap = db.collection("income_entries").where("status", "==", "active").stream()
+                for doc in income_snap:
+                    i = doc.to_dict() or {}
+                    i["id"] = doc.id
+                    income_list.append(i)
+                income_list.sort(key=lambda x: (x.get("year", 0), x.get("month", 0)), reverse=True)
+            except Exception as e:
+                print(f"[Copiloto Finance] Erro ao buscar income: {e}")
+
+            # 5. Fetch recent active transactions
+            transactions_list = []
+            try:
+                trans_snap = db.collection("finance_transactions").where("status", "==", "active").stream()
+                for doc in trans_snap:
+                    t = doc.to_dict() or {}
+                    t["id"] = doc.id
+                    transactions_list.append(t)
+                transactions_list.sort(key=lambda x: x.get("date", ""), reverse=True)
+            except Exception as e:
+                print(f"[Copiloto Finance] Erro ao buscar transactions: {e}")
+
+            # Build markdown context
+            goals_md = ""
+            for g in goals_list:
+                goals_md += f"- **{g.get('title', 'Sem Título')}**: R$ {g.get('current', 0.0):,.2f} / R$ {g.get('target', 0.0):,.2f} (Prioridade: {g.get('priority', 99)}, Prazo: {g.get('deadline', 'N/A')})\n"
+            if not goals_md:
+                goals_md = "- Nenhuma meta cadastrada.\n"
+
+            # Group bills and income by period
+            months_pt = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+            
+            bills_by_period = {}
+            for b in bills_list:
+                y = b.get("year", 2026)
+                m = b.get("month", 0)
+                if 0 <= m < 12:
+                    period_name = f"{months_pt[m]} de {y}"
+                else:
+                    period_name = f"Mês {m} de {y}"
+                bills_by_period.setdefault(period_name, []).append(b)
+
+            income_by_period = {}
+            for i in income_list:
+                y = i.get("year", 2026)
+                m = i.get("month", 0)
+                if 0 <= m < 12:
+                    period_name = f"{months_pt[m]} de {y}"
+                else:
+                    period_name = f"Mês {m} de {y}"
+                income_by_period.setdefault(period_name, []).append(i)
+
+            # Determine the periods to show (recent 6 periods)
+            all_periods = sorted(list(set(list(bills_by_period.keys()) + list(income_by_period.keys()))), reverse=True)
+            recent_periods = all_periods[:6]
+
+            periods_md = ""
+            for p in recent_periods:
+                periods_md += f"#### {p}\n"
+                p_incomes = income_by_period.get(p, [])
+                p_bills = bills_by_period.get(p, [])
+
+                periods_md += "  **Rendas/Entradas:**\n"
+                if p_incomes:
+                    for i in p_incomes:
+                        status_str = "Recebido" if i.get("isReceived") else "Pendente"
+                        periods_md += f"  - {i.get('description', 'Sem descrição')}: R$ {i.get('amount', 0.0):,.2f} ({status_str})\n"
+                else:
+                    periods_md += "  - Nenhuma renda registrada para este período.\n"
+
+                periods_md += "  **Obrigações/Contas:**\n"
+                if p_bills:
+                    for b in p_bills:
+                        status_str = "Pago" if b.get("isPaid") else "Pendente"
+                        periods_md += f"  - {b.get('description', 'Sem descrição')}: R$ {b.get('amount', 0.0):,.2f} ({status_str}, Categoria: {b.get('category', 'Geral')})\n"
+                else:
+                    periods_md += "  - Nenhuma conta registrada para este período.\n"
+                periods_md += "\n"
+
+            trans_md = ""
+            for t in transactions_list[:30]:
+                trans_md += f"- **{t.get('date', 'N/A')[:10]}**: {t.get('description', 'Sem descrição')}: R$ {t.get('amount', 0.0):,.2f} ({t.get('origin', 'internal')})\n"
+            if not trans_md:
+                trans_md = "- Nenhuma transação avulsa registrada.\n"
+
             mode_context = (
                 "## MODO FINANCEIRO ATIVO\n"
                 "Você está atuando como Copiloto Financeiro do Hermes. Priorize fluxo de caixa, gastos, reserva de emergência, metas, obrigações, orçamento mensal e dúvidas educacionais sobre investimentos.\n"
-                "Para qualquer número financeiro interno, use consultar_financas_v2 antes de concluir. Não use categorias de lançamentos como base analítica enquanto a classificação estiver em revisão.\n"
+                "Para qualquer número financeiro interno, utilize as informações em contexto abaixo. Caso necessite atualizar ou realizar novas operações, chame as ferramentas de escrita adequadas.\n"
                 "Você pode explicar tipos de investimento em caráter educativo, mas não deve prometer rentabilidade, recomendar compra/venda específica ou tratar isso como consultoria financeira regulada.\n"
                 "Quando sugerir próximos passos, escreva como proposta para o usuário avaliar; não crie ações, metas ou lançamentos sem confirmação explícita.\n\n"
+                "## DADOS FINANCEIROS EM CONTEXTO (FONTES DE VERDADE):\n\n"
+                f"### Reserva de Emergência\n"
+                f"- **Alvo**: R$ {reserva_emergencia_alvo:,.2f}\n"
+                f"- **Atual**: R$ {reserva_emergencia_atual:,.2f}\n\n"
+                f"### Metas Financeiras Ativas\n"
+                f"{goals_md}\n"
+                f"### Histórico e Planejamento de Lançamentos Recentes (Últimos 6 Meses)\n"
+                f"{periods_md}"
+                f"### Últimas Transações Avulsas Ativas (Limiar: 30)\n"
+                f"{trans_md}\n"
             )
 
         elif copilot_mode == "saude":
+            # 1. Fetch exercise logs
+            logs_list = []
+            try:
+                logs_snap = db.collection("health_exercise_logs").stream()
+                for doc in logs_snap:
+                    l = doc.to_dict() or {}
+                    l["data"] = doc.id
+                    logs_list.append(l)
+                logs_list.sort(key=lambda x: x.get("data", ""), reverse=True)
+            except Exception as e:
+                print(f"[Copiloto Saúde] Erro ao buscar logs: {e}")
+
+            # 2. Fetch habits
+            habits_list = []
+            try:
+                habits_snap = db.collection("health_daily_habits").stream()
+                for doc in habits_snap:
+                    h = doc.to_dict() or {}
+                    h["data"] = doc.id
+                    habits_list.append(h)
+                habits_list.sort(key=lambda x: x.get("data", ""), reverse=True)
+            except Exception as e:
+                print(f"[Copiloto Saúde] Erro ao buscar habits: {e}")
+
+            # 3. Fetch weights
+            weights_list = []
+            try:
+                weights_snap = db.collection("health_weights").stream()
+                for doc in weights_snap:
+                    w = doc.to_dict() or {}
+                    w["id"] = doc.id
+                    weights_list.append(w)
+                weights_list.sort(key=lambda x: x.get("date", ""), reverse=True)
+            except Exception as e:
+                print(f"[Copiloto Saúde] Erro ao buscar weights: {e}")
+
+            # Build markdown
+            logs_md = ""
+            for l in logs_list[:45]:
+                logs_md += f"- **{l['data']}**: Sono: {l.get('sleep', 0)}h | Passos: {l.get('steps', 0)} | Calorias: {l.get('calories', 0)} kcal | Treino: {l.get('exercise_duration', 0)} min\n"
+            if not logs_md:
+                logs_md = "- Nenhum log de exercício/métrica recente.\n"
+
+            habits_md = ""
+            habit_fields = ["noSugar", "noAlcohol", "noSnacks", "workout", "eatUntil18", "eatSlowly"]
+            for h in habits_list[:45]:
+                done_habits = [f for f in habit_fields if h.get(f)]
+                habits_md += f"- **{h['data']}**: Concluídos: {', '.join(done_habits) if done_habits else 'Nenhum'}\n"
+            if not habits_md:
+                habits_md = "- Nenhum registro de hábitos recente.\n"
+
+            weights_md = ""
+            for w in weights_list[:15]:
+                weights_md += f"- **{w.get('date', 'N/A')}**: {w.get('weight', 0.0)} kg\n"
+            if not weights_md:
+                weights_md = "- Nenhum registro de peso recente.\n"
+
             mode_context = (
                 "## MODO COPILOTO DE SAÚDE ATIVO\n"
                 "Você está atuando como Copiloto de Saúde do Hermes. Priorize orientações sobre hábitos, exercícios, alimentação, controle de peso, sono e gestão da dor lombar.\n"
-                "Para qualquer métrica de saúde atual, use as ferramentas disponíveis antes de concluir. "
-                "Quando sugerir próximos passos, escreva como proposta para o usuário avaliar; não crie registros, metas ou logs sem confirmação explícita.\n\n"
+                "Para qualquer métrica de saúde atual ou histórico de hábitos, consulte as informações fornecidas diretamente abaixo. Não sugira novos registros ou metas sem confirmação explícita do usuário.\n\n"
                 "## PROTOCOLO CLÍNICO PESSOAL DO USUÁRIO\n"
                 "O usuário possui as seguintes condições diagnosticadas e protocolos prescritos:\n\n"
                 "### Diagnósticos\n"
@@ -9583,6 +9772,13 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 "Ordem: 1) Vegetais/fibras folhosas 2) Proteínas magras 3) Carboidratos complexos em porção limitada\n\n"
                 "### Hábitos rastreados\n"
                 "noSugar, noAlcohol, noSnacks, workout, eatUntil18, eatSlowly. Streak = dias consecutivos com >=4/6 hábitos.\n\n"
+                "## DADOS DE SAÚDE EM CONTEXTO (FONTES DE VERDADE):\n\n"
+                "### Logs Recentes de Exercícios e Métricas (Últimos 45 dias)\n"
+                f"{logs_md}\n"
+                "### Logs Recentes de Hábitos Diários (Últimos 45 dias)\n"
+                f"{habits_md}\n"
+                "### Histórico de Peso (Últimas Medições)\n"
+                f"{weights_md}\n"
             )
 
         system_instruction = (
