@@ -12897,6 +12897,20 @@ SNAPSHOT:
             model="gemini-3.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "status": types.Schema(type=types.Type.STRING, enum=["critical", "attention", "stable", "strong"]),
+                        "score": types.Schema(type=types.Type.INTEGER),
+                        "title": types.Schema(type=types.Type.STRING),
+                        "summary": types.Schema(type=types.Type.STRING),
+                        "mainRisk": types.Schema(type=types.Type.STRING),
+                        "positivePoint": types.Schema(type=types.Type.STRING),
+                        "actionProposal": types.Schema(type=types.Type.STRING),
+                    },
+                    required=["status", "score", "title", "summary", "mainRisk", "positivePoint", "actionProposal"],
+                ),
                 temperature=0.4,
                 max_output_tokens=300
             )
@@ -13001,6 +13015,20 @@ SNAPSHOT:
             model="gemini-3.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "status": types.Schema(type=types.Type.STRING, enum=["critical", "attention", "stable", "strong"]),
+                        "score": types.Schema(type=types.Type.INTEGER),
+                        "title": types.Schema(type=types.Type.STRING),
+                        "summary": types.Schema(type=types.Type.STRING),
+                        "mainRisk": types.Schema(type=types.Type.STRING),
+                        "positivePoint": types.Schema(type=types.Type.STRING),
+                        "actionProposal": types.Schema(type=types.Type.STRING),
+                    },
+                    required=["status", "score", "title", "summary", "mainRisk", "positivePoint", "actionProposal"],
+                ),
                 temperature=0.35,
                 max_output_tokens=320
             )
