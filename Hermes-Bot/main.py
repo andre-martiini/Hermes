@@ -317,7 +317,6 @@ def responder(mensagem):
         bot.reply_to(mensagem, f"Erro: {str(e)}")
 
 @bot.message_handler(content_types=['voice'])
-@bot.message_handler(content_types=['voice'])
 def processar_audio(mensagem):
     try:
         bot.send_chat_action(mensagem.chat.id, 'record_audio')
