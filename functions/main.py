@@ -9519,7 +9519,11 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         model_id = COPILOT_CHAT_MODEL
         
         from datetime import datetime
-        today_str = datetime.now().strftime("%Y-%m-%d")
+        from zoneinfo import ZoneInfo
+        tz_sp = ZoneInfo("America/Sao_Paulo")
+        now_sp = datetime.now(tz_sp)
+        today_str = now_sp.strftime("%Y-%m-%d")
+        now_time_str = now_sp.strftime("%H:%M")
 
         # Busca catálogo de sistemas para o "de-para" exato que o usuário solicitou
         try:
@@ -9782,7 +9786,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             )
 
         system_instruction = (
-            f"Você é o Copiloto Hermes, estrategista sênior de processos. Hoje é {today_str}. "
+            f"Você é o Copiloto Hermes, estrategista sênior de processos. Hoje é {today_str} e o horário local atual é {now_time_str}. "
             f"{('CONTEXTO TÉCNICO VINCULADO (OBRIGATÓRIO): ' + (f'sistemaId={system_id}, ' if system_id else '') + (f'taskId={task_id}. ' if task_id else '')) if (system_id or task_id) else ''}"
             f"\n\n{mode_context}"
             "\n\n## CORE ESTÁTICO DO COPILOTO\n"
@@ -9844,12 +9848,16 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "  4. Se a ferramenta declarar que a informação não existe, reproduza essa declaração sem inventar alternativas.\n"
             "NUNCA misture dados numéricos (valores, itens, quantidades) de processos ou documentos distintos.\n\n"
             "## CRIAÇÃO E ALOCAÇÃO DE AÇÕES NA AGENDA (CRÍTICO)\n\n"
-            "Quando o usuário solicitar a criação ou agendamento de uma ação/tarefa, siga OBRIGATORIAMENTE este protocolo:\n\n"
-            "ETAPA 0 — VERIFICAÇÃO DE DISPONIBILIDADE NA AGENDA:\n"
-            "Você DEVE usar consultar_agenda(data_inicio, data_fim) ou encontrar_slot_livre(data) ANTES de apresentar qualquer proposta ao usuário.\n"
-            "Se o usuário pedir um horário específico (ex: 'amanhã às 14h') e houver colisão (conflito detectado): trave a inserção perguntando se ele quer Forçar a sobreposição ou Buscar próximo horário livre.\n"
-            "Se o usuário for flexível ('agende para amanhã'), use encontrar_slot_livre para acomodar no primeiro espaço vazio (duração padrão 30min).\n"
-            "Restrição: A agenda opera estritamente entre 08:00 e 19:00, dentro de uma janela de 7 dias úteis.\n\n"
+            "Quando o usuário solicitar a criação ou agendamento/reagendamento de uma ação/tarefa, siga OBRIGATORIAMENTE este protocolo:\n\n"
+            "Por padrão, agende/reagende a ação SEM horário (ou seja, `horario_inicio` e `horario_fim` nulos/None, e sem buscar slot livre), a não ser que o usuário solicite explicitamente algum horário ou turno (ex: 'às 14h', 'à tarde', 'pela manhã').\n"
+            "Se o usuário pedir para reagendar para outro dia uma ação que já possui horário sem especificar um novo horário, limpe o horário definindo `horario_inicio: null` e `horario_fim: null`.\n"
+            "Se o usuário solicitar o agendamento/reagendamento em um horário específico (ou que implique hoje/Ação do dia) e esse horário já tiver passado hoje em relação ao horário local atual, você NÃO deve agendar para hoje; em vez disso, agende/reagende para o dia seguinte (amanhã, ou próximo dia útil se for fim de semana) no mesmo horário, e informe essa alteração de data no draft de confirmação.\n"
+            "Se e somente se o usuário solicitar algum horário para a ação:\n"
+            "  ETAPA 0 — VERIFICAÇÃO DE DISPONIBILIDADE NA AGENDA:\n"
+            "  Você DEVE usar consultar_agenda(data_inicio, data_fim) ou encontrar_slot_livre(data) ANTES de apresentar qualquer proposta ao usuário.\n"
+            "  Se o usuário pedir um horário específico (ex: 'amanhã às 14h') e houver colisão (conflito detectado): trave a inserção perguntando se ele quer Forçar a sobreposição ou Buscar próximo horário livre.\n"
+            "  Se o usuário for flexível com o horário ('agende para amanhã à tarde'), use encontrar_slot_livre para acomodar no primeiro espaço vazio do turno/dia (duração padrão 30min).\n"
+            "  Restrição: A agenda opera estritamente entre 08:00 e 19:00, dentro de uma janela de 7 dias úteis.\n\n"
             "ETAPA 1 — DRAFT (apresentar antes de criar):\n"
             "Apresente um resumo estruturado para o usuário confirmar:\n"
             "  📋 **Draft da Ação na Agenda**\n"

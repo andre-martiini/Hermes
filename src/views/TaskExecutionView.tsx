@@ -502,6 +502,12 @@ export const TaskExecutionView = ({
   const [newPlanItemText, setNewPlanItemText] = useState('');
   const newPlanItemRef = useRef<HTMLInputElement>(null);
 
+  // Drag and Drop States
+  const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
+  const [draggedModalItemIndex, setDraggedModalItemIndex] = useState<number | null>(null);
+  const [localPlanoAcao, setLocalPlanoAcao] = useState<ActionPlanItem[] | null>(null);
+  const [dragAllowed, setDragAllowed] = useState(false);
+
   // Proposal editing (Feature 1 & 2)
   const [editingProposal, setEditingProposal] = useState<{ msgIndex: number; items: ActionPlanItem[] } | null>(null);
 
@@ -749,6 +755,59 @@ export const TaskExecutionView = ({
     }
 
 
+  };
+
+  // Drag and Drop Handlers for Main Plan
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedItemIndex(index);
+    setLocalPlanoAcao(currentTaskData.plano_acao || []);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedItemIndex === null || draggedItemIndex === index || !localPlanoAcao) return;
+
+    const items = [...localPlanoAcao];
+    const draggedItem = items[draggedItemIndex];
+    items.splice(draggedItemIndex, 1);
+    items.splice(index, 0, draggedItem);
+    
+    setLocalPlanoAcao(items);
+    setDraggedItemIndex(index);
+  };
+
+  const handleDragEnd = () => {
+    if (localPlanoAcao) {
+      onSave(task.id, { plano_acao: localPlanoAcao });
+    }
+    setLocalPlanoAcao(null);
+    setDraggedItemIndex(null);
+    setDragAllowed(false);
+  };
+
+  // Drag and Drop Handlers for Modal Plan
+  const handleModalDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedModalItemIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleModalDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedModalItemIndex === null || draggedModalItemIndex === index) return;
+
+    const items = [...planDraft];
+    const draggedItem = items[draggedModalItemIndex];
+    items.splice(draggedModalItemIndex, 1);
+    items.splice(index, 0, draggedItem);
+    
+    setPlanDraft(items);
+    setDraggedModalItemIndex(index);
+  };
+
+  const handleModalDragEnd = () => {
+    setDraggedModalItemIndex(null);
+    setDragAllowed(false);
   };
 
   const openReminderModal = (reminder?: TaskReminder) => {
@@ -1889,29 +1948,53 @@ export const TaskExecutionView = ({
                         {(currentTaskData.plano_acao || []).length === 0 ? (
                           <p className={`text-xs text-center py-4 ${mutedText}`}>Nenhum passo no plano.</p>
                         ) : (
-                          (currentTaskData.plano_acao || []).map(item => (
-                            <button
+                          (localPlanoAcao || currentTaskData.plano_acao || []).map((item, idx) => (
+                            <div
                               key={item.id}
-                              onClick={() => handleToggleChecklistItem(item.id)}
-                              className={`w-full flex items-start gap-3 p-2.5 rounded-none text-left transition-all group ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}
+                              draggable={dragAllowed}
+                              onDragStart={(e) => handleDragStart(e, idx)}
+                              onDragOver={(e) => handleDragOver(e, idx)}
+                              onDragEnd={handleDragEnd}
+                              className={`w-full flex items-center gap-2 p-1 rounded-none text-left transition-all border border-transparent ${isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'} ${draggedItemIndex === idx ? 'opacity-40 border-dashed border-blue-500 bg-blue-500/5' : ''}`}
                             >
-                              <div className={`w-4 h-4 mt-0.5 rounded-none border-2 flex items-center justify-center shrink-0 transition-all ${item.completed
-                                ? 'bg-emerald-500 border-emerald-500'
-                                : isDark ? 'border-white/30 group-hover:border-emerald-400' : 'border-slate-300 group-hover:border-emerald-500'
-                                }`}>
-                                {item.completed && (
-                                  <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" />
-                                  </svg>
-                                )}
+                              <div
+                                className="cursor-grab active:cursor-grabbing p-1 text-slate-400 hover:text-slate-600 transition-colors shrink-0"
+                                onMouseDown={() => setDragAllowed(true)}
+                                onMouseUp={() => setDragAllowed(false)}
+                                onMouseLeave={() => setDragAllowed(false)}
+                                title="Arrastar para reordenar"
+                              >
+                                <svg className="w-3 h-3 text-slate-400" viewBox="0 0 24 24" fill="currentColor">
+                                  <circle cx="9" cy="5" r="2" />
+                                  <circle cx="9" cy="12" r="2" />
+                                  <circle cx="9" cy="19" r="2" />
+                                  <circle cx="15" cy="5" r="2" />
+                                  <circle cx="15" cy="12" r="2" />
+                                  <circle cx="15" cy="19" r="2" />
+                                </svg>
                               </div>
-                              <span className={`text-xs font-medium leading-snug transition-all font-mono ${item.completed
-                                ? isDark ? 'text-white/30 line-through' : 'text-slate-300 line-through'
-                                : isDark ? 'text-white/80' : 'text-slate-700'
-                                }`}>
-                                {item.text}
-                              </span>
-                            </button>
+                              <button
+                                onClick={() => handleToggleChecklistItem(item.id)}
+                                className="flex-1 flex items-start gap-3 p-1.5 rounded-none text-left transition-all group"
+                              >
+                                <div className={`w-4 h-4 mt-0.5 rounded-none border-2 flex items-center justify-center shrink-0 transition-all ${item.completed
+                                  ? 'bg-emerald-500 border-emerald-500'
+                                  : isDark ? 'border-white/30 group-hover:border-emerald-400' : 'border-slate-300 group-hover:border-emerald-500'
+                                  }`}>
+                                  {item.completed && (
+                                    <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.5" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                  )}
+                                </div>
+                                <span className={`text-xs font-medium leading-snug transition-all font-mono ${item.completed
+                                  ? isDark ? 'text-white/30 line-through' : 'text-slate-300 line-through'
+                                  : isDark ? 'text-white/80' : 'text-slate-700'
+                                  }`}>
+                                  {item.text}
+                                </span>
+                              </button>
+                            </div>
                           ))
                         )}
                       </div>
@@ -2507,7 +2590,32 @@ export const TaskExecutionView = ({
                 <p className={`text-xs text-center py-6 ${mutedText}`}>Nenhum passo ainda. Adicione abaixo.</p>
               )}
               {planDraft.map((item, idx) => (
-                <div key={item.id} className={`flex items-center gap-3 px-3 py-2.5 rounded-none border group transition-all ${isDark ? 'bg-white/5 border-white/10 hover:border-white/20' : 'bg-slate-50 border-slate-100 hover:border-border-grid'}`}>
+                <div
+                  key={item.id}
+                  draggable={dragAllowed}
+                  onDragStart={(e) => handleModalDragStart(e, idx)}
+                  onDragOver={(e) => handleModalDragOver(e, idx)}
+                  onDragEnd={handleModalDragEnd}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-none border group transition-all ${isDark ? 'bg-white/5 border-white/10 hover:border-white/20' : 'bg-slate-50 border-slate-100 hover:border-border-grid'} ${draggedModalItemIndex === idx ? 'opacity-40 border-dashed border-blue-500 bg-blue-500/5' : ''}`}
+                >
+                  {/* Grip Handle */}
+                  <div
+                    className="cursor-grab active:cursor-grabbing p-1 text-slate-400 hover:text-slate-600 transition-colors shrink-0"
+                    onMouseDown={() => setDragAllowed(true)}
+                    onMouseUp={() => setDragAllowed(false)}
+                    onMouseLeave={() => setDragAllowed(false)}
+                    title="Arrastar para reordenar"
+                  >
+                    <svg className="w-3 h-3 text-slate-400" viewBox="0 0 24 24" fill="currentColor">
+                      <circle cx="9" cy="5" r="2" />
+                      <circle cx="9" cy="12" r="2" />
+                      <circle cx="9" cy="19" r="2" />
+                      <circle cx="15" cy="5" r="2" />
+                      <circle cx="15" cy="12" r="2" />
+                      <circle cx="15" cy="19" r="2" />
+                    </svg>
+                  </div>
+
                   {/* Index badge */}
                   <span className={`shrink-0 w-5 h-5 rounded-none flex items-center justify-center text-[9px] font-black ${item.completed ? 'bg-emerald-500 text-white' : isDark ? 'bg-white/10 text-white/40' : 'bg-slate-200 text-slate-500'}`}>
                     {item.completed ? <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg> : idx + 1}

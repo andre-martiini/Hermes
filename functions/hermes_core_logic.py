@@ -2188,15 +2188,19 @@ def _build_system_instruction_guarded_v2(
     acao_snapshot: dict | None = None,
 ) -> str:
     from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+    tz_sp = ZoneInfo("America/Sao_Paulo")
+    now_sp = _dt.now(tz_sp)
+    today = now_sp.strftime("%Y-%m-%d")
+    now_time_str = now_sp.strftime("%H:%M")
 
-    today = _dt.now(timezone.utc).strftime("%Y-%m-%d")
     ctx_hint = (
         f"\n\n<b>Contexto ativo:</b> {contexto_ativo}"
         if contexto_ativo != "geral"
         else ""
     )
     base = (
-        f"Voce e o Copiloto Hermes, estrategista senior de processos. Hoje e {today}."
+        f"Voce e o Copiloto Hermes, estrategista senior de processos. Hoje e {today} e o horario local atual e {now_time_str}."
         f"{ctx_hint}\n\n"
         "## CORE ESTATICO DO COPILOTO\n"
         f"{copilot_core}\n\n"
@@ -2213,7 +2217,7 @@ def _build_system_instruction_guarded_v2(
         "1. JAMAIS expanda siglas arbitrariamente.\n"
         "2. Se qualquer ferramenta retornar campo 'erro', reproduza o erro literal.\n"
         "4. Se o pedido for sobre dados internos do Hermes, tarefas, acoes, historico, agenda ou documentos do sistema, NUNCA use internet como fallback. Nesses casos, use apenas ferramentas internas. Se nao encontrar nada apos usar as ferramentas, admita explicitamente que nao encontrou nos registros do sistema.\n"
-        "5. Agendamento/Agenda: Voce DEVE usar consultar_agenda ou encontrar_slot_livre ANTES de agendar. Horario de funcionamento: 08:00 as 19:00, janela D+7. Se houver conflito em horario especifico, pergunte se forca insercao ou busca outro slot. Na criacao, use os campos horario_inicio e horario_fim.\n"
+        "5. Agendamento/Agenda: Toda vez que for solicitada a criação ou o reagendamento de uma ação/tarefa, por padrão ela deve ser agendada/reagendada SEM horário (ou seja, `horario_inicio` e `horario_fim` nulos/None, e sem buscar slot livre), a não ser que o usuário solicite explicitamente algum horário ou turno (ex: 'às 14h', 'à tarde', 'pela manhã'). Se o usuário reagendar para outro dia uma ação que já possui horário sem especificar um novo horário, limpe o horário definindo `horario_inicio: null` e `horario_fim: null`. Se o usuário solicitar agendamento/reagendamento para hoje em um horário específico que já tenha passado hoje em relação ao horário local atual, você NÃO deve agendar para hoje; em vez disso, agende/reagende para o dia seguinte (amanhã, ou próximo dia útil se for fim de semana) no mesmo horário, e informe essa alteração de data no draft. Se o usuário solicitar horário e for flexível, use `encontrar_slot_livre` para buscar disponibilidade. Horario de funcionamento: 08:00 as 19:00, janela D+7. Se houver conflito em horario especifico solicitado, pergunte se forca insercao ou busca outro slot.\n"
         "6. Para criar uma nova ação, você DEVE usar obrigatoriamente a ferramenta propor_acao_para_confirmacao. Isso apresentará os botões de ✅/❌ ao usuário.\n"
         "7. Links de tarefas: use o formato task:{ID} no texto (ex: 'Acao task:abc123').\n"
         "8. Acione salvar_memoria_global apenas para fatos duraveis e preferencias estaveis.\n"

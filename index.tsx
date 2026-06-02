@@ -1134,6 +1134,7 @@ const App: React.FC = () => {
     return <PublicShoppingPortal />;
   }
   const [user, setUser] = useState<User | null>(isLocalAuthBypassEnabled ? localDevUser : null);
+  const [profileImageError, setProfileImageError] = useState(false);
   const [authLoading, setAuthLoading] = useState(!isLocalAuthBypassEnabled);
   const [rememberMe, setRememberMe] = useState(true);
   const [tarefas, setTarefas] = useState<Tarefa[]>([]);
@@ -1259,6 +1260,10 @@ const App: React.FC = () => {
   const handleSnapshotError = (label: string) => (err: any) => {
     console.error(`[Firestore] Listener falhou (${label}):`, err);
   };
+  useEffect(() => {
+    setProfileImageError(false);
+  }, [user]);
+
   useEffect(() => {
     if (isLocalAuthBypassEnabled) {
       setUser(localDevUser);
@@ -4841,8 +4846,13 @@ const App: React.FC = () => {
                   </>
                 ) : (
                   <>
-                    {user?.photoURL ? (
-                      <img src={user.photoURL} alt="Profile" crossOrigin="anonymous" className="w-10 h-10 rounded-xl border border-white/10" />
+                    {user?.photoURL && !profileImageError ? (
+                      <img
+                        src={user.photoURL}
+                        alt="Profile"
+                        onError={() => setProfileImageError(true)}
+                        className="w-10 h-10 rounded-xl border border-white/10"
+                      />
                     ) : (
                       <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center font-black text-xs text-white border border-white/10">
                         {user?.displayName ? user.displayName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'A'}
