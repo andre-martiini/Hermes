@@ -72,6 +72,7 @@ from hermes_core_logic import (  # noqa: F401 — registra as Cloud Functions
     telegramWebhook,
     on_telegram_inbound,
 )
+from gemini_cost_controls import check_and_increment_limit
 
 
 # Inicializa o Firebase Admin apenas uma vez no escopo global
@@ -9005,6 +9006,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             IMPORTANTE: Você DEVE incluir a tag markdown da imagem retornada (ex: ![Imagem Gerada](url)) de forma exata e visível na sua resposta final para que o usuário possa vê-la.
             """
             try:
+                limit_images = int(os.environ.get("LIMIT_IMAGE_GENERATION", "5"))
+                if not check_and_increment_limit(db, user_uid, "image_generation", limit_images):
+                    return "ERRO|Você atingiu o limite diário de 5 gerações de imagem."
+
                 import uuid
                 from firebase_admin import storage
                 import os
@@ -9598,10 +9603,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 "noSugar, noAlcohol, noSnacks, workout, eatUntil18, eatSlowly. Streak = dias consecutivos com >=4/6 hábitos.\n\n"
             )
 
-        system_instruction = (
-            f"Você é o Copiloto Hermes, estrategista sênior de processos. Hoje é {today_str}. "
-            f"{('CONTEXTO TÉCNICO VINCULADO (OBRIGATÓRIO): ' + (f'sistemaId={system_id}, ' if system_id else '') + (f'taskId={task_id}. ' if task_id else '')) if (system_id or task_id) else ''}"
-            f"\n\n{mode_context}"
+        system_instruction_static = (
+            "Você é o Copiloto Hermes, estrategista sênior de processos."
             "\n\n## CORE ESTÁTICO DO COPILOTO\n"
             f"{copilot_core.get('content', '')}\n\n"
             "## PERSONALIDADE DINÂMICA ATUAL\n"
@@ -9891,6 +9894,14 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "11. Para qualquer dúvida sobre finanças, use EXCLUSIVAMENTE a ferramenta `consultar_financas_v2`.\n"
             "12. Para novos registros, use `registrar_item_financeiro_v2` sempre apresentando um rascunho para o usuário confirmar antes.\n"
             "Caso a ferramenta retorne que não há dados, relate isso honestamente. Não tente usar o RAG para buscar dados financeiros internos.\n"
+        )
+        system_instruction = (
+            system_instruction_static
+            + f"\n\nHoje é {today_str}. "
+            + (f"CONTEXTO TÉCNICO VINCULADO (OBRIGATÓRIO): "
+               + (f"sistemaId={system_id}, " if system_id else "")
+               + (f"taskId={task_id}. " if task_id else "") if (system_id or task_id) else "")
+            + f"\n\n{mode_context}"
         )
 
         # --- RECUPERAÇÃO DE HISTÓRICO DA SESSÃO ---
@@ -11962,6 +11973,13 @@ def startDeepResearch(req: https_fn.CallableRequest):
             )
 
         db = get_db()
+        limit_deep_research = int(os.environ.get("LIMIT_DEEP_RESEARCH", "3"))
+        if not check_and_increment_limit(db, uid, "deep_research", limit_deep_research):
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.RESOURCE_EXHAUSTED,
+                message="Você atingiu o limite diário de 3 pesquisas profundas."
+            )
+
         requester_email = (
             ((req.auth.token or {}).get('email') if req.auth else None)
             or data.get('requester_email')
@@ -13391,6 +13409,10 @@ def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
     client = None
 
     try:
+        limit_long_trans = int(_os.environ.get("LIMIT_LONG_TRANSCRIPTION", "3"))
+        if not check_and_increment_limit(db, user_id, "long_transcription", limit_long_trans):
+            raise RuntimeError("Você atingiu o limite diário de 3 transcrições longas.")
+
         api_key = get_gemini_api_key()
         if not api_key:
             raise RuntimeError("Chave Gemini não configurada em system/api_keys.")

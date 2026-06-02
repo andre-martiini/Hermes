@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from datetime import datetime, timezone
 
+from gemini_cost_controls import GEMINI_PRO_MODEL, generate_content_logged
+
 
 def _get_slides_bucket():
     from firebase_admin import storage
@@ -264,9 +266,12 @@ def slideExecutorWorker(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublishedDa
         Retorne APENAS o código SVG bruto. Não inclua blocos markdown como ```xml ou ```svg.
         """
 
-        response = client.models.generate_content(
-            model="gemini-3.1-pro-preview",
-            contents=prompt
+        response = generate_content_logged(
+            client,
+            model=os.environ.get("SLIDES_SVG_MODEL", GEMINI_PRO_MODEL),
+            contents=prompt,
+            feature="slides.svg_generation",
+            db=db,
         )
 
         svg_content = response.text.replace("```svg", "").replace("```xml", "").replace("```", "").strip()

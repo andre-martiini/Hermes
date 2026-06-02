@@ -22,6 +22,13 @@ from firebase_admin import firestore, get_app, initialize_app, storage
 from firebase_functions import firestore_fn, https_fn, options
 from firebase_functions.firestore_fn import Event, Change, DocumentSnapshot
 from google.cloud.firestore_v1 import DocumentReference
+from gemini_cost_controls import (
+    GEMINI_BALANCED_MODEL,
+    GEMINI_TRANSCRIPTION_MODEL,
+    GEMINI_TTS_MODEL,
+    generate_content_logged,
+    send_message_logged,
+)
 
 try:
     get_app()
@@ -31,8 +38,8 @@ except ValueError:
 _MAX_HISTORY_TURNS = 20
 _MAX_FILE_BYTES = 20 * 1024 * 1024  # 20 MB
 _MAX_INLINE_MEDIA_BYTES = 700 * 1024  # base64 stays safely below Firestore field limit
-_TTS_MODEL_ID = "gemini-3.1-flash-tts-preview"
-_TEXT_MODEL_ID = "gemini-3.5-flash"
+_TTS_MODEL_ID = os.environ.get("TELEGRAM_TTS_MODEL", GEMINI_TTS_MODEL)
+_TEXT_MODEL_ID = os.environ.get("TELEGRAM_TEXT_MODEL", GEMINI_BALANCED_MODEL)
 _DEFAULT_MALE_VOICE = "Charon"
 _MAX_TTS_TRANSCRIPT_CHARS = 1500
 
@@ -1984,12 +1991,14 @@ def _transcribe_audio_bytes(audio_bytes: bytes, extension: str, db) -> str:
             clean_ext = extension.lower().strip(".")
             mime_type = mime_map.get(clean_ext, "audio/ogg")
             
-            response = client.models.generate_content(
-                model="gemini-3.5-flash",
+            response = generate_content_logged(
+                client,
+                model=GEMINI_TRANSCRIPTION_MODEL,
                 contents=[
                     types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
                     "Transcreva este áudio literalmente. Responda apenas com o texto transcrito, sem introduções ou explicações."
-                ]
+                ],
+                feature="telegram.audio_transcription_fallback",
             )
             if response and response.text:
                 return response.text.strip()
@@ -2433,9 +2442,11 @@ def _run_gemini_text(gemini_key: str, system_instruction: str, user_prompt: str,
     from google.genai import types
 
     client = genai.Client(api_key=gemini_key)
-    response = client.models.generate_content(
+    response = generate_content_logged(
+        client,
         model=model_id,
         contents=user_prompt,
+        feature="telegram.tts_script",
         config=types.GenerateContentConfig(system_instruction=system_instruction),
     )
     return (response.text or "").strip()
@@ -2472,9 +2483,11 @@ def _run_gemini_tts(gemini_key: str, script_text: str, voice_profile: str) -> tu
         "### SCRIPT\n"
         f"\"{script_text[:_MAX_TTS_TRANSCRIPT_CHARS]}\""
     )
-    response = client.models.generate_content(
+    response = generate_content_logged(
+        client,
         model=_TTS_MODEL_ID,
         contents=style_prompt,
+        feature="telegram.tts_audio",
         config=types.GenerateContentConfig(
             response_modalities=["AUDIO"],
             speech_config=types.SpeechConfig(
@@ -2719,7 +2732,7 @@ def _run_gemini_turn(
     from google.genai import types
 
     client = genai.Client(api_key=gemini_key)
-    model_id = "gemini-3.5-flash"
+    model_id = _TEXT_MODEL_ID
     read_only_parallel_tools = {
         "consultar_historico_acoes",
         "buscar_arquivos_acervo",
@@ -2789,7 +2802,13 @@ def _run_gemini_turn(
     if perf_state is not None:
         _perf_mark(perf_state, "telegram.chat_create")
 
-    response = chat.send_message(user_message_parts)
+    response = send_message_logged(
+        chat,
+        user_message_parts,
+        model=model_id,
+        feature="telegram.first_turn",
+        db=db,
+    )
     if perf_state is not None:
         _perf_mark(perf_state, "telegram.first_model_response")
 
@@ -2831,13 +2850,25 @@ def _run_gemini_turn(
                 "parallel_safe_calls": parallel_count,
                 "serialized_calls": serial_count,
             })
-        response = chat.send_message(tool_results)
+        response = send_message_logged(
+            chat,
+            tool_results,
+            model=model_id,
+            feature="telegram.tool_roundtrip",
+            db=db,
+        )
         if perf_state is not None:
             _perf_mark(perf_state, "telegram.tool_roundtrip")
     else:
         # Se saiu do loop por limite de iterações, força um turno final de texto
         last_chance_msg = [types.Part(text="Limite de pesquisas atingido. Por favor, apresente uma resposta final ao usuário com base no que você encontrou (ou informe que não encontrou).")]
-        response = chat.send_message(last_chance_msg)
+        response = send_message_logged(
+            chat,
+            last_chance_msg,
+            model=model_id,
+            feature="telegram.safety_final_turn",
+            db=db,
+        )
         if perf_state is not None:
             _perf_mark(perf_state, "telegram.safety_final_turn")
 

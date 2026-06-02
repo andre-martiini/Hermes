@@ -41,7 +41,7 @@ VALID_ASPECT_RATIOS = [
 
 VALID_IMAGE_SIZES = ["512px", "1K", "2K", "4K"]
 
-DEFAULT_MODEL = "gemini-3.1-flash-image-preview"
+DEFAULT_MODEL = "gemini-3.1-flash-image"
 
 
 # ╔══════���═══════════════════════════════════════════════��═══════════╗
@@ -175,7 +175,7 @@ def generate(prompt: str, negative_prompt: str = None,
         image_size: Image size ("512px", "1K", "2K", "4K", case-insensitive)
         output_dir: Output directory
         filename: Output filename (without extension)
-        model: Model name (default: gemini-3.1-flash-image-preview)
+        model: Model name (default: gemini-3.1-flash-image)
         max_retries: Maximum number of retries
 
     Returns:

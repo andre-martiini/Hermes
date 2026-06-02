@@ -42,7 +42,7 @@ Example `.env`:
 IMAGE_BACKEND=gemini
 GEMINI_API_KEY=your-api-key
 GEMINI_BASE_URL=https://your-proxy-url.com/v1beta
-GEMINI_MODEL=gemini-3.1-flash-image-preview
+GEMINI_MODEL=gemini-3.1-flash-image
 ```
 
 Example process environment:
@@ -50,7 +50,7 @@ Example process environment:
 ```bash
 export IMAGE_BACKEND=gemini
 export GEMINI_API_KEY=your-api-key
-export GEMINI_MODEL=gemini-3.1-flash-image-preview
+export GEMINI_MODEL=gemini-3.1-flash-image
 ```
 
 Current process environment wins over `.env`.

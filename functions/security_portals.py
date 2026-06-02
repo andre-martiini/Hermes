@@ -6,6 +6,7 @@ import secrets
 
 from firebase_functions import https_fn, options
 from firebase_admin import firestore, get_app, initialize_app
+from gemini_cost_controls import GEMINI_STRUCTURED_MODEL, generate_content_logged
 
 
 
@@ -312,7 +313,13 @@ Responda SOMENTE com JSON valido, sem markdown, sem explicacoes:
             except Exception as img_err:
                 print(f"Imagem ignorada em matchShoppingItemsAI: {img_err}")
 
-        result = client.models.generate_content(model='gemini-3.5-flash', contents=content_parts)
+        result = generate_content_logged(
+            client,
+            model=GEMINI_STRUCTURED_MODEL,
+            contents=content_parts,
+            feature="security_portals.shopping_match",
+            db=db,
+        )
         parsed = parse_json_response(result.text or '')
         itens = parsed.get('itens') or []
 
@@ -398,7 +405,13 @@ def generatePgdFromDiariesAI(req: https_fn.CallableRequest):
     try:
         genai = get_genai_module()
         client = genai.Client(api_key=gemini_key)
-        result = client.models.generate_content(model='gemini-3.5-flash', contents=prompt)
+        result = generate_content_logged(
+            client,
+            model=GEMINI_STRUCTURED_MODEL,
+            contents=prompt,
+            feature="security_portals.pgd_from_diaries",
+            db=db,
+        )
         parsed = parse_json_response(result.text or '')
         return {'registros': parsed.get('registros') or []}
     except Exception as e:
@@ -454,7 +467,13 @@ def generatePgdFromRawTextAI(req: https_fn.CallableRequest):
     try:
         genai = get_genai_module()
         client = genai.Client(api_key=gemini_key)
-        result = client.models.generate_content(model='gemini-3.5-flash', contents=prompt)
+        result = generate_content_logged(
+            client,
+            model=GEMINI_STRUCTURED_MODEL,
+            contents=prompt,
+            feature="security_portals.pgd_from_raw_text",
+            db=db,
+        )
         parsed = parse_json_response(result.text or '')
         return {'registros': parsed.get('registros') or []}
     except Exception as e:
