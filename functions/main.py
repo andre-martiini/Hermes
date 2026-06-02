@@ -84,6 +84,12 @@ DEFAULT_GOOGLE_CALENDAR_ID = 'cf4953b9512ee2e85a7e064f9d5ce4eaf6e3634564c91e5c7e
 SYNC_LOCK_DOC_ID = 'sync_lock'
 SYNC_LOCK_STALE_SECONDS = 15 * 60
 MAX_SYNC_PASSES = 3
+# Sincronização Google Tasks <-> Ações (coleção 'tarefas') desativada a pedido do usuário (2026-06-02).
+# As duas direções estão desligadas: criar tarefa no Google não cria ação no Hermes e vice-versa,
+# e itens já vinculados também deixam de ser sincronizados. A integração com o Google Calendar
+# (sync_google_calendar e a parte de Calendar do push) continua ATIVA.
+# Para reativar a sincronização de tarefas, basta voltar este flag para True.
+SYNC_GOOGLE_TASKS_ENABLED = False
 COPILOT_FUNCTION_TIMEOUT_SEC = 540
 COPILOT_SOFT_DEADLINE_SEC = 300
 COPILOT_MODEL_TIMEOUT_MS = 70000
@@ -980,6 +986,12 @@ def sync_google_tasks_pull(service, sync_ref, logs):
 
     from datetime import datetime
 
+    # Sincronização Google Tasks -> Ações desativada a pedido do usuário.
+    # Nenhuma tarefa do Google cria ou altera ações do Hermes.
+    if not SYNC_GOOGLE_TASKS_ENABLED:
+        print("[PULL] Sincronização Google Tasks -> Ações desativada (SYNC_GOOGLE_TASKS_ENABLED=False).")
+        return
+
     db = get_db()
 
     try:
@@ -1100,39 +1112,39 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
 
     try:
 
-        results = service.tasklists().list().execute()
-
-        tasklist_id = next((item['id'] for item in results.get('items', []) if 'tarefa' in item['title'].lower()), None)
-
-
-
-        if not tasklist_id: 
-            # Verifica se há list default
-            default_list = service.tasklists().get(tasklist='@default').execute()
-            tasklist_id = default_list.get('id')
-            if not tasklist_id: return
-
-        
-
-        # Pega todas as tarefas do Google (com paginação) para o mapa
-
+        # Sincronização Ações -> Google Tasks desativada a pedido do usuário.
+        # Mantém-se apenas a parte de Google Calendar deste push (ver SYNC_GOOGLE_TASKS_ENABLED).
+        tasklist_id = None
         g_tasks_map = {}
 
-        next_page_token = None
+        if SYNC_GOOGLE_TASKS_ENABLED:
 
-        while True:
+            results = service.tasklists().list().execute()
 
-            g_results = service.tasks().list(tasklist=tasklist_id, showCompleted=True, showHidden=True, maxResults=100, pageToken=next_page_token).execute()
+            tasklist_id = next((item['id'] for item in results.get('items', []) if 'tarefa' in item['title'].lower()), None)
 
-            for item in g_results.get('items', []):
+            if not tasklist_id:
+                # Verifica se há list default
+                default_list = service.tasklists().get(tasklist='@default').execute()
+                tasklist_id = default_list.get('id')
 
-                g_tasks_map[item['id']] = item
+            # Pega todas as tarefas do Google (com paginação) para o mapa
 
-            next_page_token = g_results.get('nextPageToken')
+            next_page_token = None
 
-            if not next_page_token or len(g_tasks_map) >= 500: break
+            while True:
 
-        
+                g_results = service.tasks().list(tasklist=tasklist_id, showCompleted=True, showHidden=True, maxResults=100, pageToken=next_page_token).execute()
+
+                for item in g_results.get('items', []):
+
+                    g_tasks_map[item['id']] = item
+
+                next_page_token = g_results.get('nextPageToken')
+
+                if not next_page_token or len(g_tasks_map) >= 500: break
+
+
 
         for doc in db.collection('tarefas').stream():
 
@@ -1154,10 +1166,10 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
 
             if t.get('status') == 'excluído':
 
-                # 1. Remover do Google Tasks
-                if g_id:
+                # 1. Remover do Google Tasks (desativado: ver SYNC_GOOGLE_TASKS_ENABLED)
+                if SYNC_GOOGLE_TASKS_ENABLED and g_id:
 
-                    try: 
+                    try:
 
                         service.tasks().delete(tasklist=tasklist_id, task=g_id).execute()
 
@@ -1215,33 +1227,34 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
 
             updated_notes = update_notes_with_time(t.get('notas', ''), h_inicio, h_fim)
 
-            # --- PARTE 1: Sincronia Padrão do Google Tasks (sempre) ---
-            if not g_id:
-                body = {'title': title, 'notes': updated_notes, 'status': g_status}
-                if g_due: body['due'] = g_due
-                new_task = service.tasks().insert(tasklist=tasklist_id, body=body).execute()
-                doc.reference.update({'google_id': new_task['id'], 'data_atualizacao': new_task.get('updated'), 'notas': updated_notes, 'horario_fim': h_fim if not t.get('horario_fim') else t.get('horario_fim')})
-                log_to_firestore(sync_ref, logs, f"[+] ENVIADA TASKS: {title}")
-                g_id = new_task['id'] # Para usar no Calendar se precisar
-            elif g_id in g_tasks_map and is_iso_after(local_updated, g_tasks_map[g_id].get('updated', '')):
-                body = {'id': g_id, 'title': title, 'notes': updated_notes, 'status': g_status}
-                if g_due: body['due'] = g_due
-                try:
-                    updated_task = service.tasks().update(tasklist=tasklist_id, task=g_id, body=body).execute()
-                    log_to_firestore(sync_ref, logs, f"[^] ATUALIZADA NO TASKS: {title}")
-                    sync_updates = {}
-                    if updated_task.get('updated'):
-                        sync_updates['data_atualizacao'] = updated_task.get('updated')
-                    if updated_notes != t.get('notas', ''):
-                        sync_updates['notas'] = updated_notes
-                    if h_fim and not t.get('horario_fim'):
-                        sync_updates['horario_fim'] = h_fim
-                    if sync_updates:
-                        doc.reference.update(sync_updates)
-                except HttpError as e:
-                    if e.resp.status == 404:
-                        doc.reference.update({'google_id': None})
-            
+            # --- PARTE 1: Sincronia Padrão do Google Tasks (desativada: ver SYNC_GOOGLE_TASKS_ENABLED) ---
+            if SYNC_GOOGLE_TASKS_ENABLED:
+                if not g_id:
+                    body = {'title': title, 'notes': updated_notes, 'status': g_status}
+                    if g_due: body['due'] = g_due
+                    new_task = service.tasks().insert(tasklist=tasklist_id, body=body).execute()
+                    doc.reference.update({'google_id': new_task['id'], 'data_atualizacao': new_task.get('updated'), 'notas': updated_notes, 'horario_fim': h_fim if not t.get('horario_fim') else t.get('horario_fim')})
+                    log_to_firestore(sync_ref, logs, f"[+] ENVIADA TASKS: {title}")
+                    g_id = new_task['id'] # Para usar no Calendar se precisar
+                elif g_id in g_tasks_map and is_iso_after(local_updated, g_tasks_map[g_id].get('updated', '')):
+                    body = {'id': g_id, 'title': title, 'notes': updated_notes, 'status': g_status}
+                    if g_due: body['due'] = g_due
+                    try:
+                        updated_task = service.tasks().update(tasklist=tasklist_id, task=g_id, body=body).execute()
+                        log_to_firestore(sync_ref, logs, f"[^] ATUALIZADA NO TASKS: {title}")
+                        sync_updates = {}
+                        if updated_task.get('updated'):
+                            sync_updates['data_atualizacao'] = updated_task.get('updated')
+                        if updated_notes != t.get('notas', ''):
+                            sync_updates['notas'] = updated_notes
+                        if h_fim and not t.get('horario_fim'):
+                            sync_updates['horario_fim'] = h_fim
+                        if sync_updates:
+                            doc.reference.update(sync_updates)
+                    except HttpError as e:
+                        if e.resp.status == 404:
+                            doc.reference.update({'google_id': None})
+
             # --- PARTE 2: Sincronia Google Calendar (Se possuir horário) ---
             cal_id = t.get('google_calendar_id')
             desired_event_id = build_task_calendar_event_id(doc.id)
