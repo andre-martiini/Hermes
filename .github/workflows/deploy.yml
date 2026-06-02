@@ -75,6 +75,12 @@ jobs:
       - name: Instalar dependencias das Functions Node
         run: npm install --prefix functions_node
 
+      # Algumas dependencias Python (ex.: pycairo, puxada por libs de PDF/SVG)
+      # nao tem wheel no Linux e precisam ser compiladas, exigindo libs de
+      # desenvolvimento do sistema (cairo + pkg-config).
+      - name: Instalar libs de sistema para dependencias Python
+        run: sudo apt-get update && sudo apt-get install -y libcairo2-dev pkg-config
+
       # O Firebase descobre as Functions Python importando o codigo (main.py),
       # entao o virtualenv com TODAS as dependencias precisa existir em
       # functions/venv antes do deploy. Sem isso o deploy falha com
