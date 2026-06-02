@@ -774,6 +774,140 @@ def classify_task(title, notes, mapping=None):
     elif 'GERAL' in tags: area_tematica = 'GERAL'
     return area_tematica, None, contabilizar_meta
 
+def get_embedding_cli(text, api_key):
+    from google import genai
+    from google.genai import types
+    client = genai.Client(api_key=api_key)
+    response = client.models.embed_content(
+        model="gemini-embedding-001",
+        contents=text[:8000],
+        config=types.EmbedContentConfig(
+            task_type="RETRIEVAL_DOCUMENT",
+            output_dimensionality=768
+        )
+    )
+    return response.embeddings[0].values
+
+def sync_rag_knowledge_bases(db, log_list=None, sync_ref=None):
+    last_ui_update = [0]
+    def log(msg, force_ui=False):
+        print(msg)
+        if log_list is not None:
+            log_list.append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+            now_ts = time.time()
+            if sync_ref and (force_ui or now_ts - last_ui_update[0] > 1.2):
+                try: sync_ref.update({'logs': log_list}); last_ui_update[0] = now_ts
+                except: pass
+
+    log("[RAG] Sincronizando itens de conhecimento pendentes...", force_ui=True)
+    try:
+        keys_doc = db.collection('system').document('api_keys').get()
+        GEMINI_API_KEY = keys_doc.to_dict().get('gemini_api_key') if keys_doc.exists else None
+        if not GEMINI_API_KEY:
+            log("[RAG][!] Sincronização falhou: Chave Gemini não configurada.")
+            return
+
+        docs = db.collection('conhecimento').stream()
+        pending_items = []
+        for doc in docs:
+            data = doc.to_dict() or {}
+            if not data.get('embedding') or (data.get('tipo_arquivo') == 'link' and not data.get('texto_bruto')):
+                pending_items.append((doc.id, data, doc.reference))
+
+        if not pending_items:
+            log("[RAG] Nenhum item pendente de vetorização ou sincronização.", force_ui=True)
+            return
+
+        log(f"[RAG] Encontrados {len(pending_items)} itens para processamento.", force_ui=True)
+        
+        import requests
+        from google import genai
+
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        drive_service = None
+        
+        success_count = 0
+        for doc_id, data, doc_ref in pending_items:
+            titulo = data.get('titulo') or 'Sem título'
+            tipo = data.get('tipo_arquivo', '').lower()
+            url = data.get('url_drive')
+            texto_bruto = data.get('texto_bruto', '')
+
+            try:
+                # 1. Extração de texto para links pendentes
+                if tipo == 'link' and url and not texto_bruto:
+                    log(f"[RAG] Extraindo texto do link: {titulo} ({url})...")
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    }
+                    resp = requests.get(url, headers=headers, timeout=15)
+                    if resp.status_code == 200:
+                        html_truncated = resp.text[:120000]
+                        prompt = "Extraia todo o texto relevante e útil deste HTML para indexação em um RAG. Ignore tags, cabeçalhos de navegação do site, links de rodapé e propagandas."
+                        response = client.models.generate_content(
+                            model="gemini-3.5-flash",
+                            contents=[prompt, html_truncated]
+                        )
+                        if response.text:
+                            texto_bruto = response.text.strip()
+                            doc_ref.update({
+                                'texto_bruto': texto_bruto,
+                                'texto_extraido_por': 'sync_runner_link_scraper'
+                            })
+                            log(f"[RAG] Texto extraído com sucesso para o link: {titulo}")
+                    else:
+                        log(f"[RAG][!] Falha ao baixar link {url} (Status: {resp.status_code})")
+                
+                # 2. Indexação de arquivos do Drive (se não tiver texto bruto)
+                if tipo != 'link' and not texto_bruto and url:
+                    log(f"[RAG] Indexando arquivo do Drive pendente: {titulo} ({doc_id})...")
+                    drive_file_id = None
+                    if 'drive.google.com' in url:
+                        match = re.search(r'[-\w]{25,}', url)
+                        if match:
+                            drive_file_id = match.group(0)
+                    else:
+                        drive_file_id = url
+
+                    if drive_file_id:
+                        if not drive_service:
+                            drive_service = build("drive", "v3", credentials=get_google_creds())
+                        
+                        request_media = drive_service.files().get_media(fileId=drive_file_id)
+                        content = request_media.execute()
+                        
+                        mime_type = "application/pdf" if titulo.lower().endswith('.pdf') else "text/plain"
+                        prompt = "Extraia todo o texto relevante deste documento para indexação. Se for HTML, ignore tags. Se for PDF, faça OCR se necessário."
+                        response = client.models.generate_content(
+                            model="gemini-3.5-flash",
+                            contents=[prompt, {"mime_type": mime_type, "data": content}]
+                        )
+                        if response.text:
+                            texto_bruto = response.text.strip()
+                            doc_ref.update({
+                                'texto_bruto': texto_bruto,
+                                'texto_extraido_por': 'sync_runner_file_indexer'
+                            })
+                            log(f"[RAG] Texto extraído com sucesso para o arquivo: {titulo}")
+                    else:
+                        log(f"[RAG][!] Não foi possível identificar ID do Drive da URL: {url}")
+                
+                # 3. Geração de Embedding
+                if texto_bruto:
+                    latest_data = doc_ref.get().to_dict() or {}
+                    if not latest_data.get('embedding'):
+                        log(f"[RAG] Gerando embedding para: {titulo}...")
+                        embedding_vec = get_embedding_cli(texto_bruto, GEMINI_API_KEY)
+                        doc_ref.update({'embedding': embedding_vec})
+                        log(f"[RAG][+] Sincronizado e vetorizado: {titulo}", force_ui=True)
+                        success_count += 1
+            except Exception as item_err:
+                log(f"[RAG][!] Erro ao processar item {titulo} ({doc_id}): {item_err}")
+                
+        log(f"[RAG] Sincronização de conhecimento concluída. {success_count} itens processados.", force_ui=True)
+    except Exception as e:
+        log(f"[RAG][!] Erro na sincronização de conhecimento: {e}", force_ui=True)
+
 def watch_commands(db):
     print("MÓDULO DE SINCRONIZAÇÃO AUTOMÁTICA INICIADO")
     get_google_creds()  # força autenticação OAuth antes de entrar no loop
@@ -791,6 +925,7 @@ def watch_commands(db):
                 sync_google_calendar(db, log_entries, sync_doc_ref)
                 sync_pix_emails(db, log_entries, sync_doc_ref)
                 sync_google_drive_acervo(db, log_entries, sync_doc_ref)
+                sync_rag_knowledge_bases(db, log_entries, sync_doc_ref)
                 sync_doc_ref.update({'status': 'completed', 'last_success': datetime.now().isoformat(), 'logs': log_entries})
                 print("Sincronização concluída.")
             except Exception as e:

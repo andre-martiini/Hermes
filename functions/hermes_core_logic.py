@@ -47,6 +47,45 @@ _TELEGRAM_USER_CACHE: dict = {}
 _TELEGRAM_USER_CACHE_TTL = 300
 _COPILOT_SESSION_HISTORY_LIMIT = 12
 
+
+def validate_and_link_area_tematica(db, area_tematica: str) -> tuple[str, str | None]:
+    """
+    Valida a área temática contra as registradas na coleção 'knowledge_bases'.
+    Se encontrar correspondência (case-insensitive), retorna (nome_normalizado, base_id).
+    Caso contrário, tenta correspondência parcial ou retorna ('GERAL', None).
+    """
+    if not area_tematica:
+        return "GERAL", None
+        
+    area_clean = area_tematica.strip().upper()
+    if area_clean in ("GERAL", "NÃO CLASSIFICADA"):
+        return area_clean, None
+        
+    try:
+        bases_ref = db.collection('knowledge_bases').stream()
+        bases_list = []
+        for doc in bases_ref:
+            d = doc.to_dict() or {}
+            b_name = d.get('nome')
+            if b_name:
+                bases_list.append((doc.id, b_name.strip(), b_name.strip().upper()))
+                
+        # 1. Match exato case-insensitive
+        for bid, name, name_up in bases_list:
+            if area_clean == name_up:
+                return name, bid
+                
+        # 2. Match parcial
+        for bid, name, name_up in bases_list:
+            if area_clean in name_up or name_up in area_clean:
+                return name, bid
+                
+    except Exception as e:
+        print(f"[Core] Erro ao validar área temática: {e}")
+        
+    return "GERAL", None
+
+
 def _cached_doc_get(db, collection: str, document: str):
     key = f"{collection}/{document}"
     now = time.monotonic()
@@ -1804,6 +1843,7 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
                 "titulo": pending["titulo"].strip(),
                 "descricao": pending.get("descricao") or "",
                 "area_tematica": pending.get("area_tematica") or "GERAL",
+                "base_conhecimento": pending.get("base_conhecimento"),
                 "data_limite": pending.get("data_limite"),
                 "horario_inicio": pending.get("horario_inicio"),
                 "horario_fim": pending.get("horario_fim"),
@@ -2185,6 +2225,7 @@ def _build_system_instruction_guarded_v2(
     copilot_core: str,
     copilot_soul: str,
     contexto_ativo: str,
+    db=None,
     acao_snapshot: dict | None = None,
 ) -> str:
     from datetime import datetime as _dt
@@ -2194,6 +2235,18 @@ def _build_system_instruction_guarded_v2(
     today = now_sp.strftime("%Y-%m-%d")
     now_time_str = now_sp.strftime("%H:%M")
 
+    allowed_areas = ["GERAL", "NÃO CLASSIFICADA"]
+    if db:
+        try:
+            kb_docs = db.collection('knowledge_bases').stream()
+            for doc in kb_docs:
+                kb_name = doc.to_dict().get('nome')
+                if kb_name:
+                    allowed_areas.append(kb_name.upper())
+        except Exception as e:
+            print(f"[Core] Erro ao carregar áreas temáticas: {e}")
+    allowed_areas_str = ", ".join(allowed_areas)
+
     ctx_hint = (
         f"\n\n<b>Contexto ativo:</b> {contexto_ativo}"
         if contexto_ativo != "geral"
@@ -2201,6 +2254,8 @@ def _build_system_instruction_guarded_v2(
     )
     base = (
         f"Voce e o Copiloto Hermes, estrategista senior de processos. Hoje e {today} e o horario local atual e {now_time_str}."
+        f" Ao criar ou propor acoes, voce DEVE classificar a acao em uma das seguintes areas tematicas permitidas: [{allowed_areas_str}]."
+        f" JAMAIS crie novas areas tematicas nem use nomes fora desta lista. Se nenhuma se aplicar, use 'GERAL'."
         f"{ctx_hint}\n\n"
         "## CORE ESTATICO DO COPILOTO\n"
         f"{copilot_core}\n\n"
@@ -3251,7 +3306,7 @@ def _process_telegram_message(db, data: dict):
             session["acao_context_snapshot"] = fresh_snapshot
             session["acao_titulo"] = fresh_snapshot.get("titulo") or session.get("acao_titulo")
         _perf_mark(perf_state, "telegram.action_snapshot")
-    system_instruction = _build_system_instruction_guarded_v2(copilot_core, copilot_soul, contexto_ativo, acao_snapshot)
+    system_instruction = _build_system_instruction_guarded_v2(copilot_core, copilot_soul, contexto_ativo, db, acao_snapshot)
 
     # --- Restore history (trimmed) — isolated buffer when action-locked ---
     hist_key = "history_acao" if contexto_ativo == "acao" else "history"
@@ -3718,11 +3773,14 @@ def _process_telegram_message(db, data: dict):
         except Exception as e:
             print(f"[Core] Erro ao reagendar iterativo: {e}")
 
+        area_validada, base_id = validate_and_link_area_tematica(db, area_tematica)
+
         doc = {
             "id": task_id,
             "titulo": titulo.strip(),
             "descricao": descricao or "",
-            "area_tematica": area_tematica or "GERAL",
+            "area_tematica": area_validada,
+            "base_conhecimento": base_id,
             "data_limite": data_limite,
             "horario_inicio": horario_inicio,
             "horario_fim": horario_fim,
@@ -3951,10 +4009,14 @@ def _process_telegram_message(db, data: dict):
         eff_limit = data_limite or today_str
         if eff_limit < today_str:
             eff_limit = today_str
+            
+        area_validada, base_id = validate_and_link_area_tematica(db, area_tematica)
+        
         pending_data = {
             "titulo": titulo,
             "descricao": descricao,
-            "area_tematica": area_tematica,
+            "area_tematica": area_validada,
+            "base_conhecimento": base_id,
             "data_limite": eff_limit,
             "tipo_acao": tipo_acao,
             "tags": tags or [],
@@ -3969,7 +4031,7 @@ def _process_telegram_message(db, data: dict):
         draft = (
             f"📝 <b>PROPOSTA DE AÇÃO</b>\n"
             f"• Título: {titulo}\n"
-            f"• Área: {area_tematica}\n"
+            f"• Área: {area_validada}\n"
             f"• Prazo: {pending_data['data_limite']}\n"
         )
         if tags: draft += f"• Tags: {', '.join(tags)}\n"

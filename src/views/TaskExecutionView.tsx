@@ -2183,8 +2183,8 @@ export const TaskExecutionView = ({
                             value={currentTaskData.area_tematica || 'NÃO CLASSIFICADA'}
                             onChange={e => {
                               const newArea = e.target.value as any;
-                              const unit = unidades.find(u => u.nome.toUpperCase() === (newArea || '').toUpperCase());
-                              const baseId = unit ? (knowledgeBases.find(b => b.sistema_id === unit.id)?.id ?? undefined) : undefined;
+                              const kb = knowledgeBases.find(b => b.nome.toUpperCase() === (newArea || '').toUpperCase());
+                              const baseId = kb ? kb.id : undefined;
                               onSave(task.id, { area_tematica: newArea, base_conhecimento: baseId });
                             }}
                             style={{ colorScheme: isDark ? 'dark' : 'light' }}
@@ -2192,9 +2192,15 @@ export const TaskExecutionView = ({
                           >
                             <option className={isDark ? 'bg-slate-900 text-white font-mono' : 'bg-white text-slate-900 font-mono'} value="GERAL">Geral</option>
                             <option className={isDark ? 'bg-slate-900 text-white font-mono' : 'bg-white text-slate-900 font-mono'} value="NÃO CLASSIFICADA">Não Classificada</option>
-                            {unidades.map(u => (
-                              <option className={isDark ? 'bg-slate-900 text-white font-mono' : 'bg-white text-slate-900 font-mono'} key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
+                            {knowledgeBases.map(kb => (
+                              <option className={isDark ? 'bg-slate-900 text-white font-mono' : 'bg-white text-slate-900 font-mono'} key={kb.id} value={kb.nome.toUpperCase()}>{kb.nome}</option>
                             ))}
+                            {currentTaskData.area_tematica && 
+                             currentTaskData.area_tematica !== 'GERAL' && 
+                             currentTaskData.area_tematica !== 'NÃO CLASSIFICADA' && 
+                             !knowledgeBases.some(kb => kb.nome.toUpperCase() === currentTaskData.area_tematica.toUpperCase()) && (
+                              <option className={isDark ? 'bg-slate-900 text-white font-mono' : 'bg-white text-slate-900 font-mono'} value={currentTaskData.area_tematica.toUpperCase()}>{currentTaskData.area_tematica}</option>
+                            )}
                           </select>
                         </div>
 

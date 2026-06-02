@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import {
   Tarefa, Status, EntregaInstitucional, AtividadeRealizada,
@@ -1233,6 +1233,22 @@ const App: React.FC = () => {
   const [atividadesPGC, setAtividadesPGC] = useState<AtividadeRealizada[]>([]);
   const [afastamentos, setAfastamentos] = useState<Afastamento[]>([]);
   const [pgcSubView, setPgcSubView] = useState<'audit' | 'heatmap' | 'config' | 'plano' | 'status' | 'automatizadas'>('audit');
+  const [selectedPgdAreas, setSelectedPgdAreas] = useState<string[]>(() => {
+    const saved = localStorage.getItem('pgd_areas_tematicas_config');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    return ['CLC', 'Assistência Estudantil'];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('pgd_areas_tematicas_config', JSON.stringify(selectedPgdAreas));
+  }, [selectedPgdAreas]);
+
   const [pgdGeneratingByEntrega, setPgdGeneratingByEntrega] = useState<Record<string, boolean>>({});
   const [pgdRawTextProcessingByEntrega, setPgdRawTextProcessingByEntrega] = useState<Record<string, boolean>>({});
   const [unidades, setUnidades] = useState<{ id: string, nome: string }[]>([]);
@@ -4445,25 +4461,84 @@ const App: React.FC = () => {
   }, [searchTerm, tarefasAgrupadas, expandedSections]);
   // No PGC, filtramos as tarefas pelo período selecionado (mês/ano)
   // No PGC, filtramos as tarefas pelo período selecionado (mês/ano)
-  const pgcTasks: Tarefa[] = useMemo(() => {
-    // Normalização agressiva para comparação de texto
+  // Helper de filtragem de tarefas no PGD com base nas áreas selecionadas
+  const isTaskInSelectedPgdAreas = useCallback((t: Tarefa) => {
     const norm = (val: any) => {
       if (!val) return "";
-      return String(val).toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      return String(val).toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
     };
+
+    const taskProj = norm(t.projeto);
+    const taskCat = norm(t.area_tematica);
+
+    return selectedPgdAreas.some(area => {
+      const normArea = norm(area);
+      if (normArea === 'CLC') {
+        return taskProj.includes('CLC') || taskCat === 'CLC';
+      }
+      if (normArea === 'ASSISTENCIA ESTUDANTIL' || normArea === 'ASSIST') {
+        return taskProj.includes('ASSIST') || taskProj.includes('ESTUDANTIL') || taskCat.includes('ASSIST');
+      }
+      return taskCat === normArea || taskProj === normArea || taskCat.includes(normArea) || taskProj.includes(normArea);
+    });
+  }, [selectedPgdAreas]);
+
+  // Lista dinâmica de áreas e projetos com tarefas cadastradas, deduplicadas por nome normalizado
+  const allAvailablePgdAreas = useMemo(() => {
+    const map = new Map<string, string>(); // norm -> original
+    
+    // Garantir as áreas padrão do sistema
+    map.set('CLC', 'CLC');
+    map.set('ASSISTENCIA ESTUDANTIL', 'Assistência Estudantil');
+
+    const normalize = (val: string) => val.toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+
+    tarefas.forEach(t => {
+      if (t.area_tematica && t.area_tematica.trim()) {
+        const val = t.area_tematica.trim();
+        const normVal = normalize(val);
+        if (normVal && normVal !== 'SEM CATEGORIA' && normVal !== 'SEM AREA TEMATICA') {
+          if (!map.has(normVal)) {
+            map.set(normVal, val);
+          }
+        }
+      }
+      if (t.projeto && t.projeto.trim()) {
+        const val = t.projeto.trim();
+        const normVal = normalize(val);
+        if (normVal && normVal !== 'SEM PROJETO' && normVal !== '-') {
+          if (!map.has(normVal)) {
+            map.set(normVal, val);
+          }
+        }
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [tarefas]);
+
+  const handleTogglePgdArea = (area: string) => {
+    setSelectedPgdAreas(prev => {
+      if (prev.includes(area)) {
+        return prev.filter(a => a !== area);
+      } else {
+        return [...prev, area];
+      }
+    });
+  };
+
+  const pgcTasks: Tarefa[] = useMemo(() => {
     return tarefas.filter(t => {
       if (t.status === 'excluído' as any) return false;
-      const proj = norm(t.projeto);
-      const cat = norm(t.area_tematica);
-      // Identificadores das unidades PGD/PGC - Pelo PROJETO ou CATEGORIA
-      const isCLC = proj.includes('CLC') || cat === 'CLC';
-      const isASSIST = proj.includes('ASSIST') || proj.includes('ESTUDANTIL') || cat.includes('ASSIST');
-      const isPgcUnit = isCLC || isASSIST;
+      
+      const isPgcUnit = isTaskInSelectedPgdAreas(t);
       // Verifica se está vinculada a qualquer entrega institucional
       const linkedIds = Array.isArray(t.entregas_relacionadas) ? t.entregas_relacionadas.filter(id => !!id) : [];
       const isLinkedAtAll = linkedIds.length > 0;
+      
       // Regra fundamental: Se não é unidade PGD e não foi vinculado manualmente, não entra no PGC
       if (!isPgcUnit && !isLinkedAtAll) return false;
+      
       // Se estiver vinculado, aplicamos a regra de exibição temporal (mês atual)
       if (isLinkedAtAll) {
         if (!t.data_limite || t.data_limite === "-" || t.data_limite === "0000-00-00") return true;
@@ -4480,38 +4555,34 @@ const App: React.FC = () => {
       // Se for unidade PGD mas ainda não vinculado, aparece no PGC (staging area)
       return isPgcUnit;
     });
-  }, [tarefas, currentMonth, currentYear]);
+  }, [tarefas, currentMonth, currentYear, isTaskInSelectedPgdAreas]);
+
   const pgcEntregas: EntregaInstitucional[] = useMemo(() => entregas.filter(e => {
     return e.mes === currentMonth && e.ano === currentYear;
   }), [entregas, currentMonth, currentYear]);
+
   const primaryCalendarEvents = useMemo(() => {
     return googleCalendarEvents.filter(event => !event.calendar_id || event.calendar_id === 'primary');
   }, [googleCalendarEvents]);
+
   const pgcTasksAguardando: Tarefa[] = useMemo(() => {
     const currentDeliveryIds = pgcEntregas.map(e => e.id);
-    const norm = (val: any) => (val || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
     return pgcTasks.filter(t => {
-      // Regra 1: Deve ser da categoria CLC ou ASSISTÊNCIA
-      const isCLC = norm(t.area_tematica) === 'CLC' || (t.projeto && norm(t.projeto).includes('CLC'));
-      const isAssist = norm(t.area_tematica).includes('ASSIST') || (t.projeto && (norm(t.projeto).includes('ASSIST') || norm(t.projeto).includes('ESTUDANTIL')));
-      if (!isCLC && !isAssist) return false;
+      // Regra 1: Deve ser das áreas selecionadas
+      if (!isTaskInSelectedPgdAreas(t)) return false;
+      
       // Regra de Filtro por Data (Visualização Diária)
-      // Se estiver na visão de dia, mostra APENAS o que está agendado para aquele dia específico
       if (calendarViewMode === 'day') {
         const targetDateStr = calendarDate.toLocaleDateString('en-CA');
         if (t.data_limite !== targetDateStr) return false;
       }
-      // Regra 2: Verifica vínculos com entregas DO MÃŠS ATUAL
+      // Regra 2: Verifica vínculos com entregas DO MÊS ATUAL
       const linkedIds = Array.isArray(t.entregas_relacionadas) ? t.entregas_relacionadas : [];
       const isLinkedToCurrent = linkedIds.some(id => currentDeliveryIds.includes(id));
-      // Se JÃ estiver vinculado a uma entrega deste mês, não precisa aparecer na lista de "Aguardando"
-      // POIS ela já aparecerá dentro do card da entrega correspondente.
-      // Se estiver vinculado a entrega de OUTRO mês, deve aparecer aqui? 
-      // O usuário disse: "todas as tarefas que tem a tag CLC ou a tag assistência estudantil devam constar nessa aba Audit PGC"
-      // E "Se ela estiver vinculada a uma das atividades já cadastradas, ótimo, senão o sistema deve proporcionar uma forma inteligente de fazer essa vinculação."
       return !isLinkedToCurrent;
     });
-  }, [pgcTasks, pgcEntregas, calendarViewMode, calendarDate]);
+  }, [pgcTasks, pgcEntregas, calendarViewMode, calendarDate, isTaskInSelectedPgdAreas]);
+
   const allUnidades = useMemo(() => {
     const fixed = ['CLC', 'Assistência Estudantil'];
     const dbUnidades = unidades.map(u => u.nome);
@@ -4786,7 +4857,7 @@ const App: React.FC = () => {
                 { id: 'contacts', label: 'Contatos', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>, active: viewMode === 'contacts', onClick: () => { setActiveModule('acoes'); setViewMode('contacts'); } },
                 { id: 'sistemas', label: 'Sistemas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>, active: viewMode === 'sistemas-dev', onClick: () => { setActiveModule('acoes'); setViewMode('sistemas-dev'); } },
                 { id: 'conhecimento', label: 'Conhecimento', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>, active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
-                { id: 'rag-bases', label: 'Bases RAG', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>, active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
+                { id: 'rag-bases', label: 'Áreas Temáticas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>, active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
                 { id: 'ferramentas', label: 'Ferramentas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>, active: viewMode === 'ferramentas', onClick: () => { setActiveModule('acoes'); setViewMode('ferramentas'); setActiveFerramenta(null); } },
               ].map(item => (
                 <button
@@ -5038,7 +5109,7 @@ const App: React.FC = () => {
                       >
                         <h1 className={`text-xl font-black tracking-tight uppercase font-mono ${isDarkTheme ? 'text-slate-100' : 'text-slate-900'}`}>
                           {viewMode === 'services' ? 'Serviços' :
-                            viewMode === 'rag-bases' ? 'Bases RAG' :
+                            viewMode === 'rag-bases' ? 'Áreas Temáticas' :
                               viewMode === 'knowledge' ? 'Conhecimento' :
                                 viewMode === 'sistemas-dev' ? 'Sistemas' :
                                   viewMode === 'ferramentas' ? 'Ferramentas' :
@@ -5228,7 +5299,7 @@ const App: React.FC = () => {
                       { label: 'Contatos', active: viewMode === 'contacts', onClick: () => { setActiveModule('acoes'); setViewMode('contacts'); } },
                       { label: 'Sistemas', active: viewMode === 'sistemas-dev', onClick: () => { setActiveModule('acoes'); setViewMode('sistemas-dev'); } },
                       { label: 'Conhecimento', active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
-                      { label: 'Bases RAG', active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
+                      { label: 'Áreas Temáticas', active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
                       { label: 'Ferramentas', active: viewMode === 'ferramentas', onClick: () => { setActiveModule('acoes'); setViewMode('ferramentas'); setActiveFerramenta(null); } },
                     ].map((item, idx) => (
                       <button
@@ -7155,6 +7226,12 @@ const App: React.FC = () => {
                       >
                         Ações
                       </button>
+                      <button
+                        onClick={() => setPgcSubView('config')}
+                        className={`px-4 py-3 md:py-4 text-[10px] font-black uppercase tracking-[0.2em] transition-all border-b-4 font-mono ${pgcSubView === 'config' ? 'border-primary-tactile text-primary-tactile' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                      >
+                        Configuração
+                      </button>
                     </div>
                     {pgcSubView === 'audit' && (
                       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-4 h-[calc(100vh-200px)] pb-4">
@@ -7594,6 +7671,70 @@ const App: React.FC = () => {
                         </div>
                       </div>
                     )}
+                    {pgcSubView === 'config' && (
+                      <div className="animate-in fade-in slide-in-from-bottom-4 duration-300 space-y-6">
+                        <div className={`border-2 border-border-grid rounded-none overflow-hidden ${isDarkTheme ? 'bg-slate-900' : 'bg-white shadow-xl'} p-6 md:p-8`}>
+                          <div className="flex items-center justify-between mb-8 pb-4 border-b-2 border-border-grid">
+                            <div>
+                              <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight font-mono uppercase">Configurações do PGD</h3>
+                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.3em] mt-1 font-mono">Seleção de Áreas Temáticas para o Resumo das Entregas</p>
+                            </div>
+                            <div className="bg-slate-900 text-primary-tactile p-3 rounded-none border border-border-grid">
+                              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                              </svg>
+                            </div>
+                          </div>
+
+                          <div className="space-y-6">
+                            <div className="bg-slate-50 dark:bg-slate-800/50 p-4 border border-border-grid font-mono text-[10px] text-slate-500 uppercase tracking-widest leading-relaxed">
+                              💡 Selecione abaixo as áreas temáticas ou tags de projetos que devem ser consideradas no PGD. As tarefas que pertencerem a qualquer uma das áreas selecionadas serão incluídas na coluna de <strong>Pendentes</strong> do <strong>Resumo</strong>, para que você possa vinculá-las às suas Entregas Institucionais do mês.
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                              {allAvailablePgdAreas.map(area => {
+                                const isChecked = selectedPgdAreas.includes(area);
+                                return (
+                                  <button
+                                    key={area}
+                                    onClick={() => handleTogglePgdArea(area)}
+                                    className={`p-6 border-2 transition-all text-left flex items-center justify-between group relative overflow-hidden ${
+                                      isChecked
+                                        ? 'border-primary-tactile bg-slate-50 dark:bg-slate-800 shadow-md'
+                                        : 'border-border-grid bg-white dark:bg-slate-900 hover:border-slate-400'
+                                    }`}
+                                  >
+                                    {isChecked && (
+                                      <div className="absolute top-0 left-0 w-1.5 h-full bg-primary-tactile"></div>
+                                    )}
+                                    <div className="pr-4">
+                                      <p className={`text-xs font-black uppercase tracking-wider font-mono ${isDarkTheme ? 'text-white' : 'text-slate-900'}`}>
+                                        {area}
+                                      </p>
+                                      <p className="text-[9px] text-slate-400 font-mono mt-1">
+                                        {isChecked ? 'Incluído no PGD' : 'Oculto do PGD'}
+                                      </p>
+                                    </div>
+                                    <div className={`w-5 h-5 flex items-center justify-center border-2 shrink-0 transition-all ${
+                                      isChecked
+                                        ? 'border-primary-tactile bg-primary-tactile text-white'
+                                        : 'border-slate-300 group-hover:border-slate-400'
+                                    }`}>
+                                      {isChecked && (
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+                                        </svg>
+                                      )}
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </main>
@@ -7683,6 +7824,7 @@ const App: React.FC = () => {
             ) : (
               <TaskEditModal
                 unidades={unidades}
+                knowledgeBases={knowledgeBases}
                 task={selectedTask}
                 onSave={handleUpdateTarefa}
                 onDelete={handleDeleteTarefa}

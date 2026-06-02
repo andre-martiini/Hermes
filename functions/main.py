@@ -2046,6 +2046,10 @@ def run_full_sync(trigger_reason='unspecified'):
 
             sync_system_repositories_to_rag(db, sync_ref, logs)
 
+            # Sincronização Automática de Itens de Conhecimento RAG Pendentes (Arquivos e Links)
+            log_to_firestore(sync_ref, logs, "[SYNC] Sincronizando e vetorizando itens de conhecimento pendentes...", True)
+            sync_rag_knowledge_items_internal(db, sync_ref, logs)
+
             sync_boletos_gmail(gs, sync_ref, logs)
 
             sync_state = sync_ref.get().to_dict() or {}
@@ -3756,6 +3760,92 @@ def sync_system_repositories_to_rag(db, sync_ref, logs):
         log_to_firestore(sync_ref, logs, f"[RAG] Concluido. {synced_count} sincronizado(s), {skipped_count} sem alteracao, {failed_count} falha(s).", True)
     except Exception as e:
         log_to_firestore(sync_ref, logs, f"[RAG][!] Erro geral na sincronizacao de sistemas: {e}", True)
+
+
+def sync_rag_knowledge_items_internal(db, sync_ref, logs):
+    """Sincroniza e vetoriza itens de conhecimento (arquivos e links) pendentes na coleção 'conhecimento'."""
+    try:
+        api_key = get_gemini_api_key()
+        if not api_key:
+            log_to_firestore(sync_ref, logs, "[RAG][!] Sincronização falhou: Chave Gemini não configurada.", True)
+            return
+
+        # Busca todos os itens da coleção 'conhecimento'
+        docs = db.collection('conhecimento').stream()
+        pending_items = []
+        for doc in docs:
+            data = doc.to_dict() or {}
+            # Se não tiver embedding ou se for link sem texto_bruto
+            if not data.get('embedding') or (data.get('tipo_arquivo') == 'link' and not data.get('texto_bruto')):
+                pending_items.append((doc.id, data, doc.reference))
+
+        if not pending_items:
+            log_to_firestore(sync_ref, logs, "[RAG] Nenhum item pendente de vetorização ou sincronização.", True)
+            return
+
+        log_to_firestore(sync_ref, logs, f"[RAG] Encontrados {len(pending_items)} itens de conhecimento para sincronizar/vetorizar.", True)
+
+        import requests
+        from google import genai
+
+        success_count = 0
+        for item_id, item_data, doc_ref in pending_items:
+            titulo = item_data.get('titulo') or 'Sem título'
+            tipo = item_data.get('tipo_arquivo', '').lower()
+            url = item_data.get('url_drive')
+            texto_bruto = item_data.get('texto_bruto', '')
+
+            try:
+                # 1. Extração de texto para links pendentes
+                if tipo == 'link' and url and not texto_bruto:
+                    log_to_firestore(sync_ref, logs, f"[RAG] Extraindo texto do link: {titulo} ({url})...")
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, yGecko) Chrome/91.0.4472.124 Safari/537.36'
+                    }
+                    resp = requests.get(url, headers=headers, timeout=15)
+                    if resp.status_code == 200:
+                        html_truncated = resp.text[:120000]
+                        client = genai.Client(api_key=api_key)
+                        prompt = "Extraia todo o texto relevante e útil deste HTML para indexação em um RAG. Ignore tags, cabeçalhos de navegação do site, links de rodapé e propagandas."
+                        response = client.models.generate_content(
+                            model="gemini-3.5-flash",
+                            contents=[prompt, html_truncated]
+                        )
+                        if response.text:
+                            texto_bruto = response.text.strip()
+                            doc_ref.update({
+                                'texto_bruto': texto_bruto,
+                                'texto_extraido_por': 'sync_runner_link_scraper'
+                            })
+                            log_to_firestore(sync_ref, logs, f"[RAG] Texto extraído com sucesso para o link: {titulo}")
+                    else:
+                        log_to_firestore(sync_ref, logs, f"[RAG][!] Falha ao baixar link {url} (Status: {resp.status_code})")
+
+                # 2. Indexação de arquivos pendentes
+                if tipo != 'link' and not texto_bruto:
+                    log_to_firestore(sync_ref, logs, f"[RAG] Indexando arquivo pendente: {titulo} ({item_id})...")
+                    start_file_indexing(item_id, item_data)
+                    # start_file_indexing já gera texto_bruto e o trigger do Firestore cuida do embedding.
+                    # Mas vamos recarregar o texto_bruto se foi salvo para podermos gerar o embedding no mesmo passo
+                    updated_doc = doc_ref.get()
+                    if updated_doc.exists:
+                        item_data = updated_doc.to_dict() or {}
+                        texto_bruto = item_data.get('texto_bruto', '')
+
+                # 3. Geração de Embedding se tiver texto bruto mas não tiver embedding
+                if texto_bruto and not item_data.get('embedding'):
+                    log_to_firestore(sync_ref, logs, f"[RAG] Gerando embedding para: {titulo}...")
+                    embedding_vec = get_embedding(texto_bruto, api_key=api_key)
+                    doc_ref.update({'embedding': embedding_vec})
+                    log_to_firestore(sync_ref, logs, f"[RAG][+] Sincronizado e vetorizado: {titulo}")
+                    success_count += 1
+
+            except Exception as item_err:
+                log_to_firestore(sync_ref, logs, f"[RAG][!] Erro ao processar item {titulo} ({item_id}): {item_err}")
+
+        log_to_firestore(sync_ref, logs, f"[RAG] Concluído. {success_count} item(ns) vetorizado(s) com sucesso.", True)
+    except Exception as e:
+        log_to_firestore(sync_ref, logs, f"[RAG][!] Erro geral na sincronização de RAG: {e}", True)
 
 
 @https_fn.on_call(memory=options.MemoryOption.GB_1, timeout_sec=180, cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"]))
@@ -8766,6 +8856,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     data_limite = today_brt
                 task_id = str(_uuid.uuid4())[:20]
 
+                from hermes_core_logic import validate_and_link_area_tematica
+                area_validada, base_id = validate_and_link_area_tematica(db, area_tematica)
+
                 # Converte lista de strings em array de objetos para o React
                 plano_convertido = [
                     {
@@ -8816,7 +8909,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     # Campos fornecidos pelo LLM
                     "titulo": titulo.strip(),
                     "descricao": descricao or "",
-                    "area_tematica": (area_tematica or "GERAL").upper(),
+                    "area_tematica": area_validada,
+                    "base_conhecimento": base_id,
                     "data_limite": data_limite or None,
                     "tipo_acao": tipo_acao if tipo_acao in ("fast", "deep") else "fast",
                     "tags": list(tags) if tags else [],
@@ -9785,8 +9879,22 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 f"{weights_md}\n"
             )
 
+        allowed_areas = ["GERAL", "NÃO CLASSIFICADA"]
+        try:
+            kb_docs = db.collection('knowledge_bases').stream()
+            for doc in kb_docs:
+                kb_name = doc.to_dict().get('nome')
+                if kb_name:
+                    allowed_areas.append(kb_name.upper())
+        except Exception as e:
+            print(f"[Copiloto] Erro ao carregar áreas temáticas: {e}")
+        allowed_areas_str = ", ".join(allowed_areas)
+
         system_instruction = (
             f"Você é o Copiloto Hermes, estrategista sênior de processos. Hoje é {today_str} e o horário local atual é {now_time_str}. "
+            f"Ao criar ou propor ações, você DEVE classificar a ação em uma das seguintes áreas temáticas permitidas. "
+            f"JAMAIS crie novas áreas temáticas nem use nomes fora desta lista: [{allowed_areas_str}]. "
+            f"Se nenhuma se aplicar, use 'GERAL'. "
             f"{('CONTEXTO TÉCNICO VINCULADO (OBRIGATÓRIO): ' + (f'sistemaId={system_id}, ' if system_id else '') + (f'taskId={task_id}. ' if task_id else '')) if (system_id or task_id) else ''}"
             f"\n\n{mode_context}"
             "\n\n## CORE ESTÁTICO DO COPILOTO\n"

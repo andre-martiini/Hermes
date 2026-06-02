@@ -1042,13 +1042,13 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
       const tagsDisponiveis = [
         'GERAL',
         'NÃO CLASSIFICADA',
-        ...unidades.map(u => u.nome.toUpperCase())
+        ...knowledgeBases.map(kb => kb.nome.toUpperCase())
       ];
 
-      const unit = formData.area_tematica && formData.area_tematica !== 'GERAL' && formData.area_tematica !== 'NÃO CLASSIFICADA'
-        ? unidades.find(u => u.nome.toUpperCase() === formData.area_tematica)
+      const kb = formData.area_tematica && formData.area_tematica !== 'GERAL' && formData.area_tematica !== 'NÃO CLASSIFICADA'
+        ? knowledgeBases.find(b => b.nome.toUpperCase() === formData.area_tematica.toUpperCase())
         : null;
-      const computedRagContext = unit ? (knowledgeBases.find(b => b.sistema_id === unit.id)?.id || 'Nenhum') : 'Nenhum';
+      const computedRagContext = kb ? (kb.id || 'Nenhum') : 'Nenhum';
 
       const response = await generateFunc({
         content: inputText,
@@ -1363,13 +1363,16 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                         className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
                       >
                         <option value="GERAL">Geral</option>
-                        <option value="SAÚDE">Saúde</option>
-                        <option value="FINANCEIRO">Financeiro</option>
-                        <option value="SISTEMA">Sistema</option>
                         <option value="NÃO CLASSIFICADA">Não Classificada</option>
-                        {unidades.map(u => (
-                          <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
+                        {knowledgeBases.map(kb => (
+                          <option key={kb.id} value={kb.nome.toUpperCase()}>{kb.nome}</option>
                         ))}
+                        {formData.area_tematica && 
+                         formData.area_tematica !== 'GERAL' && 
+                         formData.area_tematica !== 'NÃO CLASSIFICADA' && 
+                         !knowledgeBases.some(kb => kb.nome.toUpperCase() === formData.area_tematica.toUpperCase()) && (
+                          <option value={formData.area_tematica.toUpperCase()}>{formData.area_tematica}</option>
+                        )}
                       </select>
                     </div>
                   </div>
@@ -1495,10 +1498,10 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
                 data_inicio: formData.data_limite || '',
                 origem: tipoAcao === 'deep' ? origemIngestao : 'manual',
                 base_conhecimento: (() => {
-                  const unit = formData.area_tematica && formData.area_tematica !== 'GERAL' && formData.area_tematica !== 'NÃO CLASSIFICADA'
-                    ? unidades.find(u => u.nome.toUpperCase() === formData.area_tematica)
+                  const kb = formData.area_tematica && formData.area_tematica !== 'GERAL' && formData.area_tematica !== 'NÃO CLASSIFICADA'
+                    ? knowledgeBases.find(b => b.nome.toUpperCase() === formData.area_tematica.toUpperCase())
                     : null;
-                  return unit ? (knowledgeBases.find(b => b.sistema_id === unit.id)?.id || undefined) : undefined;
+                  return kb ? (kb.id || undefined) : undefined;
                 })(),
                 ...(extraContextFiles.some(f => f.status === 'ready') ? {
                   extra_context_id: extraContextId,
@@ -1517,7 +1520,7 @@ export const TaskCreateModal = ({ unidades, knowledgeBases = [], knowledgeItems 
     </div>
   );
 };
-export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showAlert, showConfirm, pgcEntregas = [], existingTags = [] }: { unidades: { id: string, nome: string }[], task: Tarefa, onSave: (id: string, updates: Partial<Tarefa>) => void, onDelete: (id: string) => void, onClose: () => void, showAlert: (title: string, message: string) => void, showConfirm: (title: string, message: string, onConfirm: () => void) => void, pgcEntregas?: EntregaInstitucional[], existingTags?: string[] }) => {
+export const TaskEditModal = ({ unidades, knowledgeBases = [], task, onSave, onDelete, onClose, showAlert, showConfirm, pgcEntregas = [], existingTags = [] }: { unidades: { id: string, nome: string }[], knowledgeBases?: BaseConhecimento[], task: Tarefa, onSave: (id: string, updates: Partial<Tarefa>) => void, onDelete: (id: string) => void, onClose: () => void, showAlert: (title: string, message: string) => void, showConfirm: (title: string, message: string, onConfirm: () => void) => void, pgcEntregas?: EntregaInstitucional[], existingTags?: string[] }) => {
   const [tipoAcao, setTipoAcao] = useState<TipoAcao>(task.tipo_acao || 'fast');
   const [formData, setFormData] = useState({
     titulo: task.titulo,
@@ -1729,13 +1732,16 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
                 className="w-full bg-slate-100 border-none rounded-xl px-4 py-2 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-slate-900 transition-all font-black uppercase text-[9px] tracking-widest"
               >
                 <option value="GERAL">Geral</option>
-                <option value="SAÚDE">Saúde</option>
-                <option value="FINANCEIRO">Financeiro</option>
-                <option value="SISTEMA">Sistema</option>
                 <option value="NÃO CLASSIFICADA">Não Classificada</option>
-                {unidades.map(u => (
-                  <option key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
+                {knowledgeBases.map(kb => (
+                  <option key={kb.id} value={kb.nome.toUpperCase()}>{kb.nome}</option>
                 ))}
+                {formData.area_tematica && 
+                 formData.area_tematica !== 'GERAL' && 
+                 formData.area_tematica !== 'NÃO CLASSIFICADA' && 
+                 !knowledgeBases.some(kb => kb.nome.toUpperCase() === formData.area_tematica.toUpperCase()) && (
+                  <option value={formData.area_tematica.toUpperCase()}>{formData.area_tematica}</option>
+                )}
               </select>
             </div>
           </div>
@@ -1757,7 +1763,13 @@ export const TaskEditModal = ({ unidades, task, onSave, onDelete, onClose, showA
                 tags,
                 tipo_acao: tipoAcao,
                 plano_acao: planoAcao,
-                data_inicio: formData.data_limite || ''
+                data_inicio: formData.data_limite || '',
+                base_conhecimento: (() => {
+                  const kb = formData.area_tematica && formData.area_tematica !== 'GERAL' && formData.area_tematica !== 'NÃO CLASSIFICADA'
+                    ? knowledgeBases.find(b => b.nome.toUpperCase() === formData.area_tematica.toUpperCase())
+                    : null;
+                  return kb ? kb.id : undefined;
+                })()
               });
               onClose();
             }}
