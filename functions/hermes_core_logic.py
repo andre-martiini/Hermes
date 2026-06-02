@@ -2297,6 +2297,27 @@ def _is_explicit_web_request(text: str) -> bool:
         "link externo",
         "fonte externa",
         "fonte oficial",
+        # Sinais de intenção comercial/externa — não há sentido buscar isso no sistema interno
+        "preco",
+        "precos",
+        "valor",
+        "valores",
+        "quanto custa",
+        "quanto custam",
+        "onde comprar",
+        "onde encontrar",
+        "onde vende",
+        "comprar",
+        "produto",
+        "peca",
+        "pecas",
+        "loja",
+        "autopeças",
+        "autopecas",
+        "cotacao",
+        "orcamento",
+        "oferta",
+        "promocao",
     ]
     return any(marker in lowered for marker in web_markers)
 
