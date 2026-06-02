@@ -58,6 +58,11 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Instalar dependencias do frontend
         run: npm install
 
@@ -67,9 +72,18 @@ jobs:
         run: npm run build
 
       # Necessario para o Firebase descobrir os triggers das Functions Node.
-      # (As Functions Python sao resolvidas pelo proprio Firebase via venv.)
       - name: Instalar dependencias das Functions Node
         run: npm install --prefix functions_node
+
+      # O Firebase descobre as Functions Python importando o codigo (main.py),
+      # entao o virtualenv com TODAS as dependencias precisa existir em
+      # functions/venv antes do deploy. Sem isso o deploy falha com
+      # "Missing virtual environment at venv directory".
+      - name: Preparar virtualenv das Functions Python
+        run: |
+          python -m venv functions/venv
+          functions/venv/bin/python -m pip install --upgrade pip
+          functions/venv/bin/python -m pip install -r functions/requirements.txt
 
       - name: Autenticar no Google Cloud / Firebase
         uses: google-github-actions/auth@v2
