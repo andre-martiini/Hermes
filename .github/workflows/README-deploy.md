@@ -44,6 +44,8 @@ Como gerar:
    - `Service Account User`
    - `Cloud Datastore Index Admin` (para os índices do Firestore)
    - `Firebase Rules Admin` (para as regras do Storage)
+   - `Cloud Scheduler Admin` (para as functions **agendadas**, que criam/atualizam
+     jobs do Cloud Scheduler — ex.: `scheduled_sync`, `check_and_send_reminders`)
    - `Secret Manager Admin` *(somente se o deploy precisar criar/atualizar
      secrets das functions)*
 4. Na aba **Keys** da Service Account → **Add Key → Create new key → JSON**.
@@ -53,6 +55,10 @@ Como gerar:
 > Dica: se preferir o mínimo de configuração e já confiar na conta, o papel
 > `Editor` + `Firebase Admin` no projeto também funciona — mas a lista acima é
 > a recomendação de menor privilégio.
+
+> **APIs do projeto:** o deploy de Cloud Functions de 2ª geração também exige que
+> a **Cloud Billing API** esteja habilitada no projeto. Habilite em:
+> https://console.cloud.google.com/apis/library/cloudbilling.googleapis.com?project=gestao-hermes
 
 ### 2. `GEMINI_API_KEY`
 
