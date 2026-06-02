@@ -6,7 +6,7 @@ import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCc00Qqsa7Zgfx9NZkLoPj_gvXcuMczuxk",
-  authDomain: "gestao-hermes.firebaseapp.com",
+  authDomain: "gestao-hermes.web.app",
   projectId: "gestao-hermes",
   storageBucket: "gestao-hermes.firebasestorage.app",
   messagingSenderId: "1003307358410",
