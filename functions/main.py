@@ -8751,8 +8751,6 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             plano_acao: list[str] = [],
             sourceGmailMessageId: str = None,
             sourceKnowledgeText: str = None,
-            horario_inicio: str = None,
-            horario_fim: str = None,
         ):
             """
             Cria uma nova ação/tarefa no sistema Hermes após confirmação explícita do usuário.
@@ -8769,6 +8767,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             - sourceGmailMessageId: se a ação veio de um e-mail, passe o ID da mensagem para controle de duplicação.
             - sourceKnowledgeText: se houver texto do e-mail longo a ser arquivado, passe-o aqui para instanciar um Nó de RAG.
             Retorna o ID da tarefa criada ou mensagem de erro.
+            NÃO use horários — ações criadas pelo copiloto nunca têm horário_inicio nem horário_fim.
             """
             try:
                 import uuid as _uuid
@@ -8848,21 +8847,11 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "pool_dados": [],
                     "plano_acao_historico": [],
                     "sync_status": "new",
-                    "horario_inicio": horario_inicio,
-                    "horario_fim": horario_fim,
+                    "horario_inicio": None,
+                    "horario_fim": None,
 
                     "sourceGmailMessageId": sourceGmailMessageId or None,
                     "sourceKnowledgeId": source_knowledge_id or None,}
-
-                try:
-                    from main import get_calendar_service, get_target_calendar_id
-                    import hermes_calendar_tools as hc_tools
-                    c_service = get_calendar_service()
-                    c_id = get_target_calendar_id(db)
-                    if c_service and c_id and horario_inicio and horario_fim:
-                        hc_tools.reagendar_acoes_hermes(db, c_service, c_id, data_limite, horario_inicio, horario_fim)
-                except Exception as e:
-                    print(f"[Copiloto] Erro ao reagendar: {e}")
 
                 db.collection("tarefas").document(task_id).set(doc)
                 print(f"[Copiloto] Ação criada: id={task_id}, titulo='{titulo}'")
