@@ -1075,6 +1075,74 @@ def _extract_natural_context_query(text: str) -> str | None:
     return None
 
 
+def _is_list_actions_request(text: str) -> tuple[bool, str | None]:
+    """Detects 'liste as ações de hoje' style requests.
+    Returns (is_match, date_iso_or_None) — date_iso is None when no date was specified.
+    """
+    lowered = _normalize_for_matching(text).strip()
+    if not lowered or len(text.strip()) > 250:
+        return False, None
+
+    list_markers = (
+        "liste", "listar", "me liste",
+        "mostre", "mostrar", "me mostre", "mostra", "me mostra",
+        "me da", "me de",
+        "quais sao",
+    )
+    action_markers = ("acoes", "tarefas", "atividades")
+
+    has_list = any(marker in lowered for marker in list_markers)
+    has_action = any(marker in lowered for marker in action_markers)
+
+    wants_context = "contexto" in lowered and any(m in lowered for m in ("ative", "ativa", "entre", "entra"))
+    has_file = any(m in lowered for m in ("arquivo", "arquivos", "documento", "documentos", "link", "links", "anexo", "anexos"))
+
+    if not (has_list and has_action) or wants_context or has_file:
+        return False, None
+
+    date_iso = _requested_date_from_text(text)
+    return True, date_iso
+
+
+def _fetch_actions_by_date(date_iso: str | None) -> list:
+    """Fetches actions filtered by data_limite == date_iso, or all if date_iso is None."""
+    from tools.busca_grafo import buscar_tarefas
+    if date_iso:
+        res = buscar_tarefas(
+            "",
+            match_mode="any",
+            limite=200,
+            data_limite_inicio=date_iso,
+            data_limite_fim=date_iso,
+        )
+    else:
+        res = buscar_tarefas("", match_mode="any", limite=200)
+    return res.get("resultados", [])
+
+
+def _format_actions_simple_list(results: list, date_iso: str | None) -> str:
+    """Formats a plain bullet-point list of action titles."""
+    if date_iso:
+        try:
+            d = datetime.fromisoformat(date_iso)
+            date_label = d.strftime("%d/%m/%Y")
+        except Exception:
+            date_label = date_iso
+        header = f"Ações para <b>{date_label}</b>:"
+    else:
+        header = "Ações cadastradas:"
+
+    if not results:
+        return header + "\n\n<i>Nenhuma ação encontrada.</i>"
+
+    lines = [header, ""]
+    for r in results:
+        titulo = html.escape(r.get("titulo") or "sem título")
+        lines.append(f"• {titulo}")
+
+    return "\n".join(lines)
+
+
 def _is_reset_request(text: str) -> bool:
     """Detecta se o usuário quer resetar/limpar a sessão via linguagem natural."""
     lowered = _normalize_for_matching(text).strip()
@@ -3200,6 +3268,25 @@ def _process_telegram_message(db, data: dict):
             return
 
         response_text = f"Nenhuma acao encontrada para <i>{html.escape(natural_context_query or text)}</i>. Nao ativei contexto sem uma acao real."
+        _persist_turn_to_copilot(text, response_text, tools_used=["buscar_tarefas"])
+        _send_contextual_response(
+            db,
+            token,
+            chat_id,
+            response_text,
+            session=session,
+            response_mode=response_mode,
+            gemini_key=gemini_key,
+            voice_profile=voice_profile,
+            perf_state=perf_state,
+        )
+        return
+
+    # --- Deterministic action list ("liste as ações de hoje") ---
+    is_list_req, list_date = _is_list_actions_request(text)
+    if is_list_req:
+        results = _fetch_actions_by_date(list_date)
+        response_text = _format_actions_simple_list(results, list_date)
         _persist_turn_to_copilot(text, response_text, tools_used=["buscar_tarefas"])
         _send_contextual_response(
             db,
