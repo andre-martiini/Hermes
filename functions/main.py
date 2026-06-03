@@ -9252,6 +9252,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         return 'stand-by'
                     if raw in ('em andamento', 'andamento', 'pendente', 'aberto', 'aberta', 'reabrir'):
                         return 'em andamento'
+                    if raw in ('excluido', 'excluir', 'excluida', 'cancelado', 'cancelar', 'cancelada', 'deletar', 'deletado', 'apagar', 'remover'):
+                        return 'excluído'
                     return valor
 
                 task_ref = db.collection('tarefas').document(task_id)
@@ -9262,8 +9264,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
                 task_data = task_doc.to_dict()
 
-                if task_data.get('status') == 'concluído':
-                    return "ERRO|Esta ação já foi concluída e não pode ser editada."
+                if task_data.get('status') in ('concluído', 'excluído'):
+                    return "ERRO|Esta ação já foi concluída ou excluída e não pode ser editada."
 
                 # Monta o diff de campos (original vs. novo)
                 alteracoes_diff = {}
@@ -9754,6 +9756,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "Se o usuário disser 'confirmo' ou 'pode fazer' no chat, explique:\n"
             "  'A confirmação de segurança deve ser feita clicando no botão ✅ do card acima.'\n\n"
             "CAMPOS SUPORTADOS: titulo, descricao, data_limite, data_inicio, horario_inicio, horario_fim, status, tags, area_tematica, tipo_acao, notas.\n"
+            "STATUS VÁLIDOS: 'em andamento', 'stand-by', 'concluído', 'excluído'.\n"
+            "EXCLUSÃO DE AÇÃO: para excluir (apagar/deletar/cancelar) uma ação, use preparar_edicao_acao com alteracoes={\"status\": \"excluído\"}. "
+            "NÃO use 'cancelado' — o status correto para exclusão é 'excluído'.\n"
             "Para alteração do plano de ação (passos), use o fluxo de EDIÇÃO DE PLANO DE AÇÃO acima.\n\n"
             "## REAGENDAMENTO EM LOTE — REDISTRIBUIÇÃO DE AÇÕES (CRÍTICO)\n\n"
             "Quando o usuário pedir para mover, reagendar ou redistribuir múltiplas ações de uma vez "
@@ -10993,6 +10998,8 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
                 return 'stand-by'
             if raw in ('em andamento', 'andamento', 'pendente', 'aberto', 'aberta', 'reabrir'):
                 return 'em andamento'
+            if raw in ('excluido', 'excluir', 'excluida', 'cancelado', 'cancelar', 'cancelada', 'deletar', 'deletado', 'apagar', 'remover'):
+                return 'excluído'
             return valor
 
         updates = {}
@@ -11001,7 +11008,7 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
                 continue
             if campo == 'status':
                 novo_valor = _normalizar_status_acao(novo_valor)
-                if novo_valor not in ('em andamento', 'stand-by', 'concluído'):
+                if novo_valor not in ('em andamento', 'stand-by', 'concluído', 'excluído'):
                     continue
             updates[campo] = novo_valor
 
