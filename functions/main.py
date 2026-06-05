@@ -71,6 +71,8 @@ from knowledge_graph import (  # noqa: F401 — registra as Cloud Functions
 from hermes_core_logic import (  # noqa: F401 — registra as Cloud Functions
     telegramWebhook,
     on_telegram_inbound,
+    carregar_areas_tematicas_validas,
+    normalizar_area_tematica,
 )
 from gemini_cost_controls import check_and_increment_limit
 
@@ -7424,6 +7426,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         client = genai.Client(api_key=gemini_key)
         copilot_core = _get_copilot_core(db)
         copilot_soul = _get_copilot_soul(db)
+        # Áreas temáticas válidas: o copiloto só pode SELECIONAR uma existente, nunca inventar.
+        _areas_validas = carregar_areas_tematicas_validas(db)
         ai_profile = _bootstrap_user_ai_profile(db, user_uid)
         threading.Thread(
             target=_save_user_profile_signal,
@@ -8758,7 +8762,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             Parâmetros:
             - titulo: título obrigatório da ação
             - descricao: descrição detalhada (opcional)
-            - area_tematica: área temática (ex: 'LICITAÇÕES', 'RH', 'GERAL')
+            - area_tematica: escolha EXATAMENTE UMA das áreas temáticas válidas listadas no contexto do sistema; nunca invente uma nova. Se nenhuma se encaixar, use 'GERAL'.
             - data_limite: prazo no formato YYYY-MM-DD (opcional)
             - tipo_acao: 'fast' para ações rápidas, 'deep' para trabalho profundo
             - tags: lista de tags (opcional)
@@ -8772,6 +8776,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             try:
                 import uuid as _uuid
                 from datetime import datetime as _dt, timezone as _tz
+
+                # Garante que o copiloto só use áreas temáticas existentes (fallback 'GERAL').
+                area_tematica = normalizar_area_tematica(area_tematica, _areas_validas)
 
                 now_iso = _dt.now(_tz.utc).isoformat()
                 today_brt = (_dt.now(_tz.utc) + timedelta(hours=-3)).date().isoformat()
@@ -9984,6 +9991,9 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                + (f"sistemaId={system_id}, " if system_id else "")
                + (f"taskId={task_id}. " if task_id else "") if (system_id or task_id) else "")
             + f"\n\n{mode_context}"
+            + "\n\nÁREAS TEMÁTICAS VÁLIDAS (ao criar ações, escolha EXATAMENTE UMA desta lista; "
+            + "NUNCA invente outra): " + ", ".join(_areas_validas)
+            + ". Se nenhuma se encaixar, use 'GERAL'."
         )
 
         # --- RECUPERAÇÃO DE HISTÓRICO DA SESSÃO ---

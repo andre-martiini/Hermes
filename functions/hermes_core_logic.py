@@ -2157,6 +2157,30 @@ def _load_telegram_media_bytes(media_bytes_b64: str | None, storage_path: str | 
 # Gemini orchestration
 # ---------------------------------------------------------------------------
 
+def carregar_areas_tematicas_validas(db) -> list[str]:
+    """Lista canonica de areas tematicas = nomes das Unidades + GERAL/NAO CLASSIFICADA."""
+    nomes = []
+    try:
+        for d in db.collection('unidades').stream():
+            nome = ((d.to_dict() or {}).get('nome') or '').strip().upper()
+            if nome:
+                nomes.append(nome)
+    except Exception as e:
+        print(f"[areas_validas] Falha ao carregar unidades: {e}")
+    base = ['GERAL', 'NÃO CLASSIFICADA']
+    # preserva ordem e remove duplicados
+    return base + [n for n in nomes if n not in base]
+
+
+def normalizar_area_tematica(valor: str, areas_validas: list[str]) -> str:
+    """Casa case-insensitive contra a lista valida; fallback 'GERAL'."""
+    alvo = (valor or '').strip().upper()
+    for a in areas_validas:
+        if a.upper() == alvo:
+            return a
+    return 'GERAL'
+
+
 def _build_system_instruction(copilot_core: str, copilot_soul: str, contexto_ativo: str) -> str:
     from datetime import datetime as _dt
     today = _dt.now(timezone.utc).strftime("%Y-%m-%d")
@@ -3367,6 +3391,16 @@ def _process_telegram_message(db, data: dict):
         _perf_mark(perf_state, "telegram.action_snapshot")
     system_instruction = _build_system_instruction_guarded_v2(copilot_core, copilot_soul, contexto_ativo, acao_snapshot)
 
+    # Áreas temáticas válidas: o copiloto só pode SELECIONAR uma existente, nunca inventar.
+    _areas_validas = carregar_areas_tematicas_validas(db)
+    system_instruction = (
+        system_instruction
+        + "\n\nÁREAS TEMÁTICAS VÁLIDAS (ao criar ações, escolha EXATAMENTE UMA desta lista; "
+        + "NUNCA invente outra): "
+        + ", ".join(_areas_validas)
+        + ". Se nenhuma se encaixar, use 'GERAL'."
+    )
+
     # --- Restore history (trimmed) — isolated buffer when action-locked ---
     hist_key = "history_acao" if contexto_ativo == "acao" else "history"
     raw_history = session.get(hist_key, [])
@@ -3811,8 +3845,12 @@ def _process_telegram_message(db, data: dict):
         """
         Cria uma nova ação no Hermes. Apresente draft ao usuário antes de chamar.
         Retorna 'OK|{ID}' em caso de sucesso ou 'ERRO|{detalhe}'.
+        IMPORTANTE: area_tematica deve ser EXATAMENTE UMA das áreas temáticas válidas
+        listadas no contexto do sistema. Nunca invente uma nova; se nenhuma se encaixar, use 'GERAL'.
         """
         import uuid as _uuid
+        # Garante que o copiloto só use áreas temáticas existentes (fallback 'GERAL').
+        area_tematica = normalizar_area_tematica(area_tematica, _areas_validas)
         now_iso = datetime.now(timezone.utc).isoformat()
         today = (datetime.now(timezone.utc)).strftime("%Y-%m-%d")
         if not data_limite or str(data_limite) < today:

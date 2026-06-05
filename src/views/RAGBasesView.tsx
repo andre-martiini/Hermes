@@ -161,7 +161,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
 
     const handleDeleteBase = (base: BaseConhecimento) => {
         if (showConfirm) {
-            showConfirm('Excluir base RAG', `Excluir a base "${base.nome}"? Os documentos vinculados não serão excluídos.`, async () => {
+            showConfirm('Excluir Área Temática', `Excluir a área "${base.nome}"? Os documentos vinculados não serão excluídos.`, async () => {
                 await onDeleteBase(base.id);
                 if (selectedBaseId === base.id) setSelectedBaseId(bases.find(b => b.id !== base.id)?.id ?? null);
             });
@@ -189,9 +189,9 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                     </div>
                     <div className="flex items-center gap-2 mb-1">
                         <div className="w-2 h-2 bg-violet-500"></div>
-                        <p className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest">SYSTEM: RAG BASES</p>
+                        <p className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest">SYSTEM: ÁREAS TEMÁTICAS</p>
                     </div>
-                    <h2 className={`text-sm font-mono font-black uppercase tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Arquivos de Conhecimento</h2>
+                    <h2 className={`text-sm font-mono font-black uppercase tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Conhecimento das Áreas</h2>
                 </div>
 
                 <nav className="flex-1 overflow-y-auto">
@@ -209,7 +209,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                             )}
                             <div className="flex flex-col flex-1 min-w-0">
                                 <div className="flex items-center justify-between mb-1">
-                                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">BASE-{String(idx + 1).padStart(3, '0')}</span>
+                                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">ÁREA-{String(idx + 1).padStart(3, '0')}</span>
                                     <span className={`text-[10px] font-mono font-black ${selectedBaseId === base.id ? 'text-violet-600' : 'text-slate-400'}`}>
                                         ITEMS: {items.filter(i => i.base_id === base.id).length}
                                     </span>
@@ -233,7 +233,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                                 value={newBaseName}
                                 onChange={e => setNewBaseName(e.target.value)}
                                 onKeyDown={e => { if (e.key === 'Enter') handleCreateBase(); if (e.key === 'Escape') setIsCreatingBase(false); }}
-                                placeholder="NOME DA BASE..."
+                                placeholder="NOME DA ÁREA..."
                                 className={`w-full px-3 py-2 text-xs font-mono font-bold border rounded-none outline-none transition-colors ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-violet-400 placeholder:text-slate-500' : 'bg-white border-slate-200 text-slate-900 focus:border-violet-500 placeholder:text-slate-400'}`}
                             />
                             <div className="flex gap-2">
@@ -249,7 +249,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" />
                             </svg>
-                            Nova Base RAG
+                            Nova Área Temática
                         </button>
                     )}
                 </div>
@@ -264,7 +264,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                             </svg>
                         </div>
-                        <p className="text-slate-400 font-semibold">Selecione ou crie uma Base RAG na barra lateral</p>
+                        <p className="text-slate-400 font-semibold">Selecione ou crie uma Área Temática na barra lateral</p>
                     </div>
                 ) : (
                     <>
@@ -283,7 +283,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                                 <div className="flex items-center gap-3">
                                     <span className="text-2xl">{selectedBase.emoji || '📁'}</span>
                                     <div className="min-w-0">
-                                        <p className="text-[10px] font-mono font-black text-violet-500 uppercase tracking-[0.2em]">KNOWLEDGE BASE</p>
+                                        <p className="text-[10px] font-mono font-black text-violet-500 uppercase tracking-[0.2em]">ÁREA TEMÁTICA</p>
                                         <h1 className={`text-xl font-mono font-black uppercase tracking-tight truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{selectedBase.nome}</h1>
                                     </div>
                                 </div>
@@ -539,7 +539,7 @@ const EditBaseModal: React.FC<EditBaseModalProps> = ({ base, onSave, onDelete, o
                 <div className={`p-8 border-b flex items-center justify-between ${isDark ? 'border-slate-800 bg-slate-900/80' : 'border-slate-200 bg-slate-50'}`}>
                     <div>
                         <p className="text-[10px] font-mono font-black text-violet-500 uppercase tracking-widest mb-1">SYSTEM CONFIGURATION</p>
-                        <h2 className={`text-sm font-mono font-black uppercase tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Configurar Base RAG</h2>
+                        <h2 className={`text-sm font-mono font-black uppercase tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Configurar Área Temática</h2>
                     </div>
                     <button onClick={onClose} className={`w-10 h-10 flex items-center justify-center border transition-colors ${isDark ? 'border-slate-700 bg-slate-800 text-slate-300 hover:text-slate-100 hover:bg-slate-700' : 'border-slate-200 bg-white text-slate-400 hover:text-slate-600'}`}>
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
