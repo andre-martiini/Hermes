@@ -34,7 +34,8 @@ import {
   DEFAULT_APP_SETTINGS, getDaysInMonth, isWorkDay, callScrapeSipac,
   getMonthWorkDays, normalizeStatus, formatWhatsAppText,
   formatInlineWhatsAppText, detectAreaFromTitle, isStandbyStatus,
-  applyStandbyDateRules
+  applyStandbyDateRules, buildGravityMap, computeGravidade,
+  computeScoreGUT
 } from './src/utils/helpers';
 import {
   ToastContainer, FilterChip, PgcMiniTaskCard,
@@ -1234,7 +1235,7 @@ const App: React.FC = () => {
   const [pgcSubView, setPgcSubView] = useState<'audit' | 'heatmap' | 'config' | 'plano' | 'status' | 'automatizadas'>('audit');
   const [pgdGeneratingByEntrega, setPgdGeneratingByEntrega] = useState<Record<string, boolean>>({});
   const [pgdRawTextProcessingByEntrega, setPgdRawTextProcessingByEntrega] = useState<Record<string, boolean>>({});
-  const [unidades, setUnidades] = useState<{ id: string, nome: string }[]>([]);
+  const [unidades, setUnidades] = useState<{ id: string, nome: string, palavras_chave?: string[], peso_gravidade?: number }[]>([]);
   const [sistemasAtivos, setSistemasAtivos] = useState<string[]>([]);
   // Knowledge State
   const [knowledgeItems, setKnowledgeItems] = useState<ConhecimentoItem[]>([]);
@@ -1920,13 +1921,6 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('hermes-group-by-date', String(groupByDate));
   }, [groupByDate]);
-  const [corridoOrder, setCorridoOrder] = useState<string[]>(() => {
-    const saved = localStorage.getItem('hermes-corrido-order');
-    return saved ? JSON.parse(saved) : [];
-  });
-  useEffect(() => {
-    localStorage.setItem('hermes-corrido-order', JSON.stringify(corridoOrder));
-  }, [corridoOrder]);
   const [calendarViewMode, setCalendarViewMode] = useState<'month' | 'week' | 'day'>('month');
   const [calendarDate, setCalendarDate] = useState(new Date());
   const [loading, setLoading] = useState<boolean>(false);
@@ -3601,7 +3595,7 @@ const App: React.FC = () => {
     });
     const qUnidades = query(collection(db, 'unidades'));
     const unsubscribeUnidades = onSnapshot(qUnidades, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as { id: string, nome: string, palavras_chave?: string[] }));
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as { id: string, nome: string, palavras_chave?: string[], peso_gravidade?: number }));
       setUnidades(data);
     }, handleSnapshotError('unidades'));
     return () => {
@@ -3617,7 +3611,8 @@ const App: React.FC = () => {
     try {
       await addDoc(collection(db, 'unidades'), {
         nome: nome,
-        palavras_chave: []
+        palavras_chave: [],
+        peso_gravidade: 1
       });
       showToast(`Ãrea ${nome} adicionada!`, 'success');
     } catch (err) {
@@ -4354,37 +4349,37 @@ const App: React.FC = () => {
     return filteredAndSortedTarefas.filter(t => normalizeStatus(t.status) !== 'concluido');
   }, [filteredAndSortedTarefas]);
 
+  // Lookup UPPER(nome) -> peso_gravidade (1..5) das Áreas Temáticas (unidades)
+  const gravityMap = useMemo(() => buildGravityMap(unidades), [unidades]);
+
+  // Modo Corrido: ordenação por Score GUT (G x U x T) decrescente.
+  // Substitui o reordenamento manual por drag.
   const sortedActiveTasks = useMemo(() => {
-    if (groupByDate || corridoOrder.length === 0) {
+    if (groupByDate) {
       return activeTasks;
     }
-    const taskMap = new Map(activeTasks.map(t => [t.id, t]));
-    const ordered: Tarefa[] = [];
-    corridoOrder.forEach(id => {
-      const task = taskMap.get(id);
-      if (task) {
-        ordered.push(task);
-        taskMap.delete(id);
-      }
-    });
-    taskMap.forEach(task => {
-      ordered.push(task);
-    });
-    return ordered;
-  }, [activeTasks, corridoOrder, groupByDate]);
+    const now = new Date();
+    return [...activeTasks]
+      .map((task, idx) => ({ task, idx, score: computeScoreGUT(task, gravityMap, now).score }))
+      .sort((a, b) => (b.score - a.score) || (a.idx - b.idx))
+      .map(entry => entry.task);
+  }, [activeTasks, gravityMap, groupByDate]);
 
-  const handleCorridoReorder = (taskId: string, targetTaskId: string) => {
-    if (taskId === targetTaskId) return;
-    const currentOrder = sortedActiveTasks.map(t => t.id);
-    const oldIndex = currentOrder.indexOf(taskId);
-    const newIndex = currentOrder.indexOf(targetTaskId);
-    if (oldIndex !== -1 && newIndex !== -1) {
-      const updatedOrder = [...currentOrder];
-      const [removed] = updatedOrder.splice(oldIndex, 1);
-      updatedOrder.splice(newIndex, 0, removed);
-      setCorridoOrder(updatedOrder);
+  // Cota Institucional Diária: ao menos uma ação de área G=5 (ex.: CLC /
+  // Assistência Estudantil) precisa ter movimentação registrada hoje.
+  const cotaInstitucional = useMemo(() => {
+    const todayStr = formatDateLocalISO(new Date());
+    const institucionais = activeTasks.filter(t => computeGravidade(t.area_tematica, gravityMap) === 5);
+    if (institucionais.length === 0) {
+      return { hasInstitucional: false, cumprida: true };
     }
-  };
+    const isToday = (val: any) => String(val || '').slice(0, 10) === todayStr;
+    const cumprida = institucionais.some(t =>
+      (t.acompanhamento || []).some(e => isToday(e?.data)) ||
+      (t.plano_acao_historico || []).some(h => isToday(h?.data))
+    );
+    return { hasInstitucional: true, cumprida };
+  }, [activeTasks, gravityMap]);
 
   useEffect(() => {
     if (!hasAutoExpanded && Object.keys(tarefasAgrupadas).length > 0) {
@@ -5626,6 +5621,20 @@ const App: React.FC = () => {
                               )
                             ) : (
                               <div className="animate-in space-y-4">
+                                {/* Trava da Cota Institucional Diária (banner informativo) */}
+                                {cotaInstitucional.hasInstitucional && (
+                                  cotaInstitucional.cumprida ? (
+                                    <div className="border-2 border-emerald-500 bg-emerald-50 text-emerald-800 px-4 py-3 rounded-none flex items-center gap-3 font-black uppercase tracking-widest text-[11px]">
+                                      <span className="text-base">🟢</span>
+                                      <span>Cota Diária Cumprida! Desempenho Institucional Registrado.</span>
+                                    </div>
+                                  ) : (
+                                    <div className="border-2 border-rose-500 bg-rose-50 text-rose-800 px-4 py-3 rounded-none flex items-center gap-3 font-black uppercase tracking-widest text-[11px] animate-pulse">
+                                      <span className="text-base">🚨</span>
+                                      <span>Cota Institucional Diária Pendente. Atualize ao menos uma ação de CLC ou Assistência Estudantil hoje.</span>
+                                    </div>
+                                  )
+                                )}
                                 {/* Bloco de Ações Ativas */}
                                 <div className={`border rounded-none overflow-visible ${isDarkTheme ? 'bg-slate-900/40 border-slate-800' : 'bg-white border-border-grid'}`}>
                                   <div className="divide-y divide-border-grid">
@@ -5633,23 +5642,6 @@ const App: React.FC = () => {
                                       <div
                                         key={task.id}
                                         className="relative"
-                                        draggable
-                                        onDragStart={(e) => {
-                                          e.dataTransfer.setData('task-id', task.id);
-                                          e.currentTarget.style.opacity = '0.5';
-                                        }}
-                                        onDragEnd={(e) => {
-                                          e.currentTarget.style.opacity = '1';
-                                        }}
-                                        onDragOver={(e) => e.preventDefault()}
-                                        onDrop={(e) => {
-                                          e.preventDefault();
-                                          e.stopPropagation();
-                                          const draggedId = e.dataTransfer.getData('task-id');
-                                          if (draggedId && draggedId !== task.id) {
-                                            handleCorridoReorder(draggedId, task.id);
-                                          }
-                                        }}
                                       >
                                         <RowCard
                                           task={task}
