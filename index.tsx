@@ -4367,8 +4367,14 @@ const App: React.FC = () => {
 
   // Cota Institucional Diária: ao menos uma ação de área G=5 (ex.: CLC /
   // Assistência Estudantil) precisa ter movimentação registrada hoje.
+  // Válida apenas de segunda a sexta-feira.
   const cotaInstitucional = useMemo(() => {
-    const todayStr = formatDateLocalISO(new Date());
+    const hoje = new Date();
+    const diaSemana = hoje.getDay(); // 0 = domingo, 6 = sábado
+    if (diaSemana === 0 || diaSemana === 6) {
+      return { hasInstitucional: false, cumprida: true };
+    }
+    const todayStr = formatDateLocalISO(hoje);
     const institucionais = activeTasks.filter(t => computeGravidade(t.area_tematica, gravityMap) === 5);
     if (institucionais.length === 0) {
       return { hasInstitucional: false, cumprida: true };
