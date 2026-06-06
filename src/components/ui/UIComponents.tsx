@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Tarefa, HermesNotification, WysiwygEditorProps, PlanoTrabalhoItem,
-  EntregaInstitucional, AtividadeRealizada, Toast
+  EntregaInstitucional, AtividadeRealizada, Toast, BaseConhecimento
 } from '@/types';
 import { formatDate } from '@/types';
 import { STATUS_COLORS, PROJECT_COLORS } from '@/constants';
@@ -197,7 +197,7 @@ const hasDescriptionSynthesisContext = (task: Tarefa) => {
   return hasDiary || hasPlan;
 };
 
-export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, onDelete, onEdit, onUpdateToToday, onUpdateTask, onSynthesizeDescription, isSynthesizingDescription, highlighted }: {
+export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, onDelete, onEdit, onUpdateToToday, onUpdateTask, onSynthesizeDescription, isSynthesizingDescription, highlighted, knowledgeBases }: {
   task: Tarefa,
   isDark?: boolean,
   onClick?: () => void,
@@ -208,7 +208,8 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
   onUpdateTask?: (id: string, updates: Partial<Tarefa>) => void,
   onSynthesizeDescription?: (t: Tarefa) => void | Promise<void>,
   isSynthesizingDescription?: boolean,
-  highlighted?: boolean
+  highlighted?: boolean,
+  knowledgeBases?: BaseConhecimento[],
 }) => {
   const statusValue = normalizeStatus(task.status);
   const isCompleted = statusValue === 'concluido';
@@ -239,8 +240,19 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
     return `${parts[2]} ${months[Number(parts[1]) - 1]}`;
   };
 
+  // Helper: get base color from knowledgeBases dynamically
+  const getBaseColor = (areaName?: string): string | null => {
+    if (!areaName || !knowledgeBases?.length) return null;
+    const base = knowledgeBases.find(b => b.nome.toUpperCase() === areaName.toUpperCase());
+    return base?.cor ?? null;
+  };
+
   const getHighlightClass = (name?: string) => {
     if (isDark || !name || name === 'NÃO CLASSIFICADA') return '';
+    const baseColor = getBaseColor(name);
+    // If we have a dynamic color, we'll use inline style instead
+    if (baseColor) return '__dynamic__';
+    // Fallback legacy
     const n = name.toUpperCase();
     if (n.includes('CLC')) return 'bg-blue-100/70 px-1 -mx-1 rounded-sm decoration-clone';
     if (n.includes('SAÚDE') || n.includes('SAUDE')) return 'bg-rose-100/70 px-1 -mx-1 rounded-sm decoration-clone';
@@ -249,13 +261,25 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
     return '';
   };
 
-  const getTagStyle = (name: string) => {
+  const getTagStyle = (name: string): { className: string; style?: React.CSSProperties } => {
+    const baseColor = getBaseColor(name);
+    if (baseColor) {
+      return {
+        className: 'border font-mono uppercase',
+        style: {
+          backgroundColor: `${baseColor}18`,
+          color: baseColor,
+          borderColor: `${baseColor}40`,
+        }
+      };
+    }
+    // Fallback legacy
     const n = name.toUpperCase();
-    if (n.includes('CLC')) return 'bg-blue-50 text-blue-600 border-blue-100';
-    if (n.includes('SAÚDE') || n.includes('SAUDE')) return 'bg-rose-50 text-rose-600 border-rose-100';
-    if (n.includes('FINANCEIRO') || n.includes('FINANCEIRA')) return 'bg-emerald-50 text-emerald-600 border-emerald-100';
-    if (n.includes('ASSISTÊNCIA') || n.includes('ESTUDANTIL')) return 'bg-purple-50 text-purple-600 border-purple-100';
-    return 'bg-slate-50 text-slate-500 border-slate-100';
+    if (n.includes('CLC')) return { className: 'bg-blue-50 text-blue-600 border-blue-100' };
+    if (n.includes('SAÚDE') || n.includes('SAUDE')) return { className: 'bg-rose-50 text-rose-600 border-rose-100' };
+    if (n.includes('FINANCEIRO') || n.includes('FINANCEIRA')) return { className: 'bg-emerald-50 text-emerald-600 border-emerald-100' };
+    if (n.includes('ASSISTÊNCIA') || n.includes('ESTUDANTIL')) return { className: 'bg-purple-50 text-purple-600 border-purple-100' };
+    return { className: 'bg-slate-50 text-slate-500 border-slate-100' };
   };
 
   const highlightClass = getHighlightClass(task.area_tematica);
@@ -376,7 +400,11 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
             }}
             className={`cursor-pointer hover:underline decoration-1 ${highlighted ? `text-[15px] md:text-lg font-black` : `text-[13px] md:text-[15px] font-medium`} leading-snug transition-colors whitespace-normal break-words font-mono ${isCompleted ? 'line-through text-slate-400' : ''}`}
           >
-            {highlightClass ? (
+            {highlightClass === '__dynamic__' ? (
+              <span style={{ backgroundColor: `${getBaseColor(task.area_tematica)}18`, padding: '0 3px', margin: '0 -3px' }}>
+                {task.titulo}
+              </span>
+            ) : highlightClass ? (
               <span className={highlightClass}>
                 {task.titulo}
               </span>
@@ -388,11 +416,19 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
 
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-2 flex-wrap">
-          {task.area_tematica && task.area_tematica !== 'NÃO CLASSIFICADA' && (
-            <span className={`text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded-none border font-mono uppercase ${isDark ? 'bg-white/10 text-white' : getTagStyle(task.area_tematica)}`}>
-              {task.area_tematica.replace('SISTEMA:', '').trim()}
-            </span>
-          )}
+          {task.area_tematica && task.area_tematica !== 'NÃO CLASSIFICADA' && (() => {
+            const tagStyle = isDark
+              ? { className: 'bg-white/10 text-white border-white/10', style: undefined }
+              : getTagStyle(task.area_tematica);
+            return (
+              <span
+                className={`text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded-none border font-mono uppercase ${tagStyle.className}`}
+                style={tagStyle.style}
+              >
+                {task.area_tematica.replace('SISTEMA:', '').trim()}
+              </span>
+            );
+          })()}
         </div>
 
 

@@ -5132,6 +5132,7 @@ const App: React.FC = () => {
                                                 <RowCard
                                                   task={task}
                                                   isDark={isDarkTheme}
+                                                  knowledgeBases={knowledgeBases}
                                                   onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
                                                   onToggle={handleToggleTarefaStatus}
                                                   onDelete={handleDeleteTarefa}
@@ -5183,6 +5184,7 @@ const App: React.FC = () => {
                                               <RowCard
                                                 task={task}
                                                 isDark={isDarkTheme}
+                                                knowledgeBases={knowledgeBases}
                                                 highlighted={label === 'Hoje' && tasks.filter(t => normalizeStatus(t.status) !== 'concluido')[0]?.id === task.id}
                                                 onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
                                                 onToggle={handleToggleTarefaStatus}
@@ -5239,6 +5241,7 @@ const App: React.FC = () => {
                                         <RowCard
                                           task={task}
                                           isDark={isDarkTheme}
+                                          knowledgeBases={knowledgeBases}
                                           onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
                                           onToggle={handleToggleTarefaStatus}
                                           onDelete={handleDeleteTarefa}
@@ -5280,6 +5283,7 @@ const App: React.FC = () => {
                                             <RowCard
                                               task={task}
                                               isDark={isDarkTheme}
+                                              knowledgeBases={knowledgeBases}
                                               onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
                                               onToggle={handleToggleTarefaStatus}
                                               onDelete={handleDeleteTarefa}
@@ -5336,6 +5340,7 @@ const App: React.FC = () => {
                             <RowCard
                               task={task}
                               isDark={isDarkTheme}
+                              knowledgeBases={knowledgeBases}
                               onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
                               onToggle={handleToggleTarefaStatus}
                               onDelete={handleDeleteTarefa}

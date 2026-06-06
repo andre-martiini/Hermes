@@ -16,16 +16,27 @@ interface RAGBasesViewProps {
     onNavigateToOrigin?: (modulo: string, id: string) => void;
 }
 
-const EMOJI_OPTIONS = ['📁', '📚', '🧠', '⚡', '🔬', '🏛️', '🎯', '🗂️', '📋', '🌐', '🔧', '💡'];
 const COLOR_OPTIONS = [
-    { label: 'Amarelo', value: '#f59e0b' },
-    { label: 'Azul', value: '#3b82f6' },
-    { label: 'Verde', value: '#10b981' },
-    { label: 'Roxo', value: '#8b5cf6' },
-    { label: 'Rosa', value: '#ec4899' },
-    { label: 'Vermelho', value: '#ef4444' },
-    { label: 'Cinza', value: '#6b7280' },
-    { label: 'Laranja', value: '#f97316' },
+    { label: 'Âmbar',         value: '#f59e0b' },
+    { label: 'Laranja',       value: '#f97316' },
+    { label: 'Vermelho',      value: '#ef4444' },
+    { label: 'Rosa',          value: '#ec4899' },
+    { label: 'Magenta',       value: '#d946ef' },
+    { label: 'Roxo',          value: '#8b5cf6' },
+    { label: 'Violeta',       value: '#7c3aed' },
+    { label: 'Azul Índigo',   value: '#6366f1' },
+    { label: 'Azul',          value: '#3b82f6' },
+    { label: 'Azul Céu',      value: '#0ea5e9' },
+    { label: 'Ciano',         value: '#06b6d4' },
+    { label: 'Turquesa',      value: '#14b8a6' },
+    { label: 'Verde',         value: '#10b981' },
+    { label: 'Verde Lima',    value: '#84cc16' },
+    { label: 'Lima',          value: '#a3e635' },
+    { label: 'Amarelo',       value: '#eab308' },
+    { label: 'Marrom',        value: '#a16207' },
+    { label: 'Cinza Escuro',  value: '#374151' },
+    { label: 'Cinza',         value: '#6b7280' },
+    { label: 'Ardósia',       value: '#475569' },
 ];
 
 const FileIcon: React.FC<{ tipo: string; isDark?: boolean }> = ({ tipo, isDark }) => {
@@ -524,23 +535,20 @@ interface EditBaseModalProps {
 const EditBaseModal: React.FC<EditBaseModalProps> = ({ base, onSave, onDelete, onClose, isDark = false }) => {
     const [nome, setNome] = useState(base.nome);
     const [descricao, setDescricao] = useState(base.descricao || '');
-    const [emoji, setEmoji] = useState(base.emoji || '📁');
     const [cor, setCor] = useState(base.cor || '#f59e0b');
     const [incluirDiarios, setIncluirDiarios] = useState(base.configuracao_rag?.incluir_diarios ?? false);
     const [incluirManual, setIncluirManual] = useState(base.configuracao_rag?.incluir_manual ?? false);
-    const [categoriasInput, setCategoriasInput] = useState((base.configuracao_rag?.categorias_vinculadas ?? []).join(', '));
     const [tagsInput, setTagsInput] = useState((base.configuracao_rag?.tags_vinculadas ?? []).join(', '));
 
     const handleSave = async () => {
         await onSave({
             nome: nome.trim() || base.nome,
             descricao: descricao.trim(),
-            emoji,
             cor,
             configuracao_rag: {
                 incluir_diarios: incluirDiarios,
                 incluir_manual: incluirManual,
-                categorias_vinculadas: categoriasInput.split(',').map(s => s.trim()).filter(Boolean),
+                categorias_vinculadas: [],
                 tags_vinculadas: tagsInput.split(',').map(s => s.trim()).filter(Boolean),
             }
         });
@@ -562,38 +570,32 @@ const EditBaseModal: React.FC<EditBaseModalProps> = ({ base, onSave, onDelete, o
                 </div>
 
                 <div className="p-8 flex flex-col gap-6">
-                    {/* Identity */}
-                    <div className="flex gap-6">
-                        <div className="flex-1">
-                            <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-2 block">Ícone do Sistema</label>
-                            <div className="grid grid-cols-4 gap-2">
-                                {EMOJI_OPTIONS.map(e => (
-                                    <button
-                                        key={e}
-                                        onClick={() => setEmoji(e)}
-                                        className={`w-10 h-10 text-xl flex items-center justify-center transition-all border ${emoji === e ? (isDark ? 'bg-violet-950/50 border-violet-500 ring-1 ring-violet-500 text-violet-400' : 'bg-violet-50 border-violet-400 ring-1 ring-violet-400 text-violet-600') : (isDark ? 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-300' : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-700')}`}
-                                    >{e}</button>
-                                ))}
+                    {/* Color Palette */}
+                    <div>
+                        <div className="flex items-center justify-between mb-3">
+                            <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest">Cor da Área Temática</label>
+                            <div className="flex items-center gap-2">
+                                <div className="w-5 h-5 border-2 border-white shadow" style={{ backgroundColor: cor }} />
+                                <span className="text-[10px] font-mono font-black uppercase tracking-widest" style={{ color: cor }}>
+                                    {COLOR_OPTIONS.find(c => c.value === cor)?.label || cor}
+                                </span>
                             </div>
                         </div>
-                        <div className="w-32">
-                            <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-2 block">Cor ID</label>
-                            <div className="grid grid-cols-3 gap-2">
-                                {COLOR_OPTIONS.slice(0, 6).map(c => (
-                                    <button
-                                        key={c.value}
-                                        onClick={() => setCor(c.value)}
-                                        title={c.label}
-                                        className={`w-8 h-8 transition-all border-2 ${cor === c.value ? (isDark ? 'border-white scale-110' : 'border-slate-900 scale-110') : 'border-transparent hover:scale-105'}`}
-                                        style={{ backgroundColor: c.value }}
-                                    />
-                                ))}
-                            </div>
+                        <div className="grid grid-cols-10 gap-1.5">
+                            {COLOR_OPTIONS.map(c => (
+                                <button
+                                    key={c.value}
+                                    onClick={() => setCor(c.value)}
+                                    title={c.label}
+                                    className={`w-full aspect-square transition-all border-2 ${cor === c.value ? 'scale-110 border-slate-900 shadow-md' : 'border-transparent hover:scale-105 hover:border-slate-300'}`}
+                                    style={{ backgroundColor: c.value }}
+                                />
+                            ))}
                         </div>
                     </div>
 
                     <div>
-                        <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-2 block">Nome da Base</label>
+                        <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-2 block">Nome da Área Temática</label>
                         <input
                             value={nome}
                             onChange={e => setNome(e.target.value)}
@@ -602,11 +604,11 @@ const EditBaseModal: React.FC<EditBaseModalProps> = ({ base, onSave, onDelete, o
                     </div>
 
                     <div>
-                        <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-2 block">Descrição Técnica</label>
+                        <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-2 block">Descrição</label>
                         <input
                             value={descricao}
                             onChange={e => setDescricao(e.target.value)}
-                            placeholder="FINALIDADE DESTA BASE NO SISTEMA..."
+                            placeholder="FINALIDADE DESTA ÁREA NO SISTEMA..."
                             className={`w-full px-4 py-3 text-xs font-mono font-bold border rounded-none outline-none transition-colors uppercase tracking-widest ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-violet-400 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-violet-500 placeholder:text-slate-400'}`}
                         />
                     </div>
@@ -633,25 +635,15 @@ const EditBaseModal: React.FC<EditBaseModalProps> = ({ base, onSave, onDelete, o
                                 </div>
                                 <span className={`text-[11px] font-mono font-black uppercase tracking-tight ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>Incluir Manual Operacional</span>
                             </label>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Categorias</label>
-                                    <input
-                                        value={categoriasInput}
-                                        onChange={e => setCategoriasInput(e.target.value)}
-                                        placeholder="TI, FINANCEIRO..."
-                                        className={`w-full px-4 py-2 text-[10px] font-mono font-bold border rounded-none outline-none transition-colors uppercase ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-violet-400 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-violet-500 placeholder:text-slate-400'}`}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Tags RAG</label>
-                                    <input
-                                        value={tagsInput}
-                                        onChange={e => setTagsInput(e.target.value)}
-                                        placeholder="PROCEDIMENTO..."
-                                        className={`w-full px-4 py-2 text-[10px] font-mono font-bold border rounded-none outline-none transition-colors uppercase ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-violet-400 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-violet-500 placeholder:text-slate-400'}`}
-                                    />
-                                </div>
+                            <div>
+                                <label className="text-[10px] font-mono font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Tags RAG</label>
+                                <input
+                                    value={tagsInput}
+                                    onChange={e => setTagsInput(e.target.value)}
+                                    placeholder="PROCEDIMENTO, PROTOCOLO, REUNIÃO..."
+                                    className={`w-full px-4 py-2.5 text-[10px] font-mono font-bold border rounded-none outline-none transition-colors uppercase ${isDark ? 'bg-slate-800 border-slate-700 text-slate-100 focus:border-violet-400 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-violet-500 placeholder:text-slate-400'}`}
+                                />
+                                <p className={`text-[9px] font-mono mt-1.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Separe as tags por vírgula</p>
                             </div>
                         </div>
                     </div>
