@@ -1741,11 +1741,6 @@ def _handle_telegram_callback(db, token: str, callback_query: dict) -> "https_fn
         _persist_callback_turn("Botão: cancelar reagendamento em lote", response_text)
         _send_telegram_message(token, chat_id, response_text)
 
-        except Exception as exc:
-            response_text = f"Erro ao iniciar diagnóstico: {exc}"
-            _persist_callback_turn("Botão: iniciar diagnóstico", response_text)
-            _send_telegram_message(token, chat_id, response_text)
-
     elif data in ("webmem_keep_old", "webmem_keep_new"):
         decision = "manter_existente" if data == "webmem_keep_old" else "substituir_pelo_novo"
         _answer_callback_query(token, query_id, "Resolvendo memória...")
