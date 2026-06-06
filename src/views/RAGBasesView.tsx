@@ -13,6 +13,7 @@ interface RAGBasesViewProps {
     onVectorizeItem?: (id: string) => Promise<void>;
     showConfirm?: (title: string, message: string, onConfirm: () => void) => void;
     isDark?: boolean;
+    onNavigateToOrigin?: (modulo: string, id: string) => void;
 }
 
 const EMOJI_OPTIONS = ['📁', '📚', '🧠', '⚡', '🔬', '🏛️', '🎯', '🗂️', '📋', '🌐', '🔧', '💡'];
@@ -86,6 +87,7 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
     onVectorizeItem,
     showConfirm,
     isDark = false,
+    onNavigateToOrigin,
 }) => {
     const [mobileView, setMobileView] = useState<'bases' | 'content'>('bases');
     const [selectedBaseId, setSelectedBaseId] = useState<string | null>(bases[0]?.id ?? null);
@@ -387,6 +389,17 @@ export const RAGBasesView: React.FC<RAGBasesViewProps> = ({
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-1 md:gap-2 opacity-0 group-hover:opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                                                {item.origem && onNavigateToOrigin && (
+                                                    <button
+                                                        onClick={() => onNavigateToOrigin(item.origem!.modulo, item.origem!.id_origem)}
+                                                        className={`w-9 h-9 flex items-center justify-center border transition-all ${isDark ? 'border-slate-800 bg-slate-800 text-slate-400 hover:text-violet-400 hover:bg-slate-700' : 'border-slate-100 bg-white text-slate-400 hover:text-violet-600 hover:bg-violet-50'}`}
+                                                        title="Ver Origem"
+                                                    >
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                                        </svg>
+                                                    </button>
+                                                )}
                                                 {item.url_drive && item.url_drive !== '' && (
                                                     <a
                                                         href={item.url_drive}

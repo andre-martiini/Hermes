@@ -3239,14 +3239,16 @@ def retrieve_personalized_rag_context(db, genai, query_text, base_id):
     base_doc = db.collection('knowledge_bases').document(base_id).get()
 
     config = {}
+    base_name = ""
 
     if base_doc.exists:
 
         base_data = base_doc.to_dict()
+        base_name = base_data.get('nome', '')
 
         config = base_data.get('configuracao_rag', {})
 
-        context_parts.append(f"### [BASE ATUAL] {base_data.get('nome')} - {base_data.get('descricao', '')}")
+        context_parts.append(f"### [BASE ATUAL] {base_name} - {base_data.get('descricao', '')}")
 
     else:
 
@@ -3308,7 +3310,61 @@ def retrieve_personalized_rag_context(db, genai, query_text, base_id):
 
                     context_parts.append(f"### [HISTÓRICO - {cat}] {t.get('titulo')}\nNOTAS: {t.get('notas', '')}")
 
+    # --- 3. Dynamic Module Integrations ---
+    # Serviços Base Integration
+    if base_id == "servicos" or base_name.lower() == "serviços":
+        try:
+            services_ref = db.collection('servicos').stream()
+            context_parts.append("### [MÓDULO DE SERVIÇOS - PORTFÓLIO INTEGRADO]")
+            for doc in services_ref:
+                s = doc.to_dict()
+                context_parts.append(f"#### Serviço: {s.get('titulo')} (Cliente: {s.get('cliente')})\nPapel: {s.get('papel')}\nStatus: {s.get('status')}\nDescrição: {s.get('descricao')}\nValor Total: R$ {s.get('valor_total')}\nCarga Horária: {s.get('carga_horaria_semanal')}h/semana")
+        except Exception as e:
+            print(f"Error fetching services in RAG: {e}")
 
+    # Financeira Base Integration
+    if base_id == "financeira" or base_name.lower() == "financeira":
+        try:
+            transactions_ref = db.collection('finance_transactions').where('status', '!=', 'deleted').limit(30).stream()
+            context_parts.append("### [MÓDULO FINANCEIRO - TRANSAÇÕES INTEGRADAS]")
+            for doc in transactions_ref:
+                t = doc.to_dict()
+                context_parts.append(f"- {t.get('date')}: {t.get('description')} | Valor: R$ {t.get('amount')} | Categoria: {t.get('category')} | Tipo: {t.get('type')}")
+            
+            fixed_ref = db.collection('fixed_bills').stream()
+            context_parts.append("### [MÓDULO FINANCEIRO - CONTAS FIXAS INTEGRADAS]")
+            for doc in fixed_ref:
+                b = doc.to_dict()
+                context_parts.append(f"- Conta Fixa: {b.get('name')} | Valor: R$ {b.get('amount')} | Categoria: {b.get('category')} | Vencimento: Dia {b.get('dueDate')} | Pago: {'Sim' if b.get('isPaid') else 'Não'}")
+        except Exception as e:
+            print(f"Error fetching finance in RAG: {e}")
+
+    # Saúde Base Integration
+    if base_id == "saude" or base_name.lower() == "saúde":
+        try:
+            exams_ref = db.collection('exames').stream()
+            context_parts.append("### [MÓDULO DE SAÚDE - EXAMES E CONSULTAS INTEGRADOS]")
+            for doc in exams_ref:
+                e = doc.to_dict()
+                context_parts.append(f"#### Exame: {e.get('titulo')}\nData: {e.get('data_exame')}\nLaboratório: {e.get('laboratorio', '')}\nNotas: {e.get('notas', '')}")
+                
+            weights_ref = db.collection('health_weights').order_by('date', direction=firestore.Query.DESCENDING).limit(10).stream()
+            context_parts.append("### [MÓDULO DE SAÚDE - HISTÓRICO DE PESO RECENTE]")
+            for doc in weights_ref:
+                w = doc.to_dict()
+                context_parts.append(f"- {w.get('date')}: Peso: {w.get('weight')} kg | Gordura: {w.get('fatPercent', 'N/A')}% | Músculo: {w.get('musclePercent', 'N/A')}%")
+        except Exception as e:
+            print(f"Error fetching health in RAG: {e}")
+
+    # Specific Custom Organization/Base Linked Services
+    if base_id:
+        try:
+            linked_services = db.collection('servicos').where('base_id', '==', base_id).stream()
+            for doc in linked_services:
+                s = doc.to_dict()
+                context_parts.append(f"### [SERVIÇO VINCULADO A ESTA ÁREA TEMÁTICA]\n#### {s.get('titulo')} (Cliente: {s.get('cliente')})\nPapel: {s.get('papel')}\nStatus: {s.get('status')}\nDescrição: {s.get('descricao')}\nValor Total: R$ {s.get('valor_total')}")
+        except Exception as e:
+            print(f"Error fetching linked services in RAG: {e}")
 
     return "\n\n".join(context_parts)
 

@@ -828,4 +828,5 @@ export interface Servico {
     categoria_financeira?: 'Bolsa' | 'Serviço Particular';
     data_criacao: string;
     data_atualizacao: string;
+    base_id?: string;
 }

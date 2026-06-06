@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Servico, ParcelaServico } from '../../types';
+import { Servico, ParcelaServico, BaseConhecimento } from '../../types';
 
 interface ServicesViewProps {
   services: Servico[];
+  knowledgeBases: BaseConhecimento[];
   onCreateService: (service: Omit<Servico, 'id' | 'data_criacao' | 'data_atualizacao'>) => Promise<void>;
   onUpdateService: (id: string, service: Partial<Servico>) => Promise<void>;
   onDeleteService: (id: string) => Promise<void>;
@@ -10,6 +11,7 @@ interface ServicesViewProps {
 
 export const ServicesView: React.FC<ServicesViewProps> = ({
   services,
+  knowledgeBases = [],
   onCreateService,
   onUpdateService,
   onDeleteService
@@ -454,7 +456,7 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                         />
                                     </div>
                                 </div>
-                                <div className="grid grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <div>
                                         <label className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-2">FINANCIAL_CLASS</label>
                                         <select
@@ -480,6 +482,23 @@ export const ServicesView: React.FC<ServicesViewProps> = ({
                                             onBlur={(e) => onUpdateService(selectedService.id, { carga_horaria_semanal: Number(e.target.value) })}
                                             className="w-full bg-white border border-border-grid rounded-soft-touch px-4 py-3 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile disabled:opacity-30"
                                         />
+                                    </div>
+                                    <div>
+                                        <label className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-2">Área Temática (RAG)</label>
+                                        <select
+                                            value={localDoc?.base_id || ''}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                setLocalDoc(prev => prev ? { ...prev, base_id: val } : null);
+                                                onUpdateService(selectedService.id, { base_id: val });
+                                            }}
+                                            className="w-full bg-white border border-border-grid rounded-soft-touch px-4 py-3 text-xs font-mono font-bold text-on-surface outline-none focus:ring-1 focus:ring-primary-tactile appearance-none"
+                                        >
+                                            <option value="">Nenhuma / Geral</option>
+                                            {knowledgeBases.map(base => (
+                                                <option key={base.id} value={base.id}>{base.nome}</option>
+                                            ))}
+                                        </select>
                                     </div>
                                 </div>
                                 <div>

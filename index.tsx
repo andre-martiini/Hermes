@@ -1035,6 +1035,7 @@ const App: React.FC = () => {
   // Knowledge State
   const [knowledgeItems, setKnowledgeItems] = useState<ConhecimentoItem[]>([]);
   const [knowledgeBases, setKnowledgeBases] = useState<BaseConhecimento[]>([]);
+  const [isKnowledgeBasesLoaded, setIsKnowledgeBasesLoaded] = useState(false);
   const [masterKnowledge, setMasterKnowledge] = useState<any[]>([]);
   // Shopping State
   const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>([]);
@@ -1276,6 +1277,7 @@ const App: React.FC = () => {
     }, handleSnapshotError('conhecimento_mestre'));
     const unsubKnowledgeBases = onSnapshot(collection(db, 'knowledge_bases'), (snapshot) => {
       setKnowledgeBases(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as BaseConhecimento)));
+      setIsKnowledgeBasesLoaded(true);
     }, handleSnapshotError('knowledge_bases'));
     return () => {
       unsubGoogleCalendar();
@@ -1299,6 +1301,45 @@ const App: React.FC = () => {
       unsubKnowledgeBases();
     };
   }, [user]);
+
+  const hasSeededRef = useRef(false);
+  // Seeding Default Knowledge Bases: Serviços, Saúde, Financeira
+  useEffect(() => {
+    if (!user || !isKnowledgeBasesLoaded || hasSeededRef.current) return;
+    hasSeededRef.current = true;
+    
+    const defaultBases = [
+      { nome: 'Serviços', emoji: '💼', cor: '#3b82f6', descricao: 'Base integrada com todos os serviços e portfólio' },
+      { nome: 'Saúde', emoji: '❤️', cor: '#ef4444', descricao: 'Base integrada com exames, peso e dados de saúde' },
+      { nome: 'Financeira', emoji: '💰', cor: '#10b981', descricao: 'Base integrada com transações, contas fixas e planejamento financeiro' }
+    ];
+
+    defaultBases.forEach(async (dbase) => {
+      const exists = knowledgeBases.some(b => b.nome.toLowerCase() === dbase.nome.toLowerCase());
+      if (!exists) {
+        try {
+          await addDoc(collection(db, 'knowledge_bases'), {
+            nome: dbase.nome,
+            descricao: dbase.descricao,
+            cor: dbase.cor,
+            emoji: dbase.emoji,
+            data_criacao: new Date().toISOString(),
+            data_atualizacao: new Date().toISOString(),
+            configuracao_rag: {
+              incluir_diarios: true,
+              incluir_manual: true,
+              categorias_vinculadas: [],
+              tags_vinculadas: [],
+            },
+          });
+          console.log(`Base padrão criada: ${dbase.nome}`);
+        } catch (e) {
+          console.error(`Erro ao criar base padrão ${dbase.nome}:`, e);
+        }
+      }
+    });
+  }, [isKnowledgeBasesLoaded, knowledgeBases, user]);
+
   // Finance Processing Logic (The Listener)
   useEffect(() => {
     const processFinanceTasks = async () => {
@@ -2597,13 +2638,16 @@ const App: React.FC = () => {
         }
         break;
       case 'saude':
-        const exam = exams.find(e => e.id === id);
-        if (exam) {
-          setViewMode('saude');
-          setActiveModule('saude');
-        } else {
-          showToast("Exame não encontrado.", "error");
-        }
+        setViewMode('saude');
+        setActiveModule('saude');
+        break;
+      case 'servicos':
+        setViewMode('services');
+        setActiveModule('servicos');
+        break;
+      case 'financeiro':
+        setViewMode('finance');
+        setActiveModule('financeiro');
         break;
       default:
         showToast("Módulo não mapeado para navegação.", "info");
@@ -5427,6 +5471,7 @@ const App: React.FC = () => {
                 ) : viewMode === 'services' ? (
                   <ServicesView
                     services={services}
+                    knowledgeBases={knowledgeBases}
                     onCreateService={handleCreateService}
                     onUpdateService={handleUpdateService}
                     onDeleteService={handleDeleteService}
@@ -5532,35 +5577,209 @@ const App: React.FC = () => {
                       Voltar ao Painel
                     </button>
                   </div>
-                ) : viewMode === 'rag-bases' ? (
-                  <div className="fixed inset-0 z-[50] md:relative md:inset-auto md:z-0 h-full">
-                    <RAGBasesView
-                      isDark={isDarkTheme}
-                      bases={knowledgeBases}
-                      items={knowledgeItems}
-                      onCreateBase={handleCreateBase}
-                      onUpdateBase={handleUpdateBase}
-                      onDeleteBase={handleDeleteBase}
-                      onUploadFile={handleUploadToRAGBase}
-                      onAddLink={handleAddRAGBaseLink}
-                      onDeleteItem={async (id) => { await deleteDoc(doc(db, 'conhecimento', id)); }}
-                      onVectorizeItem={async (id) => {
-                        try {
-                          const fn = httpsCallable(functions, 'vectorizeKnowledgeItemCallable');
-                          const result = await fn({ knowledgeId: id });
-                          const data = result.data as any;
-                          if (data?.success) {
-                            showToast("Item vetorizado com sucesso!", "success");
+                ) : viewMode === 'rag-bases' ? ((() => {
+                  const servicosBase = knowledgeBases.find(b => b.nome.toLowerCase() === 'serviços');
+                  const saudeBase = knowledgeBases.find(b => b.nome.toLowerCase() === 'saúde');
+                  const financeiraBase = knowledgeBases.find(b => b.nome.toLowerCase() === 'financeira');
+                  
+                  const virtualItems: ConhecimentoItem[] = [];
+
+                  if (servicosBase) {
+                    services.forEach(s => {
+                      virtualItems.push({
+                        id: `servico_${s.id}`,
+                        titulo: `[Serviço] ${s.titulo} - ${s.cliente}`,
+                        tipo_arquivo: 'link',
+                        url_drive: '',
+                        tamanho: 0,
+                        data_criacao: s.data_criacao || s.data_inicio || new Date().toISOString(),
+                        texto_bruto: `Serviço: ${s.titulo}\nCliente: ${s.cliente}\nPapel: ${s.papel}\nDescrição: ${s.descricao}\nStatus: ${s.status}\nTipo Contrato: ${s.tipo_contrato}\nValor Total: R$ ${s.valor_total}`,
+                        tags: s.tags || [],
+                        base_id: servicosBase.id,
+                        origem: { modulo: 'servicos', id_origem: s.id }
+                      });
+                    });
+                  }
+
+                  if (saudeBase) {
+                    exams.forEach(e => {
+                      virtualItems.push({
+                        id: `exam_${e.id}`,
+                        titulo: `[Exame] ${e.titulo} - ${e.data_exame}`,
+                        tipo_arquivo: e.tipo_arquivo || 'pdf',
+                        url_drive: e.url_drive || '',
+                        tamanho: 0,
+                        data_criacao: e.data_exame || new Date().toISOString(),
+                        texto_bruto: `Exame de Saúde: ${e.titulo}\nData: ${e.data_exame}\nNotas: ${e.notas || ''}\nLaboratório: ${e.laboratorio || ''}`,
+                        tags: ['Saúde', 'Exame'],
+                        base_id: saudeBase.id,
+                        origem: { modulo: 'saude', id_origem: e.id }
+                      });
+                    });
+
+                    healthWeights.forEach(w => {
+                      virtualItems.push({
+                        id: `weight_${w.id}`,
+                        titulo: `[Peso] ${w.weight} kg - ${w.date}`,
+                        tipo_arquivo: 'link',
+                        url_drive: '',
+                        tamanho: 0,
+                        data_criacao: w.date || new Date().toISOString(),
+                        texto_bruto: `Registro de Peso: ${w.weight} kg\nData: ${w.date}\nPercentual de Gordura: ${w.fatPercent || 'N/A'}\nPercentual de Músculo: ${w.musclePercent || 'N/A'}\nNotas: ${w.notes || ''}`,
+                        tags: ['Saúde', 'Peso'],
+                        base_id: saudeBase.id,
+                        origem: { modulo: 'saude', id_origem: w.id }
+                      });
+                    });
+
+                    exerciseLogs.forEach(l => {
+                      virtualItems.push({
+                        id: `exercise_${l.id}`,
+                        titulo: `[Exercício] ${l.type} - ${l.duration} min`,
+                        tipo_arquivo: 'link',
+                        url_drive: '',
+                        tamanho: 0,
+                        data_criacao: l.date || new Date().toISOString(),
+                        texto_bruto: `Log de Exercício: ${l.type}\nDuração: ${l.duration} minutos\nData: ${l.date}\nCalorias: ${l.caloriesBurned || 'N/A'} kcal\nIntensidade: ${l.intensity || 'N/A'}\nNotas: ${l.notes || ''}`,
+                        tags: ['Saúde', 'Exercício'],
+                        base_id: saudeBase.id,
+                        origem: { modulo: 'saude', id_origem: l.id }
+                      });
+                    });
+                  }
+
+                  if (financeiraBase) {
+                    financeTransactions.forEach(t => {
+                      virtualItems.push({
+                        id: `transaction_${t.id}`,
+                        titulo: `[Transação] ${t.description} - R$ ${t.amount}`,
+                        tipo_arquivo: 'link',
+                        url_drive: '',
+                        tamanho: 0,
+                        data_criacao: t.date || new Date().toISOString(),
+                        texto_bruto: `Transação Financeira: ${t.description}\nValor: R$ ${t.amount}\nData: ${t.date}\nCategoria: ${t.category}\nTipo: ${t.type}\nStatus: ${t.status}\nNotas: ${t.notes || ''}`,
+                        tags: [t.category, t.type],
+                        base_id: financeiraBase.id,
+                        origem: { modulo: 'financeiro', id_origem: t.id }
+                      });
+                    });
+
+                    fixedBills.forEach(b => {
+                      virtualItems.push({
+                        id: `fixed_bill_${b.id}`,
+                        titulo: `[Conta Fixa] ${b.name} - R$ ${b.amount}`,
+                        tipo_arquivo: 'link',
+                        url_drive: '',
+                        tamanho: 0,
+                        data_criacao: new Date().toISOString(),
+                        texto_bruto: `Conta Fixa: ${b.name}\nValor: R$ ${b.amount}\nCategoria: ${b.category}\nDia de Vencimento: ${b.dueDate}\nPago: ${b.isPaid ? 'Sim' : 'Não'}`,
+                        tags: [b.category],
+                        base_id: financeiraBase.id,
+                        origem: { modulo: 'financeiro', id_origem: b.id }
+                      });
+                    });
+
+                    incomeEntries.forEach(e => {
+                      virtualItems.push({
+                        id: `income_${e.id}`,
+                        titulo: `[Receita] ${e.description} - R$ ${e.amount}`,
+                        tipo_arquivo: 'link',
+                        url_drive: '',
+                        tamanho: 0,
+                        data_criacao: e.date || new Date().toISOString(),
+                        texto_bruto: `Entrada de Receita: ${e.description}\nValor: R$ ${e.amount}\nData: ${e.date}\nCategoria: ${e.category}\nStatus: ${e.status}`,
+                        tags: [e.category],
+                        base_id: financeiraBase.id,
+                        origem: { modulo: 'financeiro', id_origem: e.id }
+                      });
+                    });
+                  }
+
+                  // Add custom organization linked services
+                  services.forEach(s => {
+                    if (s.base_id && s.base_id !== servicosBase?.id) {
+                      virtualItems.push({
+                        id: `servico_org_${s.id}_${s.base_id}`,
+                        titulo: `[Serviço] ${s.titulo} - ${s.cliente}`,
+                        tipo_arquivo: 'link',
+                        url_drive: '',
+                        tamanho: 0,
+                        data_criacao: s.data_criacao || s.data_inicio || new Date().toISOString(),
+                        texto_bruto: `Serviço: ${s.titulo}\nCliente: ${s.cliente}\nPapel: ${s.papel}\nDescrição: ${s.descricao}\nStatus: ${s.status}\nTipo Contrato: ${s.tipo_contrato}\nValor Total: R$ ${s.valor_total}`,
+                        tags: s.tags || [],
+                        base_id: s.base_id,
+                        origem: { modulo: 'servicos', id_origem: s.id }
+                      });
+                    }
+                  });
+
+                  const combinedItems = [...knowledgeItems, ...virtualItems];
+
+                  return (
+                    <div className="fixed inset-0 z-[50] md:relative md:inset-auto md:z-0 h-full">
+                      <RAGBasesView
+                        isDark={isDarkTheme}
+                        bases={knowledgeBases}
+                        items={combinedItems}
+                        onCreateBase={handleCreateBase}
+                        onUpdateBase={handleUpdateBase}
+                        onDeleteBase={handleDeleteBase}
+                        onUploadFile={handleUploadToRAGBase}
+                        onAddLink={handleAddRAGBaseLink}
+                        onDeleteItem={async (id) => {
+                          if (id.startsWith('servico_org_')) {
+                            const parts = id.split('_');
+                            const realId = parts[2];
+                            await handleDeleteService(realId);
+                          } else if (id.startsWith('servico_')) {
+                            const realId = id.split('_')[1];
+                            await handleDeleteService(realId);
+                          } else if (id.startsWith('exam_')) {
+                            const realId = id.split('_')[1];
+                            await deleteDoc(doc(db, 'exames', realId));
+                          } else if (id.startsWith('weight_')) {
+                            const realId = id.split('_')[1];
+                            await deleteDoc(doc(db, 'health_weights', realId));
+                          } else if (id.startsWith('exercise_')) {
+                            const realId = id.split('_')[1];
+                            await deleteDoc(doc(db, 'health_exercise_logs', realId));
+                          } else if (id.startsWith('transaction_')) {
+                            const realId = id.split('_')[1];
+                            await updateDoc(doc(db, 'finance_transactions', realId), { status: 'deleted' });
+                          } else if (id.startsWith('fixed_bill_')) {
+                            const realId = id.split('_')[1];
+                            await deleteDoc(doc(db, 'fixed_bills', realId));
+                          } else if (id.startsWith('income_')) {
+                            const realId = id.split('_')[1];
+                            await updateDoc(doc(db, 'income_entries', realId), { status: 'deleted' });
                           } else {
-                            showToast(data?.message || "Este item não tem texto extraído para vetorizar.", "error");
+                            await deleteDoc(doc(db, 'conhecimento', id));
                           }
-                        } catch (e: any) {
-                          showToast(e?.message || "Erro ao vetorizar item.", "error");
-                        }
-                      }}
-                      showConfirm={showAlert}
-                    />
-                  </div>
+                        }}
+                        onVectorizeItem={async (id) => {
+                          if (id.startsWith('servico_') || id.startsWith('exam_') || id.startsWith('weight_') || id.startsWith('exercise_') || id.startsWith('transaction_') || id.startsWith('fixed_bill_') || id.startsWith('income_')) {
+                            showToast("Itens virtuais não podem ser vetorizados diretamente. Sincronize o módulo de origem.", "info");
+                            return;
+                          }
+                          try {
+                            const fn = httpsCallable(functions, 'vectorizeKnowledgeItemCallable');
+                            const result = await fn({ knowledgeId: id });
+                            const data = result.data as any;
+                            if (data?.success) {
+                              showToast("Item vetorizado com sucesso!", "success");
+                            } else {
+                              showToast(data?.message || "Este item não tem texto extraído para vetorizar.", "error");
+                            }
+                          } catch (e: any) {
+                            showToast(e?.message || "Erro ao vetorizar item.", "error");
+                          }
+                        }}
+                        showConfirm={showAlert}
+                        onNavigateToOrigin={handleNavigateToOrigin}
+                      />
+                    </div>
+                  );
+                })()
                 ) : (
                   <div className={`actions-pgd-view space-y-3 md:space-y-6 ${isDarkTheme ? 'actions-view-dark' : ''}`}>
                     {/* DISPLAY TÃTIL DE CABEÇALHO */}
