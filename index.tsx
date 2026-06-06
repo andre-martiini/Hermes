@@ -4608,8 +4608,8 @@ const App: React.FC = () => {
                   </div>
                 )}
                 {/* Desktop Header */}
-                <div className="hidden md:flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-6">
+                <div className="hidden md:flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+                  <div className="flex min-w-[420px] flex-1 items-center gap-6">
                     <div className="flex items-center gap-3">
                       {/* Botão de voltar removido pois agora temos sidebar */}
                       <div
@@ -4629,7 +4629,7 @@ const App: React.FC = () => {
                       </div>
                     </div>
                     {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'rag-bases' && viewMode !== 'services' && activeModule !== 'financeiro' && activeModule !== 'saude' && activeModule !== 'dashboard' && (
-                      <nav className={`flex gap-1`}>
+                      <nav className={`flex flex-wrap items-center gap-1`}>
                         <button
                           onClick={() => {
                             setViewMode('gallery');
@@ -4652,7 +4652,7 @@ const App: React.FC = () => {
 
                   {/* Área Temática Multi-Filter */}
                   {(viewMode === 'gallery' || viewMode === 'licitacoes' || viewMode === 'assistencia' || viewMode === 'concluidas') && activeModule === 'acoes' && knowledgeBases.length > 0 && (
-                    <div className={`flex items-center gap-1.5 flex-wrap py-2 px-1 border-t ${isDarkTheme ? 'border-slate-800' : 'border-slate-100'}`}>
+                    <div className={`order-3 flex basis-full items-center gap-1.5 flex-wrap py-2 px-1 border-t ${isDarkTheme ? 'border-slate-800' : 'border-slate-100'}`}>
                       <span className={`text-[9px] font-mono font-black uppercase tracking-widest mr-1 ${isDarkTheme ? 'text-slate-500' : 'text-slate-400'}`}>Filtrar:</span>
                       {areaFilter.length > 0 && (
                         <button
@@ -4689,7 +4689,7 @@ const App: React.FC = () => {
 
                   {/* Finance Controls */}
                   {viewMode === 'finance' && (
-                    <div className="flex items-center gap-4">
+                    <div className="ml-auto flex items-center gap-4">
                       <div className={`flex gap-1`}>
                         <button
                           onClick={() => setFinanceActiveTab('dashboard')}
@@ -4744,9 +4744,9 @@ const App: React.FC = () => {
                   )}
                   {/* Standard Action Buttons (Search, Sync, Create) */}
                   {viewMode !== 'ferramentas' && viewMode !== 'knowledge' && viewMode !== 'saude' && viewMode !== 'finance' && viewMode !== 'dashboard' && viewMode !== 'services' && (
-                    <div className="flex items-center gap-4">
+                    <div className="ml-auto flex items-center justify-end gap-3">
                       {activeModule !== 'dashboard' && (
-                        <div className={`hidden lg:flex items-center border rounded-none px-4 py-2 w-64 group focus-within:ring-1 focus-within:ring-primary-tactile transition-all ${inputSurfaceClass} border-border-grid`}>
+                        <div className={`hidden lg:flex h-12 items-center border rounded-none px-4 w-72 xl:w-80 group focus-within:ring-1 focus-within:ring-primary-tactile transition-all ${inputSurfaceClass} border-border-grid`}>
                           <svg className={`w-4 h-4 mr-3 ${mutedTextClass}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                           <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none outline-none text-xs font-bold w-full font-mono flex-1" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                           {searchTerm && (
@@ -4764,13 +4764,13 @@ const App: React.FC = () => {
                       )}
                       <button
                         onClick={() => setIsCreateModalOpen(true)}
-                        className="bg-slate-900 text-white px-5 py-2 rounded-none text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-slate-800 transition-all active:scale-95 font-mono"
+                        className="h-12 bg-slate-900 text-white px-5 rounded-none text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-slate-800 transition-all active:scale-95 font-mono"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
                         Criar Ação
                       </button>
                       {searchTerm !== 'filter:unclassified' && (
-                        <div className={`h-11 p-1 rounded-none inline-flex border ${isDarkTheme ? 'bg-slate-800 border-slate-700' : 'bg-surface-container border-border-grid'} gap-0.5`}>
+                        <div className={`h-12 p-1 rounded-none inline-flex border ${isDarkTheme ? 'bg-slate-800 border-slate-700' : 'bg-surface-container border-border-grid'} gap-0.5`}>
                           <button
                             onClick={() => setDashboardViewMode('list')}
                             className={`px-3 md:px-4 py-1.5 rounded-none text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center font-mono ${dashboardViewMode === 'list' ? (isDarkTheme ? 'bg-slate-600 text-white' : 'bg-slate-900 text-white') : (isDarkTheme ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600')}`}
