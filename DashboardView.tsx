@@ -23,7 +23,7 @@ interface DashboardViewProps {
 
 // --- SUBCOMPONENTES MOVIDOS PARA FORA ---
 
-const DashboardCard = ({ title, iconColor, onRedirect, children, isDark = false, headerAction }: { title: string, iconColor: string, onRedirect: () => void, children: React.ReactNode, isDark?: boolean, headerAction?: React.ReactNode }) => {
+const DashboardCard = ({ title, iconColor, onRedirect, children, isDark = false, headerAction, className = "" }: { title: string, iconColor: string, onRedirect: () => void, children: React.ReactNode, isDark?: boolean, headerAction?: React.ReactNode, className?: string }) => {
     const colorMap: Record<string, string> = {
         'bg-accent-tactile': '#FF9D4D',
         'bg-safety-red': '#EF4444',
@@ -37,7 +37,7 @@ const DashboardCard = ({ title, iconColor, onRedirect, children, isDark = false,
         <div
             onClick={onRedirect}
             style={{ borderLeftColor: hexColor }}
-            className={`group p-3 md:p-4 rounded-none border-y border-r border-border-grid border-l-4 h-full transition-all flex flex-col cursor-pointer min-h-0 ${isDark ? 'bg-[#1b1c1c] border-white/10' : 'bg-white shadow-sm hover:shadow-md'}`}
+            className={`group p-3 md:p-4 rounded-none border-y border-r border-border-grid border-l-4 h-full transition-all flex flex-col cursor-pointer min-h-0 ${isDark ? 'bg-[#1b1c1c] border-white/10' : 'bg-white shadow-sm hover:shadow-md'} ${className}`}
             role="button"
             tabIndex={0}
         >
@@ -339,7 +339,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="grid grid-cols-1 lg:grid-cols-2 lg:grid-rows-2 gap-2 md:gap-3 lg:gap-2 flex-1 min-h-0">
 
                 {/* CARD: AÇÕES */}
-                <DashboardCard title="Ações" iconColor="bg-accent-tactile" onRedirect={() => onNavigate('gallery')} isDark={isDark}>
+                <DashboardCard title="Ações" iconColor="bg-accent-tactile" onRedirect={() => onNavigate('gallery')} isDark={isDark} className="lg:col-span-2">
                     <div className={`h-full flex flex-col gap-4 p-2 md:p-4 rounded-none bg-transparent`}>
                         <div className="flex items-center justify-between shrink-0">
                             <p className={`text-[10px] font-bold uppercase tracking-[0.2em] font-mono ${isDark ? 'text-slate-400' : 'text-on-surface/50'}`}>// CARGA SEMANAL (D+6)</p>
