@@ -11992,7 +11992,8 @@ SNAPSHOT:
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.4,
-                max_output_tokens=300
+                max_output_tokens=400,
+                response_mime_type="application/json"
             )
         )
         raw_text = (response.text or "").strip()
@@ -12096,7 +12097,8 @@ SNAPSHOT:
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.35,
-                max_output_tokens=320
+                max_output_tokens=450,
+                response_mime_type="application/json"
             )
         )
         raw_text = (response.text or "").strip()
