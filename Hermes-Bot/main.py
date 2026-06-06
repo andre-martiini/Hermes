@@ -23,7 +23,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 if GEMINI_API_KEY:
-    print(f"API Key carregada: {GEMINI_API_KEY[:4]}...{GEMINI_API_KEY[-4:]}")
+    print("GEMINI_API_KEY carregada.")
 else:
     print("ERRO: GEMINI_API_KEY não encontrada no .env!")
 
@@ -38,7 +38,7 @@ google_search_tool = types.Tool(
     google_search=types.GoogleSearch()
 )
 
-model_id = "gemini-3.5-flash"
+model_id = os.getenv("GEMINI_BOT_MODEL", "gemini-3.1-flash-lite")
 system_instruction = """
 Você é o HERMES, o braço direito e assistente pessoal de elite do André Araújo Martini.
 Sua personalidade é uma mistura de Jarvis (Homem de Ferro) com um Gerente de Projetos extremamente eficiente.
@@ -315,7 +315,6 @@ def responder(mensagem):
     except Exception as e:
         bot.reply_to(mensagem, f"Erro: {str(e)}")
 
-@bot.message_handler(content_types=['voice'])
 @bot.message_handler(content_types=['voice'])
 def processar_audio(mensagem):
     try:

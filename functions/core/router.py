@@ -1,8 +1,9 @@
 import json
 
 from core import tracing
+from gemini_cost_controls import GEMINI_ROUTING_MODEL, generate_content_logged
 
-_ROUTING_MODEL = "gemini-3.5-flash"
+_ROUTING_MODEL = GEMINI_ROUTING_MODEL
 
 _MISSING_PARAM_PROMPTS: dict[str, str] = {
     "query": "O que você quer buscar?",
@@ -38,9 +39,11 @@ def classify_tool(gemini_key: str, message: str, catalog: str) -> str | None:
 
     client = genai.Client(api_key=gemini_key)
     try:
-        response = client.models.generate_content(
+        response = generate_content_logged(
+            client,
             model=_ROUTING_MODEL,
             contents=prompt,
+            feature="router.classify_tool",
             config=types.GenerateContentConfig(
                 system_instruction=(
                     "Você é um classificador de intenção. "
@@ -79,9 +82,11 @@ def extract_slots(gemini_key: str, tool_name: str, message: str, current_slots: 
 
     client = genai.Client(api_key=gemini_key)
     try:
-        response = client.models.generate_content(
+        response = generate_content_logged(
+            client,
             model=_ROUTING_MODEL,
             contents=prompt,
+            feature="router.extract_slots",
             config=types.GenerateContentConfig(
                 system_instruction="Extraia parâmetros. Retorne APENAS JSON válido.",
                 response_mime_type="application/json",

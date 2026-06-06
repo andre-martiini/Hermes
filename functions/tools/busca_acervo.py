@@ -5,8 +5,10 @@ from google.cloud import firestore
 from google.cloud.firestore_v1.vector import Vector
 from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
 
+from gemini_cost_controls import GEMINI_EMBEDDING_MODEL, embed_content_logged
+
 # ─── Constantes ──────────────────────────────────────────────────────────────
-EMBEDDING_MODEL   = "gemini-embedding-001"          # 768 dims (output_dimensionality=768)
+EMBEDDING_MODEL   = GEMINI_EMBEDDING_MODEL          # 768 dims (output_dimensionality=768)
 EMBEDDING_DIM     = 768
 ACERVO_COLLECTION = "indice_artefatos"
 EMBEDDING_FIELD   = "embedding"
@@ -45,9 +47,12 @@ def _gerar_embedding_query(texto: str) -> list[float]:
     client = genai.Client(api_key=api_key)
 
     # 3. Mesmo modelo e dimensão usados na indexação (knowledge_graph._get_embedding)
-    resposta = client.models.embed_content(
-        model="gemini-embedding-001",
+    resposta = embed_content_logged(
+        client,
+        model=EMBEDDING_MODEL,
         contents=texto,
+        feature="busca_acervo.embedding.query",
+        db=db,
         config=types.EmbedContentConfig(
             task_type="RETRIEVAL_QUERY",
             output_dimensionality=EMBEDDING_DIM  # 768 — obrigatório para compatibilidade

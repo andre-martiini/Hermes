@@ -61,7 +61,8 @@
       "Bash(functions/venv/Scripts/python.exe -m py_compile functions/main.py)",
       "Bash(./venv/Scripts/python.exe -m py_compile main.py)",
       "Bash(\"C:/Users/T-GAMER/Documents/gestao-Hermes/functions/venv/Scripts/python.exe\" -m py_compile \"C:/Users/T-GAMER/Documents/gestao-Hermes/functions/main.py\")",
-      "Bash(firebase functions:artifacts:setpolicy --location us-east1 --days 3 --force)"
+      "Bash(firebase functions:artifacts:setpolicy --location us-east1 --days 3 --force)",
+      "Bash(gh run *)"
     ]
   }
 }

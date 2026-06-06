@@ -34,7 +34,8 @@ import {
   DEFAULT_APP_SETTINGS, getDaysInMonth, isWorkDay, callScrapeSipac,
   getMonthWorkDays, normalizeStatus, formatWhatsAppText,
   formatInlineWhatsAppText, detectAreaFromTitle, isStandbyStatus,
-  applyStandbyDateRules
+  applyStandbyDateRules, buildGravityMap, computeGravidade,
+  computeScoreGUT
 } from './src/utils/helpers';
 import {
   ToastContainer, FilterChip, PgcMiniTaskCard,
@@ -1030,7 +1031,7 @@ const App: React.FC = () => {
   const [pgcSubView, setPgcSubView] = useState<'audit' | 'heatmap' | 'config' | 'plano' | 'status' | 'automatizadas'>('audit');
   const [pgdGeneratingByEntrega, setPgdGeneratingByEntrega] = useState<Record<string, boolean>>({});
   const [pgdRawTextProcessingByEntrega, setPgdRawTextProcessingByEntrega] = useState<Record<string, boolean>>({});
-  const [unidades, setUnidades] = useState<{ id: string, nome: string }[]>([]);
+  const [unidades, setUnidades] = useState<{ id: string, nome: string, palavras_chave?: string[], peso_gravidade?: number }[]>([]);
   // Knowledge State
   const [knowledgeItems, setKnowledgeItems] = useState<ConhecimentoItem[]>([]);
   const [knowledgeBases, setKnowledgeBases] = useState<BaseConhecimento[]>([]);
@@ -1644,6 +1645,13 @@ const App: React.FC = () => {
   };
   // Dashboard states
   const [dashboardViewMode, setDashboardViewMode] = useState<'list' | 'calendar'>('list');
+  const [groupByDate, setGroupByDate] = useState<boolean>(() => {
+    const saved = localStorage.getItem('hermes-group-by-date');
+    return saved !== 'false';
+  });
+  useEffect(() => {
+    localStorage.setItem('hermes-group-by-date', String(groupByDate));
+  }, [groupByDate]);
   const [calendarViewMode, setCalendarViewMode] = useState<'month' | 'week' | 'day'>('month');
   const [calendarDate, setCalendarDate] = useState(new Date());
   const [loading, setLoading] = useState<boolean>(false);
@@ -3156,7 +3164,7 @@ const App: React.FC = () => {
     });
     const qUnidades = query(collection(db, 'unidades'));
     const unsubscribeUnidades = onSnapshot(qUnidades, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as { id: string, nome: string, palavras_chave?: string[] }));
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as { id: string, nome: string, palavras_chave?: string[], peso_gravidade?: number }));
       setUnidades(data);
     }, handleSnapshotError('unidades'));
     return () => {
@@ -3172,7 +3180,8 @@ const App: React.FC = () => {
     try {
       await addDoc(collection(db, 'unidades'), {
         nome: nome,
-        palavras_chave: []
+        palavras_chave: [],
+        peso_gravidade: 1
       });
       showToast(`Ãrea ${nome} adicionada!`, 'success');
     } catch (err) {
@@ -3905,6 +3914,48 @@ const App: React.FC = () => {
     }
     return finalGroups;
   }, [filteredAndSortedTarefas]);
+  const activeTasks = useMemo(() => {
+    return filteredAndSortedTarefas.filter(t => normalizeStatus(t.status) !== 'concluido');
+  }, [filteredAndSortedTarefas]);
+
+  // Lookup UPPER(nome) -> peso_gravidade (1..5) das Áreas Temáticas (unidades)
+  const gravityMap = useMemo(() => buildGravityMap(unidades), [unidades]);
+
+  // Modo Corrido: ordenação por Score GUT (G x U x T) decrescente.
+  // Substitui o reordenamento manual por drag.
+  const sortedActiveTasks = useMemo(() => {
+    if (groupByDate) {
+      return activeTasks;
+    }
+    const now = new Date();
+    return [...activeTasks]
+      .map((task, idx) => ({ task, idx, score: computeScoreGUT(task, gravityMap, now).score }))
+      .sort((a, b) => (b.score - a.score) || (a.idx - b.idx))
+      .map(entry => entry.task);
+  }, [activeTasks, gravityMap, groupByDate]);
+
+  // Cota Institucional Diária: ao menos uma ação de área G=5 (ex.: CLC /
+  // Assistência Estudantil) precisa ter movimentação registrada hoje.
+  // Válida apenas de segunda a sexta-feira.
+  const cotaInstitucional = useMemo(() => {
+    const hoje = new Date();
+    const diaSemana = hoje.getDay(); // 0 = domingo, 6 = sábado
+    if (diaSemana === 0 || diaSemana === 6) {
+      return { hasInstitucional: false, cumprida: true };
+    }
+    const todayStr = formatDateLocalISO(hoje);
+    const institucionais = activeTasks.filter(t => computeGravidade(t.area_tematica, gravityMap) === 5);
+    if (institucionais.length === 0) {
+      return { hasInstitucional: false, cumprida: true };
+    }
+    const isToday = (val: any) => String(val || '').slice(0, 10) === todayStr;
+    const cumprida = institucionais.some(t =>
+      (t.acompanhamento || []).some(e => isToday(e?.data)) ||
+      (t.plano_acao_historico || []).some(h => isToday(h?.data))
+    );
+    return { hasInstitucional: true, cumprida };
+  }, [activeTasks, gravityMap]);
+
   useEffect(() => {
     if (!hasAutoExpanded && Object.keys(tarefasAgrupadas).length > 0) {
       const keys = Object.keys(tarefasAgrupadas);
@@ -4274,8 +4325,9 @@ const App: React.FC = () => {
                 { id: 'servicos', label: 'Serviços', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>, active: activeModule === 'servicos' && viewMode === 'services', onClick: () => { setActiveModule('servicos'); setViewMode('services'); } },
                 { id: 'finance', label: 'Financeiro', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>, active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
                 { id: 'saude', label: 'Saúde', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>, active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
-                { id: 'contacts', label: 'Contatos', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>, active: viewMode === 'contacts', onClick: () => { setActiveModule('acoes'); setViewMode('contacts'); } },                { id: 'conhecimento', label: 'Conhecimento', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>, active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
-                { id: 'rag-bases', label: 'Bases RAG', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>, active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
+                { id: 'contacts', label: 'Contatos', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>, active: viewMode === 'contacts', onClick: () => { setActiveModule('acoes'); setViewMode('contacts'); } },
+                { id: 'conhecimento', label: 'Conhecimento', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>, active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
+                { id: 'rag-bases', label: 'Áreas Temáticas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>, active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
                 { id: 'ferramentas', label: 'Ferramentas', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>, active: viewMode === 'ferramentas', onClick: () => { setActiveModule('acoes'); setViewMode('ferramentas'); setActiveFerramenta(null); } },
               ].map(item => (
                 <button
@@ -4522,7 +4574,7 @@ const App: React.FC = () => {
                       >
                         <h1 className={`text-xl font-black tracking-tight uppercase font-mono ${isDarkTheme ? 'text-slate-100' : 'text-slate-900'}`}>
                           {viewMode === 'services' ? 'Serviços' :
-                            viewMode === 'rag-bases' ? 'Bases RAG' :
+                            viewMode === 'rag-bases' ? 'Áreas Temáticas' :
                               viewMode === 'knowledge' ? 'Conhecimento' :
                                 viewMode === 'ferramentas' ? 'Ferramentas' :
                                   activeModule === 'dashboard' ? 'Dashboard' :
@@ -4615,7 +4667,18 @@ const App: React.FC = () => {
                       {activeModule !== 'dashboard' && (
                         <div className={`hidden lg:flex items-center border rounded-none px-4 py-2 w-64 group focus-within:ring-1 focus-within:ring-primary-tactile transition-all ${inputSurfaceClass} border-border-grid`}>
                           <svg className={`w-4 h-4 mr-3 ${mutedTextClass}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                          <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none outline-none text-xs font-bold w-full font-mono" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                          <input type="text" placeholder="Pesquisar..." className="bg-transparent border-none outline-none text-xs font-bold w-full font-mono flex-1" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                          {searchTerm && (
+                            <button
+                              onClick={() => setSearchTerm('')}
+                              className="ml-2 text-slate-400 hover:text-slate-600 focus:outline-none transition-colors"
+                              title="Limpar pesquisa"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          )}
                         </div>
                       )}
                       <button
@@ -4626,7 +4689,7 @@ const App: React.FC = () => {
                         Criar Ação
                       </button>
                       {searchTerm !== 'filter:unclassified' && (
-                        <div className={`h-11 p-1 rounded-none inline-flex border ${isDarkTheme ? 'bg-slate-800 border-slate-700' : 'bg-surface-container border-border-grid'}`}>
+                        <div className={`h-11 p-1 rounded-none inline-flex border ${isDarkTheme ? 'bg-slate-800 border-slate-700' : 'bg-surface-container border-border-grid'} gap-0.5`}>
                           <button
                             onClick={() => setDashboardViewMode('list')}
                             className={`px-3 md:px-4 py-1.5 rounded-none text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center font-mono ${dashboardViewMode === 'list' ? (isDarkTheme ? 'bg-slate-600 text-white' : 'bg-slate-900 text-white') : (isDarkTheme ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600')}`}
@@ -4634,6 +4697,18 @@ const App: React.FC = () => {
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
                           </button>
+                          {dashboardViewMode === 'list' && (
+                            <button
+                              onClick={() => setGroupByDate(prev => !prev)}
+                              className={`px-3 md:px-4 py-1.5 rounded-none text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center font-mono border-l ${isDarkTheme ? 'border-slate-700' : 'border-slate-200'} ${!groupByDate ? 'text-amber-500 font-black' : (isDarkTheme ? 'text-slate-400 hover:text-slate-300' : 'text-slate-500 hover:text-slate-700')}`}
+                              title={groupByDate ? "Desativar Agrupamento por Datas (Ver Lista Corrida)" : "Ativar Agrupamento por Datas"}
+                            >
+                              <svg className="w-3.5 h-3.5 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2-2v12a2 2 0 002 2z" />
+                              </svg>
+                              <span>{groupByDate ? "Agrupado" : "Corrido"}</span>
+                            </button>
+                          )}
                           <button
                             onClick={() => setDashboardViewMode('calendar')}
                             className={`px-3 md:px-4 py-1.5 rounded-none text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center font-mono ${dashboardViewMode === 'calendar' ? (isDarkTheme ? 'bg-slate-600 text-white' : 'bg-slate-900 text-white') : (isDarkTheme ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600')}`}
@@ -4689,8 +4764,9 @@ const App: React.FC = () => {
                       { label: 'PGD', active: activeModule === 'acoes' && viewMode === 'pgc', onClick: () => { setActiveModule('acoes'); setViewMode('pgc'); } },
                       { label: 'Financeiro', active: activeModule === 'financeiro', onClick: () => { setActiveModule('financeiro'); setViewMode('finance'); } },
                       { label: 'Saúde', active: activeModule === 'saude', onClick: () => { setActiveModule('saude'); setViewMode('saude'); } },
-                      { label: 'Contatos', active: viewMode === 'contacts', onClick: () => { setActiveModule('acoes'); setViewMode('contacts'); } },                      { label: 'Conhecimento', active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
-                      { label: 'Bases RAG', active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
+                      { label: 'Contatos', active: viewMode === 'contacts', onClick: () => { setActiveModule('acoes'); setViewMode('contacts'); } },
+                      { label: 'Conhecimento', active: viewMode === 'knowledge', onClick: () => { setActiveModule('acoes'); setViewMode('knowledge'); } },
+                      { label: 'Áreas Temáticas', active: viewMode === 'rag-bases', onClick: () => { setActiveModule('acoes'); setViewMode('rag-bases'); } },
                       { label: 'Ferramentas', active: viewMode === 'ferramentas', onClick: () => { setActiveModule('acoes'); setViewMode('ferramentas'); setActiveFerramenta(null); } },
                     ].map((item, idx) => (
                       <button
@@ -4793,9 +4869,37 @@ const App: React.FC = () => {
                         )}
                       </div>
                     </div>
-                    <div className="flex flex-col md:flex-row items-center justify-between mb-4 gap-4 px-4 md:px-0">
+                    <div className="flex flex-col md:flex-row items-center justify-between mb-4 gap-4 px-4 md:px-0 lg:hidden">
                       {/* Linha de Filtros e Ações Globais */}
                       <div className="flex items-center justify-between w-full gap-2">
+                        {searchTerm !== 'filter:unclassified' && (
+                          <div className={`h-10 p-1 rounded-none inline-flex border w-full justify-between ${isDarkTheme ? 'bg-slate-800 border-slate-700' : 'bg-surface-container border-border-grid'}`}>
+                            <button
+                              onClick={() => setDashboardViewMode('list')}
+                              className={`flex-1 py-1 rounded-none text-[9px] font-black uppercase tracking-widest transition-all flex items-center justify-center font-mono ${dashboardViewMode === 'list' ? (isDarkTheme ? 'bg-slate-600 text-white' : 'bg-slate-900 text-white') : (isDarkTheme ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600')}`}
+                            >
+                              <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
+                              Lista
+                            </button>
+                            
+                            {dashboardViewMode === 'list' && (
+                              <button
+                                onClick={() => setGroupByDate(prev => !prev)}
+                                className={`flex-1 py-1 rounded-none text-[9px] font-black uppercase tracking-widest transition-all flex items-center justify-center font-mono border-x ${isDarkTheme ? 'border-slate-700' : 'border-slate-200'} ${!groupByDate ? 'text-amber-500 font-bold' : (isDarkTheme ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600')}`}
+                              >
+                                {groupByDate ? "Agrupado" : "Corrido"}
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => setDashboardViewMode('calendar')}
+                              className={`flex-1 py-1 rounded-none text-[9px] font-black uppercase tracking-widest transition-all flex items-center justify-center font-mono ${dashboardViewMode === 'calendar' ? (isDarkTheme ? 'bg-slate-600 text-white' : 'bg-slate-900 text-white') : (isDarkTheme ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600')}`}
+                            >
+                              <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2-2v12a2 2 0 002 2z" /></svg>
+                              Calendário
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                     {dashboardViewMode === 'calendar' ? (
@@ -4934,55 +5038,108 @@ const App: React.FC = () => {
                           </div>
                         ) : (
                           <div className="animate-in">
-                            {Object.keys(tarefasAgrupadas).length > 0 ? (
-                              Object.entries(tarefasAgrupadas).map(([label, tasks]: [string, Tarefa[]]) => (
-                                <div
-                                  key={label}
-                                  className={`mb-3 border transition-colors rounded-none overflow-visible ${isDarkTheme ? 'bg-slate-900/40 border-slate-800' : 'bg-white border-border-grid'}`}
-                                  onDragOver={(e) => {
-                                    e.preventDefault();
-                                    e.currentTarget.style.borderColor = '#835500';
-                                  }}
-                                  onDragLeave={(e) => {
-                                    e.currentTarget.style.borderColor = '';
-                                  }}
-                                  onDrop={(e) => {
-                                    e.preventDefault();
-                                    e.currentTarget.style.borderColor = '';
-                                    const taskId = e.dataTransfer.getData('task-id');
-                                    if (taskId) {
-                                      if (label === 'Ações em Stand-by') {
-                                        handleUpdateTarefa(taskId, { status: 'stand-by' as any });
-                                        return;
+                            {groupByDate ? (
+                              Object.keys(tarefasAgrupadas).length > 0 ? (
+                                Object.entries(tarefasAgrupadas).map(([label, tasks]: [string, Tarefa[]]) => (
+                                  <div
+                                    key={label}
+                                    className={`mb-3 border transition-colors rounded-none overflow-visible ${isDarkTheme ? 'bg-slate-900/40 border-slate-800' : 'bg-white border-border-grid'}`}
+                                    onDragOver={(e) => {
+                                      e.preventDefault();
+                                      e.currentTarget.style.borderColor = '#835500';
+                                    }}
+                                    onDragLeave={(e) => {
+                                      e.currentTarget.style.borderColor = '';
+                                    }}
+                                    onDrop={(e) => {
+                                      e.preventDefault();
+                                      e.currentTarget.style.borderColor = '';
+                                      const taskId = e.dataTransfer.getData('task-id');
+                                      if (taskId) {
+                                        if (label === 'Ações em Stand-by') {
+                                          handleUpdateTarefa(taskId, { status: 'stand-by' as any });
+                                          return;
+                                        }
+                                        const date = getBucketStartDate(label);
+                                        if (date) {
+                                          handleUpdateTarefa(taskId, { data_limite: date });
+                                        }
                                       }
-                                      const date = getBucketStartDate(label);
-                                      if (date) {
-                                        handleUpdateTarefa(taskId, { data_limite: date });
-                                      }
-                                    }
-                                  }}
-                                >
-                                  <button
-                                    onClick={() => toggleSection(label)}
-                                    className={`w-full px-4 py-3 bg-transparent flex items-center justify-between transition-colors group ${isDarkTheme ? 'hover:bg-white/[0.02]' : 'hover:bg-slate-50'}`}
+                                    }}
                                   >
-                                    <div className="flex items-center gap-3">
-                                      <span className={`text-xs font-black uppercase tracking-[0.22em] font-mono ${isDarkTheme ? 'text-slate-300' : 'text-slate-500'}`}>{label}</span>
-                                      <span className={`text-[10px] font-bold font-mono ${isDarkTheme ? 'text-slate-500' : 'text-slate-300'}`}>({tasks.length})</span>
-                                    </div>
-                                    <svg className={`w-4 h-4 transition-transform duration-300 ${effectiveExpandedSections.includes(label) ? 'rotate-180' : ''} ${isDarkTheme ? 'text-slate-500' : 'text-slate-300'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
-                                    </svg>
-                                  </button>
-                                  {effectiveExpandedSections.includes(label) && (
-                                    <div className="animate-in origin-top border-t border-border-grid">
-                                      {label === "Concluídas" ? (
-                                        <>
-                                          {tasks.slice(0, completedLimit).map(task => (
-                                            <div key={task.id} className="relative">
+                                    <button
+                                      onClick={() => toggleSection(label)}
+                                      className={`w-full px-4 py-3 bg-transparent flex items-center justify-between transition-colors group ${isDarkTheme ? 'hover:bg-white/[0.02]' : 'hover:bg-slate-50'}`}
+                                    >
+                                      <div className="flex items-center gap-3">
+                                        <span className={`text-xs font-black uppercase tracking-[0.22em] font-mono ${isDarkTheme ? 'text-slate-300' : 'text-slate-500'}`}>{label}</span>
+                                        <span className={`text-[10px] font-bold font-mono ${isDarkTheme ? 'text-slate-500' : 'text-slate-300'}`}>({tasks.length})</span>
+                                      </div>
+                                      <svg className={`w-4 h-4 transition-transform duration-300 ${effectiveExpandedSections.includes(label) ? 'rotate-180' : ''} ${isDarkTheme ? 'text-slate-500' : 'text-slate-300'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+                                      </svg>
+                                    </button>
+                                    {effectiveExpandedSections.includes(label) && (
+                                      <div className="animate-in origin-top border-t border-border-grid">
+                                        {label === "Concluídas" ? (
+                                          <>
+                                            {tasks.slice(0, completedLimit).map(task => (
+                                              <div key={task.id} className="relative">
+                                                <RowCard
+                                                  task={task}
+                                                  isDark={isDarkTheme}
+                                                  onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
+                                                  onToggle={handleToggleTarefaStatus}
+                                                  onDelete={handleDeleteTarefa}
+                                                  onEdit={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
+                                                  onUpdateToToday={handleUpdateToToday}
+                                                  onUpdateTask={handleUpdateTarefa}
+                                                  onSynthesizeDescription={handleSynthesizeTaskDescription}
+                                                  isSynthesizingDescription={descriptionSynthesisTaskId === task.id}
+                                                />
+                                              </div>
+                                            ))}
+                                            {tasks.length > completedLimit && (
+                                              <div className="p-4 flex justify-center">
+                                                <button
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setCompletedLimit(prev => prev + 10);
+                                                  }}
+                                                  className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isDarkTheme ? 'bg-slate-900 text-slate-300 hover:bg-slate-800' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
+                                                >
+                                                  Ver mais 10 concluídas
+                                                </button>
+                                              </div>
+                                            )}
+                                          </>
+                                        ) : (
+                                          tasks.map(task => (
+                                            <div
+                                              key={task.id}
+                                              className="relative"
+                                              draggable
+                                              onDragStart={(e) => {
+                                                e.dataTransfer.setData('task-id', task.id);
+                                                e.currentTarget.style.opacity = '0.5';
+                                              }}
+                                              onDragEnd={(e) => {
+                                                e.currentTarget.style.opacity = '1';
+                                              }}
+                                              onDragOver={(e) => e.preventDefault()}
+                                              onDrop={(e) => {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                const draggedId = e.dataTransfer.getData('task-id');
+                                                if (draggedId && draggedId !== task.id) {
+                                                  handleReorderTasks(draggedId, task.id, label);
+                                                }
+                                              }}
+                                            >
                                               <RowCard
                                                 task={task}
                                                 isDark={isDarkTheme}
+                                                highlighted={label === 'Hoje' && tasks.filter(t => normalizeStatus(t.status) !== 'concluido')[0]?.id === task.id}
                                                 onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
                                                 onToggle={handleToggleTarefaStatus}
                                                 onDelete={handleDeleteTarefa}
@@ -4993,48 +5150,92 @@ const App: React.FC = () => {
                                                 isSynthesizingDescription={descriptionSynthesisTaskId === task.id}
                                               />
                                             </div>
-                                          ))}
-                                          {tasks.length > completedLimit && (
-                                            <div className="p-4 flex justify-center">
-                                              <button
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  setCompletedLimit(prev => prev + 10);
-                                                }}
-                                                className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isDarkTheme ? 'bg-slate-900 text-slate-300 hover:bg-slate-800' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
-                                              >
-                                                Ver mais 10 concluídas
-                                              </button>
-                                            </div>
-                                          )}
-                                        </>
-                                      ) : (
-                                        tasks.map(task => (
-                                          <div
-                                            key={task.id}
-                                            className="relative"
-                                            draggable
-                                            onDragStart={(e) => {
-                                              e.dataTransfer.setData('task-id', task.id);
-                                              e.currentTarget.style.opacity = '0.5';
-                                            }}
-                                            onDragEnd={(e) => {
-                                              e.currentTarget.style.opacity = '1';
-                                            }}
-                                            onDragOver={(e) => e.preventDefault()}
-                                            onDrop={(e) => {
-                                              e.preventDefault();
-                                              e.stopPropagation();
-                                              const draggedId = e.dataTransfer.getData('task-id');
-                                              if (draggedId && draggedId !== task.id) {
-                                                handleReorderTasks(draggedId, task.id, label);
-                                              }
-                                            }}
-                                          >
+                                          ))
+                                        )}
+                                        {tasks.length === 0 && (
+                                          <div className={`p-8 text-center ${isDarkTheme ? 'bg-slate-950/40' : 'bg-slate-50/30'}`}>
+                                            <p className={`text-[10px] font-black uppercase tracking-widest italic ${isDarkTheme ? 'text-slate-500' : 'text-slate-300'}`}>
+                                              {label === 'Ações em Stand-by' ? 'Arraste ações aqui para pausar' : 'Nenhuma ação nesta seção'}
+                                            </p>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="py-24 text-center">
+                                  <p className={`font-black text-xl uppercase tracking-widest ${isDarkTheme ? 'text-slate-600' : 'text-slate-300'}`}>Sem demandas encontradas</p>
+                                </div>
+                              )
+                            ) : (
+                              <div className="animate-in space-y-4">
+                                {/* Trava da Cota Institucional Diária (banner informativo) */}
+                                {cotaInstitucional.hasInstitucional && (
+                                  cotaInstitucional.cumprida ? (
+                                    <div className="border-2 border-emerald-500 bg-emerald-50 text-emerald-800 px-4 py-3 rounded-none flex items-center gap-3 font-black uppercase tracking-widest text-[11px]">
+                                      <span className="text-base">🟢</span>
+                                      <span>Cota Diária Cumprida! Desempenho Institucional Registrado.</span>
+                                    </div>
+                                  ) : (
+                                    <div className="border-2 border-rose-500 bg-rose-50 text-rose-800 px-4 py-3 rounded-none flex items-center gap-3 font-black uppercase tracking-widest text-[11px] animate-pulse">
+                                      <span className="text-base">🚨</span>
+                                      <span>Cota Institucional Diária Pendente. Atualize ao menos uma ação de CLC ou Assistência Estudantil hoje.</span>
+                                    </div>
+                                  )
+                                )}
+                                {/* Bloco de Ações Ativas */}
+                                <div className={`border rounded-none overflow-visible ${isDarkTheme ? 'bg-slate-900/40 border-slate-800' : 'bg-white border-border-grid'}`}>
+                                  <div className="divide-y divide-border-grid">
+                                    {sortedActiveTasks.map(task => (
+                                      <div
+                                        key={task.id}
+                                        className="relative"
+                                      >
+                                        <RowCard
+                                          task={task}
+                                          isDark={isDarkTheme}
+                                          onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
+                                          onToggle={handleToggleTarefaStatus}
+                                          onDelete={handleDeleteTarefa}
+                                          onEdit={(t) => { setSelectedTask(t); setTaskModalMode('edit'); }}
+                                          onUpdateToToday={handleUpdateToToday}
+                                          onUpdateTask={handleUpdateTarefa}
+                                          onSynthesizeDescription={handleSynthesizeTaskDescription}
+                                          isSynthesizingDescription={descriptionSynthesisTaskId === task.id}
+                                        />
+                                      </div>
+                                    ))}
+                                  </div>
+                                  {sortedActiveTasks.length === 0 && (
+                                    <div className="py-24 text-center">
+                                      <p className={`font-black text-xl uppercase tracking-widest ${isDarkTheme ? 'text-slate-600' : 'text-slate-300'}`}>Sem demandas ativas</p>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Bloco de Concluídas colapsável */}
+                                {tarefasAgrupadas["Concluídas"] && tarefasAgrupadas["Concluídas"].length > 0 && (
+                                  <div className={`border rounded-none overflow-visible ${isDarkTheme ? 'bg-slate-900/40 border-slate-800' : 'bg-white border-border-grid'}`}>
+                                    <button
+                                      onClick={() => toggleSection("Concluídas")}
+                                      className={`w-full px-4 py-3 bg-transparent flex items-center justify-between transition-colors group ${isDarkTheme ? 'hover:bg-white/[0.02]' : 'hover:bg-slate-50'}`}
+                                    >
+                                      <div className="flex items-center gap-3">
+                                        <span className={`text-xs font-black uppercase tracking-[0.22em] font-mono ${isDarkTheme ? 'text-slate-300' : 'text-slate-500'}`}>Concluídas</span>
+                                        <span className={`text-[10px] font-bold font-mono ${isDarkTheme ? 'text-slate-500' : 'text-slate-300'}`}>({tarefasAgrupadas["Concluídas"].length})</span>
+                                      </div>
+                                      <svg className={`w-4 h-4 transition-transform duration-300 ${effectiveExpandedSections.includes("Concluídas") ? 'rotate-180' : ''} ${isDarkTheme ? 'text-slate-500' : 'text-slate-300'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+                                      </svg>
+                                    </button>
+                                    {effectiveExpandedSections.includes("Concluídas") && (
+                                      <div className="animate-in origin-top border-t border-border-grid divide-y divide-border-grid">
+                                        {tarefasAgrupadas["Concluídas"].slice(0, completedLimit).map(task => (
+                                          <div key={task.id} className="relative">
                                             <RowCard
                                               task={task}
                                               isDark={isDarkTheme}
-                                              highlighted={label === 'Hoje' && tasks.filter(t => normalizeStatus(t.status) !== 'concluido')[0]?.id === task.id}
                                               onClick={() => { setSelectedTask(task); setTaskModalMode('execute'); if (task.auto_data_atualizada) handleUpdateTarefa(task.id, { auto_data_atualizada: false }); }}
                                               onToggle={handleToggleTarefaStatus}
                                               onDelete={handleDeleteTarefa}
@@ -5045,22 +5246,24 @@ const App: React.FC = () => {
                                               isSynthesizingDescription={descriptionSynthesisTaskId === task.id}
                                             />
                                           </div>
-                                        ))
-                                      )}
-                                      {tasks.length === 0 && (
-                                        <div className={`p-8 text-center ${isDarkTheme ? 'bg-slate-950/40' : 'bg-slate-50/30'}`}>
-                                          <p className={`text-[10px] font-black uppercase tracking-widest italic ${isDarkTheme ? 'text-slate-500' : 'text-slate-300'}`}>
-                                            {label === 'Ações em Stand-by' ? 'Arraste ações aqui para pausar' : 'Nenhuma ação nesta seção'}
-                                          </p>
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              ))
-                            ) : (
-                              <div className="py-24 text-center">
-                                <p className={`font-black text-xl uppercase tracking-widest ${isDarkTheme ? 'text-slate-600' : 'text-slate-300'}`}>Sem demandas encontradas</p>
+                                        ))}
+                                        {tarefasAgrupadas["Concluídas"].length > completedLimit && (
+                                          <div className="p-4 flex justify-center">
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setCompletedLimit(prev => prev + 10);
+                                              }}
+                                              className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isDarkTheme ? 'bg-slate-900 text-slate-300 hover:bg-slate-800' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
+                                            >
+                                              Ver mais 10 concluídas
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>

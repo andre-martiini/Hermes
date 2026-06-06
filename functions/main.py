@@ -71,7 +71,10 @@ from knowledge_graph import (  # noqa: F401 — registra as Cloud Functions
 from hermes_core_logic import (  # noqa: F401 — registra as Cloud Functions
     telegramWebhook,
     on_telegram_inbound,
+    carregar_areas_tematicas_validas,
+    normalizar_area_tematica,
 )
+from gemini_cost_controls import check_and_increment_limit
 
 
 # Inicializa o Firebase Admin apenas uma vez no escopo global
@@ -84,6 +87,12 @@ DEFAULT_GOOGLE_CALENDAR_ID = 'cf4953b9512ee2e85a7e064f9d5ce4eaf6e3634564c91e5c7e
 SYNC_LOCK_DOC_ID = 'sync_lock'
 SYNC_LOCK_STALE_SECONDS = 15 * 60
 MAX_SYNC_PASSES = 3
+# Sincronização Google Tasks <-> Ações (coleção 'tarefas') desativada a pedido do usuário (2026-06-02).
+# As duas direções estão desligadas: criar tarefa no Google não cria ação no Hermes e vice-versa,
+# e itens já vinculados também deixam de ser sincronizados. A integração com o Google Calendar
+# (sync_google_calendar e a parte de Calendar do push) continua ATIVA.
+# Para reativar a sincronização de tarefas, basta voltar este flag para True.
+SYNC_GOOGLE_TASKS_ENABLED = False
 COPILOT_FUNCTION_TIMEOUT_SEC = 540
 COPILOT_SOFT_DEADLINE_SEC = 300
 COPILOT_MODEL_TIMEOUT_MS = 70000
@@ -980,6 +989,12 @@ def sync_google_tasks_pull(service, sync_ref, logs):
 
     from datetime import datetime
 
+    # Sincronização Google Tasks -> Ações desativada a pedido do usuário.
+    # Nenhuma tarefa do Google cria ou altera ações do Hermes.
+    if not SYNC_GOOGLE_TASKS_ENABLED:
+        print("[PULL] Sincronização Google Tasks -> Ações desativada (SYNC_GOOGLE_TASKS_ENABLED=False).")
+        return
+
     db = get_db()
 
     try:
@@ -1100,39 +1115,39 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
 
     try:
 
-        results = service.tasklists().list().execute()
-
-        tasklist_id = next((item['id'] for item in results.get('items', []) if 'tarefa' in item['title'].lower()), None)
-
-
-
-        if not tasklist_id: 
-            # Verifica se há list default
-            default_list = service.tasklists().get(tasklist='@default').execute()
-            tasklist_id = default_list.get('id')
-            if not tasklist_id: return
-
-        
-
-        # Pega todas as tarefas do Google (com paginação) para o mapa
-
+        # Sincronização Ações -> Google Tasks desativada a pedido do usuário.
+        # Mantém-se apenas a parte de Google Calendar deste push (ver SYNC_GOOGLE_TASKS_ENABLED).
+        tasklist_id = None
         g_tasks_map = {}
 
-        next_page_token = None
+        if SYNC_GOOGLE_TASKS_ENABLED:
 
-        while True:
+            results = service.tasklists().list().execute()
 
-            g_results = service.tasks().list(tasklist=tasklist_id, showCompleted=True, showHidden=True, maxResults=100, pageToken=next_page_token).execute()
+            tasklist_id = next((item['id'] for item in results.get('items', []) if 'tarefa' in item['title'].lower()), None)
 
-            for item in g_results.get('items', []):
+            if not tasklist_id:
+                # Verifica se há list default
+                default_list = service.tasklists().get(tasklist='@default').execute()
+                tasklist_id = default_list.get('id')
 
-                g_tasks_map[item['id']] = item
+            # Pega todas as tarefas do Google (com paginação) para o mapa
 
-            next_page_token = g_results.get('nextPageToken')
+            next_page_token = None
 
-            if not next_page_token or len(g_tasks_map) >= 500: break
+            while True:
 
-        
+                g_results = service.tasks().list(tasklist=tasklist_id, showCompleted=True, showHidden=True, maxResults=100, pageToken=next_page_token).execute()
+
+                for item in g_results.get('items', []):
+
+                    g_tasks_map[item['id']] = item
+
+                next_page_token = g_results.get('nextPageToken')
+
+                if not next_page_token or len(g_tasks_map) >= 500: break
+
+
 
         for doc in db.collection('tarefas').stream():
 
@@ -1154,10 +1169,10 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
 
             if t.get('status') == 'excluído':
 
-                # 1. Remover do Google Tasks
-                if g_id:
+                # 1. Remover do Google Tasks (desativado: ver SYNC_GOOGLE_TASKS_ENABLED)
+                if SYNC_GOOGLE_TASKS_ENABLED and g_id:
 
-                    try: 
+                    try:
 
                         service.tasks().delete(tasklist=tasklist_id, task=g_id).execute()
 
@@ -1215,33 +1230,34 @@ def sync_google_tasks_push(service, calendar_service, sync_ref, logs):
 
             updated_notes = update_notes_with_time(t.get('notas', ''), h_inicio, h_fim)
 
-            # --- PARTE 1: Sincronia Padrão do Google Tasks (sempre) ---
-            if not g_id:
-                body = {'title': title, 'notes': updated_notes, 'status': g_status}
-                if g_due: body['due'] = g_due
-                new_task = service.tasks().insert(tasklist=tasklist_id, body=body).execute()
-                doc.reference.update({'google_id': new_task['id'], 'data_atualizacao': new_task.get('updated'), 'notas': updated_notes, 'horario_fim': h_fim if not t.get('horario_fim') else t.get('horario_fim')})
-                log_to_firestore(sync_ref, logs, f"[+] ENVIADA TASKS: {title}")
-                g_id = new_task['id'] # Para usar no Calendar se precisar
-            elif g_id in g_tasks_map and is_iso_after(local_updated, g_tasks_map[g_id].get('updated', '')):
-                body = {'id': g_id, 'title': title, 'notes': updated_notes, 'status': g_status}
-                if g_due: body['due'] = g_due
-                try:
-                    updated_task = service.tasks().update(tasklist=tasklist_id, task=g_id, body=body).execute()
-                    log_to_firestore(sync_ref, logs, f"[^] ATUALIZADA NO TASKS: {title}")
-                    sync_updates = {}
-                    if updated_task.get('updated'):
-                        sync_updates['data_atualizacao'] = updated_task.get('updated')
-                    if updated_notes != t.get('notas', ''):
-                        sync_updates['notas'] = updated_notes
-                    if h_fim and not t.get('horario_fim'):
-                        sync_updates['horario_fim'] = h_fim
-                    if sync_updates:
-                        doc.reference.update(sync_updates)
-                except HttpError as e:
-                    if e.resp.status == 404:
-                        doc.reference.update({'google_id': None})
-            
+            # --- PARTE 1: Sincronia Padrão do Google Tasks (desativada: ver SYNC_GOOGLE_TASKS_ENABLED) ---
+            if SYNC_GOOGLE_TASKS_ENABLED:
+                if not g_id:
+                    body = {'title': title, 'notes': updated_notes, 'status': g_status}
+                    if g_due: body['due'] = g_due
+                    new_task = service.tasks().insert(tasklist=tasklist_id, body=body).execute()
+                    doc.reference.update({'google_id': new_task['id'], 'data_atualizacao': new_task.get('updated'), 'notas': updated_notes, 'horario_fim': h_fim if not t.get('horario_fim') else t.get('horario_fim')})
+                    log_to_firestore(sync_ref, logs, f"[+] ENVIADA TASKS: {title}")
+                    g_id = new_task['id'] # Para usar no Calendar se precisar
+                elif g_id in g_tasks_map and is_iso_after(local_updated, g_tasks_map[g_id].get('updated', '')):
+                    body = {'id': g_id, 'title': title, 'notes': updated_notes, 'status': g_status}
+                    if g_due: body['due'] = g_due
+                    try:
+                        updated_task = service.tasks().update(tasklist=tasklist_id, task=g_id, body=body).execute()
+                        log_to_firestore(sync_ref, logs, f"[^] ATUALIZADA NO TASKS: {title}")
+                        sync_updates = {}
+                        if updated_task.get('updated'):
+                            sync_updates['data_atualizacao'] = updated_task.get('updated')
+                        if updated_notes != t.get('notas', ''):
+                            sync_updates['notas'] = updated_notes
+                        if h_fim and not t.get('horario_fim'):
+                            sync_updates['horario_fim'] = h_fim
+                        if sync_updates:
+                            doc.reference.update(sync_updates)
+                    except HttpError as e:
+                        if e.resp.status == 404:
+                            doc.reference.update({'google_id': None})
+
             # --- PARTE 2: Sincronia Google Calendar (Se possuir horário) ---
             cal_id = t.get('google_calendar_id')
             desired_event_id = build_task_calendar_event_id(doc.id)
@@ -6602,6 +6618,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
         client = genai.Client(api_key=gemini_key)
         copilot_core = _get_copilot_core(db)
         copilot_soul = _get_copilot_soul(db)
+        # Áreas temáticas válidas: o copiloto só pode SELECIONAR uma existente, nunca inventar.
+        _areas_validas = carregar_areas_tematicas_validas(db)
         ai_profile = _bootstrap_user_ai_profile(db, user_uid)
         threading.Thread(
             target=_save_user_profile_signal,
@@ -7929,8 +7947,6 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             plano_acao: list[str] = [],
             sourceGmailMessageId: str = None,
             sourceKnowledgeText: str = None,
-            horario_inicio: str = None,
-            horario_fim: str = None,
         ):
             """
             Cria uma nova ação/tarefa no sistema Hermes após confirmação explícita do usuário.
@@ -7938,7 +7954,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             Parâmetros:
             - titulo: título obrigatório da ação
             - descricao: descrição detalhada (opcional)
-            - area_tematica: área temática (ex: 'LICITAÇÕES', 'RH', 'GERAL')
+            - area_tematica: escolha EXATAMENTE UMA das áreas temáticas válidas listadas no contexto do sistema; nunca invente uma nova. Se nenhuma se encaixar, use 'GERAL'.
             - data_limite: prazo no formato YYYY-MM-DD (opcional)
             - tipo_acao: 'fast' para ações rápidas, 'deep' para trabalho profundo
             - tags: lista de tags (opcional)
@@ -7947,10 +7963,14 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             - sourceGmailMessageId: se a ação veio de um e-mail, passe o ID da mensagem para controle de duplicação.
             - sourceKnowledgeText: se houver texto do e-mail longo a ser arquivado, passe-o aqui para instanciar um Nó de RAG.
             Retorna o ID da tarefa criada ou mensagem de erro.
+            NÃO use horários — ações criadas pelo copiloto nunca têm horário_inicio nem horário_fim.
             """
             try:
                 import uuid as _uuid
                 from datetime import datetime as _dt, timezone as _tz
+
+                # Garante que o copiloto só use áreas temáticas existentes (fallback 'GERAL').
+                area_tematica = normalizar_area_tematica(area_tematica, _areas_validas)
 
                 now_iso = _dt.now(_tz.utc).isoformat()
                 today_brt = (_dt.now(_tz.utc) + timedelta(hours=-3)).date().isoformat()
@@ -8026,21 +8046,11 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                     "pool_dados": [],
                     "plano_acao_historico": [],
                     "sync_status": "new",
-                    "horario_inicio": horario_inicio,
-                    "horario_fim": horario_fim,
+                    "horario_inicio": None,
+                    "horario_fim": None,
 
                     "sourceGmailMessageId": sourceGmailMessageId or None,
                     "sourceKnowledgeId": source_knowledge_id or None,}
-
-                try:
-                    from main import get_calendar_service, get_target_calendar_id
-                    import hermes_calendar_tools as hc_tools
-                    c_service = get_calendar_service()
-                    c_id = get_target_calendar_id(db)
-                    if c_service and c_id and horario_inicio and horario_fim:
-                        hc_tools.reagendar_acoes_hermes(db, c_service, c_id, data_limite, horario_inicio, horario_fim)
-                except Exception as e:
-                    print(f"[Copiloto] Erro ao reagendar: {e}")
 
                 db.collection("tarefas").document(task_id).set(doc)
                 print(f"[Copiloto] Ação criada: id={task_id}, titulo='{titulo}'")
@@ -8184,6 +8194,10 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             IMPORTANTE: Você DEVE incluir a tag markdown da imagem retornada (ex: ![Imagem Gerada](url)) de forma exata e visível na sua resposta final para que o usuário possa vê-la.
             """
             try:
+                limit_images = int(os.environ.get("LIMIT_IMAGE_GENERATION", "5"))
+                if not check_and_increment_limit(db, user_uid, "image_generation", limit_images):
+                    return "ERRO|Você atingiu o limite diário de 5 gerações de imagem."
+
                 import uuid
                 from firebase_admin import storage
                 import os
@@ -8426,6 +8440,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                         return 'stand-by'
                     if raw in ('em andamento', 'andamento', 'pendente', 'aberto', 'aberta', 'reabrir'):
                         return 'em andamento'
+                    if raw in ('excluido', 'excluir', 'excluida', 'cancelado', 'cancelar', 'cancelada', 'deletar', 'deletado', 'apagar', 'remover'):
+                        return 'excluído'
                     return valor
 
                 task_ref = db.collection('tarefas').document(task_id)
@@ -8436,8 +8452,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
                 task_data = task_doc.to_dict()
 
-                if task_data.get('status') == 'concluído':
-                    return "ERRO|Esta ação já foi concluída e não pode ser editada."
+                if task_data.get('status') in ('concluído', 'excluído'):
+                    return "ERRO|Esta ação já foi concluída ou excluída e não pode ser editada."
 
                 # Monta o diff de campos (original vs. novo)
                 alteracoes_diff = {}
@@ -8582,6 +8598,79 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
 
             except Exception as _re:
                 print(f"[Copiloto] Erro em preparar_reagendamento_em_lote: {_re}")
+                return f"ERRO|{str(_re)}"
+
+        def preparar_remocao_horarios_em_lote(
+            filtro_data: str = None,
+            task_ids: list[str] = None,
+            justificativa: str = "",
+        ):
+            """
+            Prepara a remoção de horários (horario_inicio/horario_fim) de múltiplas ações em lote.
+            NÃO realiza nenhuma mutação — retorna payload para card de confirmação visual.
+
+            Parâmetros:
+            - filtro_data: YYYY-MM-DD — seleciona ações com data_limite igual a esta data (ex: hoje)
+            - task_ids: lista explícita de IDs (alternativa ao filtro_data)
+            - justificativa: frase curta explicando o motivo
+
+            Use quando o usuário pedir para remover/limpar/tirar horários de várias ações de uma vez.
+            Para remover o horário de uma única ação, use preparar_edicao_acao com
+            alteracoes={"horario_inicio": None, "horario_fim": None}.
+            Retorna JSON string com payload de confirmação ou string de erro.
+            """
+            try:
+                if not filtro_data and not task_ids:
+                    return "ERRO|Forneça filtro_data (YYYY-MM-DD) ou task_ids (lista de IDs)."
+
+                tasks = []
+                if task_ids:
+                    for tid in (task_ids or []):
+                        tdoc = db.collection('tarefas').document(str(tid)).get()
+                        if tdoc.exists:
+                            t = tdoc.to_dict()
+                            if t.get('status') not in ('concluído', 'excluído'):
+                                tasks.append({'_doc_id': str(tid), **t})
+                else:
+                    q = db.collection('tarefas')\
+                        .where('data_limite', '==', filtro_data)\
+                        .where('status', 'in', ['em andamento', 'stand-by'])\
+                        .get()
+                    for qdoc in q:
+                        tasks.append({'_doc_id': qdoc.id, **qdoc.to_dict()})
+
+                tasks_com_horario = [t for t in tasks if t.get('horario_inicio')]
+
+                if not tasks_com_horario:
+                    if tasks:
+                        return "ERRO|Nenhuma das ações encontradas possui horário definido."
+                    return "ERRO|Nenhuma ação encontrada com os critérios informados."
+
+                items = []
+                for task in tasks_com_horario:
+                    items.append({
+                        'task_id': task['_doc_id'],
+                        'titulo': task.get('titulo', ''),
+                        'data_limite_original': task.get('data_limite', ''),
+                        'horario_inicio_original': task.get('horario_inicio'),
+                        'horario_fim_original': task.get('horario_fim'),
+                        'nova_data_limite': task.get('data_limite', ''),
+                        'novo_horario_inicio': None,
+                        'novo_horario_fim': None,
+                    })
+
+                payload = {
+                    'items': items,
+                    'justificativa': justificativa or "Remoção de horários em lote via Copiloto Hermes.",
+                    'status': 'pending',
+                    'created_at': datetime.now(timezone.utc).isoformat(),
+                }
+
+                print(f"[Copiloto] Remoção de horários preparada: {len(items)} ações.")
+                return json.dumps(payload, ensure_ascii=False)
+
+            except Exception as _re:
+                print(f"[Copiloto] Erro em preparar_remocao_horarios_em_lote: {_re}")
                 return f"ERRO|{str(_re)}"
 
         def buscar_contato(termo: str, limite: int = 5):
@@ -8777,10 +8866,8 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
                 "noSugar, noAlcohol, noSnacks, workout, eatUntil18, eatSlowly. Streak = dias consecutivos com >=4/6 hábitos.\n\n"
             )
 
-        system_instruction = (
-            f"Você é o Copiloto Hermes, estrategista sênior de processos. Hoje é {today_str}. "
-            f"{('CONTEXTO TÉCNICO VINCULADO (OBRIGATÓRIO): ' + (f'sistemaId={system_id}, ' if system_id else '') + (f'taskId={task_id}. ' if task_id else '')) if (system_id or task_id) else ''}"
-            f"\n\n{mode_context}"
+        system_instruction_static = (
+            "Você é o Copiloto Hermes, estrategista sênior de processos."
             "\n\n## CORE ESTÁTICO DO COPILOTO\n"
             f"{copilot_core.get('content', '')}\n\n"
             "## PERSONALIDADE DINÂMICA ATUAL\n"
@@ -8828,6 +8915,13 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "2. Use `consultar_historico_acoes(query='', data_limite_inicio='YYYY-MM-DD')` para filtrar por prazo/vencimento se o usuário mencionar datas.\n"
             "3. Se não houver data específica, use `query=''` para listar as tarefas mais recentes do sistema.\n"
             "4. Analise os resultados e peça clarificação apenas se necessário.\n\n"
+            "PADRÕES DE LISTAGEM POR PERÍODO (calcule as datas e passe diretamente — não pergunte ao usuário):\n"
+            "- 'ações de hoje' → data_limite_inicio=hoje, data_limite_fim=hoje\n"
+            "- 'ações de amanhã' → data_limite_inicio=amanhã, data_limite_fim=amanhã\n"
+            "- 'ações desta semana' → data_limite_inicio=segunda-feira da semana atual, data_limite_fim=domingo da semana atual\n"
+            "- 'ações da próxima semana' → data_limite_inicio=segunda-feira da próxima semana, data_limite_fim=domingo da próxima semana\n"
+            "- 'ações de [dia da semana]' → calcule a data correspondente e passe como inicio e fim\n"
+            "Sempre use o formato YYYY-MM-DD. A data de hoje é injetada no contexto de sistema.\n\n"
             "## REGRA DE INTEGRIDADE DOCUMENTAL (CRÍTICO — PENA DE FALHA SISTÊMICA)\n"
             "Se o usuário perguntar sobre valores, quantidades, itens ou cláusulas de um arquivo presente\n"
             "no campo 'arquivos_disponiveis' do contexto da tarefa, você é ESTRITAMENTE PROIBIDO de:\n"
@@ -8930,6 +9024,17 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "Se o usuário disser 'confirmo' ou 'pode fazer' no chat, explique:\n"
             "  'A confirmação de segurança deve ser feita clicando no botão ✅ do card acima.'\n\n"
             "CAMPOS SUPORTADOS: titulo, descricao, data_limite, data_inicio, horario_inicio, horario_fim, status, tags, area_tematica, tipo_acao, notas.\n"
+            "STATUS VÁLIDOS: 'em andamento', 'stand-by', 'concluído', 'excluído'.\n"
+            "EXCLUSÃO DE AÇÃO: para excluir (apagar/deletar/cancelar) uma ação, use preparar_edicao_acao com alteracoes={\"status\": \"excluído\"}. "
+            "NÃO use 'cancelado' — o status correto para exclusão é 'excluído'.\n"
+            "REMOÇÃO DE HORÁRIO (ação única): para tirar/limpar o horário de uma ação, use preparar_edicao_acao com "
+            "alteracoes={\"horario_inicio\": None, \"horario_fim\": None}.\n"
+            "REMOÇÃO DE HORÁRIOS EM LOTE: quando o usuário pedir para tirar/remover horários de várias ações de uma vez "
+            "(ex: 'tira o horário de todas as ações de hoje', 'remove os horários da semana'), use:\n"
+            "  preparar_remocao_horarios_em_lote(filtro_data='YYYY-MM-DD') — para ações de uma data específica\n"
+            "  preparar_remocao_horarios_em_lote(task_ids=[...]) — para uma lista explícita de IDs\n"
+            "Após chamar com sucesso, sua resposta de texto DEVE ser APENAS:\n"
+            "  🕐 Preparei a remoção de horários. Verifique o card abaixo e confirme ou cancele.\n"
             "Para alteração do plano de ação (passos), use o fluxo de EDIÇÃO DE PLANO DE AÇÃO acima.\n\n"
             "## REAGENDAMENTO EM LOTE — REDISTRIBUIÇÃO DE AÇÕES (CRÍTICO)\n\n"
             "Quando o usuário pedir para mover, reagendar ou redistribuir múltiplas ações de uma vez "
@@ -9042,6 +9147,17 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             "12. Para novos registros, use `registrar_item_financeiro_v2` sempre apresentando um rascunho para o usuário confirmar antes.\n"
             "Caso a ferramenta retorne que não há dados, relate isso honestamente. Não tente usar o RAG para buscar dados financeiros internos.\n"
         )
+        system_instruction = (
+            system_instruction_static
+            + f"\n\nHoje é {today_str}. "
+            + (f"CONTEXTO TÉCNICO VINCULADO (OBRIGATÓRIO): "
+               + (f"sistemaId={system_id}, " if system_id else "")
+               + (f"taskId={task_id}. " if task_id else "") if (system_id or task_id) else "")
+            + f"\n\n{mode_context}"
+            + "\n\nÁREAS TEMÁTICAS VÁLIDAS (ao criar ações, escolha EXATAMENTE UMA desta lista; "
+            + "NUNCA invente outra): " + ", ".join(_areas_validas)
+            + ". Se nenhuma se encaixar, use 'GERAL'."
+        )
 
         # --- RECUPERAÇÃO DE HISTÓRICO DA SESSÃO ---
         history = []
@@ -9123,6 +9239,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'consultar_agenda': consultar_agenda,
             'encontrar_slot_livre': encontrar_slot_livre,
             'preparar_reagendamento_em_lote': preparar_reagendamento_em_lote,
+            'preparar_remocao_horarios_em_lote': preparar_remocao_horarios_em_lote,
             'consultar_financas_v2': consultar_financas_v2,
             'consultar_saude': consultar_saude,
             'registrar_item_financeiro_v2': registrar_item_financeiro_v2,
@@ -9212,6 +9329,7 @@ def askCopilotoHermes(req: https_fn.CallableRequest):
             'consultar_agenda': consultar_agenda,
             'encontrar_slot_livre': encontrar_slot_livre,
             'preparar_reagendamento_em_lote': preparar_reagendamento_em_lote,
+            'preparar_remocao_horarios_em_lote': preparar_remocao_horarios_em_lote,
             'consultar_financas_v2': consultar_financas_v2,
             'consultar_saude': consultar_saude,
             'registrar_item_financeiro_v2': registrar_item_financeiro_v2,
@@ -10132,6 +10250,8 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
                 return 'stand-by'
             if raw in ('em andamento', 'andamento', 'pendente', 'aberto', 'aberta', 'reabrir'):
                 return 'em andamento'
+            if raw in ('excluido', 'excluir', 'excluida', 'cancelado', 'cancelar', 'cancelada', 'deletar', 'deletado', 'apagar', 'remover'):
+                return 'excluído'
             return valor
 
         updates = {}
@@ -10140,7 +10260,7 @@ def confirmarEdicaoAcao(req: https_fn.CallableRequest):
                 continue
             if campo == 'status':
                 novo_valor = _normalizar_status_acao(novo_valor)
-                if novo_valor not in ('em andamento', 'stand-by', 'concluído'):
+                if novo_valor not in ('em andamento', 'stand-by', 'concluído', 'excluído'):
                     continue
             updates[campo] = novo_valor
 
@@ -10260,9 +10380,9 @@ def confirmarReagendamentoEmLote(req: https_fn.CallableRequest):
                 item['nova_data_limite'] = single_date
                 updates['data_limite'] = single_date
                 updates['data_inicio'] = item['nova_data_limite']
-            if item.get('novo_horario_inicio') is not None:
+            if 'novo_horario_inicio' in item:
                 updates['horario_inicio'] = item['novo_horario_inicio']
-            if item.get('novo_horario_fim') is not None:
+            if 'novo_horario_fim' in item:
                 updates['horario_fim'] = item['novo_horario_fim']
 
             task_ref = db_ref.collection('tarefas').document(task_id)
@@ -11112,6 +11232,13 @@ def startDeepResearch(req: https_fn.CallableRequest):
             )
 
         db = get_db()
+        limit_deep_research = int(os.environ.get("LIMIT_DEEP_RESEARCH", "3"))
+        if not check_and_increment_limit(db, uid, "deep_research", limit_deep_research):
+            raise https_fn.HttpsError(
+                code=https_fn.FunctionsErrorCode.RESOURCE_EXHAUSTED,
+                message="Você atingiu o limite diário de 3 pesquisas profundas."
+            )
+
         requester_email = (
             ((req.auth.token or {}).get('email') if req.auth else None)
             or data.get('requester_email')
@@ -12541,6 +12668,10 @@ def on_long_transcription_uploaded(event: storage_fn.CloudEvent) -> None:
     client = None
 
     try:
+        limit_long_trans = int(_os.environ.get("LIMIT_LONG_TRANSCRIPTION", "3"))
+        if not check_and_increment_limit(db, user_id, "long_transcription", limit_long_trans):
+            raise RuntimeError("Você atingiu o limite diário de 3 transcrições longas.")
+
         api_key = get_gemini_api_key()
         if not api_key:
             raise RuntimeError("Chave Gemini não configurada em system/api_keys.")

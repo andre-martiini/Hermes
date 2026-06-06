@@ -12,8 +12,6 @@
     "whatsapp:worker": "npm --prefix services/whatsapp-capture start"
   },
   "dependencies": {
-    "@google/genai": "^1.43.0",
-    "@google/generative-ai": "^0.24.1",
     "emoji-picker-react": "^4.18.0",
     "firebase": "^12.9.0",
     "firebase-admin": "^13.6.1",

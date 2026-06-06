@@ -9,9 +9,14 @@ from io import BytesIO
 
 from firebase_admin import firestore
 
+from gemini_cost_controls import (
+    GEMINI_BALANCED_MODEL,
+    GEMINI_STRUCTURED_MODEL,
+    generate_content_logged,
+)
 from pdf_precision import extract_pdf_text_with_fallback, is_pdf_mime_type
 
-_TEXT_MODEL_ID = "gemini-3.5-flash"
+_TEXT_MODEL_ID = os.environ.get("TELEGRAM_EXTENDED_TEXT_MODEL", GEMINI_BALANCED_MODEL)
 
 
 def _get_api_keys(db):
@@ -98,8 +103,11 @@ def execute(tool_name: str, slots: dict, db) -> str:
             )
             pdf_text = (pdf_result.get("text") or "").strip()
             if pdf_text:
-                response = client.models.generate_content(
+                response = generate_content_logged(
+                    client,
                     model=_TEXT_MODEL_ID,
+                    feature="telegram_extended.document_pdf_answer",
+                    db=db,
                     contents=[
                         (
                             f"Responda exclusivamente a pergunta abaixo com base no documento '{real_name}'.\n\n"
@@ -121,8 +129,11 @@ def execute(tool_name: str, slots: dict, db) -> str:
             config=types.UploadFileConfig(mime_type=mime, display_name=real_name),
         )
         try:
-            response = client.models.generate_content(
+            response = generate_content_logged(
+                client,
                 model=_TEXT_MODEL_ID,
+                feature="telegram_extended.document_file_answer",
+                db=db,
                 contents=[
                     types.Content(parts=[
                         types.Part.from_uri(file_uri=gemini_file.uri, mime_type=mime),
@@ -446,7 +457,13 @@ def execute(tool_name: str, slots: dict, db) -> str:
         )
         if secoes_customizadas:
             skeleton_prompt += f"\nInclua obrigatoriamente: {secoes_customizadas}"
-        skeleton_resp = client.models.generate_content(model="gemini-2.0-flash-lite", contents=skeleton_prompt)
+        skeleton_resp = generate_content_logged(
+            client,
+            model=GEMINI_STRUCTURED_MODEL,
+            feature="telegram_extended.report_skeleton",
+            db=db,
+            contents=skeleton_prompt,
+        )
         skeleton_text = skeleton_resp.text or ""
         json_match = re.search(r"\{.*\}", skeleton_text, re.DOTALL)
         if json_match:
@@ -460,7 +477,13 @@ def execute(tool_name: str, slots: dict, db) -> str:
                 f"Data: {data_hoje}\n\nCONTEXTO:\n{contexto[:4000]}\n\n"
                 "Entregue Markdown direto, sem repetir o título da seção."
             )
-            sect_resp = client.models.generate_content(model=_TEXT_MODEL_ID, contents=section_prompt)
+            sect_resp = generate_content_logged(
+                client,
+                model=_TEXT_MODEL_ID,
+                feature="telegram_extended.report_section",
+                db=db,
+                contents=section_prompt,
+            )
             sections_content[secao] = sect_resp.text or "*(conteúdo indisponível)*"
         md_parts = [f"# {titulo}", "", f"**Tipo:** Relatório {tipo.capitalize()}  ", f"**Data:** {data_hoje}  ", "**Gerado por:** Hermes Telegram  ", "", "---", ""]
         for secao, content in sections_content.items():

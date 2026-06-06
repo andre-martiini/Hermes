@@ -138,14 +138,17 @@ def _extract_with_pdfplumber(file_bytes: bytes, max_pages: int | None = None) ->
 
 def _extract_with_gemini(file_bytes: bytes, api_key: str, prompt: str | None = None) -> str:
     from google import genai
+    from gemini_cost_controls import GEMINI_DOCUMENT_MODEL, generate_content_logged
 
     client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model="gemini-3.1-flash-lite",
+    response = generate_content_logged(
+        client,
+        model=GEMINI_DOCUMENT_MODEL,
         contents=[
             {"mime_type": "application/pdf", "data": file_bytes},
             prompt or DEFAULT_GEMINI_TEXT_PROMPT,
         ],
+        feature="pdf_precision.gemini_ocr",
     )
     return (response.text or "").strip()
 

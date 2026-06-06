@@ -1,0 +1,12 @@
+{
+  "AllowMultiple": "false",
+  "Description": "\"Add check_and_increment_limit to the gemini_cost_controls imports in functions/main.py\"",
+  "EndLine": "52",
+  "Instruction": "\"Add check_and_increment_limit to the gemini_cost_controls imports in functions/main.py\"",
+  "ReplacementContent": "\"from gemini_cost_controls import (\\n    GEMINI_BALANCED_MODEL,\\n    GEMINI_DOCUMENT_MODEL,\\n    GEMINI_EMBEDDING_MODEL,\\n    GEMINI_IMAGE_MODEL,\\n    GEMINI_LIGHT_MODEL,\\n    GEMINI_PRO_MODEL,\\n    GEMINI_STRUCTURED_MODEL,\\n    GEMINI_TRANSCRIPTION_MODEL,\\n    embed_content_logged,\\n    generate_content_logged,\\n    log_gemini_usage,\\n    send_message_logged,\\n    check_and_increment_limit,\\n)\"",
+  "StartLine": "36",
+  "TargetContent": "\"from gemini_cost_controls import (\\n    GEMINI_BALANCED_MODEL,\\n    GEMINI_DOCUMENT_MODEL,\\n    GEMINI_EMBEDDING_MODEL,\\n    GEMINI_IMAGE_MODEL,\\n    GEMINI_LIGHT_MODEL,\\n    GEMINI_PRO_MODEL,\\n    GEMINI_STRUCTURED_MODEL,\\n    GEMINI_TRANSCRIPTION_MODEL,\\n    embed_content_logged,\\n    generate_content_logged,\\n    log_gemini_usage,\\n    send_message_logged,\\n)\"",
+  "TargetFile": "\"c:\\\\Users\\\\T-GAMER\\\\Documents\\\\gestao-Hermes\\\\functions\\\\main.py\"",
+  "toolAction": "\"Update main imports\"",
+  "toolSummary": "\"Adding the check_and_increment_limit import to main.py.\""
+}

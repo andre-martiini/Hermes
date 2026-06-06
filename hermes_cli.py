@@ -31,6 +31,11 @@ SCOPES = [
 
 DEBUG_MODE = True # Ativa log detalhado de cada tarefa no terminal do sistema
 
+# Sincronização Google Tasks <-> Ações (coleção 'tarefas') desativada a pedido do usuário (2026-06-02).
+# As duas direções estão desligadas; a integração com o Google Calendar continua ativa.
+# Mantém paridade com SYNC_GOOGLE_TASKS_ENABLED em functions/main.py.
+SYNC_GOOGLE_TASKS_ENABLED = False
+
 # Configuração do Firebase
 KEY_FILE = 'firebase_service_account_key.json'
 
@@ -249,12 +254,17 @@ def sync_google_tasks(db, log_list=None, sync_ref=None):
     last_ui_update = [0]
     def log(msg, force_ui=False):
         print(msg)
-        if log_list is not None: 
+        if log_list is not None:
             log_list.append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
             now_ts = time.time()
             if sync_ref and (force_ui or now_ts - last_ui_update[0] > 1.2):
                 try: sync_ref.update({'logs': log_list}); last_ui_update[0] = now_ts
                 except: pass
+
+    # Sincronização Google Tasks -> Ações desativada a pedido do usuário.
+    if not SYNC_GOOGLE_TASKS_ENABLED:
+        log("[PULL] Sincronização Google Tasks -> Ações desativada (SYNC_GOOGLE_TASKS_ENABLED=False).")
+        return
 
     try:
         service = get_tasks_service()
@@ -453,31 +463,34 @@ def push_google_tasks(db, log_list=None, sync_ref=None):
                 except: pass
     try:
         service = get_tasks_service()
-        results = service.tasklists().list().execute()
-        tasklists = results.get('items', [])
-        tasklist_id = None
-        target_name = 'tarefa-gerais'
-        for item in tasklists:
-            clean_title = item['title'].lower().replace(' ', '-').replace('s', '') if 'tarefa' in item['title'].lower() else item['title'].lower()
-            if item['title'].lower() == target_name or clean_title == target_name.replace('s', ''):
-                tasklist_id = item['id']
-                log(f"Iniciando PUSH para: {item['title']}")
-                break
-        if not tasklist_id:
-            log("ERRO: Lista destino não encontrada.")
-            return
-
         calendar_service = get_calendar_service()
 
-        # Pega todas as tarefas do Google (com paginação) para o mapa
+        # Sincronia Ações -> Google Tasks desativada (ver SYNC_GOOGLE_TASKS_ENABLED). Mantém-se o Calendar.
+        tasklist_id = None
         g_tasks_map = {}
-        next_page_token = None
-        while True:
-            g_results = service.tasks().list(tasklist=tasklist_id, showCompleted=True, showHidden=True, maxResults=100, pageToken=next_page_token).execute()
-            for item in g_results.get('items', []):
-                g_tasks_map[item['id']] = item
-            next_page_token = g_results.get('nextPageToken')
-            if not next_page_token or len(g_tasks_map) >= 500: break
+
+        if SYNC_GOOGLE_TASKS_ENABLED:
+            results = service.tasklists().list().execute()
+            tasklists = results.get('items', [])
+            target_name = 'tarefa-gerais'
+            for item in tasklists:
+                clean_title = item['title'].lower().replace(' ', '-').replace('s', '') if 'tarefa' in item['title'].lower() else item['title'].lower()
+                if item['title'].lower() == target_name or clean_title == target_name.replace('s', ''):
+                    tasklist_id = item['id']
+                    log(f"Iniciando PUSH para: {item['title']}")
+                    break
+            if not tasklist_id:
+                log("ERRO: Lista destino não encontrada.")
+                return
+
+            # Pega todas as tarefas do Google (com paginação) para o mapa
+            next_page_token = None
+            while True:
+                g_results = service.tasks().list(tasklist=tasklist_id, showCompleted=True, showHidden=True, maxResults=100, pageToken=next_page_token).execute()
+                for item in g_results.get('items', []):
+                    g_tasks_map[item['id']] = item
+                next_page_token = g_results.get('nextPageToken')
+                if not next_page_token or len(g_tasks_map) >= 500: break
 
         tasks = db.collection('tarefas').stream()
         count = 0
@@ -493,8 +506,8 @@ def push_google_tasks(db, log_list=None, sync_ref=None):
                 doc.reference.update({'titulo': title, 'data_atualizacao': local_updated})
             
             if h_status == 'excluído':
-                if g_id:
-                    try: 
+                if SYNC_GOOGLE_TASKS_ENABLED and g_id:
+                    try:
                         service.tasks().delete(tasklist=tasklist_id, task=g_id).execute()
                         log(f"[X] REMOVIDA DO GOOGLE: {title}")
                     except HttpError as e:
@@ -521,32 +534,34 @@ def push_google_tasks(db, log_list=None, sync_ref=None):
             
             updated_notes = update_notes_with_time(t.get('notas', ''), h_inicio, h_fim)
 
-            if not g_id:
-                body = {'title': title, 'notes': updated_notes, 'status': g_status, 'due': due_date}
-                new_task = service.tasks().insert(tasklist=tasklist_id, body=body).execute()
-                doc.reference.update({
-                    'google_id': new_task['id'], 
-                    'data_atualizacao': new_task.get('updated'), 
-                    'notas': updated_notes, 
-                    'horario_fim': h_fim if not t.get('horario_fim') else t.get('horario_fim')
-                })
-                log(f"[+] ENVIADA: {title}"); count += 1
-                continue
-            g_task = g_tasks_map.get(g_id)
-            if g_task and local_updated > g_task.get('updated', ''):
-                body = {'id': g_id, 'title': title, 'notes': updated_notes, 'status': g_status, 'due': due_date}
-                try:
-                    service.tasks().update(tasklist=tasklist_id, task=g_id, body=body).execute()
-                    log(f"[^] ATUALIZADA NO GOOGLE: {title}"); count += 1
-                    if updated_notes != t.get('notas', ''):
-                        doc.reference.update({'notas': updated_notes})
-                except HttpError as e:
-                    if e.resp.status == 404:
-                        log(f"[!] Task {g_id} não encontrada no Google - Limpando ID para re-envio.")
-                        doc.reference.update({'google_id': None})
-                    else:
-                        raise e
-            
+            # --- PARTE 1: Sincronia Padrão do Google Tasks (desativada: ver SYNC_GOOGLE_TASKS_ENABLED) ---
+            if SYNC_GOOGLE_TASKS_ENABLED:
+                if not g_id:
+                    body = {'title': title, 'notes': updated_notes, 'status': g_status, 'due': due_date}
+                    new_task = service.tasks().insert(tasklist=tasklist_id, body=body).execute()
+                    doc.reference.update({
+                        'google_id': new_task['id'],
+                        'data_atualizacao': new_task.get('updated'),
+                        'notas': updated_notes,
+                        'horario_fim': h_fim if not t.get('horario_fim') else t.get('horario_fim')
+                    })
+                    log(f"[+] ENVIADA: {title}"); count += 1
+                    continue
+                g_task = g_tasks_map.get(g_id)
+                if g_task and local_updated > g_task.get('updated', ''):
+                    body = {'id': g_id, 'title': title, 'notes': updated_notes, 'status': g_status, 'due': due_date}
+                    try:
+                        service.tasks().update(tasklist=tasklist_id, task=g_id, body=body).execute()
+                        log(f"[^] ATUALIZADA NO GOOGLE: {title}"); count += 1
+                        if updated_notes != t.get('notas', ''):
+                            doc.reference.update({'notas': updated_notes})
+                    except HttpError as e:
+                        if e.resp.status == 404:
+                            log(f"[!] Task {g_id} não encontrada no Google - Limpando ID para re-envio.")
+                            doc.reference.update({'google_id': None})
+                        else:
+                            raise e
+
             # --- PARTE 2: Sincronia Google Calendar (Se possuir horário) ---
             cal_id = t.get('google_calendar_id')
             if sync_to_calendar and g_status == 'needsAction':

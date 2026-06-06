@@ -37,6 +37,95 @@ export const isWorkDay = (date: Date) => {
   return day !== 0 && day !== 6; // Seg-Sex
 };
 
+// ============================================================
+// MOTOR DE CÁLCULO: SCORE GUT HÍBRIDO (Modo Corrido)
+// Score = G x U x T (ordenação decrescente)
+// ============================================================
+
+export type GravityMap = Map<string, number>;
+
+/** Constrói um lookup UPPER(nome da área) -> peso_gravidade (1..5). */
+export const buildGravityMap = (
+  unidades: { nome?: string; peso_gravidade?: number }[]
+): GravityMap => {
+  const map = new Map<string, number>();
+  for (const u of unidades || []) {
+    const nome = (u?.nome || '').trim().toUpperCase();
+    if (!nome) continue;
+    const peso = Number(u?.peso_gravidade);
+    if (Number.isFinite(peso) && peso >= 1 && peso <= 5) {
+      map.set(nome, Math.round(peso));
+    }
+  }
+  return map;
+};
+
+/** GRAVIDADE (G): peso_gravidade da área temática da tarefa; default 1. */
+export const computeGravidade = (
+  areaTematica: string | undefined,
+  gravityMap: GravityMap
+): number => {
+  const key = (areaTematica || '').trim().toUpperCase();
+  return gravityMap.get(key) ?? 1;
+};
+
+/**
+ * URGÊNCIA (U): baseada no prazo_final (prazo fatal) vs hoje.
+ * vencido/hoje=5 | até D+3=4 | até 7 dias=3 | longo prazo=2 | sem prazo=1
+ */
+export const computeUrgencia = (
+  prazoFinal: string | undefined,
+  now: Date = new Date()
+): number => {
+  const raw = (prazoFinal || '').trim();
+  if (!raw || raw === '-' || raw === '0000-00-00' || !/^\d{4}-\d{2}-\d{2}/.test(raw)) {
+    return 1;
+  }
+  const todayStr = formatDateLocalISO(now);
+  const prazoDate = new Date(raw.slice(0, 10) + 'T00:00:00');
+  const todayDate = new Date(todayStr + 'T00:00:00');
+  const diffDays = Math.round((prazoDate.getTime() - todayDate.getTime()) / 86400000);
+  if (diffDays <= 0) return 5; // vencido ou igual a hoje
+  if (diffDays <= 3) return 4; // até D+3
+  if (diffDays <= 7) return 3; // até 7 dias
+  return 2;                    // longo prazo (> 7 dias)
+};
+
+/**
+ * TENDÊNCIA (T): risco de estagnação pela última movimentação do diário
+ * de bordo (acompanhamento). < 48h=1 (saudável) | até 5 dias=3 (alerta) |
+ * > 5 dias ou sem registros=5 (risco máximo).
+ */
+export const computeTendencia = (
+  acompanhamento: { data?: string }[] | undefined,
+  now: Date = new Date()
+): number => {
+  const list = acompanhamento || [];
+  if (list.length === 0) return 5;
+  let last = 0;
+  for (const e of list) {
+    const t = new Date(e?.data || '').getTime();
+    if (Number.isFinite(t) && t > last) last = t;
+  }
+  if (!last) return 5;
+  const diffHours = (now.getTime() - last) / 3600000;
+  if (diffHours < 48) return 1;       // movimento nas últimas 48h
+  if (diffHours <= 5 * 24) return 3;  // desaceleração (48h a 5 dias)
+  return 5;                            // mais de 5 dias parado
+};
+
+/** Computa G, U, T e o Score GUT (G x U x T) de uma tarefa. */
+export const computeScoreGUT = (
+  task: Tarefa,
+  gravityMap: GravityMap,
+  now: Date = new Date()
+): { g: number; u: number; t: number; score: number } => {
+  const g = computeGravidade(task.area_tematica, gravityMap);
+  const u = computeUrgencia(task.prazo_final, now);
+  const t = computeTendencia(task.acompanhamento, now);
+  return { g, u, t, score: g * u * t };
+};
+
 export const callScrapeSipac = async (taskId: string, processoSei: string) => {
   const data = { taskId, processoSei };
   if (import.meta.env.DEV) {

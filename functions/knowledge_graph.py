@@ -44,6 +44,14 @@ from firebase_functions import firestore_fn, https_fn, options, pubsub_fn, sched
 from google.cloud.firestore_v1 import ArrayUnion
 from google.cloud.firestore_v1.vector import Vector
 from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
+from gemini_cost_controls import (
+    GEMINI_BALANCED_MODEL,
+    GEMINI_DOCUMENT_MODEL,
+    GEMINI_EMBEDDING_MODEL,
+    GEMINI_STRUCTURED_MODEL,
+    embed_content_logged,
+    generate_content_logged,
+)
 
 # ─── Constantes ──────────────────────────────────────────────────────────────
 
@@ -87,7 +95,7 @@ SUPPORTED_MIMES = frozenset({
 
 DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 FILE_SEARCH_STORE_MODEL = "models/gemini-embedding-2"
-FILE_SEARCH_QUERY_MODEL = "gemini-3.5-flash"
+FILE_SEARCH_QUERY_MODEL = GEMINI_BALANCED_MODEL
 FILE_SEARCH_WAIT_SECONDS = 90
 
 
@@ -135,9 +143,12 @@ def _get_embedding(
 
     client = genai.Client(api_key=api_key)
     
-    response = client.models.embed_content(
-        model="gemini-embedding-001",  # Modelo atualizado recomendado
+    response = embed_content_logged(
+        client,
+        model=GEMINI_EMBEDDING_MODEL,
         contents=text[:8000],
+        feature=f"knowledge_graph.embedding.{task_type.lower()}",
+        db=_get_db(),
         config=types.EmbedContentConfig(
             task_type=task_type,
             output_dimensionality=_EMBEDDING_DIM
@@ -755,7 +766,7 @@ Regras:
 
 Responda:"""
     response = client.models.generate_content(
-        model="gemini-3.5-flash", contents=prompt
+        model=GEMINI_STRUCTURED_MODEL, contents=prompt
     )
     raw = (response.text or "").strip()
     match = re.search(r'\[.*?\]', raw, re.DOTALL)
@@ -823,7 +834,7 @@ Regras:
 Responda:"""
 
     response = client.models.generate_content(
-        model="gemini-3.5-flash", contents=prompt
+        model=GEMINI_STRUCTURED_MODEL, contents=prompt
     )
     raw = (response.text or "").strip()
 
@@ -958,7 +969,7 @@ Responda APENAS com uma das opções acima, sem mais texto."""
 
         client = _gemini_client(api_key)
         response = client.models.generate_content(
-            model="gemini-3.5-flash", contents=prompt
+            model=GEMINI_STRUCTURED_MODEL, contents=prompt
         )
         decision = (response.text or "").strip()
 
@@ -998,7 +1009,7 @@ O nó agrupará tarefas com o seguinte tipo de procedimento:
 \"\"\"{summary[:400]}\"\"\"
 Responda APENAS com o título, sem pontuação final. Exemplo: Contratação CLC Dispensa"""
     response = client.models.generate_content(
-        model="gemini-3.5-flash", contents=prompt
+        model=GEMINI_STRUCTURED_MODEL, contents=prompt
     )
     title = (response.text or "").strip().strip(".").strip()
     return title[:80] if title else f"Procedimento {area}"
@@ -1031,7 +1042,7 @@ Diário:
 Resumo:"""
 
     summary_response = client.models.generate_content(
-        model="gemini-3.5-flash", contents=summary_prompt
+        model=GEMINI_STRUCTURED_MODEL, contents=summary_prompt
     )
     summary = (summary_response.text or "").strip()
     if not summary:
@@ -1245,13 +1256,16 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
             texto = _extract_docx_text(file_bytes)
         else:
             from google.genai import types
-            extract_resp = client.models.generate_content(
-                model="gemini-3.5-flash",
+            extract_resp = generate_content_logged(
+                client,
+                model=GEMINI_DOCUMENT_MODEL,
                 contents=[
                     "Extraia todo o texto relevante deste documento. "
                     "Ignore cabecalhos repetitivos, rodapes e numeracao de paginas.",
                     types.Part.from_bytes(data=file_bytes, mime_type=tipo_mime),
                 ],
+                feature="knowledge_graph.artifact_text_extraction",
+                db=db,
             )
             texto = (extract_resp.text or "").strip()
     except Exception as exc:
@@ -1268,8 +1282,9 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
 
     # ── Resumo semântico ─────────────────────────────────────────────────────
     try:
-        summary_resp = client.models.generate_content(
-            model="gemini-3.5-flash",
+        summary_resp = generate_content_logged(
+            client,
+            model=GEMINI_DOCUMENT_MODEL,
             contents=(
                 f"Voce e um analista de documentos corporativos.\n"
                 f"Resuma o objetivo e os principais parametros deste documento "
@@ -1278,6 +1293,8 @@ def processar_artefato_kg(event: pubsub_fn.CloudEvent[pubsub_fn.MessagePublished
                 f"seu proposito central e dados-chave.\n\n"
                 f"Documento: \"{nome}\"\nConteudo:\n{texto_cap}\n\nResumo:"
             ),
+            feature="knowledge_graph.artifact_summary",
+            db=db,
         )
         resumo = (summary_resp.text or "").strip()
     except Exception as exc:
@@ -1913,7 +1930,7 @@ Consulta: "{query}"
 Responda APENAS com uma das duas palavras: BUSCA_SIMPLES ou SINTESE_PROFUNDA."""
     try:
         response = client.models.generate_content(
-            model="gemini-3.5-flash", contents=prompt
+            model=GEMINI_STRUCTURED_MODEL, contents=prompt
         )
         raw = (response.text or "").strip().upper()
         if "SINTESE" in raw:
@@ -2153,7 +2170,7 @@ Resposta:"""
     try:
         client = _gemini_client(api_key)
         response = client.models.generate_content(
-            model="gemini-3.5-flash", contents=prompt
+            model=GEMINI_STRUCTURED_MODEL, contents=prompt
         )
         return (response.text or "").strip()
     except Exception as exc:
@@ -2518,7 +2535,7 @@ Sua resposta em JSON:"""
     try:
         client = _gemini_client(api_key)
         response = client.models.generate_content(
-            model="gemini-3.5-flash", contents=prompt
+            model=GEMINI_STRUCTURED_MODEL, contents=prompt
         )
         raw_response = (response.text or "").strip()
         

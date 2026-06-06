@@ -30,6 +30,7 @@ app = FastAPI(title="Hermes Voice Bridge")
 TWILIO_SAMPLE_RATE = 8000
 GEMINI_SAMPLE_RATE = 24000
 SAMPLE_WIDTH_BYTES = 2
+DEFAULT_VOICE_MAX_SESSION_SECONDS = 300
 
 
 def _build_system_instruction() -> str:
@@ -92,6 +93,23 @@ def _safe_voice_context() -> str:
     if not context.strip():
         return ""
     return "\n\n[CONTEXTO DO HERMES]\n" + context.strip()
+
+
+def _voice_max_session_seconds() -> int:
+    try:
+        return int(os.getenv("HERMES_VOICE_MAX_SESSION_SECONDS", str(DEFAULT_VOICE_MAX_SESSION_SECONDS)))
+    except (TypeError, ValueError):
+        return DEFAULT_VOICE_MAX_SESSION_SECONDS
+
+
+async def _stop_voice_session_after(stop_event: asyncio.Event) -> None:
+    seconds = _voice_max_session_seconds()
+    if seconds <= 0:
+        await stop_event.wait()
+        return
+    await asyncio.sleep(seconds)
+    stop_event.set()
+    logger.info("Voice session max duration reached (%ss)", seconds)
 
 
 class AudioConverter:
@@ -214,9 +232,10 @@ async def media_stream(websocket: WebSocket) -> None:
                     auth_event=auth_event,
                 )
             )
+            timer_task = asyncio.create_task(_stop_voice_session_after(stop_event))
 
             done, pending = await asyncio.wait(
-                {twilio_task, gemini_task},
+                {twilio_task, gemini_task, timer_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
@@ -295,11 +314,19 @@ async def browser_voice_stream(websocket: WebSocket) -> None:
                     auth_event=auth_event,
                 )
             )
+            timer_task = asyncio.create_task(_stop_voice_session_after(stop_event))
 
             done, pending = await asyncio.wait(
-                {browser_task, gemini_task},
+                {browser_task, gemini_task, timer_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
+
+            if timer_task in done:
+                with contextlib.suppress(RuntimeError, WebSocketDisconnect):
+                    await websocket.send_json(
+                        {"type": "status", "message": "Sessao de voz encerrada por limite de duracao."}
+                    )
+                    await websocket.close(code=1000)
 
             for task in pending:
                 task.cancel()

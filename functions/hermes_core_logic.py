@@ -22,6 +22,13 @@ from firebase_admin import firestore, get_app, initialize_app, storage
 from firebase_functions import firestore_fn, https_fn, options
 from firebase_functions.firestore_fn import Event, Change, DocumentSnapshot
 from google.cloud.firestore_v1 import DocumentReference
+from gemini_cost_controls import (
+    GEMINI_BALANCED_MODEL,
+    GEMINI_TRANSCRIPTION_MODEL,
+    GEMINI_TTS_MODEL,
+    generate_content_logged,
+    send_message_logged,
+)
 
 try:
     get_app()
@@ -31,8 +38,8 @@ except ValueError:
 _MAX_HISTORY_TURNS = 20
 _MAX_FILE_BYTES = 20 * 1024 * 1024  # 20 MB
 _MAX_INLINE_MEDIA_BYTES = 700 * 1024  # base64 stays safely below Firestore field limit
-_TTS_MODEL_ID = "gemini-3.1-flash-tts-preview"
-_TEXT_MODEL_ID = "gemini-3.5-flash"
+_TTS_MODEL_ID = os.environ.get("TELEGRAM_TTS_MODEL", GEMINI_TTS_MODEL)
+_TEXT_MODEL_ID = os.environ.get("TELEGRAM_TEXT_MODEL", GEMINI_BALANCED_MODEL)
 _DEFAULT_MALE_VOICE = "Charon"
 _MAX_TTS_TRANSCRIPT_CHARS = 1500
 
@@ -1041,6 +1048,74 @@ def _extract_natural_context_query(text: str) -> str | None:
     return None
 
 
+def _is_list_actions_request(text: str) -> tuple[bool, str | None]:
+    """Detects 'liste as ações de hoje' style requests.
+    Returns (is_match, date_iso_or_None) — date_iso is None when no date was specified.
+    """
+    lowered = _normalize_for_matching(text).strip()
+    if not lowered or len(text.strip()) > 250:
+        return False, None
+
+    list_markers = (
+        "liste", "listar", "me liste",
+        "mostre", "mostrar", "me mostre", "mostra", "me mostra",
+        "me da", "me de",
+        "quais sao",
+    )
+    action_markers = ("acoes", "tarefas", "atividades")
+
+    has_list = any(marker in lowered for marker in list_markers)
+    has_action = any(marker in lowered for marker in action_markers)
+
+    wants_context = "contexto" in lowered and any(m in lowered for m in ("ative", "ativa", "entre", "entra"))
+    has_file = any(m in lowered for m in ("arquivo", "arquivos", "documento", "documentos", "link", "links", "anexo", "anexos"))
+
+    if not (has_list and has_action) or wants_context or has_file:
+        return False, None
+
+    date_iso = _requested_date_from_text(text)
+    return True, date_iso
+
+
+def _fetch_actions_by_date(date_iso: str | None) -> list:
+    """Fetches actions filtered by data_limite == date_iso, or all if date_iso is None."""
+    from tools.busca_grafo import buscar_tarefas
+    if date_iso:
+        res = buscar_tarefas(
+            "",
+            match_mode="any",
+            limite=200,
+            data_limite_inicio=date_iso,
+            data_limite_fim=date_iso,
+        )
+    else:
+        res = buscar_tarefas("", match_mode="any", limite=200)
+    return res.get("resultados", [])
+
+
+def _format_actions_simple_list(results: list, date_iso: str | None) -> str:
+    """Formats a plain bullet-point list of action titles."""
+    if date_iso:
+        try:
+            d = datetime.fromisoformat(date_iso)
+            date_label = d.strftime("%d/%m/%Y")
+        except Exception:
+            date_label = date_iso
+        header = f"Ações para <b>{date_label}</b>:"
+    else:
+        header = "Ações cadastradas:"
+
+    if not results:
+        return header + "\n\n<i>Nenhuma ação encontrada.</i>"
+
+    lines = [header, ""]
+    for r in results:
+        titulo = html.escape(r.get("titulo") or "sem título")
+        lines.append(f"• {titulo}")
+
+    return "\n".join(lines)
+
+
 def _is_reset_request(text: str) -> bool:
     """Detecta se o usuário quer resetar/limpar a sessão via linguagem natural."""
     lowered = _normalize_for_matching(text).strip()
@@ -1920,12 +1995,14 @@ def _transcribe_audio_bytes(audio_bytes: bytes, extension: str, db) -> str:
             clean_ext = extension.lower().strip(".")
             mime_type = mime_map.get(clean_ext, "audio/ogg")
             
-            response = client.models.generate_content(
-                model="gemini-3.5-flash",
+            response = generate_content_logged(
+                client,
+                model=GEMINI_TRANSCRIPTION_MODEL,
                 contents=[
                     types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
                     "Transcreva este áudio literalmente. Responda apenas com o texto transcrito, sem introduções ou explicações."
-                ]
+                ],
+                feature="telegram.audio_transcription_fallback",
             )
             if response and response.text:
                 return response.text.strip()
@@ -2015,6 +2092,30 @@ def _load_telegram_media_bytes(media_bytes_b64: str | None, storage_path: str | 
 # ---------------------------------------------------------------------------
 # Gemini orchestration
 # ---------------------------------------------------------------------------
+
+def carregar_areas_tematicas_validas(db) -> list[str]:
+    """Lista canonica de areas tematicas = nomes das Unidades + GERAL/NAO CLASSIFICADA."""
+    nomes = []
+    try:
+        for d in db.collection('unidades').stream():
+            nome = ((d.to_dict() or {}).get('nome') or '').strip().upper()
+            if nome:
+                nomes.append(nome)
+    except Exception as e:
+        print(f"[areas_validas] Falha ao carregar unidades: {e}")
+    base = ['GERAL', 'NÃO CLASSIFICADA']
+    # preserva ordem e remove duplicados
+    return base + [n for n in nomes if n not in base]
+
+
+def normalizar_area_tematica(valor: str, areas_validas: list[str]) -> str:
+    """Casa case-insensitive contra a lista valida; fallback 'GERAL'."""
+    alvo = (valor or '').strip().upper()
+    for a in areas_validas:
+        if a.upper() == alvo:
+            return a
+    return 'GERAL'
+
 
 def _build_system_instruction(copilot_core: str, copilot_soul: str, contexto_ativo: str) -> str:
     from datetime import datetime as _dt
@@ -2368,9 +2469,11 @@ def _run_gemini_text(gemini_key: str, system_instruction: str, user_prompt: str,
     from google.genai import types
 
     client = genai.Client(api_key=gemini_key)
-    response = client.models.generate_content(
+    response = generate_content_logged(
+        client,
         model=model_id,
         contents=user_prompt,
+        feature="telegram.tts_script",
         config=types.GenerateContentConfig(system_instruction=system_instruction),
     )
     return (response.text or "").strip()
@@ -2407,9 +2510,11 @@ def _run_gemini_tts(gemini_key: str, script_text: str, voice_profile: str) -> tu
         "### SCRIPT\n"
         f"\"{script_text[:_MAX_TTS_TRANSCRIPT_CHARS]}\""
     )
-    response = client.models.generate_content(
+    response = generate_content_logged(
+        client,
         model=_TTS_MODEL_ID,
         contents=style_prompt,
+        feature="telegram.tts_audio",
         config=types.GenerateContentConfig(
             response_modalities=["AUDIO"],
             speech_config=types.SpeechConfig(
@@ -2575,7 +2680,7 @@ def _run_gemini_turn(
     from google.genai import types
 
     client = genai.Client(api_key=gemini_key)
-    model_id = "gemini-3.5-flash"
+    model_id = _TEXT_MODEL_ID
     read_only_parallel_tools = {
         "consultar_historico_acoes",
         "buscar_arquivos_acervo",
@@ -2642,7 +2747,13 @@ def _run_gemini_turn(
     if perf_state is not None:
         _perf_mark(perf_state, "telegram.chat_create")
 
-    response = chat.send_message(user_message_parts)
+    response = send_message_logged(
+        chat,
+        user_message_parts,
+        model=model_id,
+        feature="telegram.first_turn",
+        db=db,
+    )
     if perf_state is not None:
         _perf_mark(perf_state, "telegram.first_model_response")
 
@@ -2684,13 +2795,25 @@ def _run_gemini_turn(
                 "parallel_safe_calls": parallel_count,
                 "serialized_calls": serial_count,
             })
-        response = chat.send_message(tool_results)
+        response = send_message_logged(
+            chat,
+            tool_results,
+            model=model_id,
+            feature="telegram.tool_roundtrip",
+            db=db,
+        )
         if perf_state is not None:
             _perf_mark(perf_state, "telegram.tool_roundtrip")
     else:
         # Se saiu do loop por limite de iterações, força um turno final de texto
         last_chance_msg = [types.Part(text="Limite de pesquisas atingido. Por favor, apresente uma resposta final ao usuário com base no que você encontrou (ou informe que não encontrou).")]
-        response = chat.send_message(last_chance_msg)
+        response = send_message_logged(
+            chat,
+            last_chance_msg,
+            model=model_id,
+            feature="telegram.safety_final_turn",
+            db=db,
+        )
         if perf_state is not None:
             _perf_mark(perf_state, "telegram.safety_final_turn")
 
@@ -2951,6 +3074,25 @@ def _process_telegram_message(db, data: dict):
         )
         return
 
+    # --- Deterministic action list ("liste as ações de hoje") ---
+    is_list_req, list_date = _is_list_actions_request(text)
+    if is_list_req:
+        results = _fetch_actions_by_date(list_date)
+        response_text = _format_actions_simple_list(results, list_date)
+        _persist_turn_to_copilot(text, response_text, tools_used=["buscar_tarefas"])
+        _send_contextual_response(
+            db,
+            token,
+            chat_id,
+            response_text,
+            session=session,
+            response_mode=response_mode,
+            gemini_key=gemini_key,
+            voice_profile=voice_profile,
+            perf_state=perf_state,
+        )
+        return
+
     # --- Deterministic action lookup ("busque a acao relacionada a X") ---
     action_lookup_query = _extract_action_lookup_query(text)
     if action_lookup_query:
@@ -3016,6 +3158,16 @@ def _process_telegram_message(db, data: dict):
             session["acao_titulo"] = fresh_snapshot.get("titulo") or session.get("acao_titulo")
         _perf_mark(perf_state, "telegram.action_snapshot")
     system_instruction = _build_system_instruction_guarded_v2(copilot_core, copilot_soul, contexto_ativo, acao_snapshot)
+
+    # Áreas temáticas válidas: o copiloto só pode SELECIONAR uma existente, nunca inventar.
+    _areas_validas = carregar_areas_tematicas_validas(db)
+    system_instruction = (
+        system_instruction
+        + "\n\nÁREAS TEMÁTICAS VÁLIDAS (ao criar ações, escolha EXATAMENTE UMA desta lista; "
+        + "NUNCA invente outra): "
+        + ", ".join(_areas_validas)
+        + ". Se nenhuma se encaixar, use 'GERAL'."
+    )
 
     # --- Restore history (trimmed) — isolated buffer when action-locked ---
     hist_key = "history_acao" if contexto_ativo == "acao" else "history"
@@ -3461,8 +3613,12 @@ def _process_telegram_message(db, data: dict):
         """
         Cria uma nova ação no Hermes. Apresente draft ao usuário antes de chamar.
         Retorna 'OK|{ID}' em caso de sucesso ou 'ERRO|{detalhe}'.
+        IMPORTANTE: area_tematica deve ser EXATAMENTE UMA das áreas temáticas válidas
+        listadas no contexto do sistema. Nunca invente uma nova; se nenhuma se encaixar, use 'GERAL'.
         """
         import uuid as _uuid
+        # Garante que o copiloto só use áreas temáticas existentes (fallback 'GERAL').
+        area_tematica = normalizar_area_tematica(area_tematica, _areas_validas)
         now_iso = datetime.now(timezone.utc).isoformat()
         today = (datetime.now(timezone.utc)).strftime("%Y-%m-%d")
         if not data_limite or str(data_limite) < today:

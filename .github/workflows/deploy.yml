@@ -1,0 +1,108 @@
+name: Deploy Hermes (Firebase)
+
+# Publica o sistema no Firebase (projeto gestao-hermes) automaticamente
+# sempre que algo entra na branch `main` (por exemplo, ao fazer merge de um PR).
+# Tambem pode ser disparado manualmente em:
+#   Actions > Deploy Hermes (Firebase) > Run workflow.
+#
+# PRE-REQUISITOS (configurar uma unica vez em Settings > Secrets and variables > Actions):
+#   - FIREBASE_SERVICE_ACCOUNT : conteudo JSON de uma chave de Service Account do
+#                                projeto gestao-hermes com permissao de deploy.
+#   - GEMINI_API_KEY           : chave usada no build do frontend (embutida no bundle).
+# Veja .github/workflows/README-deploy.md para o passo a passo.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Garante que dois deploys nao rodem ao mesmo tempo pisando um no outro.
+concurrency:
+  group: deploy-hermes
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # 1) Gate de qualidade: roda os testes. Se falharem, o deploy NAO acontece.
+  test:
+    name: Testes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar dependencias
+        run: npm install
+
+      - name: Rodar testes
+        run: npm test
+
+  # 2) Deploy completo no Firebase. So roda se o job de testes passar.
+  deploy:
+    name: Deploy Firebase
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias do frontend
+        run: npm install
+
+      - name: Build do frontend (Vite -> dist)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: npm run build
+
+      # Necessario para o Firebase descobrir os triggers das Functions Node.
+      - name: Instalar dependencias das Functions Node
+        run: npm install --prefix functions_node
+
+      # Algumas dependencias Python (ex.: pycairo, puxada por libs de PDF/SVG)
+      # nao tem wheel no Linux e precisam ser compiladas, exigindo libs de
+      # desenvolvimento do sistema (cairo + pkg-config).
+      - name: Instalar libs de sistema para dependencias Python
+        run: sudo apt-get update && sudo apt-get install -y libcairo2-dev pkg-config
+
+      # O Firebase descobre as Functions Python importando o codigo (main.py),
+      # entao o virtualenv com TODAS as dependencias precisa existir em
+      # functions/venv antes do deploy. Sem isso o deploy falha com
+      # "Missing virtual environment at venv directory".
+      - name: Preparar virtualenv das Functions Python
+        run: |
+          python -m venv functions/venv
+          functions/venv/bin/python -m pip install --upgrade pip
+          functions/venv/bin/python -m pip install -r functions/requirements.txt
+
+      - name: Autenticar no Google Cloud / Firebase
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Instalar Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Deploy (hosting + functions + firestore indexes + storage)
+        run: >-
+          firebase deploy
+          --only hosting,functions,firestore:indexes,storage
+          --project gestao-hermes
+          --non-interactive
+          --force

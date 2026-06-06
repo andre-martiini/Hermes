@@ -81,7 +81,7 @@ BACKEND_REGISTRY = {
         "module": "backend_gemini",
         "tier": "core",
         "label": "Google Gemini",
-        "default_model": "gemini-3.1-flash-image-preview",
+        "default_model": "gemini-3.1-flash-image",
         "key_hint": "GEMINI_API_KEY",
         "aliases": ["google"],
     },

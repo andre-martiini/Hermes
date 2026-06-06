@@ -307,23 +307,11 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
       className={`group w-full border-b transition-all flex flex-col animate-in relative ${isEditingDateTime ? 'z-[1000]' : 'z-auto'} ${isDark ? 'border-white/10' : 'border-border-grid'} ${isCompleted ? 'opacity-60 grayscale-[0.35]' : ''} ${highlighted ? (isDark ? 'bg-white/10 border-l-2 border-l-accent-tactile' : 'bg-surface-container border-l-2 border-l-primary-tactile') : 'bg-transparent'}`}
     >
       <div
-        onClick={onClick}
+        onClick={() => setIsExpanded(!isExpanded)}
         onMouseLeave={() => setIsConfirmingDelete(false)}
         className={`w-full pl-4 pr-16 md:pl-6 md:pr-20 py-5 md:py-4 transition-all flex flex-col sm:flex-row sm:items-start gap-4 md:gap-6 cursor-pointer relative ${isDark ? 'hover:bg-white/[0.03]' : 'hover:bg-slate-50/70'}`}
       >
         <div className={`absolute top-3 right-3 z-10 flex items-center gap-1 ${isConfirmingDelete ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity duration-200`}>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsExpanded(!isExpanded);
-            }}
-            className={`p-1.5 transition-all flex items-center justify-center rounded-none ${isDark ? 'text-slate-500 hover:text-white hover:bg-white/5' : 'text-slate-400 hover:text-slate-900 hover:bg-slate-100'}`}
-            title={isExpanded ? "Ocultar detalhes" : "Mostrar detalhes"}
-          >
-            <svg className={`w-3.5 h-3.5 transition-transform duration-300 ${isExpanded ? 'rotate-180 text-primary-tactile' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
 
           <button
             onClick={(e) => {
@@ -381,7 +369,13 @@ export const RowCard = React.memo(({ task, isDark = false, onClick, onToggle, on
               <span className={`text-[9px] font-black uppercase tracking-widest font-mono ${isDark ? 'text-accent-tactile' : 'text-primary-tactile'}`}>Próxima Ação</span>
             </div>
           )}
-          <div className={`${highlighted ? `text-[15px] md:text-lg font-black` : `text-[13px] md:text-[15px] font-medium`} leading-snug transition-colors whitespace-normal break-words font-mono ${isCompleted ? 'line-through text-slate-400' : ''}`}>
+          <div
+            onClick={(e) => {
+              e.stopPropagation();
+              onClick?.();
+            }}
+            className={`cursor-pointer hover:underline decoration-1 ${highlighted ? `text-[15px] md:text-lg font-black` : `text-[13px] md:text-[15px] font-medium`} leading-snug transition-colors whitespace-normal break-words font-mono ${isCompleted ? 'line-through text-slate-400' : ''}`}
+          >
             {highlightClass ? (
               <span className={highlightClass}>
                 {task.titulo}

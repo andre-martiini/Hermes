@@ -59,7 +59,7 @@ export const SettingsModal = ({
   onThemeModeChange
 }: {
   settings: AppSettings,
-  unidades: { id: string, nome: string, palavras_chave?: string[] }[],
+  unidades: { id: string, nome: string, palavras_chave?: string[], peso_gravidade?: number }[],
   onSave: (settings: AppSettings) => void,
   onClose: () => void,
   onAddUnidade: (nome: string) => void,
@@ -557,6 +557,28 @@ export const SettingsModal = ({
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                           </button>
                         )}
+                      </div>
+
+                      {/* Peso de Gravidade (G) do Score GUT — 1 a 5 */}
+                      <div className="flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-none md:rounded-xl px-3 py-2">
+                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">Gravidade (G)</span>
+                        <div className="flex items-center gap-1">
+                          {[1, 2, 3, 4, 5].map((n) => {
+                            const current = Number(u.peso_gravidade) || 1;
+                            const active = current === n;
+                            return (
+                              <button
+                                key={n}
+                                type="button"
+                                onClick={() => onUpdateUnidade(u.id, { peso_gravidade: n })}
+                                className={`w-7 h-7 rounded-full text-[10px] font-black transition-all ${active ? 'bg-slate-900 text-white scale-110' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}
+                                title={`Definir gravidade ${n}`}
+                              >
+                                {n}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
 
                       <div className="flex flex-wrap gap-2">
