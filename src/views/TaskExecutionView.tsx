@@ -1540,10 +1540,13 @@ export const TaskExecutionView = ({
 
   // ─── Derived knowledge base from area_tematica ───────────────
   const derivedKnowledgeBase = (() => {
+    if (currentTaskData.base_conhecimento) {
+      const base = (knowledgeBases || []).find(b => b.id === currentTaskData.base_conhecimento);
+      if (base) return base;
+    }
     const area = (currentTaskData.area_tematica || '').toUpperCase();
     if (!area || area === 'GERAL' || area === 'NÃO CLASSIFICADA') return null;
-    const unit = unidades.find(u => u.nome.toUpperCase() === area);
-    return unit ? (knowledgeBases.find(b => b.sistema_id === unit.id) ?? null) : null;
+    return (knowledgeBases || []).find(b => b.nome.toUpperCase() === area) ?? null;
   })();
   const isPlanPanelCollapsed = isDesktopViewport && isPlanCollapsed;
   const isCopilotPanelCollapsed = isDesktopViewport && isCopilotCollapsed;
@@ -2095,9 +2098,9 @@ export const TaskExecutionView = ({
                           <select
                             value={currentTaskData.area_tematica || 'NÃO CLASSIFICADA'}
                             onChange={e => {
-                              const newArea = e.target.value as any;
-                              const unit = unidades.find(u => u.nome.toUpperCase() === (newArea || '').toUpperCase());
-                              const baseId = unit ? (knowledgeBases.find(b => b.sistema_id === unit.id)?.id ?? undefined) : undefined;
+                              const newArea = e.target.value;
+                              const base = (knowledgeBases || []).find(b => b.nome.toUpperCase() === (newArea || '').toUpperCase());
+                              const baseId = base ? base.id : undefined;
                               onSave(task.id, { area_tematica: newArea, base_conhecimento: baseId });
                             }}
                             style={{ colorScheme: isDark ? 'dark' : 'light' }}
@@ -2105,8 +2108,8 @@ export const TaskExecutionView = ({
                           >
                             <option className={isDark ? 'bg-slate-900 text-white font-mono' : 'bg-white text-slate-900 font-mono'} value="GERAL">Geral</option>
                             <option className={isDark ? 'bg-slate-900 text-white font-mono' : 'bg-white text-slate-900 font-mono'} value="NÃO CLASSIFICADA">Não Classificada</option>
-                            {unidades.map(u => (
-                              <option className={isDark ? 'bg-slate-900 text-white font-mono' : 'bg-white text-slate-900 font-mono'} key={u.id} value={u.nome.toUpperCase()}>{u.nome}</option>
+                            {(knowledgeBases || []).map(b => (
+                              <option className={isDark ? 'bg-slate-900 text-white font-mono' : 'bg-white text-slate-900 font-mono'} key={b.id} value={b.nome.toUpperCase()}>{b.nome}</option>
                             ))}
                           </select>
                         </div>
